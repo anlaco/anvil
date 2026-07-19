@@ -9,7 +9,7 @@ description: >-
   español con "escribe", "si ...:", "fin". Regla central: lo que la skill no
   responda, se comprueba con un programa mínimo — nunca se contesta de
   memoria. Si Ana no puede hacer algo que este proyecto necesita, NO se
-  intenta arreglar el lenguaje desde aquí: se reporta (ver la sección
+  intenta arreglar el lenguaje desde aquí: se abre un issue (ver la sección
   "Cuando Ana no llega").
 ---
 
@@ -61,21 +61,36 @@ Ana no tiene, es el caso de la siguiente sección.
 
 ## Cuando Ana no llega: reportar, no arreglar
 
-Este proyecto y el lenguaje se desarrollan **por separado**. Si algo que
-`anvil` necesita no se puede expresar en Ana (verificado con el protocolo
-empírico de arriba, no de memoria):
+Este proyecto y el lenguaje se desarrollan **por separado**, y no comparten
+ningún archivo — la comunicación entre `anvil` y el equipo de Ana es un
+issue, como con cualquier proveedor. Si algo que `anvil` necesita no se
+puede expresar en Ana (verificado con el protocolo empírico de arriba, no
+de memoria):
 
 1. **No se modifica el lenguaje desde aquí.** Este repo no tiene ni el
    código fuente de Ana ni motivo para tenerlo.
-2. Se anota la necesidad en `NECESIDADES-ANA.md` (raíz de este repo),
-   siguiendo la plantilla que trae: qué hace falta, por qué Ana no lo cubre
-   hoy, y el programa mínimo que lo demuestra.
+2. Se abre un issue en el repositorio del equipo de Ana:
+   ```bash
+   gh issue create --repo anlaco/anlaco-lang \
+     --title "[anvil] título corto de la necesidad" \
+     --body "Qué necesita anvil: ...
+   Por qué Ana no lo cubre hoy (verificado con): ...
+   Programa mínimo que lo demuestra:
+   \`\`\`
+   ...
+   \`\`\`"
+   ```
+   El prefijo `[anvil]` en el título es lo que identifica que el pedido
+   viene de este proyecto — no hay más acoplamiento que ese.
 3. Se sigue trabajando con lo que el lenguaje permite — un rodeo, no un
    bloqueo. El equipo de Ana decide, en su propio tiempo y en su propio
-   proceso, si esa necesidad entra al lenguaje y cómo.
+   proceso, si esa necesidad entra al lenguaje y cómo; el seguimiento pasa
+   por el propio issue (comentarios, cierre), no por nada de este repo.
 
 Esta separación es intencional: evita que arreglar un problema puntual de
-`anvil` derive en tocar un lenguaje que usan otros proyectos.
+`anvil` derive en tocar un lenguaje que usan otros proyectos, y evita
+también un archivo compartido que los dos lados tendrían que mantener
+sincronizado a mano.
 
 ## Chuleta
 
