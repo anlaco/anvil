@@ -1,11 +1,18 @@
 bin/anac y bin/anac-stub — build del equipo de Ana:
 
-  commit:   c4516e4a0c61ff7cb3bdc6a226035228f1010783
-  describe: v0.26.2-12-gc4516e4
+  commit:   c545b22a072925aa9b696bdb62a7d3f6d0daceb9
+  describe: v0.26.2-14-gc545b22
   fecha:    2026-07-19
 
-Verificado antes de copiarlo aquí: punto fijo de auto-creación, 16/16
-ejemplos dorados, y el banco de empaquetar.
+Arregla el issue #2 (compilar/ensamblar/empaquetar fallaban con "No
+encuentro el archivo preludio_es.wat"): ese archivo ahora va embebido en
+el binario y se materializa solo si falta en el directorio de trabajo,
+así que ya no hace falta copiarlo junto a anac/anac-stub.
+
+Verificado antes de copiarlo aquí: punto fijo de auto-creación, el banco
+de empaquetar, y a mano el caso exacto del issue #2 (ejecutar/compilar/
+empaquetar el programa mínimo del reporte, aquí mismo en bin/, sin
+preludio_es.wat presente).
 
 Nota de mantenimiento (no forma parte de lo que este proyecto necesita saber
 para escribir Ana — ver .claude/skills/ana/ para eso): esta copia se generó
