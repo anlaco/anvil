@@ -24,7 +24,8 @@ de build, no código fuente de este proyecto. Ver `bin/VERSION.md`.
 
 Ana lo desarrolla un equipo independiente, según lo que le piden sus
 clientes — de los que `anvil` es uno. Este proyecto no tiene ni necesita el
-código fuente del lenguaje: si algo hace falta y Ana no lo tiene, se anota
-en [`NECESIDADES-ANA.md`](NECESIDADES-ANA.md) y se reporta aparte — nunca se
-arregla desde aquí. La guía completa del lenguaje, para escribir código
-`.ana` en este repo, está en `.claude/skills/ana/`.
+código fuente del lenguaje: si algo hace falta y Ana no lo tiene, se abre un
+issue en su repositorio (`gh issue create --repo anlaco/anlaco-lang`) —
+nunca se arregla desde aquí, y no hay ningún archivo compartido entre los
+dos lados. La guía completa del lenguaje, con el protocolo exacto para
+reportar, está en `.claude/skills/ana/`.
