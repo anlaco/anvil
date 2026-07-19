@@ -1,8 +1,8 @@
 # anvil
 
-Un proyecto escrito en [Anlaco](../anlaco-lang) (archivos `.ana`). Trae su
-propio `anac` — el compilador/intérprete nativo de Ana — listo para usar,
-sin depender de tener Python ni el repo del lenguaje instalados.
+Un proyecto escrito en **Ana** (ana-lang; archivos `.ana`). Trae su propia
+herramienta (`bin/anac`) lista para usar, sin depender de tener nada más
+instalado.
 
 ## Herramientas (`bin/`)
 
@@ -17,12 +17,14 @@ bin/anac empaquetar programa.ana [-o nombre] # Ana → ejecutable nativo standal
 que ya no necesita a `anac` para correr (arranca en unos milisegundos,
 requiere `bin/anac-stub` al lado — ya está).
 
-`bin/anac` y `bin/anac-stub` no están versionados aquí (son artefactos de
-otro repo, no código fuente de este proyecto) — ver `bin/VERSION.md` para
-saber de qué commit de `anlaco-lang` vienen y cómo refrescarlos.
+`bin/anac` y `bin/anac-stub` no están versionados aquí — son un artefacto
+de build, no código fuente de este proyecto. Ver `bin/VERSION.md`.
 
-## Referencia del lenguaje
+## El lenguaje
 
-Este repo no duplica la especificación ni el compilador — vive en el
-[repo hermano `anlaco-lang`](../anlaco-lang), que es la fuente canónica.
-La skill de Claude Code de este repo (`.claude/skills/anlaco/`) apunta ahí.
+Ana lo desarrolla un equipo independiente, según lo que le piden sus
+clientes — de los que `anvil` es uno. Este proyecto no tiene ni necesita el
+código fuente del lenguaje: si algo hace falta y Ana no lo tiene, se anota
+en [`NECESIDADES-ANA.md`](NECESIDADES-ANA.md) y se reporta aparte — nunca se
+arregla desde aquí. La guía completa del lenguaje, para escribir código
+`.ana` en este repo, está en `.claude/skills/ana/`.
