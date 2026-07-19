@@ -1,41 +1,33 @@
 ---
-name: anlaco
+name: ana
 description: >-
-  Referencia del lenguaje Anlaco (archivos .ana) y protocolo para verificar
-  cualquier duda ejecutando programas mínimos. Úsala SIEMPRE que se lea,
-  escriba, modifique o depure código .ana en este proyecto, o se responda una
-  pregunta sobre cómo funciona Anlaco ("ana"). También cuando el usuario
-  mencione "ana", "anlaco", "trocea", "fichas" o pegue código que se lee como
+  Referencia del lenguaje Ana (archivos .ana, también llamado ana-lang) y
+  protocolo para verificar cualquier duda ejecutando programas mínimos con
+  bin/anac. Úsala SIEMPRE que se lea, escriba, modifique o depure código .ana
+  en este proyecto, o se responda una pregunta sobre cómo funciona Ana.
+  También cuando el usuario mencione "ana" o pegue código que se lee como
   español con "escribe", "si ...:", "fin". Regla central: lo que la skill no
   responda, se comprueba con un programa mínimo — nunca se contesta de
-  memoria.
+  memoria. Si Ana no puede hacer algo que este proyecto necesita, NO se
+  intenta arreglar el lenguaje desde aquí: se reporta (ver la sección
+  "Cuando Ana no llega").
 ---
 
-# Anlaco — referencia y protocolo de verificación
+# Ana — referencia y protocolo de verificación
 
-Anlaco es un **lenguaje natural controlado**: un punto medio entre la máquina
-y el humano — fácil de entender sin saber programar, con palabras de tu
-idioma (español o inglés), pero cada construcción tiene exactamente UNA forma
-gramatical.
+Ana (también "ana-lang") es un **lenguaje natural controlado**: un punto
+medio entre la máquina y el humano — fácil de entender sin saber programar,
+con palabras de tu idioma (español o inglés), pero cada construcción tiene
+exactamente UNA forma gramatical.
 
-Este repo (`anvil`) es un PROYECTO escrito en Anlaco, no el lenguaje en sí.
-La fuente canónica del lenguaje —especificación, compilador, oráculo Python
-de referencia— vive en el repo hermano **`../anlaco-lang`**. Este repo trae
-su propia herramienta (`bin/anac`, ver `bin/VERSION.md` para de qué commit de
-`anlaco-lang` viene) para no depender de tenerlo instalado aparte.
+Este proyecto (`anvil`) está escrito en Ana. El lenguaje lo desarrolla **el
+equipo de Ana**, un equipo independiente que hace crecer Ana según lo que le
+piden sus clientes — de los cuales este proyecto es uno. La relación es de
+cliente a proveedor: **aquí se pide, ellos deciden cómo y cuándo.** Este
+repo no tiene ni necesita acceso al lenguaje en sí — solo a la herramienta
+ya compilada (`bin/anac`) y a esta guía.
 
-## Fuentes canónicas (en `../anlaco-lang`, en este orden)
-
-| Pregunta sobre... | Mira en |
-|---|---|
-| Sintaxis, semántica, gramática EBNF | `../anlaco-lang/espec/especificacion.md` (NORMATIVA; §5.1 isla de cálculo, §11 gramática) |
-| Programas de ejemplo con su salida esperada | `../anlaco-lang/espec/ejemplos/*.ana` + `.out` |
-| Qué le falta al lenguaje y por qué | `../anlaco-lang/src/BITACORA.md` |
-| Qué queda fuera a propósito | `../anlaco-lang/espec/especificacion.md` §12 + `espec/ideas-futuras.md` |
-
-La especificación manda sobre esta skill: si contradicen algo, gana la espec.
-
-## Cómo ejecutar (desde la raíz de ESTE repo, `anvil`)
+## Cómo ejecutar (desde la raíz de este repo)
 
 ```bash
 bin/anac ejecutar programa.ana               # interpreta y corre — como Python
@@ -46,31 +38,46 @@ bin/anac empaquetar programa.ana [-o nombre] # Ana → ejecutable nativo standal
                                               # (necesita bin/anac-stub al lado)
 ```
 
-Para dudas de verdad finas (comparar los dos motores del lenguaje, no solo
-correr un programa), el oráculo Python vive en `../anlaco-lang/oraculo/` —
-requiere Python 3.11+ y `PYTHONPATH=../anlaco-lang/oraculo python -m anlaco
-...`, ejecutado desde `../anlaco-lang`. No hace falta para el día a día:
-`bin/anac ejecutar` ES el intérprete, no una imitación.
+`empaquetar` es lo más útil para distribuir algo de este proyecto: produce
+un binario que arranca en milisegundos y no depende de tener `anac`
+instalado. Por ahora empaqueta para la máquina donde corre — sin
+compilación cruzada todavía.
 
 ## Protocolo empírico — la regla de oro de esta skill
 
-Si una pregunta no se responde con esta skill ni con la espec, **no adivines**:
+Si una pregunta sobre el lenguaje no se responde con esta guía, **no
+adivines**:
 
 1. Escribe el programa mínimo que la decide (2-6 líneas).
-2. Pásalo por `bin/anac ejecutar`.
-3. Si la duda es de semántica (no de mensajes de error), verifica también con
-   `bin/anac compilar` + `bin/anac ensamblar` + wasmtime (o directamente
-   `bin/anac empaquetar` y correr el resultado). Intérprete y compilador
-   deben coincidir.
-4. Si el lenguaje NO puede hacer algo y duele para este proyecto, es un
-   candidato a reportar en `../anlaco-lang` (`src/BITACORA.md`), no a
-   inventar sintaxis nueva aquí.
+2. Pásalo por `bin/anac ejecutar`. Si la duda es de semántica más fina,
+   verifica también con `bin/anac compilar` + `bin/anac ensamblar` (o
+   `bin/anac empaquetar` y correr el resultado): deben coincidir.
+3. Con la respuesta en la mano, sigue trabajando con lo que el lenguaje
+   permite hoy.
 
-**Nunca inventes sintaxis nueva** para salir de un apuro: el lenguaje solo
-crece por la bitácora de `anlaco-lang` (método Wirth). Escribe el rodeo con
-lo que hay.
+**Nunca inventes sintaxis nueva** para salir de un apuro, y nunca toques
+nada fuera de este repo para conseguirlo. Si de verdad hace falta algo que
+Ana no tiene, es el caso de la siguiente sección.
 
-## Chuleta (v0.2 + v0.3)
+## Cuando Ana no llega: reportar, no arreglar
+
+Este proyecto y el lenguaje se desarrollan **por separado**. Si algo que
+`anvil` necesita no se puede expresar en Ana (verificado con el protocolo
+empírico de arriba, no de memoria):
+
+1. **No se modifica el lenguaje desde aquí.** Este repo no tiene ni el
+   código fuente de Ana ni motivo para tenerlo.
+2. Se anota la necesidad en `NECESIDADES-ANA.md` (raíz de este repo),
+   siguiendo la plantilla que trae: qué hace falta, por qué Ana no lo cubre
+   hoy, y el programa mínimo que lo demuestra.
+3. Se sigue trabajando con lo que el lenguaje permite — un rodeo, no un
+   bloqueo. El equipo de Ana decide, en su propio tiempo y en su propio
+   proceso, si esa necesidad entra al lenguaje y cómo.
+
+Esta separación es intencional: evita que arreglar un problema puntual de
+`anvil` derive en tocar un lenguaje que usan otros proyectos.
+
+## Chuleta
 
 ```
 # comentario                          # idioma: es  (primera línea, opcional)
@@ -92,7 +99,7 @@ para cada n del 1 al 10:
 mientras n es menor que 5:
 repite 3 veces:
 define media con un a_, un b_:        # llamada: media con 4, 6  (comas, nunca "y")
-                                      # estilo v0.2: el indefinido presenta el parámetro
+                                      # estilo con azúcar: el indefinido presenta el parámetro
     devuelve ((a_ + b_) / 2)
 fin
 guarda "hola" en "notas.txt"          # archivos
@@ -110,10 +117,10 @@ un punto tiene:                      # tarjetas (registros) — declara un tipo
 fin
 el p es un nuevo punto con la x 3, la altitud 4   # construye una tarjeta
 escribe p.x                          # acceso a campo; el punto NO se encadena
-el m es resto de 17 entre 5          # v0.3: división entera de suelo (2)
+el m es resto de 17 entre 5          # división entera de suelo (2)
 el q es cociente de 17 entre 5       # (3)
-los b son bytes de "hola"            # v0.3: bytes UTF-8, lista de 0-255
-guarda los bytes b en "salida.bin"   # v0.3: escritura binaria, sin decodificar
+los b son bytes de "hola"            # bytes UTF-8, lista de 0-255
+guarda los bytes b en "salida.bin"   # escritura binaria, sin decodificar
 ```
 
 Los argumentos: `los argumentos` es la lista de textos que siguen al
@@ -132,8 +139,7 @@ Escapes en textos (lista CERRADA): `\"` `\n` `\\`. Nada más tras la barra.
 - **Los dos registros**: todo programa puede escribirse LLANO
   (`variable es 3`, `define área con ancho, alto:`) o ADORNADO con artículos
   (`la variable es 3`, `con un ancho`). Ambos son el MISMO árbol. Ninguna
-  frase EXIGE azúcar para funcionar. La IA escribe con azúcar; los
-  programadores pueden ir secos.
+  frase EXIGE azúcar para funcionar.
 - **Una sentencia por línea** y **una lista no puede partirse en varias
   líneas**. Tablas grandes = una línea larga.
 - **`es` es dos cosas**: al inicio de sentencia, asignación; en condición,
@@ -145,7 +151,7 @@ Escapes en textos (lista CERRADA): `\"` `\n` `\\`. Nada más tras la barra.
 - **Llamadas**: `f con x, y`. Una llamada como argumento de otra o como
   elemento de lista literal va entre paréntesis: `f con (g con 1)`, `[(f con 1), 2]`.
   Dentro de un cálculo no hace falta: `(fib con (n - 1) + fib con (n - 2))`.
-  El compilador WASM aún NO compila una llamada suelta como sentencia
+  El compilador aún NO compila una llamada suelta como sentencia
   (`f con x` sin asignar → error amable; el intérprete sí la acepta).
   Rodeo portable: `el _ es f con x`.
 - **Funciones solo en el nivel superior**. Las globales se LEEN desde una
@@ -169,37 +175,23 @@ Escapes en textos (lista CERRADA): `\"` `\n` `\\`. Nada más tras la barra.
   multilínea, excepciones. (`detente con` para el programa: mensaje a
   stderr, código 1. A diferencia de `devuelve` —que solo sale de la
   función— `detente` para todo el programa, se ejecute donde se ejecute.)
-- **«Ana de máquina» (v0.3)**: `resto de`/`cociente de` son división entera
-  de SUELO (como Python: `resto de -1 entre 128` es `127`, no `-1`). Una tira
+- **Aritmética de bytes**: `resto de`/`cociente de` son división entera de
+  SUELO (como Python: `resto de -1 entre 128` es `127`, no `-1`). Una tira
   de bytes NO es un tipo nuevo: `bytes de "Añil"` es una LISTA de enteros
   0-255 por BYTE UTF-8 (`[65, 195, 177, 105, 108]`, 5 elementos), a diferencia
   de `cantidad de`/`elemento N de`, que cuentan LETRAS (`cantidad de "Añil"`
   es `4`). `guarda los bytes B en RUTA` escribe binario sin pasar por
-  `mostrar`. El compilador WASM exige que el divisor de `resto`/`cociente`
-  quepa en 32 bits; el intérprete no tiene ese límite.
+  `mostrar`. El compilador exige que el divisor de `resto`/`cociente` quepa
+  en 32 bits; el intérprete no tiene ese límite.
 - **Multilingüe**: el idioma se detecta solo o se fija con `# idioma: es`.
   Frases multi-palabra: gana la más larga (`es mayor o igual que` antes que `es`).
 
-## Sobre `bin/anac` — qué es y qué no es
+## Sobre `bin/anac`
 
-`bin/anac` es un binario nativo (Rust + wasmtime enlazado estático) que
-embebe el compilador/intérprete de Ana **escrito en Ana** — Ana se compila a
-sí misma; el detalle vive en `../anlaco-lang` (`src/*.ana`, autoalojado,
-punto fijo verificado). Cuatro verbos:
-
-- `ejecutar`/`compilar`/`ensamblar` reenvían el argv directo a ese
-  compilador embebido — son el mismo código Ana en los tres casos, con
-  distinto modo.
-- `empaquetar` es distinto: es lógica **solo de este host en Rust**, no
-  existe dentro del compilador autoalojado. Compila+ensambla con el
-  compilador embebido, precompila el `.wasm` resultante a código máquina, y
-  lo pega a `bin/anac-stub` (un binario genérico, sin compilador dentro) para
-  producir el ejecutable final. Por eso un programa empaquetado con
-  `bin/anac empaquetar` sabe ejecutarse a sí mismo, pero si ESE programa
-  fuera a su vez el propio `anac.ana`, el resultado sabría `ejecutar`/
-  `compilar`/`ensamblar` pero NO `empaquetar` — esa pieza no se hereda,
-  porque no es Ana, es Rust. (Confirmado y con banco de pruebas en
-  `../anlaco-lang/native/anac/verifica_empaquetar.py`.)
-
-Por ahora `empaquetar` produce binarios para la máquina donde corre — sin
-compilación cruzada todavía.
+Cuatro verbos: `ejecutar`/`compilar`/`ensamblar` son el mismo compilador de
+Ana en tres modos. `empaquetar` es distinto — es la única pieza que no vive
+en el lenguaje: compila, ensambla, precompila a código máquina y pega el
+resultado a `bin/anac-stub` (un anfitrión genérico) para dar un ejecutable
+standalone. Detalle relevante: un programa empaquetado hereda
+`ejecutar`/`compilar`/`ensamblar` si los tenía, pero nunca hereda
+`empaquetar` — esa capacidad es de la herramienta, no del programa.
