@@ -1,0 +1,16 @@
+# idioma: es
+
+un resultado_step tiene:
+    un nombre
+    un estado
+    un mensaje
+    un valor_medido
+    un limite_min
+    un limite_max
+fin
+
+un resultado_secuencia tiene:
+    un nombre
+    un estado
+    un pasos
+fin

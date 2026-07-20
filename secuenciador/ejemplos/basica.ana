@@ -1,0 +1,62 @@
+# idioma: es
+# Correr con el directorio de trabajo en secuenciador/ (bug de anac con
+# rutas + llamadas cualificadas, ver issue anlaco-lang#4):
+#   cd secuenciador && ../bin/anac ejecutar ejemplos/basica.ana
+
+usa "modelo"
+usa "ejecutor"
+
+define paso_conectar con un intento_:
+    si intento_ es menor que 2:
+        devuelve un nuevo resultado_step con el nombre "conectar_equipo", el estado "fallo", el mensaje "el equipo no respondió (intento {intento_})"
+    fin
+    devuelve un nuevo resultado_step con el nombre "conectar_equipo", el estado "paso", el mensaje "equipo conectado (intento {intento_})"
+fin
+
+define paso_medir_voltaje:
+    el valor es 4.2
+    si valor es menor que 4.5:
+        devuelve un nuevo resultado_step con el nombre "medir_voltaje", el estado "fallo", el mensaje "voltaje fuera de rango", el valor_medido valor, el limite_min 4.5, el limite_max 5.5
+    fin
+    devuelve un nuevo resultado_step con el nombre "medir_voltaje", el estado "paso", el mensaje "voltaje dentro de rango", el valor_medido valor, el limite_min 4.5, el limite_max 5.5
+fin
+
+define paso_verificar_led:
+    devuelve un nuevo resultado_step con el nombre "verificar_led", el estado "paso", el mensaje "led encendido"
+fin
+
+define paso_desconectar:
+    devuelve un nuevo resultado_step con el nombre "desconectar_equipo", el estado "paso", el mensaje "equipo desconectado"
+fin
+
+el secuencia es un nuevo resultado_secuencia con el nombre "basica", el pasos []
+
+# --- Setup: reintenta conectar hasta 3 veces ---
+el intentos es 0
+el conectado es falso
+el r_conectar es paso_conectar con 1
+mientras intentos es menor que 3 y conectado no es verdadero:
+    el intentos es (intentos + 1)
+    el r_conectar es paso_conectar con intentos
+    si r_conectar.estado es "paso":
+        el conectado es verdadero
+    fin
+fin
+el _ es ejecutor.registra con secuencia, r_conectar
+
+# --- Main: solo si Setup salió bien; si un paso falla, se salta el resto ---
+si conectado:
+    el r_voltaje es paso_medir_voltaje
+    el _ es ejecutor.registra con secuencia, r_voltaje
+
+    si r_voltaje.estado es "paso":
+        el r_led es paso_verificar_led
+        el _ es ejecutor.registra con secuencia, r_led
+    fin
+fin
+
+# --- Cleanup: corre siempre, pase lo que pase en Setup/Main ---
+el r_desconectar es paso_desconectar
+el _ es ejecutor.registra con secuencia, r_desconectar
+
+el _ es ejecutor.reporte con secuencia

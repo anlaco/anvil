@@ -180,12 +180,54 @@ Escapes en textos (lista CERRADA): `\"` `\n` `\\`. Nada más tras la barra.
   hay import plano. Dentro del módulo, sus funciones se llaman sin
   cualificar. Gotcha de compilación: los accesos cualificados (`M.x`) solo
   son fiables después de que un `usa "M"` se haya EJECUTADO antes en el
-  programa.
+  programa. Las **tarjetas** definidas en un módulo importado son la
+  excepción: se construyen SIN cualificar (`un nuevo resultado_step con
+  ...`, no `un nuevo M.resultado_step con ...`), a diferencia de funciones
+  y tablas.
+- **`usa "X"` resuelve la ruta contra el directorio de trabajo del
+  proceso** (`bin/anac ejecutar ...`), no contra la carpeta del archivo que
+  hace el `usa` — ni siquiera si el `usa` está DENTRO de otro módulo ya
+  importado con ruta. Un módulo en `carpeta/lib.ana` que haga `usa "otro"`
+  solo encuentra `otro.ana` si el proceso se invocó con cwd en `carpeta/`;
+  si el archivo raíz vive en otro sitio y usó `usa "carpeta/lib"`, ese
+  `usa "otro"` interno sigue buscando `./otro.ana` desde el cwd real, no
+  desde `carpeta/`. **Bug conocido y más grave**: una vez cargado un módulo
+  con `usa "carpeta/nombre"` (con ruta), la PRIMERA llamada cualificada a
+  una de sus funciones (`nombre.func con ...`) puede fallar con "No
+  encuentro el archivo nombre.ana" — la llamada cualificada vuelve a
+  resolver el módulo por su nombre base contra el cwd, perdiendo la ruta
+  original, aunque el `usa` sí tuvo éxito. Reportado en
+  [anlaco-lang#4](https://github.com/anlaco/anlaco-lang/issues/4).
+  **Workaround verificado**: usar siempre `usa "nombre"` (sin ruta) e
+  invocar `bin/anac` con el directorio de trabajo puesto en la carpeta que
+  contiene los módulos — con nombre simple no falla nunca, con o sin
+  llamadas cualificadas.
+- **No hay funciones de primera clase.** Un nombre de función usado como
+  valor SIN `con` (p. ej. `la f es saluda`) no la referencia: la
+  AUTOINVOCA inmediatamente con cero argumentos. Con una función de 0
+  parámetros esto ejecuta su cuerpo en silencio (footgun: parece una
+  asignación inocente); con parámetros, falla al intentar leer un
+  argumento que no existe (`"La lista tiene 0 elementos y pediste el 1"`).
+  No hay forma de pasar una función como valor — el despacho dinámico a
+  "uno entre varios pasos" se hace por nombre de texto con una cadena
+  `si/si no`, nunca guardando la función en una variable o lista.
 - **Tarjetas (registros con campos)**: `un punto tiene:` … `fin` declara un
   tipo (nivel superior, hermana de `define`); `un nuevo punto con la x 3`
   construye (los campos no rellenados valen `nada`, cualquier orden); `p.x`
   lee un campo. El punto **NO se encadena**: para anidar, guarda en una
   palabra (`la izq es raiz.izquierda` … `izq.clase`).
+  **Los campos NO se pueden reasignar tras construir** — no existe
+  `objeto.campo es valor` como mutación. Escribir eso NO da error ni
+  mutación: se parsea como si reasignaras la TARJETA ENTERA (`objeto`) al
+  resultado booleano de comparar `objeto.campo es valor` — un footgun
+  serio y silencioso (`objeto` se vuelve `verdadero`/`falso`, deja de ser
+  una tarjeta). Verificado con programa mínimo — no adivinar esto.
+  Excepción real: un **campo de tipo lista** SÍ es mutable en el sitio vía
+  `añade elemento a objeto.campo` (la lista es un objeto compartido; el
+  cambio se ve incluso pasando la tarjeta a una función y mutándola ahí
+  dentro — es la única forma práctica de "actualizar" una tarjeta desde
+  una función). Para "cambiar" un campo escalar, la única opción es
+  construir una tarjeta nueva.
 - **No hay** (a propósito): diccionarios, negación suelta, textos
   multilínea, excepciones. (`detente con` para el programa: mensaje a
   stderr, código 1. A diferencia de `devuelve` —que solo sale de la
