@@ -1,0 +1,33 @@
+# idioma: es
+
+define registra con una secuencia_, un paso_:
+    añade paso_ a secuencia_.pasos
+fin
+
+define estado_de con una secuencia_:
+    el hay_error es falso
+    el hay_fallo es falso
+    para cada paso_ en secuencia_.pasos:
+        si paso_.estado es "error":
+            el hay_error es verdadero
+        fin
+        si paso_.estado es "fallo":
+            el hay_fallo es verdadero
+        fin
+    fin
+    si hay_error:
+        devuelve "error"
+    fin
+    si hay_fallo:
+        devuelve "fallo"
+    fin
+    devuelve "paso"
+fin
+
+define reporte con una secuencia_:
+    el estado_agregado es estado_de con secuencia_
+    escribe "=== {secuencia_.nombre}: {estado_agregado} ==="
+    para cada paso_ en secuencia_.pasos:
+        escribe "  [{paso_.estado}] {paso_.nombre}: {paso_.mensaje}"
+    fin
+fin
