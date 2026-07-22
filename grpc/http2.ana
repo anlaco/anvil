@@ -1,0 +1,30 @@
+# idioma: es
+
+define cabecera_frame de una longitud, un tipo, una marca, un id_stream:
+    el l0 es cociente de longitud entre 65536
+    el resto_l es resto de longitud entre 65536
+    el l1 es cociente de resto_l entre 256
+    el l2 es resto de resto_l entre 256
+    el s0 es cociente de id_stream entre 16777216
+    el resto_s es resto de id_stream entre 16777216
+    el s1 es cociente de resto_s entre 65536
+    el resto_s2 es resto de resto_s entre 65536
+    el s2 es cociente de resto_s2 entre 256
+    el s3 es resto de resto_s2 entre 256
+    devuelve [l0, l1, l2, tipo, marca, s0, s1, s2, s3]
+fin
+
+define longitud_de de una cabecera:
+    el l0 es elemento 1 de cabecera
+    el l1 es elemento 2 de cabecera
+    el l2 es elemento 3 de cabecera
+    devuelve ((l0 * 65536) + (l1 * 256) + l2)
+fin
+
+define id_stream_de de una cabecera:
+    el s0 es elemento 6 de cabecera
+    el s1 es elemento 7 de cabecera
+    el s2 es elemento 8 de cabecera
+    el s3 es elemento 9 de cabecera
+    devuelve ((s0 * 16777216) + (s1 * 65536) + (s2 * 256) + s3)
+fin

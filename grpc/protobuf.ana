@@ -1,0 +1,38 @@
+# idioma: es
+
+define varint_bytes de un valor:
+    la lista_bytes son []
+    el resto_ es valor
+    mientras resto_ es mayor que 127:
+        el octeto es ((resto de resto_ entre 128) + 128)
+        añade octeto a lista_bytes
+        el resto_ es cociente de resto_ entre 128
+    fin
+    añade resto_ a lista_bytes
+    devuelve lista_bytes
+fin
+
+define varint_valor de datos:
+    el total es 0
+    el multiplicador es 1
+    para cada b en datos:
+        el bajo7 es resto de b entre 128
+        el total es (total + (bajo7 * multiplicador))
+        el multiplicador es (multiplicador * 128)
+    fin
+    devuelve total
+fin
+
+define zigzag_de de un n:
+    si n es mayor que -1:
+        devuelve (n * 2)
+    fin
+    devuelve (((0 - n) * 2) - 1)
+fin
+
+define zigzag_a de un z:
+    si resto de z entre 2 es 0:
+        devuelve cociente de z entre 2
+    fin
+    devuelve (0 - (cociente de (z + 1) entre 2))
+fin

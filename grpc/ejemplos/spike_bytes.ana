@@ -1,0 +1,24 @@
+# idioma: es
+# Demuestra que las piezas de bytes que necesita gRPC (varint y zigzag de
+# protobuf, cabecera de frame de HTTP/2) se pueden construir en Ana con
+# aritmética (resto de / cociente de), sin operadores de bits.
+
+usa "protobuf"
+usa "http2"
+
+para cada n en [0, 1, 127, 128, 300, 16384, 3000000]:
+    los codificado son protobuf.varint_bytes de n
+    el decodificado es protobuf.varint_valor de codificado
+    escribe "varint {n} -> {codificado} -> {decodificado}"
+fin
+
+para cada n en [0, 1, -1, 2, -2, 300, -300]:
+    el z es protobuf.zigzag_de de n
+    el vuelta es protobuf.zigzag_a de z
+    escribe "zigzag {n} -> {z} -> {vuelta}"
+fin
+
+la cab es http2.cabecera_frame de 1200, 0, 1, 99
+el l es http2.longitud_de de cab
+el sid es http2.id_stream_de de cab
+escribe "cabecera_frame {cab} -> longitud={l} stream_id={sid}"
