@@ -17,8 +17,8 @@ description: >-
 
 Ana (también "ana-lang") es un **lenguaje natural controlado**: un punto
 medio entre la máquina y el humano — fácil de entender sin saber programar,
-con palabras de tu idioma (español o inglés), pero cada construcción tiene
-exactamente UNA forma gramatical.
+con palabras en español, pero cada construcción tiene exactamente UNA forma
+gramatical.
 
 Este proyecto (`anvil`) está escrito en Ana. El lenguaje lo desarrolla **el
 equipo de Ana**, un equipo independiente que hace crecer Ana según lo que le
@@ -26,6 +26,17 @@ piden sus clientes — de los cuales este proyecto es uno. La relación es de
 cliente a proveedor: **aquí se pide, ellos deciden cómo y cuándo.** Este
 repo no tiene ni necesita acceso al lenguaje en sí — solo a la herramienta
 ya compilada (`bin/anac`) y a esta guía.
+
+**Versión presente**: v0.26.5 (ver `bin/VERSION.md` para el commit exacto).
+Trae **red TCP** y el lenguaje **v0.4** (con cambios que ROMPEN código de
+versiones anteriores — ver la sección siguiente).
+
+Dos límites de ESTE binario (`bin/anac` es el build self-hosted, no el
+oráculo Python del equipo de Ana):
+- **Solo español.** El inglés (`write`, `if`) NO funciona aquí, ni con
+  `# idioma: en`. Escribe Ana en español.
+- **Sin diccionarios.** Los `{clave: valor}` son del oráculo; `bin/anac` no
+  los soporta (su lexer no tiene `{`/`}`). No los uses.
 
 ## Cómo ejecutar (desde la raíz de este repo)
 
@@ -41,7 +52,8 @@ bin/anac empaquetar programa.ana [-o nombre] # Ana → ejecutable nativo standal
 `empaquetar` es lo más útil para distribuir algo de este proyecto: produce
 un binario que arranca en milisegundos y no depende de tener `anac`
 instalado. Por ahora empaqueta para la máquina donde corre — sin
-compilación cruzada todavía.
+compilación cruzada todavía. Un binario empaquetado que usa red lleva dentro
+un puente `wasi:sockets` de verdad.
 
 ## Protocolo empírico — la regla de oro de esta skill
 
@@ -57,7 +69,32 @@ adivines**:
 
 **Nunca inventes sintaxis nueva** para salir de un apuro, y nunca toques
 nada fuera de este repo para conseguirlo. Si de verdad hace falta algo que
-Ana no tiene, es el caso de la siguiente sección.
+Ana no tiene, es el caso de la sección "Cuando Ana no llega".
+
+## v0.4: cambios que ROMPEN código de versiones anteriores
+
+Si hay código `.ana` en este repo escrito para una versión anterior, migra
+con estos puntos (verifícalo con `bin/anac ejecutar`, no de memoria):
+
+- **La forma `con` de FUNCIONES se eliminó.** `define f con a, b:` y la
+  llamada `f con x, y` dan error amable. Migración (la elige lo que la
+  función DEVUELVE, ver "Formas de define"):
+  - devuelve un valor → forma `de`: `define f de a, b:` / `f de x, y`.
+  - no devuelve nada (acción) → forma `a`/`en`: `define registra un paso en
+    una secuencia:` / `registra x en s`.
+  - devuelve booleano → forma `?`: `define una caja contiene? una buscada:`
+    / `[1,2,3] contiene 2`.
+  - **Ojo**: `con` SIGUE viva para CONSTRUIR tarjetas (`un nuevo punto con
+    la x 3`). Solo desapareció en funciones.
+- **Comparar tipos distintos con `es` ahora da ERROR de ejecución**, no
+  `falso` en silencio. `si 3 es "3":` revienta con "No se puede comparar…".
+  Excepciones: entero vs decimal (comparan numéricamente) y cualquier cosa
+  contra `nada` (siempre vale, para `si X es nada:`).
+- **`nada` sustituye al centinela `-1`** que devolvían algunas frases.
+- **`a`/`veces` ya valen como nombre de parámetro** en la forma `de`.
+- **Rutas relativas al fuente** (no al directorio de trabajo) en varios
+  sitios; y el issue #4 (llamada cualificada tras `usa` con subcarpeta) está
+  ARREGLADO — ya no hace falta esquivar rutas con subcarpeta.
 
 ## Cuando Ana no llega: reportar, no arreglar
 
@@ -113,9 +150,11 @@ fin
 para cada n del 1 al 10:
 mientras n es menor que 5:
 repite 3 veces:
-define media con un a_, un b_:        # llamada: media con 4, 6  (comas, nunca "y")
-                                      # estilo con azúcar: el indefinido presenta el parámetro
-    devuelve ((a_ + b_) / 2)
+define media de un a_, un b_:         # forma "de" (devuelve valor); llamada: media de 4, 6
+    devuelve ((a_ + b_) / 2)          # (comas entre argumentos, nunca "y")
+fin
+define registra un x en una lista:    # forma "a"/"en" (acción, no devuelve); registra 5 en l
+    añade x a lista
 fin
 guarda "hola" en "notas.txt"          # archivos
 añade "adiós" a "notas.txt"           # a texto = archivo; a lista = elemento
@@ -123,19 +162,19 @@ el t es contenido de "notas.txt"
 detente con "El número no es válido"  # para el programa; mensaje a stderr, código 1
 la edad es respuesta a "¿años?"       # entrada; "15" se vuelve número solo
 elemento 2 de lista, primero de, último de, cantidad de, al azar entre 1 y 6
-usa "lexer"                           # módulos — trae lexer.ana (misma carpeta)
-las fichas son lexer.trocea con código  # SIEMPRE cualificado con punto; carga 1 vez
+usa "modelo"                          # módulos — trae modelo.ana (misma carpeta)
+las fichas son lexer.trocea de código # llamada cualificada: SIEMPRE con punto y forma "de"
 el archivo es elemento 1 de los argumentos  # los de la línea de comandos
-un punto tiene:                      # tarjetas (registros) — declara un tipo
+un punto tiene:                       # tarjetas (registros) — declara un tipo
     una x
     una altitud
 fin
-el p es un nuevo punto con la x 3, la altitud 4   # construye una tarjeta
-escribe p.x                          # acceso a campo; el punto NO se encadena
-el m es resto de 17 entre 5          # división entera de suelo (2)
-el q es cociente de 17 entre 5       # (3)
-los b son bytes de "hola"            # bytes UTF-8, lista de 0-255
-guarda los bytes b en "salida.bin"   # escritura binaria, sin decodificar
+el p es un nuevo punto con la x 3, la altitud 4   # construye ("con" SÍ vale aquí)
+escribe p.x                           # acceso a campo; el punto NO se encadena
+el m es resto de 17 entre 5           # división entera de suelo (2)
+el q es cociente de 17 entre 5        # (3)
+los b son bytes de "hola"             # bytes UTF-8, lista de 0-255
+guarda los bytes b en "salida.bin"    # escritura binaria, sin decodificar
 ```
 
 Los argumentos: `los argumentos` es la lista de textos que siguen al
@@ -143,6 +182,42 @@ programa (`bin/anac ejecutar prog.ana 7 hola` → `["7", "hola"]`; sin el
 nombre del programa; siempre textos; una lista nueva cada vez).
 
 Escapes en textos (lista CERRADA): `\"` `\n` `\\`. Nada más tras la barra.
+
+## Formas de `define` — la elige el tipo de devolución, no el gusto
+
+| forma | devuelve | definición | llamada |
+|---|---|---|---|
+| sin parámetros | lo que sea | `define saluda:` | `saluda` |
+| `de` | un valor | `define doble de n:` | `doble de 3` |
+| `a` / `en` | nada (acción) | `define registra un paso en una secuencia:` | `registra x en s` |
+| infija `?` | booleano | `define una caja contiene? una buscada:` | `[1,2,3] contiene 2` |
+
+Una función, una forma. El artículo indefinido presenta cada parámetro:
+`define área de un ancho, una altura`. `de` acepta tantos parámetros como
+haga falta (1-3 por legibilidad). La forma `con` ya NO existe (v0.4).
+
+## Red (TCP) — lo que anvil pidió
+
+Servidor:
+```
+el servidor es la escucha del puerto 8099   # asa, o "nada" si no pudo
+si servidor es nada:
+    detente con "no se pudo escuchar"
+fin
+la conexion es la aceptación de servidor    # BLOQUEA hasta que llega un cliente; asa o nada
+los datos son bytes recibidos de conexion   # lista de bytes (0-255)
+envía datos a conexion                       # acción
+cierra conexion
+cierra servidor
+```
+Cliente:
+```
+la conexion es la conexión a "127.0.0.1" en el puerto 8099   # asa, o "nada" si falló
+```
+Las asas son enteros opacos. `envía` toma una lista de bytes (usa `bytes de
+"texto"` para convertir). Verificado que `la escucha del puerto` devuelve un
+socket real con este `bin/anac`. Ejemplo completo de eco: pídelo al equipo
+de Ana o mira un servidor mínimo con el patrón de arriba.
 
 ## Gotchas — lo que sorprende al que viene de otros lenguajes
 
@@ -152,96 +227,62 @@ Escapes en textos (lista CERRADA): `\"` `\n` `\\`. Nada más tras la barra.
 - **Los índices empiezan en 1.**
 - **La sangría NO significa nada**: la estructura la dan `:` y `fin`.
 - **Los dos registros**: todo programa puede escribirse LLANO
-  (`variable es 3`, `define área con ancho, alto:`) o ADORNADO con artículos
-  (`la variable es 3`, `con un ancho`). Ambos son el MISMO árbol. Ninguna
+  (`variable es 3`, `define área de ancho, alto:`) o ADORNADO con artículos
+  (`la variable es 3`, `de un ancho`). Ambos son el MISMO árbol. Ninguna
   frase EXIGE azúcar para funcionar.
-- **Una sentencia por línea** y **una lista no puede partirse en varias
-  líneas**. Tablas grandes = una línea larga.
+- **Una sentencia por línea**, salvo dentro de un paréntesis o corchete sin
+  cerrar: una lista literal o un cálculo SÍ pueden partirse en varias líneas
+  (v0.4). Una llamada en forma `de` (sin paréntesis propios) no se parte.
 - **`es` es dos cosas**: al inicio de sentencia, asignación; en condición,
   igualdad. No hay asignación dentro de expresiones.
 - **Sin truthiness**: las condiciones exigen booleano (una variable booleana
   sola sí vale: `si carnet:`). No hay `no` suelto: la negación es `no es`.
-- **Palabras reservadas traicioneras**: `a` y `veces` (y todas las keywords y
-  artículos) no valen como nombres de variable.
-- **Llamadas**: `f con x, y`. Una llamada como argumento de otra o como
-  elemento de lista literal va entre paréntesis: `f con (g con 1)`, `[(f con 1), 2]`.
-  Dentro de un cálculo no hace falta: `(fib con (n - 1) + fib con (n - 2))`.
-  El compilador aún NO compila una llamada suelta como sentencia
-  (`f con x` sin asignar → error amable; el intérprete sí la acepta).
-  Rodeo portable: `el _ es f con x`.
+- **Llamadas** (v0.4): la sintaxis depende de la forma — `f de x`, `f a x` /
+  `f x en y`, `x f y` (infija `?`). Una llamada como argumento de otra o como
+  elemento de lista literal va entre paréntesis: `fib de (fib de 4)`,
+  `[(fib de 3), 2]`. Dentro de un cálculo no hace falta: `(fib de (n - 1) +
+  fib de (n - 2))`.
 - **Funciones solo en el nivel superior**. Las globales se LEEN desde una
   función; escribirlas es error. Recursión: mínimo 1000 niveles garantizados.
 - **`añade X a Y`** depende del tipo de Y: lista → elemento; texto → archivo.
   Los textos son inmutables (concatenar = interpolación: `"{a}{b}"`, ojo O(n²)).
-- **Comparar tipos distintos con `es` da `falso`**, no error (salvo entero vs
-  decimal, que comparan numéricamente). `(7 / 2)` es `3.5`; `21.0` se muestra `21`.
+- **Comparar tipos distintos con `es` da ERROR** (v0.4), no `falso` — salvo
+  entero vs decimal (numérico) y cualquier cosa contra `nada`. `(7 / 2)` es
+  `3.5`; `21.0` se muestra `21`.
 - **Módulos**: `usa "X"` ejecuta X.ana al importar (¡sin escribe de demo en
-  bibliotecas!) y todo se usa cualificado: `X.func con args`, `X.tabla`. NO
-  hay import plano. Dentro del módulo, sus funciones se llaman sin
-  cualificar. Gotcha de compilación: los accesos cualificados (`M.x`) solo
-  son fiables después de que un `usa "M"` se haya EJECUTADO antes en el
-  programa. Las **tarjetas** definidas en un módulo importado son la
-  excepción: se construyen SIN cualificar (`un nuevo resultado_step con
-  ...`, no `un nuevo M.resultado_step con ...`), a diferencia de funciones
-  y tablas.
-- **`usa "X"` resuelve la ruta contra el directorio de trabajo del
-  proceso** (`bin/anac ejecutar ...`), no contra la carpeta del archivo que
-  hace el `usa` — ni siquiera si el `usa` está DENTRO de otro módulo ya
-  importado con ruta. Un módulo en `carpeta/lib.ana` que haga `usa "otro"`
-  solo encuentra `otro.ana` si el proceso se invocó con cwd en `carpeta/`;
-  si el archivo raíz vive en otro sitio y usó `usa "carpeta/lib"`, ese
-  `usa "otro"` interno sigue buscando `./otro.ana` desde el cwd real, no
-  desde `carpeta/`. **Bug conocido y más grave**: una vez cargado un módulo
-  con `usa "carpeta/nombre"` (con ruta), la PRIMERA llamada cualificada a
-  una de sus funciones (`nombre.func con ...`) puede fallar con "No
-  encuentro el archivo nombre.ana" — la llamada cualificada vuelve a
-  resolver el módulo por su nombre base contra el cwd, perdiendo la ruta
-  original, aunque el `usa` sí tuvo éxito. Reportado en
-  [anlaco-lang#4](https://github.com/anlaco/anlaco-lang/issues/4).
-  **Workaround verificado**: usar siempre `usa "nombre"` (sin ruta) e
-  invocar `bin/anac` con el directorio de trabajo puesto en la carpeta que
-  contiene los módulos — con nombre simple no falla nunca, con o sin
-  llamadas cualificadas.
+  bibliotecas!) y todo se usa cualificado con la forma de la función:
+  `X.func de args`, `X.tabla`. NO hay import plano. Dentro del módulo, sus
+  funciones se llaman sin cualificar. El issue #4 (llamada cualificada tras
+  `usa` con subcarpeta) está ARREGLADO: los módulos se cachean y buscan por
+  su nombre corto. **Las tarjetas de un módulo importado se construyen SIN
+  cualificar** (`un nuevo resultado_step con ...`, no `un nuevo
+  M.resultado_step con ...`), a diferencia de funciones y tablas.
 - **No hay funciones de primera clase.** Un nombre de función usado como
-  valor SIN `con` (p. ej. `la f es saluda`) no la referencia: la
-  AUTOINVOCA inmediatamente con cero argumentos. Con una función de 0
-  parámetros esto ejecuta su cuerpo en silencio (footgun: parece una
-  asignación inocente); con parámetros, falla al intentar leer un
-  argumento que no existe (`"La lista tiene 0 elementos y pediste el 1"`).
-  No hay forma de pasar una función como valor — el despacho dinámico a
-  "uno entre varios pasos" se hace por nombre de texto con una cadena
-  `si/si no`, nunca guardando la función en una variable o lista.
+  valor (p. ej. `la f es saluda`) no la referencia: la AUTOINVOCA con cero
+  argumentos. No hay forma de pasar una función como valor — el despacho
+  dinámico se hace por nombre de texto con una cadena `si/si no`.
 - **Tarjetas (registros con campos)**: `un punto tiene:` … `fin` declara un
-  tipo (nivel superior, hermana de `define`); `un nuevo punto con la x 3`
-  construye (los campos no rellenados valen `nada`, cualquier orden); `p.x`
-  lee un campo. El punto **NO se encadena**: para anidar, guarda en una
-  palabra (`la izq es raiz.izquierda` … `izq.clase`).
-  **Los campos NO se pueden reasignar tras construir** — no existe
-  `objeto.campo es valor` como mutación. Escribir eso NO da error ni
-  mutación: se parsea como si reasignaras la TARJETA ENTERA (`objeto`) al
-  resultado booleano de comparar `objeto.campo es valor` — un footgun
-  serio y silencioso (`objeto` se vuelve `verdadero`/`falso`, deja de ser
-  una tarjeta). Verificado con programa mínimo — no adivinar esto.
-  Excepción real: un **campo de tipo lista** SÍ es mutable en el sitio vía
-  `añade elemento a objeto.campo` (la lista es un objeto compartido; el
-  cambio se ve incluso pasando la tarjeta a una función y mutándola ahí
-  dentro — es la única forma práctica de "actualizar" una tarjeta desde
-  una función). Para "cambiar" un campo escalar, la única opción es
-  construir una tarjeta nueva.
-- **No hay** (a propósito): diccionarios, negación suelta, textos
-  multilínea, excepciones. (`detente con` para el programa: mensaje a
-  stderr, código 1. A diferencia de `devuelve` —que solo sale de la
-  función— `detente` para todo el programa, se ejecute donde se ejecute.)
+  tipo (nivel superior); `un nuevo punto con la x 3` construye (campos no
+  rellenados = `nada`, cualquier orden; `con` SÍ vale aquí); `p.x` lee un
+  campo. El punto **NO se encadena**: para anidar, guarda en una palabra
+  (`la izq es raiz.izquierda` … `izq.clase`).
+  **Los campos escalares NO se pueden reasignar tras construir** — no existe
+  `objeto.campo es valor` como mutación: se parsea como reasignar la TARJETA
+  ENTERA al booleano de comparar `objeto.campo es valor` (footgun silencioso;
+  `objeto` se vuelve `verdadero`/`falso`). Excepción: un **campo lista** SÍ es
+  mutable en el sitio vía `añade elemento a objeto.campo` (la lista es un
+  objeto compartido; el cambio se ve aun pasando la tarjeta a una función).
+  Para "cambiar" un campo escalar, construye una tarjeta nueva.
+- **No hay** (a propósito, o no en este binario): diccionarios `{}` (oráculo
+  solo), inglés (oráculo solo), negación suelta, textos multilínea,
+  excepciones. `detente con` sí para el programa (stderr, código 1); a
+  diferencia de `devuelve` (solo sale de la función), `detente` para todo.
 - **Aritmética de bytes**: `resto de`/`cociente de` son división entera de
-  SUELO (como Python: `resto de -1 entre 128` es `127`, no `-1`). Una tira
-  de bytes NO es un tipo nuevo: `bytes de "Añil"` es una LISTA de enteros
-  0-255 por BYTE UTF-8 (`[65, 195, 177, 105, 108]`, 5 elementos), a diferencia
-  de `cantidad de`/`elemento N de`, que cuentan LETRAS (`cantidad de "Añil"`
-  es `4`). `guarda los bytes B en RUTA` escribe binario sin pasar por
-  `mostrar`. El compilador exige que el divisor de `resto`/`cociente` quepa
-  en 32 bits; el intérprete no tiene ese límite.
-- **Multilingüe**: el idioma se detecta solo o se fija con `# idioma: es`.
-  Frases multi-palabra: gana la más larga (`es mayor o igual que` antes que `es`).
+  SUELO (`resto de -1 entre 128` es `127`). `bytes de "Añil"` es una LISTA de
+  enteros 0-255 por BYTE UTF-8 (`[65, 195, 177, 105, 108]`, 5 elementos), a
+  diferencia de `cantidad de`/`elemento N de`, que cuentan LETRAS (`cantidad
+  de "Añil"` es `4`). El compilador exige que el divisor quepa en 32 bits.
+- **Multilingüe (solo en el oráculo, no aquí)**: `bin/anac` es solo español.
 
 ## Sobre `bin/anac`
 
