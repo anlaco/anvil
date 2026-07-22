@@ -1,0 +1,200 @@
+# idioma: es
+# Servidor gRPC real (mínimo) para el servicio Saludador de saludador.proto.
+# Habla con un cliente gRPC de verdad sin modificar (grpc-python) — no con
+# otro script de Ana. Usa http2.ana + hpack.ana + protobuf.ana tal cual
+# están en grpc/.
+
+usa "http2"
+usa "hpack"
+usa "protobuf"
+
+un resultado_lectura tiene:
+    un datos
+    un resto
+fin
+
+# Junta bytes de la conexión hasta tener al menos n, y separa los primeros
+# n del resto (para no perder lo que ya llegó de más).
+define lee_n de conexion, buffer, un n:
+    la buffer_actual son buffer
+    mientras (cantidad de buffer_actual) es menor que n:
+        los nuevos son bytes recibidos de conexion
+        para cada b en nuevos:
+            añade b a buffer_actual
+        fin
+    fin
+    los datos son []
+    los resto son []
+    el i es 1
+    mientras i es menor que (n + 1):
+        añade (elemento i de buffer_actual) a datos
+        el i es (i + 1)
+    fin
+    la total es cantidad de buffer_actual
+    mientras i es menor que (total + 1):
+        añade (elemento i de buffer_actual) a resto
+        el i es (i + 1)
+    fin
+    devuelve un nuevo resultado_lectura con el datos datos, el resto resto
+fin
+
+un resultado_frame tiene:
+    un longitud
+    un tipo
+    un marca
+    un stream
+    un payload
+    un resto
+fin
+
+define lee_frame de conexion, buffer:
+    el r1 es lee_n de conexion, buffer, 9
+    la cab es r1.datos
+    la longitud es http2.longitud_de de cab
+    el tipo es elemento 4 de cab
+    la marca es elemento 5 de cab
+    el stream es http2.id_stream_de de cab
+    si longitud es 0:
+        devuelve un nuevo resultado_frame con el longitud 0, el tipo tipo, el marca marca, el stream stream, el payload [], el resto r1.resto
+    fin
+    el r2 es lee_n de conexion, r1.resto, longitud
+    devuelve un nuevo resultado_frame con el longitud longitud, el tipo tipo, el marca marca, el stream stream, el payload r2.datos, el resto r2.resto
+fin
+
+el servidor es la escucha del puerto 9099
+si servidor es nada:
+    detente con "no se pudo escuchar"
+fin
+escribe "servidor Saludador escuchando en 9099"
+
+la conexion es la aceptación de servidor
+si conexion es nada:
+    detente con "no se pudo aceptar"
+fin
+escribe "cliente conectado"
+
+el r_preface es lee_n de conexion, [], 24
+escribe "preface recibido"
+
+la cab_settings son http2.cabecera_frame de 0, 4, 0, 0
+envía cab_settings a conexion
+escribe "SETTINGS del servidor enviado"
+
+el buffer es r_preface.resto
+el nombre_bytes es nada
+el stream_pedido es 1
+el sigue_leyendo es verdadero
+mientras sigue_leyendo:
+    la rf es lee_frame de conexion, buffer
+    el buffer es rf.resto
+    si rf.tipo es 4:
+        si rf.marca es 0:
+            escribe "SETTINGS del cliente recibido, mandando ACK"
+            la cab_ack son http2.cabecera_frame de 0, 4, 1, 0
+            envía cab_ack a conexion
+        fin
+    fin
+    si rf.tipo es 1:
+        escribe "HEADERS recibido, {rf.longitud} bytes"
+        el stream_pedido es rf.stream
+    fin
+    si rf.tipo es 0:
+        escribe "DATA recibido, {rf.longitud} bytes"
+        los msg son rf.payload
+        el l0 es elemento 2 de msg
+        el l1 es elemento 3 de msg
+        el l2 es elemento 4 de msg
+        el l3 es elemento 5 de msg
+        la longitud_msg es ((((l0 * 256) + l1) * 256 + l2) * 256 + l3)
+        # campo 1 (string) del protobuf: byte de tag (10) + longitud + bytes
+        el tag es elemento 6 de msg
+        el long_campo es elemento 7 de msg
+        los contenido son []
+        el i es 0
+        mientras i es menor que long_campo:
+            añade (elemento (8 + i) de msg) a contenido
+            el i es (i + 1)
+        fin
+        el nombre_bytes es contenido
+        el sigue_leyendo es falso
+    fin
+fin
+
+escribe "nombre recibido (bytes): {nombre_bytes}"
+
+# --- construir la respuesta: SaludoResponse { mensaje: "Hola, {nombre}!" } ---
+los saludo son bytes de "Hola, "
+para cada b en nombre_bytes:
+    añade b a saludo
+fin
+los cierre son bytes de "!"
+para cada b en cierre:
+    añade b a saludo
+fin
+
+los tag_campo son protobuf.varint_bytes de 10
+los long_campo_bytes son protobuf.varint_bytes de (cantidad de saludo)
+los mensaje_pb son []
+para cada b en tag_campo:
+    añade b a mensaje_pb
+fin
+para cada b en long_campo_bytes:
+    añade b a mensaje_pb
+fin
+para cada b en saludo:
+    añade b a mensaje_pb
+fin
+
+# prefijo de mensaje gRPC: 1 byte comprimido=0 + 4 bytes de longitud big-endian
+la longitud_pb es cantidad de mensaje_pb
+el b0 es cociente de longitud_pb entre 16777216
+el resto0 es resto de longitud_pb entre 16777216
+el b1 es cociente de resto0 entre 65536
+el resto1 es resto de resto0 entre 65536
+el b2 es cociente de resto1 entre 256
+el b3 es resto de resto1 entre 256
+los cuerpo_data son [0, b0, b1, b2, b3]
+para cada b en mensaje_pb:
+    añade b a cuerpo_data
+fin
+
+# --- cabeceras de la respuesta ---
+los h_status son hpack.codifica_campo de ":status", "200"
+los h_tipo son hpack.codifica_campo de "content-type", "application/grpc"
+los cab_headers son []
+para cada b en h_status:
+    añade b a cab_headers
+fin
+para cada b en h_tipo:
+    añade b a cab_headers
+fin
+
+la marco_headers son http2.cabecera_frame de (cantidad de cab_headers), 1, 4, stream_pedido
+los envio_headers son marco_headers
+para cada b en cab_headers:
+    añade b a envio_headers
+fin
+envía envio_headers a conexion
+escribe "HEADERS de respuesta enviado"
+
+la marco_data son http2.cabecera_frame de (cantidad de cuerpo_data), 0, 0, stream_pedido
+los envio_data son marco_data
+para cada b en cuerpo_data:
+    añade b a envio_data
+fin
+envía envio_data a conexion
+escribe "DATA de respuesta enviado"
+
+# --- trailers: grpc-status: 0, fin del stream ---
+los h_gstatus son hpack.codifica_campo de "grpc-status", "0"
+la marco_trailers son http2.cabecera_frame de (cantidad de h_gstatus), 1, 5, stream_pedido
+los envio_trailers son marco_trailers
+para cada b en h_gstatus:
+    añade b a envio_trailers
+fin
+envía envio_trailers a conexion
+escribe "trailers (grpc-status: 0) enviados, END_STREAM"
+
+cierra conexion
+cierra servidor
+escribe "servidor cerrado"
