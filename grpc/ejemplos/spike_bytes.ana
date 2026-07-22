@@ -3,8 +3,8 @@
 # protobuf, cabecera de frame de HTTP/2) se pueden construir en Ana con
 # aritmética (resto de / cociente de), sin operadores de bits.
 
-usa "protobuf"
-usa "http2"
+usa "grpc/protobuf"
+usa "grpc/http2"
 
 para cada n en [0, 1, 127, 128, 300, 16384, 3000000]:
     los codificado son protobuf.varint_bytes de n

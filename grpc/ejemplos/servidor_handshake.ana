@@ -4,7 +4,7 @@
 # Primer spike que toca un socket TCP real (ver cliente_handshake.ana,
 # que es el otro extremo — correr los dos como procesos separados).
 
-usa "http2"
+usa "grpc/http2"
 
 la preface son [80, 82, 73, 32, 42, 32, 72, 84, 84, 80, 47, 50, 46, 48, 13, 10, 13, 10, 83, 77, 13, 10, 13, 10]
 

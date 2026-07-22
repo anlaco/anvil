@@ -8,7 +8,7 @@
 # without Indexing) — no decodifica las otras dos formas de literal
 # (incremental indexing, never indexed). Ver README.md.
 
-usa "huffman"
+usa "grpc/huffman"
 
 un entrada_estatica tiene:
     un nombre

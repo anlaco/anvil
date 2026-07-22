@@ -1,10 +1,10 @@
 # idioma: es
 # Otro extremo de servidor_handshake.ana — correr los dos como procesos
-# separados (el servidor primero, este después):
-#   cd grpc && ../bin/anac ejecutar ejemplos/servidor_handshake.ana &
-#   cd grpc && ../bin/anac ejecutar ejemplos/cliente_handshake.ana
+# separados, desde la raíz del repo (el servidor primero, este después):
+#   bin/anac ejecutar grpc/ejemplos/servidor_handshake.ana &
+#   bin/anac ejecutar grpc/ejemplos/cliente_handshake.ana
 
-usa "http2"
+usa "grpc/http2"
 
 la preface son [80, 82, 73, 32, 42, 32, 72, 84, 84, 80, 47, 50, 46, 48, 13, 10, 13, 10, 83, 77, 13, 10, 13, 10]
 

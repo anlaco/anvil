@@ -1,40 +1,18 @@
 # idioma: es
 
-usa "modelo"
-usa "ejecutor"
-
-define paso_conectar de un intento_:
-    si intento_ es menor que 2:
-        devuelve un nuevo resultado_step con el nombre "conectar_equipo", el estado "fallo", el mensaje "el equipo no respondió (intento {intento_})"
-    fin
-    devuelve un nuevo resultado_step con el nombre "conectar_equipo", el estado "paso", el mensaje "equipo conectado (intento {intento_})"
-fin
-
-define paso_medir_voltaje:
-    el valor es 4.2
-    si valor es menor que 4.5:
-        devuelve un nuevo resultado_step con el nombre "medir_voltaje", el estado "fallo", el mensaje "voltaje fuera de rango", el valor_medido valor, el limite_min 4.5, el limite_max 5.5
-    fin
-    devuelve un nuevo resultado_step con el nombre "medir_voltaje", el estado "paso", el mensaje "voltaje dentro de rango", el valor_medido valor, el limite_min 4.5, el limite_max 5.5
-fin
-
-define paso_verificar_led:
-    devuelve un nuevo resultado_step con el nombre "verificar_led", el estado "paso", el mensaje "led encendido"
-fin
-
-define paso_desconectar:
-    devuelve un nuevo resultado_step con el nombre "desconectar_equipo", el estado "paso", el mensaje "equipo desconectado"
-fin
+usa "secuenciador/modelo"
+usa "secuenciador/ejecutor"
+usa "secuenciador/pasos_demo"
 
 el secuencia es un nuevo resultado_secuencia con el nombre "basica", el pasos []
 
 # --- Setup: reintenta conectar hasta 3 veces ---
 el intentos es 0
 el conectado es falso
-el r_conectar es paso_conectar de 1
+el r_conectar es pasos_demo.paso_conectar de 1
 mientras intentos es menor que 3 y conectado no es verdadero:
     el intentos es (intentos + 1)
-    el r_conectar es paso_conectar de intentos
+    el r_conectar es pasos_demo.paso_conectar de intentos
     si r_conectar.estado es "paso":
         el conectado es verdadero
     fin
@@ -43,17 +21,17 @@ ejecutor.registra r_conectar en secuencia
 
 # --- Main: solo si Setup salió bien; si un paso falla, se salta el resto ---
 si conectado:
-    el r_voltaje es paso_medir_voltaje
+    el r_voltaje es pasos_demo.paso_medir_voltaje de 1
     ejecutor.registra r_voltaje en secuencia
 
     si r_voltaje.estado es "paso":
-        el r_led es paso_verificar_led
+        el r_led es pasos_demo.paso_verificar_led de 1
         ejecutor.registra r_led en secuencia
     fin
 fin
 
 # --- Cleanup: corre siempre, pase lo que pase en Setup/Main ---
-el r_desconectar es paso_desconectar
+el r_desconectar es pasos_demo.paso_desconectar de 1
 ejecutor.registra r_desconectar en secuencia
 
 ejecutor.reporte a secuencia
