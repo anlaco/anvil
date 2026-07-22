@@ -1,0 +1,383 @@
+# idioma: es
+#
+# Huffman de HPACK (RFC 7541 Apéndice B) — 257 símbolos (0-255 más EOS=256).
+# Tabla verificada: sin colisiones de prefijo entre los 257 códigos (se
+# comprobó por separado antes de escribir esto), y el resultado de
+# codificar "www.example.com" coincide byte a byte con el ejemplo oficial
+# del RFC (Apéndice C.4): f1e3c2e5f23a6ba0ab90f4ff.
+
+define potencia_de_2 de un exponente:
+    el resultado es 1
+    el i es 0
+    mientras i es menor que exponente:
+        el resultado es (resultado * 2)
+        el i es (i + 1)
+    fin
+    devuelve resultado
+fin
+
+define bit_en de datos, un posicion_bit:
+    el idx_byte es ((cociente de posicion_bit entre 8) + 1)
+    el offset es resto de posicion_bit entre 8
+    el byte_val es elemento idx_byte de datos
+    el despl es (7 - offset)
+    el pot es potencia_de_2 de despl
+    devuelve resto de (cociente de byte_val entre pot) entre 2
+fin
+
+un huffman_entrada tiene:
+    un simbolo
+    un codigo
+    un bits
+fin
+
+la tabla_huffman son []
+añade un nuevo huffman_entrada con el simbolo 0, el codigo 8184, el bits 13 a tabla_huffman
+añade un nuevo huffman_entrada con el simbolo 1, el codigo 8388568, el bits 23 a tabla_huffman
+añade un nuevo huffman_entrada con el simbolo 2, el codigo 268435426, el bits 28 a tabla_huffman
+añade un nuevo huffman_entrada con el simbolo 3, el codigo 268435427, el bits 28 a tabla_huffman
+añade un nuevo huffman_entrada con el simbolo 4, el codigo 268435428, el bits 28 a tabla_huffman
+añade un nuevo huffman_entrada con el simbolo 5, el codigo 268435429, el bits 28 a tabla_huffman
+añade un nuevo huffman_entrada con el simbolo 6, el codigo 268435430, el bits 28 a tabla_huffman
+añade un nuevo huffman_entrada con el simbolo 7, el codigo 268435431, el bits 28 a tabla_huffman
+añade un nuevo huffman_entrada con el simbolo 8, el codigo 268435432, el bits 28 a tabla_huffman
+añade un nuevo huffman_entrada con el simbolo 9, el codigo 16777194, el bits 24 a tabla_huffman
+añade un nuevo huffman_entrada con el simbolo 10, el codigo 1073741820, el bits 30 a tabla_huffman
+añade un nuevo huffman_entrada con el simbolo 11, el codigo 268435433, el bits 28 a tabla_huffman
+añade un nuevo huffman_entrada con el simbolo 12, el codigo 268435434, el bits 28 a tabla_huffman
+añade un nuevo huffman_entrada con el simbolo 13, el codigo 1073741821, el bits 30 a tabla_huffman
+añade un nuevo huffman_entrada con el simbolo 14, el codigo 268435435, el bits 28 a tabla_huffman
+añade un nuevo huffman_entrada con el simbolo 15, el codigo 268435436, el bits 28 a tabla_huffman
+añade un nuevo huffman_entrada con el simbolo 16, el codigo 268435437, el bits 28 a tabla_huffman
+añade un nuevo huffman_entrada con el simbolo 17, el codigo 268435438, el bits 28 a tabla_huffman
+añade un nuevo huffman_entrada con el simbolo 18, el codigo 268435439, el bits 28 a tabla_huffman
+añade un nuevo huffman_entrada con el simbolo 19, el codigo 268435440, el bits 28 a tabla_huffman
+añade un nuevo huffman_entrada con el simbolo 20, el codigo 268435441, el bits 28 a tabla_huffman
+añade un nuevo huffman_entrada con el simbolo 21, el codigo 268435442, el bits 28 a tabla_huffman
+añade un nuevo huffman_entrada con el simbolo 22, el codigo 1073741822, el bits 30 a tabla_huffman
+añade un nuevo huffman_entrada con el simbolo 23, el codigo 268435443, el bits 28 a tabla_huffman
+añade un nuevo huffman_entrada con el simbolo 24, el codigo 268435444, el bits 28 a tabla_huffman
+añade un nuevo huffman_entrada con el simbolo 25, el codigo 268435445, el bits 28 a tabla_huffman
+añade un nuevo huffman_entrada con el simbolo 26, el codigo 268435446, el bits 28 a tabla_huffman
+añade un nuevo huffman_entrada con el simbolo 27, el codigo 268435447, el bits 28 a tabla_huffman
+añade un nuevo huffman_entrada con el simbolo 28, el codigo 268435448, el bits 28 a tabla_huffman
+añade un nuevo huffman_entrada con el simbolo 29, el codigo 268435449, el bits 28 a tabla_huffman
+añade un nuevo huffman_entrada con el simbolo 30, el codigo 268435450, el bits 28 a tabla_huffman
+añade un nuevo huffman_entrada con el simbolo 31, el codigo 268435451, el bits 28 a tabla_huffman
+añade un nuevo huffman_entrada con el simbolo 32, el codigo 20, el bits 6 a tabla_huffman
+añade un nuevo huffman_entrada con el simbolo 33, el codigo 1016, el bits 10 a tabla_huffman
+añade un nuevo huffman_entrada con el simbolo 34, el codigo 1017, el bits 10 a tabla_huffman
+añade un nuevo huffman_entrada con el simbolo 35, el codigo 4090, el bits 12 a tabla_huffman
+añade un nuevo huffman_entrada con el simbolo 36, el codigo 8185, el bits 13 a tabla_huffman
+añade un nuevo huffman_entrada con el simbolo 37, el codigo 21, el bits 6 a tabla_huffman
+añade un nuevo huffman_entrada con el simbolo 38, el codigo 248, el bits 8 a tabla_huffman
+añade un nuevo huffman_entrada con el simbolo 39, el codigo 2042, el bits 11 a tabla_huffman
+añade un nuevo huffman_entrada con el simbolo 40, el codigo 1018, el bits 10 a tabla_huffman
+añade un nuevo huffman_entrada con el simbolo 41, el codigo 1019, el bits 10 a tabla_huffman
+añade un nuevo huffman_entrada con el simbolo 42, el codigo 249, el bits 8 a tabla_huffman
+añade un nuevo huffman_entrada con el simbolo 43, el codigo 2043, el bits 11 a tabla_huffman
+añade un nuevo huffman_entrada con el simbolo 44, el codigo 250, el bits 8 a tabla_huffman
+añade un nuevo huffman_entrada con el simbolo 45, el codigo 22, el bits 6 a tabla_huffman
+añade un nuevo huffman_entrada con el simbolo 46, el codigo 23, el bits 6 a tabla_huffman
+añade un nuevo huffman_entrada con el simbolo 47, el codigo 24, el bits 6 a tabla_huffman
+añade un nuevo huffman_entrada con el simbolo 48, el codigo 0, el bits 5 a tabla_huffman
+añade un nuevo huffman_entrada con el simbolo 49, el codigo 1, el bits 5 a tabla_huffman
+añade un nuevo huffman_entrada con el simbolo 50, el codigo 2, el bits 5 a tabla_huffman
+añade un nuevo huffman_entrada con el simbolo 51, el codigo 25, el bits 6 a tabla_huffman
+añade un nuevo huffman_entrada con el simbolo 52, el codigo 26, el bits 6 a tabla_huffman
+añade un nuevo huffman_entrada con el simbolo 53, el codigo 27, el bits 6 a tabla_huffman
+añade un nuevo huffman_entrada con el simbolo 54, el codigo 28, el bits 6 a tabla_huffman
+añade un nuevo huffman_entrada con el simbolo 55, el codigo 29, el bits 6 a tabla_huffman
+añade un nuevo huffman_entrada con el simbolo 56, el codigo 30, el bits 6 a tabla_huffman
+añade un nuevo huffman_entrada con el simbolo 57, el codigo 31, el bits 6 a tabla_huffman
+añade un nuevo huffman_entrada con el simbolo 58, el codigo 92, el bits 7 a tabla_huffman
+añade un nuevo huffman_entrada con el simbolo 59, el codigo 251, el bits 8 a tabla_huffman
+añade un nuevo huffman_entrada con el simbolo 60, el codigo 32764, el bits 15 a tabla_huffman
+añade un nuevo huffman_entrada con el simbolo 61, el codigo 32, el bits 6 a tabla_huffman
+añade un nuevo huffman_entrada con el simbolo 62, el codigo 4091, el bits 12 a tabla_huffman
+añade un nuevo huffman_entrada con el simbolo 63, el codigo 1020, el bits 10 a tabla_huffman
+añade un nuevo huffman_entrada con el simbolo 64, el codigo 8186, el bits 13 a tabla_huffman
+añade un nuevo huffman_entrada con el simbolo 65, el codigo 33, el bits 6 a tabla_huffman
+añade un nuevo huffman_entrada con el simbolo 66, el codigo 93, el bits 7 a tabla_huffman
+añade un nuevo huffman_entrada con el simbolo 67, el codigo 94, el bits 7 a tabla_huffman
+añade un nuevo huffman_entrada con el simbolo 68, el codigo 95, el bits 7 a tabla_huffman
+añade un nuevo huffman_entrada con el simbolo 69, el codigo 96, el bits 7 a tabla_huffman
+añade un nuevo huffman_entrada con el simbolo 70, el codigo 97, el bits 7 a tabla_huffman
+añade un nuevo huffman_entrada con el simbolo 71, el codigo 98, el bits 7 a tabla_huffman
+añade un nuevo huffman_entrada con el simbolo 72, el codigo 99, el bits 7 a tabla_huffman
+añade un nuevo huffman_entrada con el simbolo 73, el codigo 100, el bits 7 a tabla_huffman
+añade un nuevo huffman_entrada con el simbolo 74, el codigo 101, el bits 7 a tabla_huffman
+añade un nuevo huffman_entrada con el simbolo 75, el codigo 102, el bits 7 a tabla_huffman
+añade un nuevo huffman_entrada con el simbolo 76, el codigo 103, el bits 7 a tabla_huffman
+añade un nuevo huffman_entrada con el simbolo 77, el codigo 104, el bits 7 a tabla_huffman
+añade un nuevo huffman_entrada con el simbolo 78, el codigo 105, el bits 7 a tabla_huffman
+añade un nuevo huffman_entrada con el simbolo 79, el codigo 106, el bits 7 a tabla_huffman
+añade un nuevo huffman_entrada con el simbolo 80, el codigo 107, el bits 7 a tabla_huffman
+añade un nuevo huffman_entrada con el simbolo 81, el codigo 108, el bits 7 a tabla_huffman
+añade un nuevo huffman_entrada con el simbolo 82, el codigo 109, el bits 7 a tabla_huffman
+añade un nuevo huffman_entrada con el simbolo 83, el codigo 110, el bits 7 a tabla_huffman
+añade un nuevo huffman_entrada con el simbolo 84, el codigo 111, el bits 7 a tabla_huffman
+añade un nuevo huffman_entrada con el simbolo 85, el codigo 112, el bits 7 a tabla_huffman
+añade un nuevo huffman_entrada con el simbolo 86, el codigo 113, el bits 7 a tabla_huffman
+añade un nuevo huffman_entrada con el simbolo 87, el codigo 114, el bits 7 a tabla_huffman
+añade un nuevo huffman_entrada con el simbolo 88, el codigo 252, el bits 8 a tabla_huffman
+añade un nuevo huffman_entrada con el simbolo 89, el codigo 115, el bits 7 a tabla_huffman
+añade un nuevo huffman_entrada con el simbolo 90, el codigo 253, el bits 8 a tabla_huffman
+añade un nuevo huffman_entrada con el simbolo 91, el codigo 8187, el bits 13 a tabla_huffman
+añade un nuevo huffman_entrada con el simbolo 92, el codigo 524272, el bits 19 a tabla_huffman
+añade un nuevo huffman_entrada con el simbolo 93, el codigo 8188, el bits 13 a tabla_huffman
+añade un nuevo huffman_entrada con el simbolo 94, el codigo 16380, el bits 14 a tabla_huffman
+añade un nuevo huffman_entrada con el simbolo 95, el codigo 34, el bits 6 a tabla_huffman
+añade un nuevo huffman_entrada con el simbolo 96, el codigo 32765, el bits 15 a tabla_huffman
+añade un nuevo huffman_entrada con el simbolo 97, el codigo 3, el bits 5 a tabla_huffman
+añade un nuevo huffman_entrada con el simbolo 98, el codigo 35, el bits 6 a tabla_huffman
+añade un nuevo huffman_entrada con el simbolo 99, el codigo 4, el bits 5 a tabla_huffman
+añade un nuevo huffman_entrada con el simbolo 100, el codigo 36, el bits 6 a tabla_huffman
+añade un nuevo huffman_entrada con el simbolo 101, el codigo 5, el bits 5 a tabla_huffman
+añade un nuevo huffman_entrada con el simbolo 102, el codigo 37, el bits 6 a tabla_huffman
+añade un nuevo huffman_entrada con el simbolo 103, el codigo 38, el bits 6 a tabla_huffman
+añade un nuevo huffman_entrada con el simbolo 104, el codigo 39, el bits 6 a tabla_huffman
+añade un nuevo huffman_entrada con el simbolo 105, el codigo 6, el bits 5 a tabla_huffman
+añade un nuevo huffman_entrada con el simbolo 106, el codigo 116, el bits 7 a tabla_huffman
+añade un nuevo huffman_entrada con el simbolo 107, el codigo 117, el bits 7 a tabla_huffman
+añade un nuevo huffman_entrada con el simbolo 108, el codigo 40, el bits 6 a tabla_huffman
+añade un nuevo huffman_entrada con el simbolo 109, el codigo 41, el bits 6 a tabla_huffman
+añade un nuevo huffman_entrada con el simbolo 110, el codigo 42, el bits 6 a tabla_huffman
+añade un nuevo huffman_entrada con el simbolo 111, el codigo 7, el bits 5 a tabla_huffman
+añade un nuevo huffman_entrada con el simbolo 112, el codigo 43, el bits 6 a tabla_huffman
+añade un nuevo huffman_entrada con el simbolo 113, el codigo 118, el bits 7 a tabla_huffman
+añade un nuevo huffman_entrada con el simbolo 114, el codigo 44, el bits 6 a tabla_huffman
+añade un nuevo huffman_entrada con el simbolo 115, el codigo 8, el bits 5 a tabla_huffman
+añade un nuevo huffman_entrada con el simbolo 116, el codigo 9, el bits 5 a tabla_huffman
+añade un nuevo huffman_entrada con el simbolo 117, el codigo 45, el bits 6 a tabla_huffman
+añade un nuevo huffman_entrada con el simbolo 118, el codigo 119, el bits 7 a tabla_huffman
+añade un nuevo huffman_entrada con el simbolo 119, el codigo 120, el bits 7 a tabla_huffman
+añade un nuevo huffman_entrada con el simbolo 120, el codigo 121, el bits 7 a tabla_huffman
+añade un nuevo huffman_entrada con el simbolo 121, el codigo 122, el bits 7 a tabla_huffman
+añade un nuevo huffman_entrada con el simbolo 122, el codigo 123, el bits 7 a tabla_huffman
+añade un nuevo huffman_entrada con el simbolo 123, el codigo 32766, el bits 15 a tabla_huffman
+añade un nuevo huffman_entrada con el simbolo 124, el codigo 2044, el bits 11 a tabla_huffman
+añade un nuevo huffman_entrada con el simbolo 125, el codigo 16381, el bits 14 a tabla_huffman
+añade un nuevo huffman_entrada con el simbolo 126, el codigo 8189, el bits 13 a tabla_huffman
+añade un nuevo huffman_entrada con el simbolo 127, el codigo 268435452, el bits 28 a tabla_huffman
+añade un nuevo huffman_entrada con el simbolo 128, el codigo 1048550, el bits 20 a tabla_huffman
+añade un nuevo huffman_entrada con el simbolo 129, el codigo 4194258, el bits 22 a tabla_huffman
+añade un nuevo huffman_entrada con el simbolo 130, el codigo 1048551, el bits 20 a tabla_huffman
+añade un nuevo huffman_entrada con el simbolo 131, el codigo 1048552, el bits 20 a tabla_huffman
+añade un nuevo huffman_entrada con el simbolo 132, el codigo 4194259, el bits 22 a tabla_huffman
+añade un nuevo huffman_entrada con el simbolo 133, el codigo 4194260, el bits 22 a tabla_huffman
+añade un nuevo huffman_entrada con el simbolo 134, el codigo 4194261, el bits 22 a tabla_huffman
+añade un nuevo huffman_entrada con el simbolo 135, el codigo 8388569, el bits 23 a tabla_huffman
+añade un nuevo huffman_entrada con el simbolo 136, el codigo 4194262, el bits 22 a tabla_huffman
+añade un nuevo huffman_entrada con el simbolo 137, el codigo 8388570, el bits 23 a tabla_huffman
+añade un nuevo huffman_entrada con el simbolo 138, el codigo 8388571, el bits 23 a tabla_huffman
+añade un nuevo huffman_entrada con el simbolo 139, el codigo 8388572, el bits 23 a tabla_huffman
+añade un nuevo huffman_entrada con el simbolo 140, el codigo 8388573, el bits 23 a tabla_huffman
+añade un nuevo huffman_entrada con el simbolo 141, el codigo 8388574, el bits 23 a tabla_huffman
+añade un nuevo huffman_entrada con el simbolo 142, el codigo 16777195, el bits 24 a tabla_huffman
+añade un nuevo huffman_entrada con el simbolo 143, el codigo 8388575, el bits 23 a tabla_huffman
+añade un nuevo huffman_entrada con el simbolo 144, el codigo 16777196, el bits 24 a tabla_huffman
+añade un nuevo huffman_entrada con el simbolo 145, el codigo 16777197, el bits 24 a tabla_huffman
+añade un nuevo huffman_entrada con el simbolo 146, el codigo 4194263, el bits 22 a tabla_huffman
+añade un nuevo huffman_entrada con el simbolo 147, el codigo 8388576, el bits 23 a tabla_huffman
+añade un nuevo huffman_entrada con el simbolo 148, el codigo 16777198, el bits 24 a tabla_huffman
+añade un nuevo huffman_entrada con el simbolo 149, el codigo 8388577, el bits 23 a tabla_huffman
+añade un nuevo huffman_entrada con el simbolo 150, el codigo 8388578, el bits 23 a tabla_huffman
+añade un nuevo huffman_entrada con el simbolo 151, el codigo 8388579, el bits 23 a tabla_huffman
+añade un nuevo huffman_entrada con el simbolo 152, el codigo 8388580, el bits 23 a tabla_huffman
+añade un nuevo huffman_entrada con el simbolo 153, el codigo 2097116, el bits 21 a tabla_huffman
+añade un nuevo huffman_entrada con el simbolo 154, el codigo 4194264, el bits 22 a tabla_huffman
+añade un nuevo huffman_entrada con el simbolo 155, el codigo 8388581, el bits 23 a tabla_huffman
+añade un nuevo huffman_entrada con el simbolo 156, el codigo 4194265, el bits 22 a tabla_huffman
+añade un nuevo huffman_entrada con el simbolo 157, el codigo 8388582, el bits 23 a tabla_huffman
+añade un nuevo huffman_entrada con el simbolo 158, el codigo 8388583, el bits 23 a tabla_huffman
+añade un nuevo huffman_entrada con el simbolo 159, el codigo 16777199, el bits 24 a tabla_huffman
+añade un nuevo huffman_entrada con el simbolo 160, el codigo 4194266, el bits 22 a tabla_huffman
+añade un nuevo huffman_entrada con el simbolo 161, el codigo 2097117, el bits 21 a tabla_huffman
+añade un nuevo huffman_entrada con el simbolo 162, el codigo 1048553, el bits 20 a tabla_huffman
+añade un nuevo huffman_entrada con el simbolo 163, el codigo 4194267, el bits 22 a tabla_huffman
+añade un nuevo huffman_entrada con el simbolo 164, el codigo 4194268, el bits 22 a tabla_huffman
+añade un nuevo huffman_entrada con el simbolo 165, el codigo 8388584, el bits 23 a tabla_huffman
+añade un nuevo huffman_entrada con el simbolo 166, el codigo 8388585, el bits 23 a tabla_huffman
+añade un nuevo huffman_entrada con el simbolo 167, el codigo 2097118, el bits 21 a tabla_huffman
+añade un nuevo huffman_entrada con el simbolo 168, el codigo 8388586, el bits 23 a tabla_huffman
+añade un nuevo huffman_entrada con el simbolo 169, el codigo 4194269, el bits 22 a tabla_huffman
+añade un nuevo huffman_entrada con el simbolo 170, el codigo 4194270, el bits 22 a tabla_huffman
+añade un nuevo huffman_entrada con el simbolo 171, el codigo 16777200, el bits 24 a tabla_huffman
+añade un nuevo huffman_entrada con el simbolo 172, el codigo 2097119, el bits 21 a tabla_huffman
+añade un nuevo huffman_entrada con el simbolo 173, el codigo 4194271, el bits 22 a tabla_huffman
+añade un nuevo huffman_entrada con el simbolo 174, el codigo 8388587, el bits 23 a tabla_huffman
+añade un nuevo huffman_entrada con el simbolo 175, el codigo 8388588, el bits 23 a tabla_huffman
+añade un nuevo huffman_entrada con el simbolo 176, el codigo 2097120, el bits 21 a tabla_huffman
+añade un nuevo huffman_entrada con el simbolo 177, el codigo 2097121, el bits 21 a tabla_huffman
+añade un nuevo huffman_entrada con el simbolo 178, el codigo 4194272, el bits 22 a tabla_huffman
+añade un nuevo huffman_entrada con el simbolo 179, el codigo 2097122, el bits 21 a tabla_huffman
+añade un nuevo huffman_entrada con el simbolo 180, el codigo 8388589, el bits 23 a tabla_huffman
+añade un nuevo huffman_entrada con el simbolo 181, el codigo 4194273, el bits 22 a tabla_huffman
+añade un nuevo huffman_entrada con el simbolo 182, el codigo 8388590, el bits 23 a tabla_huffman
+añade un nuevo huffman_entrada con el simbolo 183, el codigo 8388591, el bits 23 a tabla_huffman
+añade un nuevo huffman_entrada con el simbolo 184, el codigo 1048554, el bits 20 a tabla_huffman
+añade un nuevo huffman_entrada con el simbolo 185, el codigo 4194274, el bits 22 a tabla_huffman
+añade un nuevo huffman_entrada con el simbolo 186, el codigo 4194275, el bits 22 a tabla_huffman
+añade un nuevo huffman_entrada con el simbolo 187, el codigo 4194276, el bits 22 a tabla_huffman
+añade un nuevo huffman_entrada con el simbolo 188, el codigo 8388592, el bits 23 a tabla_huffman
+añade un nuevo huffman_entrada con el simbolo 189, el codigo 4194277, el bits 22 a tabla_huffman
+añade un nuevo huffman_entrada con el simbolo 190, el codigo 4194278, el bits 22 a tabla_huffman
+añade un nuevo huffman_entrada con el simbolo 191, el codigo 8388593, el bits 23 a tabla_huffman
+añade un nuevo huffman_entrada con el simbolo 192, el codigo 67108832, el bits 26 a tabla_huffman
+añade un nuevo huffman_entrada con el simbolo 193, el codigo 67108833, el bits 26 a tabla_huffman
+añade un nuevo huffman_entrada con el simbolo 194, el codigo 1048555, el bits 20 a tabla_huffman
+añade un nuevo huffman_entrada con el simbolo 195, el codigo 524273, el bits 19 a tabla_huffman
+añade un nuevo huffman_entrada con el simbolo 196, el codigo 4194279, el bits 22 a tabla_huffman
+añade un nuevo huffman_entrada con el simbolo 197, el codigo 8388594, el bits 23 a tabla_huffman
+añade un nuevo huffman_entrada con el simbolo 198, el codigo 4194280, el bits 22 a tabla_huffman
+añade un nuevo huffman_entrada con el simbolo 199, el codigo 33554412, el bits 25 a tabla_huffman
+añade un nuevo huffman_entrada con el simbolo 200, el codigo 67108834, el bits 26 a tabla_huffman
+añade un nuevo huffman_entrada con el simbolo 201, el codigo 67108835, el bits 26 a tabla_huffman
+añade un nuevo huffman_entrada con el simbolo 202, el codigo 67108836, el bits 26 a tabla_huffman
+añade un nuevo huffman_entrada con el simbolo 203, el codigo 134217694, el bits 27 a tabla_huffman
+añade un nuevo huffman_entrada con el simbolo 204, el codigo 134217695, el bits 27 a tabla_huffman
+añade un nuevo huffman_entrada con el simbolo 205, el codigo 67108837, el bits 26 a tabla_huffman
+añade un nuevo huffman_entrada con el simbolo 206, el codigo 16777201, el bits 24 a tabla_huffman
+añade un nuevo huffman_entrada con el simbolo 207, el codigo 33554413, el bits 25 a tabla_huffman
+añade un nuevo huffman_entrada con el simbolo 208, el codigo 524274, el bits 19 a tabla_huffman
+añade un nuevo huffman_entrada con el simbolo 209, el codigo 2097123, el bits 21 a tabla_huffman
+añade un nuevo huffman_entrada con el simbolo 210, el codigo 67108838, el bits 26 a tabla_huffman
+añade un nuevo huffman_entrada con el simbolo 211, el codigo 134217696, el bits 27 a tabla_huffman
+añade un nuevo huffman_entrada con el simbolo 212, el codigo 134217697, el bits 27 a tabla_huffman
+añade un nuevo huffman_entrada con el simbolo 213, el codigo 67108839, el bits 26 a tabla_huffman
+añade un nuevo huffman_entrada con el simbolo 214, el codigo 134217698, el bits 27 a tabla_huffman
+añade un nuevo huffman_entrada con el simbolo 215, el codigo 16777202, el bits 24 a tabla_huffman
+añade un nuevo huffman_entrada con el simbolo 216, el codigo 2097124, el bits 21 a tabla_huffman
+añade un nuevo huffman_entrada con el simbolo 217, el codigo 2097125, el bits 21 a tabla_huffman
+añade un nuevo huffman_entrada con el simbolo 218, el codigo 67108840, el bits 26 a tabla_huffman
+añade un nuevo huffman_entrada con el simbolo 219, el codigo 67108841, el bits 26 a tabla_huffman
+añade un nuevo huffman_entrada con el simbolo 220, el codigo 268435453, el bits 28 a tabla_huffman
+añade un nuevo huffman_entrada con el simbolo 221, el codigo 134217699, el bits 27 a tabla_huffman
+añade un nuevo huffman_entrada con el simbolo 222, el codigo 134217700, el bits 27 a tabla_huffman
+añade un nuevo huffman_entrada con el simbolo 223, el codigo 134217701, el bits 27 a tabla_huffman
+añade un nuevo huffman_entrada con el simbolo 224, el codigo 1048556, el bits 20 a tabla_huffman
+añade un nuevo huffman_entrada con el simbolo 225, el codigo 16777203, el bits 24 a tabla_huffman
+añade un nuevo huffman_entrada con el simbolo 226, el codigo 1048557, el bits 20 a tabla_huffman
+añade un nuevo huffman_entrada con el simbolo 227, el codigo 2097126, el bits 21 a tabla_huffman
+añade un nuevo huffman_entrada con el simbolo 228, el codigo 4194281, el bits 22 a tabla_huffman
+añade un nuevo huffman_entrada con el simbolo 229, el codigo 2097127, el bits 21 a tabla_huffman
+añade un nuevo huffman_entrada con el simbolo 230, el codigo 2097128, el bits 21 a tabla_huffman
+añade un nuevo huffman_entrada con el simbolo 231, el codigo 8388595, el bits 23 a tabla_huffman
+añade un nuevo huffman_entrada con el simbolo 232, el codigo 4194282, el bits 22 a tabla_huffman
+añade un nuevo huffman_entrada con el simbolo 233, el codigo 4194283, el bits 22 a tabla_huffman
+añade un nuevo huffman_entrada con el simbolo 234, el codigo 33554414, el bits 25 a tabla_huffman
+añade un nuevo huffman_entrada con el simbolo 235, el codigo 33554415, el bits 25 a tabla_huffman
+añade un nuevo huffman_entrada con el simbolo 236, el codigo 16777204, el bits 24 a tabla_huffman
+añade un nuevo huffman_entrada con el simbolo 237, el codigo 16777205, el bits 24 a tabla_huffman
+añade un nuevo huffman_entrada con el simbolo 238, el codigo 67108842, el bits 26 a tabla_huffman
+añade un nuevo huffman_entrada con el simbolo 239, el codigo 8388596, el bits 23 a tabla_huffman
+añade un nuevo huffman_entrada con el simbolo 240, el codigo 67108843, el bits 26 a tabla_huffman
+añade un nuevo huffman_entrada con el simbolo 241, el codigo 134217702, el bits 27 a tabla_huffman
+añade un nuevo huffman_entrada con el simbolo 242, el codigo 67108844, el bits 26 a tabla_huffman
+añade un nuevo huffman_entrada con el simbolo 243, el codigo 67108845, el bits 26 a tabla_huffman
+añade un nuevo huffman_entrada con el simbolo 244, el codigo 134217703, el bits 27 a tabla_huffman
+añade un nuevo huffman_entrada con el simbolo 245, el codigo 134217704, el bits 27 a tabla_huffman
+añade un nuevo huffman_entrada con el simbolo 246, el codigo 134217705, el bits 27 a tabla_huffman
+añade un nuevo huffman_entrada con el simbolo 247, el codigo 134217706, el bits 27 a tabla_huffman
+añade un nuevo huffman_entrada con el simbolo 248, el codigo 134217707, el bits 27 a tabla_huffman
+añade un nuevo huffman_entrada con el simbolo 249, el codigo 268435454, el bits 28 a tabla_huffman
+añade un nuevo huffman_entrada con el simbolo 250, el codigo 134217708, el bits 27 a tabla_huffman
+añade un nuevo huffman_entrada con el simbolo 251, el codigo 134217709, el bits 27 a tabla_huffman
+añade un nuevo huffman_entrada con el simbolo 252, el codigo 134217710, el bits 27 a tabla_huffman
+añade un nuevo huffman_entrada con el simbolo 253, el codigo 134217711, el bits 27 a tabla_huffman
+añade un nuevo huffman_entrada con el simbolo 254, el codigo 134217712, el bits 27 a tabla_huffman
+añade un nuevo huffman_entrada con el simbolo 255, el codigo 67108846, el bits 26 a tabla_huffman
+añade un nuevo huffman_entrada con el simbolo 256, el codigo 1073741823, el bits 30 a tabla_huffman
+
+define busca_simbolo de un simbolo:
+    para cada e en tabla_huffman:
+        si e.simbolo es simbolo:
+            devuelve e
+        fin
+    fin
+    devuelve nada
+fin
+
+define busca_codigo de un candidato, un longitud:
+    para cada e en tabla_huffman:
+        si e.bits es longitud:
+            si e.codigo es candidato:
+                devuelve e
+            fin
+        fin
+    fin
+    devuelve nada
+fin
+
+# Codifica un texto Ana a bytes Huffman-comprimidos, con el relleno final
+# de unos que exige el estándar.
+define codifica de un texto:
+    los datos_orig son bytes de texto
+    la salida son []
+    el buffer_valor es 0
+    el buffer_bits es 0
+    para cada s en datos_orig:
+        la entrada es busca_simbolo de s
+        el pot_codigo es potencia_de_2 de entrada.bits
+        el buffer_valor es ((buffer_valor * pot_codigo) + entrada.codigo)
+        el buffer_bits es (buffer_bits + entrada.bits)
+        mientras buffer_bits es mayor que 7:
+            el extra es (buffer_bits - 8)
+            el pot_extra es potencia_de_2 de extra
+            el byte_arriba es cociente de buffer_valor entre pot_extra
+            el buffer_valor es resto de buffer_valor entre pot_extra
+            el buffer_bits es extra
+            añade byte_arriba a salida
+        fin
+    fin
+    si buffer_bits es mayor que 0:
+        el bits_faltan es (8 - buffer_bits)
+        el pot_faltan es potencia_de_2 de bits_faltan
+        el relleno es (pot_faltan - 1)
+        el byte_final es ((buffer_valor * pot_faltan) + relleno)
+        añade byte_final a salida
+    fin
+    devuelve salida
+fin
+
+# Decodifica bytes Huffman-comprimidos a una lista de bytes (0-255). No
+# hace falta saber cuántos símbolos hay de antemano: para en cuanto
+# quedan menos de 5 bits, o cuando los bits que quedan no forman ningún
+# código válido (relleno final de unos).
+define decodifica de datos:
+    la salida son []
+    el total_bits es ((cantidad de datos) * 8)
+    el pos es 0
+    el continua es verdadero
+    mientras continua:
+        si (total_bits - pos) es menor que 5:
+            el continua es falso
+        fin
+        si continua:
+            el candidato es 0
+            el l es 0
+            el encontrado es nada
+            mientras l es menor que 30 y (pos + l) es menor que total_bits:
+                el b es bit_en de datos, (pos + l)
+                el candidato es ((candidato * 2) + b)
+                el l es (l + 1)
+                si l es mayor que 4:
+                    el e es busca_codigo de candidato, l
+                    si e no es nada:
+                        el encontrado es e
+                        el l es 30
+                    fin
+                fin
+            fin
+            si encontrado es nada:
+                el continua es falso
+            fin
+            si encontrado no es nada:
+                añade encontrado.simbolo a salida
+                el pos es (pos + encontrado.bits)
+            fin
+        fin
+    fin
+    devuelve salida
+fin
