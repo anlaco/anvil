@@ -1,10 +1,10 @@
 # idioma: es
 
-define registra con una secuencia_, un paso_:
+define registra un paso_ en una secuencia_:
     añade paso_ a secuencia_.pasos
 fin
 
-define estado_de con una secuencia_:
+define estado_de de una secuencia_:
     el hay_error es falso
     el hay_fallo es falso
     para cada paso_ en secuencia_.pasos:
@@ -24,8 +24,8 @@ define estado_de con una secuencia_:
     devuelve "paso"
 fin
 
-define reporte con una secuencia_:
-    el estado_agregado es estado_de con secuencia_
+define reporte a una secuencia_:
+    el estado_agregado es estado_de de secuencia_
     escribe "=== {secuencia_.nombre}: {estado_agregado} ==="
     para cada paso_ en secuencia_.pasos:
         escribe "  [{paso_.estado}] {paso_.nombre}: {paso_.mensaje}"
