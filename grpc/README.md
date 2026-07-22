@@ -57,6 +57,19 @@ cabeceras comprimidas con HPACK desde el primer mensaje.
   ```
   cd grpc && ../bin/anac ejecutar ejemplos/spike_hpack.ana
   ```
+- `ejemplos/servidor_handshake.ana` + `ejemplos/cliente_handshake.ana` —
+  primer spike que toca un socket TCP real: dos procesos Ana
+  independientes hacen el saludo inicial de HTTP/2 (el cliente manda el
+  preface de 24 bytes `PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n`, cada lado manda
+  su frame SETTINGS con `http2.cabecera_frame`, el servidor contesta con
+  el ACK). Verificado de punta a punta por loopback: el servidor confirma
+  `preface coincide: verdadero` y ambos lados leen bien el tipo y la
+  marca del frame que les llega. Correr con (servidor primero, en
+  segundo plano):
+  ```
+  cd grpc && ../bin/anac ejecutar ejemplos/servidor_handshake.ana &
+  cd grpc && ../bin/anac ejecutar ejemplos/cliente_handshake.ana
+  ```
 
 ## Qué falta (todavía nada de esto existe)
 
@@ -64,14 +77,13 @@ cabeceras comprimidas con HPACK desde el primer mensaje.
   tamaño real que manda un cliente/servidor gRPC de verdad, y para
   decodificar las representaciones "with incremental indexing" que un
   cliente real puede mandar).
-- El framing completo de streams HTTP/2 (settings, window update,
-  control de flujo) — solo está la cabecera de 9 bytes, no el protocolo.
+- El resto del framing de streams HTTP/2 más allá del saludo inicial
+  (window update, control de flujo, múltiples streams concurrentes,
+  DATA/HEADERS de verdad con payload) — el handshake ya funciona, pero
+  es solo el saludo, no una conexión gRPC completa todavía.
 - Codificación de mensajes protobuf reales a partir de un `.proto`
   (campos, tipos, mensajes anidados) — hoy solo hay los primitivos
   (varint, zigzag), no un serializador de mensajes.
-- Unir esto con los sockets TCP de Ana (`la escucha del puerto`, `la
-  conexión a ... en el puerto`, ver la skill `ana`) para tener un cliente
-  o servidor gRPC real hablando por la red.
 - Servicio de reflexión de gRPC — necesario más adelante para que un
   futuro editor gráfico de secuencias pueda descubrir los métodos de un
   módulo sin compilar un `.proto` a mano (objetivo de producto: arrastrar
