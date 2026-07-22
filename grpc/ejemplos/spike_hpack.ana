@@ -2,7 +2,7 @@
 # Codifica y decodifica el bloque de cabeceras que un cliente gRPC real
 # manda en toda petición unaria, usando solo la tabla estática de HPACK.
 
-usa "hpack"
+usa "grpc/hpack"
 
 el c_metodo es hpack.codifica_campo de ":method", "POST"
 el c_esquema es hpack.codifica_campo de ":scheme", "http"

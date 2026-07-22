@@ -32,7 +32,7 @@ cd grpc/prueba_interop
 python3 -m grpc_tools.protoc -I. --python_out=. --grpc_python_out=. saludador.proto
 
 # en una terminal:
-cd grpc && ../bin/anac ejecutar prueba_interop/servidor_saludador.ana
+bin/anac ejecutar grpc/prueba_interop/servidor_saludador.ana
 
 # en otra:
 cd grpc/prueba_interop && python3 cliente.py

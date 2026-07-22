@@ -38,7 +38,7 @@ en vez de solo contra nuestros propios tests (ver más abajo).
 - `ejemplos/spike_bytes.ana` — demuestra las dos piezas de punta a punta.
   Correr con:
   ```
-  cd grpc && ../bin/anac ejecutar ejemplos/spike_bytes.ana
+  bin/anac ejecutar grpc/ejemplos/spike_bytes.ana
   ```
 - `huffman.ana` — Huffman de HPACK (RFC 7541 Apéndice B), tabla completa
   de 257 símbolos. Verificado dos veces: (1) sin colisiones de prefijo
@@ -48,7 +48,7 @@ en vez de solo contra nuestros propios tests (ver más abajo).
   ejemplo oficial del RFC (Apéndice C.4.1). La tabla se sacó del texto
   del RFC (`rfc-editor.org/rfc/rfc7541.txt`), no de memoria. Correr con:
   ```
-  cd grpc && ../bin/anac ejecutar ejemplos/spike_huffman.ana
+  bin/anac ejecutar grpc/ejemplos/spike_huffman.ana
   ```
 - `hpack.ana` — HPACK (RFC 7541) con **tabla estática completa** (las 61
   entradas fijas del estándar) **y Huffman**: codifica/decodifica campos
@@ -62,7 +62,7 @@ en vez de solo contra nuestros propios tests (ver más abajo).
   (`:method: POST`, `:scheme: http`, `:path`, `content-type:
   application/grpc`, `te: trailers`), round-trip byte a byte. Correr con:
   ```
-  cd grpc && ../bin/anac ejecutar ejemplos/spike_hpack.ana
+  bin/anac ejecutar grpc/ejemplos/spike_hpack.ana
   ```
 - `ejemplos/servidor_handshake.ana` + `ejemplos/cliente_handshake.ana` —
   primer spike que toca un socket TCP real: dos procesos Ana
@@ -74,8 +74,8 @@ en vez de solo contra nuestros propios tests (ver más abajo).
   marca del frame que les llega. Correr con (servidor primero, en
   segundo plano):
   ```
-  cd grpc && ../bin/anac ejecutar ejemplos/servidor_handshake.ana &
-  cd grpc && ../bin/anac ejecutar ejemplos/cliente_handshake.ana
+  bin/anac ejecutar grpc/ejemplos/servidor_handshake.ana &
+  bin/anac ejecutar grpc/ejemplos/cliente_handshake.ana
   ```
 - `ejemplos/spike_interop_real.ana` — decodifica, con nuestro propio
   `hpack.ana`, los 225 bytes de cabecera EXACTOS que mandó un cliente
@@ -125,6 +125,18 @@ un solo sentido) — ver
 Mientras tanto, `hpack.ana` devuelve los valores decodificados como
 LISTA DE BYTES, no como texto Ana (ver comentarios en el propio
 `hpack.ana`).
+
+**Convención de rutas:** todo lo de aquí corre con el directorio de
+trabajo en la **raíz del repo** (`bin/anac ejecutar grpc/ejemplos/...`),
+nunca `cd grpc && ...` — es la única convención que funciona al
+componer módulos de `grpc/` con `secuenciador/` en un mismo programa
+(ver [anlaco/anlaco-lang#9](https://github.com/anlaco/anlaco-lang/issues/9)).
+Por el mismo motivo, **`bin/anac compilar` diverge de `bin/anac
+ejecutar`** en cualquier script que importe `hpack.ana` (que a su vez
+importa `huffman.ana`) — `ejecutar` lo resuelve bien, `compilar` no
+encuentra `huffman.ana`. Usar `ejecutar` como referencia para estos
+casos hasta que se resuelva
+[anlaco/anlaco-lang#10](https://github.com/anlaco/anlaco-lang/issues/10).
 
 Si al construir alguna de estas piezas Ana genuinamente no da algo que
 haga falta (candidato más probable, señalado por el propio equipo de

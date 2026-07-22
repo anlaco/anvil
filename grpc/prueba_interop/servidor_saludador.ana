@@ -4,9 +4,9 @@
 # otro script de Ana. Usa http2.ana + hpack.ana + protobuf.ana tal cual
 # están en grpc/.
 
-usa "http2"
-usa "hpack"
-usa "protobuf"
+usa "grpc/http2"
+usa "grpc/hpack"
+usa "grpc/protobuf"
 
 un resultado_lectura tiene:
     un datos

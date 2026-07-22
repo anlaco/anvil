@@ -4,7 +4,7 @@
 # [241, 227, 194, 229, 242, 58, 107, 160, 171, 144, 244, 255]
 # (hex f1e3c2e5f23a6ba0ab90f4ff).
 
-usa "huffman"
+usa "grpc/huffman"
 
 el codificado son huffman.codifica de "www.example.com"
 escribe codificado
