@@ -1,0 +1,249 @@
+# idioma: es
+#
+# HPACK (RFC 7541) — solo tabla estática. No hay tabla dinámica (todo se
+# codifica como "Literal Header Field without Indexing", que no la toca) ni
+# Huffman (los textos van sin comprimir, H=0). Un decodificador HPACT real
+# debe aceptar esto sin problema por el estándar, pero decodificar ESTE
+# módulo solo entiende lo que él mismo produce (Indexed Header Field y
+# Literal without Indexing) — no decodifica Huffman ni las otras dos formas
+# de literal (incremental indexing, never indexed). Ver README.md.
+
+un entrada_estatica tiene:
+    un nombre
+    un valor
+fin
+
+la tabla_estatica son []
+añade un nuevo entrada_estatica con el nombre ":authority", el valor nada a tabla_estatica
+añade un nuevo entrada_estatica con el nombre ":method", el valor "GET" a tabla_estatica
+añade un nuevo entrada_estatica con el nombre ":method", el valor "POST" a tabla_estatica
+añade un nuevo entrada_estatica con el nombre ":path", el valor "/" a tabla_estatica
+añade un nuevo entrada_estatica con el nombre ":path", el valor "/index.html" a tabla_estatica
+añade un nuevo entrada_estatica con el nombre ":scheme", el valor "http" a tabla_estatica
+añade un nuevo entrada_estatica con el nombre ":scheme", el valor "https" a tabla_estatica
+añade un nuevo entrada_estatica con el nombre ":status", el valor "200" a tabla_estatica
+añade un nuevo entrada_estatica con el nombre ":status", el valor "204" a tabla_estatica
+añade un nuevo entrada_estatica con el nombre ":status", el valor "206" a tabla_estatica
+añade un nuevo entrada_estatica con el nombre ":status", el valor "304" a tabla_estatica
+añade un nuevo entrada_estatica con el nombre ":status", el valor "400" a tabla_estatica
+añade un nuevo entrada_estatica con el nombre ":status", el valor "404" a tabla_estatica
+añade un nuevo entrada_estatica con el nombre ":status", el valor "500" a tabla_estatica
+añade un nuevo entrada_estatica con el nombre "accept-charset", el valor nada a tabla_estatica
+añade un nuevo entrada_estatica con el nombre "accept-encoding", el valor "gzip, deflate" a tabla_estatica
+añade un nuevo entrada_estatica con el nombre "accept-language", el valor nada a tabla_estatica
+añade un nuevo entrada_estatica con el nombre "accept-ranges", el valor nada a tabla_estatica
+añade un nuevo entrada_estatica con el nombre "accept", el valor nada a tabla_estatica
+añade un nuevo entrada_estatica con el nombre "access-control-allow-origin", el valor nada a tabla_estatica
+añade un nuevo entrada_estatica con el nombre "age", el valor nada a tabla_estatica
+añade un nuevo entrada_estatica con el nombre "allow", el valor nada a tabla_estatica
+añade un nuevo entrada_estatica con el nombre "authorization", el valor nada a tabla_estatica
+añade un nuevo entrada_estatica con el nombre "cache-control", el valor nada a tabla_estatica
+añade un nuevo entrada_estatica con el nombre "content-disposition", el valor nada a tabla_estatica
+añade un nuevo entrada_estatica con el nombre "content-encoding", el valor nada a tabla_estatica
+añade un nuevo entrada_estatica con el nombre "content-language", el valor nada a tabla_estatica
+añade un nuevo entrada_estatica con el nombre "content-length", el valor nada a tabla_estatica
+añade un nuevo entrada_estatica con el nombre "content-location", el valor nada a tabla_estatica
+añade un nuevo entrada_estatica con el nombre "content-range", el valor nada a tabla_estatica
+añade un nuevo entrada_estatica con el nombre "content-type", el valor nada a tabla_estatica
+añade un nuevo entrada_estatica con el nombre "cookie", el valor nada a tabla_estatica
+añade un nuevo entrada_estatica con el nombre "date", el valor nada a tabla_estatica
+añade un nuevo entrada_estatica con el nombre "etag", el valor nada a tabla_estatica
+añade un nuevo entrada_estatica con el nombre "expect", el valor nada a tabla_estatica
+añade un nuevo entrada_estatica con el nombre "expires", el valor nada a tabla_estatica
+añade un nuevo entrada_estatica con el nombre "from", el valor nada a tabla_estatica
+añade un nuevo entrada_estatica con el nombre "host", el valor nada a tabla_estatica
+añade un nuevo entrada_estatica con el nombre "if-match", el valor nada a tabla_estatica
+añade un nuevo entrada_estatica con el nombre "if-modified-since", el valor nada a tabla_estatica
+añade un nuevo entrada_estatica con el nombre "if-none-match", el valor nada a tabla_estatica
+añade un nuevo entrada_estatica con el nombre "if-range", el valor nada a tabla_estatica
+añade un nuevo entrada_estatica con el nombre "if-unmodified-since", el valor nada a tabla_estatica
+añade un nuevo entrada_estatica con el nombre "last-modified", el valor nada a tabla_estatica
+añade un nuevo entrada_estatica con el nombre "link", el valor nada a tabla_estatica
+añade un nuevo entrada_estatica con el nombre "location", el valor nada a tabla_estatica
+añade un nuevo entrada_estatica con el nombre "max-forwards", el valor nada a tabla_estatica
+añade un nuevo entrada_estatica con el nombre "proxy-authenticate", el valor nada a tabla_estatica
+añade un nuevo entrada_estatica con el nombre "proxy-authorization", el valor nada a tabla_estatica
+añade un nuevo entrada_estatica con el nombre "range", el valor nada a tabla_estatica
+añade un nuevo entrada_estatica con el nombre "referer", el valor nada a tabla_estatica
+añade un nuevo entrada_estatica con el nombre "refresh", el valor nada a tabla_estatica
+añade un nuevo entrada_estatica con el nombre "retry-after", el valor nada a tabla_estatica
+añade un nuevo entrada_estatica con el nombre "server", el valor nada a tabla_estatica
+añade un nuevo entrada_estatica con el nombre "set-cookie", el valor nada a tabla_estatica
+añade un nuevo entrada_estatica con el nombre "strict-transport-security", el valor nada a tabla_estatica
+añade un nuevo entrada_estatica con el nombre "transfer-encoding", el valor nada a tabla_estatica
+añade un nuevo entrada_estatica con el nombre "user-agent", el valor nada a tabla_estatica
+añade un nuevo entrada_estatica con el nombre "vary", el valor nada a tabla_estatica
+añade un nuevo entrada_estatica con el nombre "via", el valor nada a tabla_estatica
+añade un nuevo entrada_estatica con el nombre "www-authenticate", el valor nada a tabla_estatica
+
+define busca_estatica de un nombre, un valor:
+    el i es 1
+    mientras i es menor que 62:
+        la e es elemento i de tabla_estatica
+        si e.nombre es nombre:
+            si e.valor no es nada:
+                si e.valor es valor:
+                    devuelve i
+                fin
+            fin
+        fin
+        el i es (i + 1)
+    fin
+    devuelve nada
+fin
+
+define busca_estatica_nombre de un nombre:
+    el i es 1
+    mientras i es menor que 62:
+        la e es elemento i de tabla_estatica
+        si e.nombre es nombre:
+            devuelve i
+        fin
+        el i es (i + 1)
+    fin
+    devuelve nada
+fin
+
+# Codificación de enteros con prefijo (RFC 7541 §5.1). "mascara" es
+# 2^bits_prefijo - 1 (127 para prefijo de 7 bits, 15 para 4 bits).
+# "patron" son los bits fijos de la representación (128 para Indexed
+# Header Field, 0 para Literal Header Field without Indexing).
+define codifica_entero de un valor, una mascara, un patron:
+    la lista_bytes son []
+    si valor es menor que mascara:
+        añade (patron + valor) a lista_bytes
+        devuelve lista_bytes
+    fin
+    añade (patron + mascara) a lista_bytes
+    el resto_ es (valor - mascara)
+    mientras resto_ es mayor que 127:
+        el octeto es ((resto de resto_ entre 128) + 128)
+        añade octeto a lista_bytes
+        el resto_ es cociente de resto_ entre 128
+    fin
+    añade resto_ a lista_bytes
+    devuelve lista_bytes
+fin
+
+un resultado_entero tiene:
+    un valor
+    un siguiente
+fin
+
+define decodifica_entero de datos, un indice_inicio, una mascara:
+    el primer es elemento indice_inicio de datos
+    el limite es (mascara + 1)
+    el prefijo es resto de primer entre limite
+    si prefijo es menor que mascara:
+        devuelve un nuevo resultado_entero con el valor prefijo, el siguiente (indice_inicio + 1)
+    fin
+    el total es mascara
+    el multiplicador es 1
+    el i es (indice_inicio + 1)
+    el continua es verdadero
+    mientras continua:
+        el octeto es elemento i de datos
+        el bajo7 es resto de octeto entre 128
+        el total es (total + (bajo7 * multiplicador))
+        el multiplicador es (multiplicador * 128)
+        si octeto es menor que 128:
+            el continua es falso
+        fin
+        el i es (i + 1)
+    fin
+    devuelve un nuevo resultado_entero con el valor total, el siguiente i
+fin
+
+# Cadena literal sin Huffman (H=0): entero de longitud + bytes crudos.
+define codifica_cadena de un texto:
+    los datos son bytes de texto
+    la longitud es cantidad de datos
+    la resultado son codifica_entero de longitud, 127, 0
+    para cada b en datos:
+        añade b a resultado
+    fin
+    devuelve resultado
+fin
+
+un resultado_cadena tiene:
+    un bytes_
+    un siguiente
+fin
+
+# Devuelve el contenido como LISTA DE BYTES, no como texto: Ana no tiene
+# hoy conversión de bytes a texto (reportado, ver anlaco-lang#6).
+define decodifica_cadena de datos, un indice_inicio:
+    el r_long es decodifica_entero de datos, indice_inicio, 127
+    el longitud es r_long.valor
+    el inicio_datos es r_long.siguiente
+    los contenido son []
+    el i es 0
+    mientras i es menor que longitud:
+        el pos es (inicio_datos + i)
+        añade (elemento pos de datos) a contenido
+        el i es (i + 1)
+    fin
+    devuelve un nuevo resultado_cadena con el bytes_ contenido, el siguiente (inicio_datos + longitud)
+fin
+
+# Codifica un campo de cabecera (nombre, valor — ambos texto Ana):
+# Indexed Header Field si nombre+valor coinciden exactos en la tabla
+# estática; si no, Literal without Indexing (con nombre indexado si el
+# nombre solo ya está en la tabla, o con nombre y valor literales).
+define codifica_campo de un nombre, un valor:
+    el idx_exacto es busca_estatica de nombre, valor
+    si idx_exacto no es nada:
+        devuelve codifica_entero de idx_exacto, 127, 128
+    fin
+    el idx_nombre es busca_estatica_nombre de nombre
+    si idx_nombre no es nada:
+        la cab son codifica_entero de idx_nombre, 15, 0
+        los val_bytes son codifica_cadena de valor
+        para cada b en val_bytes:
+            añade b a cab
+        fin
+        devuelve cab
+    fin
+    la cab son codifica_entero de 0, 15, 0
+    los nom_bytes son codifica_cadena de nombre
+    para cada b en nom_bytes:
+        añade b a cab
+    fin
+    los val_bytes son codifica_cadena de valor
+    para cada b en val_bytes:
+        añade b a cab
+    fin
+    devuelve cab
+fin
+
+un campo_decodificado tiene:
+    un nombre
+    un valor
+    un siguiente
+fin
+
+# El nombre viene como texto Ana si salió de la tabla estática (Indexed
+# Header Field o nombre indexado), o como lista de bytes si vino literal
+# (nombre nuevo) — misma limitación que decodifica_cadena. El valor
+# SIEMPRE es lista de bytes salvo en Indexed Header Field, donde viene de
+# la tabla ya como texto.
+define decodifica_campo de datos, un indice_inicio:
+    el primer es elemento indice_inicio de datos
+    si primer es mayor que 127:
+        el r_idx es decodifica_entero de datos, indice_inicio, 127
+        el idx_tabla es r_idx.valor
+        la entrada es elemento idx_tabla de tabla_estatica
+        devuelve un nuevo campo_decodificado con el nombre entrada.nombre, el valor entrada.valor, el siguiente r_idx.siguiente
+    fin
+    el r_idx es decodifica_entero de datos, indice_inicio, 15
+    el idx es r_idx.valor
+    el pos es r_idx.siguiente
+    si idx es 0:
+        el r_nombre es decodifica_cadena de datos, pos
+        el r_valor es decodifica_cadena de datos, r_nombre.siguiente
+        devuelve un nuevo campo_decodificado con el nombre r_nombre.bytes_, el valor r_valor.bytes_, el siguiente r_valor.siguiente
+    fin
+    la entrada es elemento idx de tabla_estatica
+    el r_valor es decodifica_cadena de datos, pos
+    devuelve un nuevo campo_decodificado con el nombre entrada.nombre, el valor r_valor.bytes_, el siguiente r_valor.siguiente
+fin
