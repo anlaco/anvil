@@ -1,12 +1,9 @@
 # idioma: es
-# Correr con el directorio de trabajo en secuenciador/ (bug de anac con
-# rutas + llamadas cualificadas, ver issue anlaco-lang#4):
-#   cd secuenciador && ../bin/anac ejecutar ejemplos/basica.ana
 
 usa "modelo"
 usa "ejecutor"
 
-define paso_conectar con un intento_:
+define paso_conectar de un intento_:
     si intento_ es menor que 2:
         devuelve un nuevo resultado_step con el nombre "conectar_equipo", el estado "fallo", el mensaje "el equipo no respondió (intento {intento_})"
     fin
@@ -34,29 +31,29 @@ el secuencia es un nuevo resultado_secuencia con el nombre "basica", el pasos []
 # --- Setup: reintenta conectar hasta 3 veces ---
 el intentos es 0
 el conectado es falso
-el r_conectar es paso_conectar con 1
+el r_conectar es paso_conectar de 1
 mientras intentos es menor que 3 y conectado no es verdadero:
     el intentos es (intentos + 1)
-    el r_conectar es paso_conectar con intentos
+    el r_conectar es paso_conectar de intentos
     si r_conectar.estado es "paso":
         el conectado es verdadero
     fin
 fin
-el _ es ejecutor.registra con secuencia, r_conectar
+ejecutor.registra r_conectar en secuencia
 
 # --- Main: solo si Setup salió bien; si un paso falla, se salta el resto ---
 si conectado:
     el r_voltaje es paso_medir_voltaje
-    el _ es ejecutor.registra con secuencia, r_voltaje
+    ejecutor.registra r_voltaje en secuencia
 
     si r_voltaje.estado es "paso":
         el r_led es paso_verificar_led
-        el _ es ejecutor.registra con secuencia, r_led
+        ejecutor.registra r_led en secuencia
     fin
 fin
 
 # --- Cleanup: corre siempre, pase lo que pase en Setup/Main ---
 el r_desconectar es paso_desconectar
-el _ es ejecutor.registra con secuencia, r_desconectar
+ejecutor.registra r_desconectar en secuencia
 
-el _ es ejecutor.reporte con secuencia
+ejecutor.reporte a secuencia
