@@ -1,12 +1,14 @@
 # idioma: es
 #
-# HPACK (RFC 7541) — solo tabla estática. No hay tabla dinámica (todo se
-# codifica como "Literal Header Field without Indexing", que no la toca) ni
-# Huffman (los textos van sin comprimir, H=0). Un decodificador HPACT real
-# debe aceptar esto sin problema por el estándar, pero decodificar ESTE
-# módulo solo entiende lo que él mismo produce (Indexed Header Field y
-# Literal without Indexing) — no decodifica Huffman ni las otras dos formas
-# de literal (incremental indexing, never indexed). Ver README.md.
+# HPACK (RFC 7541) — tabla estática completa + Huffman (ver huffman.ana).
+# No hay tabla dinámica: todo se codifica como "Literal Header Field
+# without Indexing", que no la toca. Un decodificador HPACK real debe
+# aceptar esto sin problema por el estándar, pero decodificar ESTE módulo
+# solo entiende lo que él mismo produce (Indexed Header Field y Literal
+# without Indexing) — no decodifica las otras dos formas de literal
+# (incremental indexing, never indexed). Ver README.md.
+
+usa "huffman"
 
 un entrada_estatica tiene:
     un nombre
@@ -154,12 +156,26 @@ define decodifica_entero de datos, un indice_inicio, una mascara:
     devuelve un nuevo resultado_entero con el valor total, el siguiente i
 fin
 
-# Cadena literal sin Huffman (H=0): entero de longitud + bytes crudos.
+# Cadena literal: entero de longitud (con el bit H en el patrón) + bytes.
+# Usa Huffman cuando comprime (lo normal), igual que un codificador real —
+# si no comprime, va sin comprimir. El bit H (patrón 128 vs 0 en el
+# prefijo de longitud) le dice al decodificador cuál de los dos es.
 define codifica_cadena de un texto:
-    los datos son bytes de texto
-    la longitud es cantidad de datos
-    la resultado son codifica_entero de longitud, 127, 0
-    para cada b en datos:
+    los plano son bytes de texto
+    los comprimido son huffman.codifica de texto
+    la usar_huffman es falso
+    si (cantidad de comprimido) es menor que (cantidad de plano):
+        la usar_huffman es verdadero
+    fin
+    si usar_huffman:
+        la resultado son codifica_entero de (cantidad de comprimido), 127, 128
+        para cada b en comprimido:
+            añade b a resultado
+        fin
+        devuelve resultado
+    fin
+    la resultado son codifica_entero de (cantidad de plano), 127, 0
+    para cada b en plano:
         añade b a resultado
     fin
     devuelve resultado
@@ -173,17 +189,24 @@ fin
 # Devuelve el contenido como LISTA DE BYTES, no como texto: Ana no tiene
 # hoy conversión de bytes a texto (reportado, ver anlaco-lang#6).
 define decodifica_cadena de datos, un indice_inicio:
+    el primer es elemento indice_inicio de datos
+    el h_bit es cociente de primer entre 128
     el r_long es decodifica_entero de datos, indice_inicio, 127
     el longitud es r_long.valor
     el inicio_datos es r_long.siguiente
-    los contenido son []
+    los crudos son []
     el i es 0
     mientras i es menor que longitud:
         el pos es (inicio_datos + i)
-        añade (elemento pos de datos) a contenido
+        añade (elemento pos de datos) a crudos
         el i es (i + 1)
     fin
-    devuelve un nuevo resultado_cadena con el bytes_ contenido, el siguiente (inicio_datos + longitud)
+    el siguiente_indice es (inicio_datos + longitud)
+    si h_bit es 1:
+        los contenido son huffman.decodifica de crudos
+        devuelve un nuevo resultado_cadena con el bytes_ contenido, el siguiente siguiente_indice
+    fin
+    devuelve un nuevo resultado_cadena con el bytes_ crudos, el siguiente siguiente_indice
 fin
 
 # Codifica un campo de cabecera (nombre, valor — ambos texto Ana):

@@ -33,31 +33,37 @@ cabeceras comprimidas con HPACK desde el primer mensaje.
   ```
   cd grpc && ../bin/anac ejecutar ejemplos/spike_bytes.ana
   ```
-- `hpack.ana` — HPACK (RFC 7541) **solo con tabla estática** (las 61
-  entradas fijas del estándar): codifica/decodifica campos de cabecera
-  como *Indexed Header Field* (nombre+valor exacto en la tabla) o
-  *Literal Header Field without Indexing* (nombre indexado + valor
-  literal, o ambos literales) — nunca toca la tabla dinámica, así que no
-  hace falta llevar estado entre peticiones. **Sin Huffman**: los textos
-  van sin comprimir (bit H=0), válido por el estándar pero más grande de
-  lo que manda un cliente real. Verificado con el juego exacto de
-  cabeceras que manda cualquier petición unaria de gRPC (`:method:
-  POST`, `:scheme: http`, `:path`, `content-type: application/grpc`,
-  `te: trailers`), round-trip byte a byte contra los índices conocidos
-  del RFC. Correr con:
+- `huffman.ana` — Huffman de HPACK (RFC 7541 Apéndice B), tabla completa
+  de 257 símbolos. Verificado dos veces: (1) sin colisiones de prefijo
+  entre los 257 códigos (comprobado aparte antes de escribir el módulo);
+  (2) codificar `"www.example.com"` da exactamente
+  `f1e3c2e5f23a6ba0ab90f4ff` — el mismo resultado, byte a byte, del
+  ejemplo oficial del RFC (Apéndice C.4.1). La tabla se sacó del texto
+  del RFC (`rfc-editor.org/rfc/rfc7541.txt`), no de memoria. Correr con:
+  ```
+  cd grpc && ../bin/anac ejecutar ejemplos/spike_huffman.ana
+  ```
+- `hpack.ana` — HPACK (RFC 7541) con **tabla estática completa** (las 61
+  entradas fijas del estándar) **y Huffman**: codifica/decodifica campos
+  de cabecera como *Indexed Header Field* (nombre+valor exacto en la
+  tabla) o *Literal Header Field without Indexing* (nombre indexado +
+  valor literal, o ambos literales) — nunca toca la tabla dinámica, así
+  que no hace falta llevar estado entre peticiones. Las cadenas usan
+  Huffman cuando comprime (como un codificador real) y sin comprimir si
+  no; decodifica ambos casos según el bit H. Verificado con el juego
+  exacto de cabeceras que manda cualquier petición unaria de gRPC
+  (`:method: POST`, `:scheme: http`, `:path`, `content-type:
+  application/grpc`, `te: trailers`), round-trip byte a byte. Correr con:
   ```
   cd grpc && ../bin/anac ejecutar ejemplos/spike_hpack.ana
   ```
 
 ## Qué falta (todavía nada de esto existe)
 
-- **Huffman** en HPACK — hoy `hpack.ana` no lo codifica NI lo decodifica.
-  La mayoría de clientes gRPC reales sí lo usan por defecto, así que un
-  decodificador que no entiende Huffman no puede leer sus cabeceras
-  todavía — bloqueante para "un cliente real puede hablarnos" tal como
-  está hoy.
 - **Tabla dinámica** de HPACK — sin empezar (hace falta para acercarse al
-  tamaño real que manda un cliente/servidor gRPC de verdad).
+  tamaño real que manda un cliente/servidor gRPC de verdad, y para
+  decodificar las representaciones "with incremental indexing" que un
+  cliente real puede mandar).
 - El framing completo de streams HTTP/2 (settings, window update,
   control de flujo) — solo está la cabecera de 9 bytes, no el protocolo.
 - Codificación de mensajes protobuf reales a partir de un `.proto`
