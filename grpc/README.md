@@ -14,6 +14,12 @@ eso no importa nada de `secuenciador/` ni de nada específico de anvil —
 solo depende de `bin/anac` (la herramienta del lenguaje) y de sí mismo.
 El día que se extraiga, es copiar la carpeta.
 
+**El objetivo es cumplir el estándar gRPC de verdad**, no un protocolo
+propio simplificado: que un cliente gRPC real (Python, Go, lo que sea,
+sin tocar) pueda invocar el secuenciador de anvil. Por eso hace falta
+HPACK real y no un atajo — cualquier cliente gRPC estándar manda las
+cabeceras comprimidas con HPACK desde el primer mensaje.
+
 ## Qué hay hoy (spike, no producción)
 
 - `protobuf.ana` — varints sin signo (`varint_bytes de`/`varint_valor
@@ -27,10 +33,31 @@ El día que se extraiga, es copiar la carpeta.
   ```
   cd grpc && ../bin/anac ejecutar ejemplos/spike_bytes.ana
   ```
+- `hpack.ana` — HPACK (RFC 7541) **solo con tabla estática** (las 61
+  entradas fijas del estándar): codifica/decodifica campos de cabecera
+  como *Indexed Header Field* (nombre+valor exacto en la tabla) o
+  *Literal Header Field without Indexing* (nombre indexado + valor
+  literal, o ambos literales) — nunca toca la tabla dinámica, así que no
+  hace falta llevar estado entre peticiones. **Sin Huffman**: los textos
+  van sin comprimir (bit H=0), válido por el estándar pero más grande de
+  lo que manda un cliente real. Verificado con el juego exacto de
+  cabeceras que manda cualquier petición unaria de gRPC (`:method:
+  POST`, `:scheme: http`, `:path`, `content-type: application/grpc`,
+  `te: trailers`), round-trip byte a byte contra los índices conocidos
+  del RFC. Correr con:
+  ```
+  cd grpc && ../bin/anac ejecutar ejemplos/spike_hpack.ana
+  ```
 
 ## Qué falta (todavía nada de esto existe)
 
-- HPACK (compresión de cabeceras de HTTP/2) — sin empezar.
+- **Huffman** en HPACK — hoy `hpack.ana` no lo codifica NI lo decodifica.
+  La mayoría de clientes gRPC reales sí lo usan por defecto, así que un
+  decodificador que no entiende Huffman no puede leer sus cabeceras
+  todavía — bloqueante para "un cliente real puede hablarnos" tal como
+  está hoy.
+- **Tabla dinámica** de HPACK — sin empezar (hace falta para acercarse al
+  tamaño real que manda un cliente/servidor gRPC de verdad).
 - El framing completo de streams HTTP/2 (settings, window update,
   control de flujo) — solo está la cabecera de 9 bytes, no el protocolo.
 - Codificación de mensajes protobuf reales a partir de un `.proto`
@@ -39,9 +66,23 @@ El día que se extraiga, es copiar la carpeta.
 - Unir esto con los sockets TCP de Ana (`la escucha del puerto`, `la
   conexión a ... en el puerto`, ver la skill `ana`) para tener un cliente
   o servidor gRPC real hablando por la red.
+- Servicio de reflexión de gRPC — necesario más adelante para que un
+  futuro editor gráfico de secuencias pueda descubrir los métodos de un
+  módulo sin compilar un `.proto` a mano (objetivo de producto: arrastrar
+  un Python o una DLL como step, ver memoria de visión del proyecto).
+
+**Límite de lenguaje encontrado y reportado:** Ana no tiene hoy manera de
+convertir una lista de bytes de vuelta a texto (`bytes de "texto"` va en
+un solo sentido) — ver
+[anlaco/anlaco-lang#6](https://github.com/anlaco/anlaco-lang/issues/6).
+Mientras tanto, `hpack.ana` devuelve los valores decodificados como
+LISTA DE BYTES, no como texto Ana (ver comentarios en el propio
+`hpack.ana`).
 
 Si al construir alguna de estas piezas Ana genuinamente no da algo que
 haga falta (candidato más probable, señalado por el propio equipo de
-Ana: operadores bit a bit), se reporta como issue nuevo y concreto en
-`anlaco/anlaco-lang` con el caso mínimo — no se intenta arreglar el
-lenguaje desde aquí. Ver `.claude/skills/ana/` para el protocolo.
+Ana: operadores bit a bit — aunque de momento ni varint, zigzag ni HPACK
+de tabla estática lo han necesitado), se reporta como issue nuevo y
+concreto en `anlaco/anlaco-lang` con el caso mínimo — no se intenta
+arreglar el lenguaje desde aquí. Ver `.claude/skills/ana/` para el
+protocolo.

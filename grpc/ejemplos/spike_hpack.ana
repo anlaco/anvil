@@ -1,0 +1,29 @@
+# idioma: es
+# Codifica y decodifica el bloque de cabeceras que un cliente gRPC real
+# manda en toda petición unaria, usando solo la tabla estática de HPACK.
+
+usa "hpack"
+
+el c_metodo es hpack.codifica_campo de ":method", "POST"
+el c_esquema es hpack.codifica_campo de ":scheme", "http"
+el c_ruta es hpack.codifica_campo de ":path", "/paquete.Servicio/Metodo"
+el c_tipo es hpack.codifica_campo de "content-type", "application/grpc"
+el c_te es hpack.codifica_campo de "te", "trailers"
+
+escribe ":method -> {c_metodo}"
+escribe ":scheme -> {c_esquema}"
+escribe ":path -> {c_ruta}"
+escribe "content-type -> {c_tipo}"
+escribe "te -> {c_te}"
+
+el d_metodo es hpack.decodifica_campo de c_metodo, 1
+el d_esquema es hpack.decodifica_campo de c_esquema, 1
+el d_ruta es hpack.decodifica_campo de c_ruta, 1
+el d_tipo es hpack.decodifica_campo de c_tipo, 1
+el d_te es hpack.decodifica_campo de c_te, 1
+
+escribe "decodificado :method -> {d_metodo.nombre} = {d_metodo.valor}"
+escribe "decodificado :scheme -> {d_esquema.nombre} = {d_esquema.valor}"
+escribe "decodificado :path -> {d_ruta.nombre} = {d_ruta.valor}"
+escribe "decodificado content-type -> {d_tipo.nombre} = {d_tipo.valor}"
+escribe "decodificado te -> {d_te.nombre} = {d_te.valor}"
