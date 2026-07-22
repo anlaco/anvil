@@ -20,6 +20,13 @@ sin tocar) pueda invocar el secuenciador de anvil. Por eso hace falta
 HPACK real y no un atajo — cualquier cliente gRPC estándar manda las
 cabeceras comprimidas con HPACK desde el primer mensaje.
 
+**Ya conseguido (2026-07-22): un cliente `grpcio` de Python real, sin
+modificar, completó una llamada unaria de punta a punta contra un
+servidor escrito a mano en Ana** — ver `prueba_interop/`. No fue trivial:
+el cliente real usa una representación de HPACK que no habíamos
+contemplado, y se encontró precisamente por probar contra tráfico real
+en vez de solo contra nuestros propios tests (ver más abajo).
+
 ## Qué hay hoy (spike, no producción)
 
 - `protobuf.ana` — varints sin signo (`varint_bytes de`/`varint_valor
@@ -70,20 +77,42 @@ cabeceras comprimidas con HPACK desde el primer mensaje.
   cd grpc && ../bin/anac ejecutar ejemplos/servidor_handshake.ana &
   cd grpc && ../bin/anac ejecutar ejemplos/cliente_handshake.ana
   ```
+- `ejemplos/spike_interop_real.ana` — decodifica, con nuestro propio
+  `hpack.ana`, los 225 bytes de cabecera EXACTOS que mandó un cliente
+  `grpc-python` de verdad (capturados y documentados en
+  `prueba_interop/`). No es un ejemplo inventado: es tráfico real.
+- `prueba_interop/` — la prueba completa: un cliente `grpcio` de Python
+  sin modificar habla con `servidor_saludador.ana` (un servidor gRPC
+  mínimo escrito en Ana con las piezas de arriba) y completa una llamada
+  unaria real, con respuesta correcta. Ver `prueba_interop/README.md`
+  para reproducirlo.
+
+## Qué se aprendió probando contra un cliente real
+
+Nuestro `hpack.codifica_campo` produce cabeceras con "Literal Header
+Field without Indexing" (prefijo de 4 bits). Un cliente gRPC real
+(`grpc-python`, sobre `grpc-c`/nghttp2) manda casi todo con **"Literal
+Header Field with Incremental Indexing"** (prefijo de 6 bits, patrón
+`0x40`) — una representación que `decodifica_campo` no entendía. Sin
+probar contra tráfico real esto no se habría visto: nuestros propios
+tests, al decodificar solo lo que nosotros mismos codificábamos, nunca
+iban a generar ese patrón. Arreglado en `hpack.ana` — ver el comentario
+junto a `decodifica_campo`.
 
 ## Qué falta (todavía nada de esto existe)
 
-- **Tabla dinámica** de HPACK — sin empezar (hace falta para acercarse al
-  tamaño real que manda un cliente/servidor gRPC de verdad, y para
-  decodificar las representaciones "with incremental indexing" que un
-  cliente real puede mandar).
-- El resto del framing de streams HTTP/2 más allá del saludo inicial
-  (window update, control de flujo, múltiples streams concurrentes,
-  DATA/HEADERS de verdad con payload) — el handshake ya funciona, pero
-  es solo el saludo, no una conexión gRPC completa todavía.
-- Codificación de mensajes protobuf reales a partir de un `.proto`
-  (campos, tipos, mensajes anidados) — hoy solo hay los primitivos
-  (varint, zigzag), no un serializador de mensajes.
+- **Tabla dinámica** de HPACK — sin empezar. No bloqueó la prueba de
+  interoperabilidad (decodificar no depende de mantener la tabla), pero
+  hace falta para acercarse al tamaño real que manda un cliente/servidor
+  gRPC de verdad en peticiones sucesivas de la misma conexión.
+- El resto del framing de streams HTTP/2 más allá de una llamada unaria
+  de un solo stream — control de flujo de verdad (hoy se ignoran los
+  `WINDOW_UPDATE` que manda el cliente), múltiples streams concurrentes,
+  mensajes más grandes que un frame.
+- Serializar mensajes protobuf a partir de tipos con nombre —
+  `servidor_saludador.ana` decodifica/codifica el único campo string que
+  necesita a mano; no hay todavía un serializador general para mensajes
+  con varios campos y tipos.
 - Servicio de reflexión de gRPC — necesario más adelante para que un
   futuro editor gráfico de secuencias pueda descubrir los métodos de un
   módulo sin compilar un `.proto` a mano (objetivo de producto: arrastrar

@@ -258,7 +258,21 @@ define decodifica_campo de datos, un indice_inicio:
         la entrada es elemento idx_tabla de tabla_estatica
         devuelve un nuevo campo_decodificado con el nombre entrada.nombre, el valor entrada.valor, el siguiente r_idx.siguiente
     fin
-    el r_idx es decodifica_entero de datos, indice_inicio, 15
+    # 0x40-0x7F: Literal Header Field WITH Incremental Indexing (prefijo de
+    # 6 bits, mascara 63) — la forma que usan los clientes gRPC reales
+    # (nghttp2/grpc-python), aunque este módulo no mantenga tabla dinámica.
+    # Decodificar el nombre/valor no depende de la tabla dinámica; lo único
+    # que nos perdemos es una referencia posterior POR ÍNDICE a esta misma
+    # entrada — no ocurrió en la petición real que verificamos.
+    # 0x00-0x3F cubre "without indexing" (0x00-0x0F) y "never indexed"
+    # (0x10-0x1F), ambas con prefijo de 4 bits — igual que ya hacíamos.
+    # 0x20-0x3F (Dynamic Table Size Update) NO es un campo de cabecera y
+    # todavía no se decodifica aparte (no apareció en la petición real).
+    la mascara es 15
+    si primer es mayor que 63:
+        la mascara es 63
+    fin
+    el r_idx es decodifica_entero de datos, indice_inicio, mascara
     el idx es r_idx.valor
     el pos es r_idx.siguiente
     si idx es 0:
