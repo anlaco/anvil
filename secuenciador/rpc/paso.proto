@@ -1,0 +1,19 @@
+syntax = "proto3";
+
+message PeticionPaso {
+  string nombre = 1;
+  int32 intento = 2;
+}
+
+message ResultadoPasoProto {
+  string nombre = 1;
+  string estado = 2;
+  string mensaje = 3;
+  string valor_medido = 4;
+  string limite_min = 5;
+  string limite_max = 6;
+}
+
+service EjecutorPasos {
+  rpc Invoca(PeticionPaso) returns (ResultadoPasoProto);
+}

@@ -14,3 +14,19 @@ un resultado_secuencia tiene:
     un estado
     un pasos
 fin
+
+# --- Definición de secuencia: los datos que describen QUÉ correr, para
+# el motor genérico (rpc/, motor.ana) — a diferencia de resultado_step
+# arriba, que es lo que un paso YA corrido devolvió.
+
+un definicion_paso tiene:
+    un nombre
+    un reintentos
+fin
+
+un definicion_secuencia tiene:
+    un nombre
+    un pasos_setup
+    un pasos_main
+    un pasos_cleanup
+fin
