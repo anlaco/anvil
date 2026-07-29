@@ -1,31 +1,92 @@
 # anvil
 
-Un proyecto escrito en **Ana** (ana-lang; archivos `.ana`). Trae su propia
-herramienta (`bin/anac`) lista para usar, sin depender de tener nada más
-instalado.
+Un secuenciador de test: corre secuencias de pasos contra equipo real,
+reintenta los que fallan y reporta el resultado. Escrito en **Rust
+compilado a WASM** (`wasm32-wasip2`, bajo wasmtime).
 
-## Herramientas (`bin/`)
+La secuencia es **datos**, no código: el motor la recorre sin saber qué hace
+cada paso, y cada paso se invoca **por gRPC por su nombre** — nunca con una
+llamada directa. Eso aísla los pasos entre sí y deja la puerta abierta a
+escribirlos en cualquier lenguaje.
+
+## Correr el ejemplo
+
+```sh
+cargo build --target wasm32-wasip2 -p ejecutor_pasos -p motor
+
+# terminal 1
+wasmtime -S cli -S tcp=y -S inherit-network=y \
+  target/wasm32-wasip2/debug/ejecutor_pasos.wasm
+
+# terminal 2
+wasmtime -S cli -S tcp=y -S inherit-network=y \
+  target/wasm32-wasip2/debug/basica_datos.wasm
+```
+
+Los flags de wasmtime no son opcionales: sin `-S tcp=y -S
+inherit-network=y` el guest no puede tocar la red.
+
+## Estructura
 
 ```
-bin/anac ejecutar programa.ana              # interpreta y corre (como Python)
-bin/anac compilar programa.ana              # Ana → programa.wat (texto wasm)
-bin/anac ensamblar programa.wat             # .wat → programa.wasm (binario)
-bin/anac empaquetar programa.ana [-o nombre] # Ana → ejecutable nativo standalone
+crates/
+  modelo/          modelo de datos + mensajes de paso.proto (prost)
+  pasos_demo/      los pasos de la secuencia de ejemplo
+  ejecutor_pasos/  servidor gRPC: despacha pasos por nombre
+  motor/           cliente gRPC: recorre la secuencia
 ```
 
-`empaquetar` es lo más útil para un proyecto de verdad: produce un binario
-que ya no necesita a `anac` para correr (arranca en unos milisegundos,
-requiere `bin/anac-stub` al lado — ya está).
+La pila gRPC vive aparte, en
+[`anlaco/wasi-grpc`](https://github.com/anlaco/wasi-grpc): gRPC sobre
+sockets WASI nativos, porque `tonic`/`tokio` no compilan a WASM. anvil es su
+primer consumidor y la dogfoodea.
 
-`bin/anac` y `bin/anac-stub` no están versionados aquí — son un artefacto
-de build, no código fuente de este proyecto. Ver `bin/VERSION.md`.
+## La especificación
 
-## El lenguaje
+Estas son las decisiones que definen el producto. Sobrevivieron a un cambio
+completo de lenguaje, y no se tocan sin querer tocarlas:
 
-Ana lo desarrolla un equipo independiente, según lo que le piden sus
-clientes — de los que `anvil` es uno. Este proyecto no tiene ni necesita el
-código fuente del lenguaje: si algo hace falta y Ana no lo tiene, se abre un
-issue en su repositorio (`gh issue create --repo anlaco/anlaco-lang`) —
-nunca se arregla desde aquí, y no hay ningún archivo compartido entre los
-dos lados. La guía completa del lenguaje, con el protocolo exacto para
-reportar, está en `.claude/skills/ana/`.
+- **Semántica de ejecución.** Setup → Main (solo si el Setup fue bien) →
+  Cleanup. El Main **corta en el primer fallo**; el Cleanup corre **siempre**
+  — un equipo que se quedó encendido es peor que una secuencia que falló.
+- **Reintentos por paso.** Cada paso declara cuántos intentos admite. El
+  número de intento llega al paso, que puede usarlo.
+- **Tres estados:** `paso`, `fallo`, `error`. En el agregado de la secuencia,
+  un `error` manda sobre un `fallo`.
+- **El contrato** está en `secuenciador/rpc/paso.proto`: `PeticionPaso`,
+  `ResultadoPasoProto`, `service EjecutorPasos { rpc Invoca }`. Es la fuente
+  de verdad; los structs `prost` de `crates/modelo/src/proto.rs` lo espejan a
+  mano (wasi-grpc v0.1 no trae codegen).
+
+## Verificar
+
+```sh
+cargo test              # tests unitarios
+./verifica_paridad.sh   # la secuencia de ejemplo en 4 combinaciones
+```
+
+`verifica_paridad.sh` corre `basica_datos` con motor y ejecutor en Rust, en
+Ana, y **cruzados en las dos direcciones**, exigiendo que las cuatro salidas
+sean idénticas. Las cruzadas son las que prueban de verdad que el contrato
+gRPC se respeta byte a byte y que las dos implementaciones son
+intercambiables.
+
+## La versión en Ana
+
+El proyecto se escribió primero en [Ana](https://github.com/anlaco/anlaco-lang)
+(archivos `.ana`), y ese código **sigue aquí y sigue funcionando**:
+
+```
+grpc/                 pila HTTP/2 + HPACK + protobuf en Ana
+secuenciador/*.ana    modelo, ejecutor, pasos, motor y ejecutor gRPC
+```
+
+No es histórico muerto: es la referencia contra la que se verifica la
+paridad, y la prueba viva de que el contrato es independiente del lenguaje.
+Correrlo necesita `bin/anac`, que no está versionado (es un artefacto de
+build — ver `bin/VERSION.md`).
+
+Ana la desarrolla un equipo independiente. Si algo hace falta y Ana no lo
+tiene, se abre un issue en su repositorio (`gh issue create --repo
+anlaco/anlaco-lang`) — nunca se arregla desde aquí. La guía del lenguaje,
+con el protocolo para reportar, está en `.claude/skills/ana/`.

@@ -3,3 +3,5 @@ bin/anac-stub
 *~
 *.wat
 *.wasm
+/target
+Cargo.lock

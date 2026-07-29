@@ -1,0 +1,12 @@
+[package]
+name = "ejecutor_pasos"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Servidor gRPC que ejecuta pasos del secuenciador por nombre"
+
+[dependencies]
+modelo.workspace = true
+pasos_demo.workspace = true
+prost.workspace = true
+wasi-grpc.workspace = true
