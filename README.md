@@ -71,6 +71,25 @@ sean idénticas. Las cruzadas son las que prueban de verdad que el contrato
 gRPC se respeta byte a byte y que las dos implementaciones son
 intercambiables.
 
+## Licencia
+
+**anvil es AGPL-3.0-or-later** (ver [LICENSE](LICENSE)). anvil es el
+producto: se *usa*, no se linka. La AGPL impide que alguien lo cierre y lo
+revenda, y **no afecta a tus secuencias de test** — son datos que le pasas al
+secuenciador, no obra derivada de él. Los límites de aceptación y el know-how
+de producto que hay en una secuencia son tuyos y siguen siendo tuyos.
+
+Las librerías sobre las que se apoya van deliberadamente **Apache-2.0**:
+
+| Pieza | Licencia | Por qué |
+|---|---|---|
+| Interfaces WIT | Apache-2.0 | Queremos que se adopten como referencia |
+| `wasi-grpc`, `wasi-visa` | Apache-2.0 | Se linkan en código ajeno |
+| anvil | AGPL-3.0 | Es el producto |
+
+Un paso de test se **linka** con las librerías, así que copyleft ahí
+contagiaría el código de quien las use. En el secuenciador no ocurre.
+
 ## La versión en Ana
 
 El proyecto se escribió primero en [Ana](https://github.com/anlaco/anlaco-lang)
