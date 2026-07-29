@@ -28,4 +28,4 @@ la secuencia es motor.ejecuta_secuencia de cx.enlace, cx.buffer, 1, definicion
 
 cierra cx.enlace
 
-motor.reporte_remoto a secuencia
+ejecutor.reporte a secuencia

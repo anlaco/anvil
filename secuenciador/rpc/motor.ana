@@ -108,7 +108,10 @@ define ejecuta_paso_remoto de enlace, buffer, un stream, un nombre, un intento:
     fin
     la decodificado es paso_codec.decodifica_resultado_paso de sin_prefijo
 
-    el r es un nuevo resultado_step con el nombre decodificado.nombre_bytes, el estado decodificado.estado_bytes, el mensaje decodificado.mensaje_bytes
+    el nombre_txt es texto de decodificado.nombre_bytes
+    el estado_txt es texto de decodificado.estado_bytes
+    el mensaje_txt es texto de decodificado.mensaje_bytes
+    el r es un nuevo resultado_step con el nombre nombre_txt, el estado estado_txt, el mensaje mensaje_txt
     devuelve un nuevo paso_y_buffer con el resultado r, el buffer rf_trailers.resto
 fin
 
@@ -123,13 +126,19 @@ define ejecuta_con_reintentos de enlace, buffer, un stream_inicial, un nombre, u
     el stream_actual es stream_inicial
     la pr es ejecuta_paso_remoto de enlace, buffer, stream_actual, nombre, intento
     el res es pr.resultado
-    el ok es protobuf.coincide de res.estado, (bytes de "paso")
+    el ok es falso
+    si res.estado es "paso":
+        el ok es verdadero
+    fin
     mientras ok es falso y intento es menor que max_intentos:
         el intento es (intento + 1)
         el stream_actual es (stream_actual + 2)
         la pr es ejecuta_paso_remoto de enlace, pr.buffer, stream_actual, nombre, intento
         el res es pr.resultado
-        el ok es protobuf.coincide de res.estado, (bytes de "paso")
+        el ok es falso
+        si res.estado es "paso":
+            el ok es verdadero
+        fin
     fin
     devuelve un nuevo paso_y_estado con el resultado res, el buffer pr.buffer, el stream_siguiente (stream_actual + 2)
 fin
@@ -146,25 +155,20 @@ define ejecuta_secuencia de enlace, buffer_inicial, un stream_inicial, una defin
         el stream_actual es r.stream_siguiente
         el res_paso es r.resultado
         ejecutor.registra res_paso en secuencia
-        el paso_ok es protobuf.coincide de res_paso.estado, (bytes de "paso")
-        si paso_ok es falso:
+        si res_paso.estado no es "paso":
             el setup_ok es falso
         fin
     fin
 
     si setup_ok:
-        el continua_main es verdadero
         para cada p en definicion.pasos_main:
-            si continua_main:
-                la r es ejecuta_con_reintentos de enlace, buffer_actual, stream_actual, p.nombre, p.reintentos
-                el buffer_actual es r.buffer
-                el stream_actual es r.stream_siguiente
-                el res_paso es r.resultado
-                ejecutor.registra res_paso en secuencia
-                el paso_ok es protobuf.coincide de res_paso.estado, (bytes de "paso")
-                si paso_ok es falso:
-                    el continua_main es falso
-                fin
+            la r es ejecuta_con_reintentos de enlace, buffer_actual, stream_actual, p.nombre, p.reintentos
+            el buffer_actual es r.buffer
+            el stream_actual es r.stream_siguiente
+            el res_paso es r.resultado
+            ejecutor.registra res_paso en secuencia
+            si res_paso.estado no es "paso":
+                rompe
             fin
         fin
     fin
@@ -177,36 +181,4 @@ define ejecuta_secuencia de enlace, buffer_inicial, un stream_inicial, una defin
     fin
 
     devuelve secuencia
-fin
-
-# ejecutor.reporte/estado_de comparan .estado con texto vía "es" — no
-# sirve aquí porque .estado llega como lista de bytes desde la red (no
-# hay conversión de bytes a texto en Ana, anlaco-lang#6). Misma lógica,
-# comparando con protobuf.coincide en su lugar.
-define estado_de_remoto de una secuencia_:
-    el hay_error es falso
-    el hay_fallo es falso
-    para cada paso_ en secuencia_.pasos:
-        si protobuf.coincide de paso_.estado, (bytes de "error"):
-            el hay_error es verdadero
-        fin
-        si protobuf.coincide de paso_.estado, (bytes de "fallo"):
-            el hay_fallo es verdadero
-        fin
-    fin
-    si hay_error:
-        devuelve "error"
-    fin
-    si hay_fallo:
-        devuelve "fallo"
-    fin
-    devuelve "paso"
-fin
-
-define reporte_remoto de una secuencia_:
-    el estado_agregado es estado_de_remoto de secuencia_
-    escribe "=== {secuencia_.nombre}: {estado_agregado} ==="
-    para cada paso_ en secuencia_.pasos:
-        escribe "  [{paso_.estado}] {paso_.nombre}: {paso_.mensaje}"
-    fin
 fin

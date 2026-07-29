@@ -112,7 +112,8 @@ mientras sigue_conectado:
                 el i es (i + 1)
             fin
             los peticion son paso_codec.decodifica_peticion_paso de sin_prefijo
-            escribe "paso pedido: {peticion.nombre_bytes} intento={peticion.intento}"
+            el nombre_pedido es texto de peticion.nombre_bytes
+            escribe "paso pedido: {nombre_pedido} intento={peticion.intento}"
             el r es despacha de peticion.nombre_bytes, peticion.intento
             manda_respuesta de enlace, rf.stream, r
             escribe "respuesta enviada, stream {rf.stream}"
