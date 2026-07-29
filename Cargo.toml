@@ -10,7 +10,12 @@ members = [
 [workspace.package]
 version = "0.1.0"
 edition = "2021"
-license = "Apache-2.0"
+# anvil es el producto: se usa, no se linka. AGPL protege frente a que
+# alguien lo cierre y lo revenda, sin afectar a las secuencias de test de
+# quien lo usa (que son secreto industrial suyo).
+# Las librerías (wasi-grpc, wasi-visa) van Apache-2.0 a propósito: se linkan
+# en código ajeno y queremos que sus interfaces se adopten como referencia.
+license = "AGPL-3.0-or-later"
 
 [workspace.dependencies]
 modelo = { path = "crates/modelo" }
