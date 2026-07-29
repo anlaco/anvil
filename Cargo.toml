@@ -1,0 +1,24 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/modelo",
+    "crates/pasos_demo",
+    "crates/ejecutor_pasos",
+    "crates/motor",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "Apache-2.0"
+
+[workspace.dependencies]
+modelo = { path = "crates/modelo" }
+pasos_demo = { path = "crates/pasos_demo" }
+prost = "0.14"
+
+# `wasi-grpc` es un proyecto aparte (github.com/anlaco/wasi-grpc, privado).
+# Se referencia por ruta porque anvil lo dogfoodea: los dos repos se
+# desarrollan a la vez y un cambio en la pila se prueba aquí al momento.
+# Cuando wasi-grpc se estabilice y se publique, esto pasa a ser una versión.
+wasi-grpc = { path = "../wasi-grpc" }

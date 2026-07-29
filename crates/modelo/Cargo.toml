@@ -1,0 +1,9 @@
+[package]
+name = "modelo"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Modelo de datos del secuenciador anvil y los mensajes de paso.proto"
+
+[dependencies]
+prost.workspace = true
