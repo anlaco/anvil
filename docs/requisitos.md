@@ -1,0 +1,129 @@
+# Requisitos
+
+SRS ligero: lo que Anvil debe hacer, **verificable y trazable** a su fuente
+real del repo o a un ADR. Las características de calidad (correcto, no
+ambiguo, verificable, trazable) se conservan; la maquinaria formal de un SRS
+de 20 subsecciones no.
+
+Prioridad: **MVP** (Must), **MVP-parcial** (Should), **post-MVP** (Could),
+**out-of-scope** (Won't). La base priorizada es
+[`investigacion/TestStand-y-competencia.md`](investigacion/TestStand-y-competencia.md)
+§5; lo ya decidido se ancla al código.
+
+## Requisitos funcionales
+
+### Ejecución de la secuencia
+
+| ID | Requisito | Prioridad | Trazabilidad |
+|---|---|---|---|
+| RF-01 | Una secuencia se compone de tres fases: **Setup**, **Main**, **Cleanup**. | MVP | `modelo/src/lib.rs::DefinicionSecuencia` |
+| RF-02 | **Setup**: corren todos los pasos; si alguno no pasa, el Main se salta entero. | MVP | `motor/src/lib.rs::ejecuta_secuencia` |
+| RF-03 | **Main**: solo corre si el Setup fue bien; **corta en el primer fallo**. | MVP | `motor/src/lib.rs::ejecuta_secuencia` |
+| RF-04 | **Cleanup**: corre **siempre**, pase lo que pase antes. | MVP | `motor/src/lib.rs::ejecuta_secuencia` |
+| RF-05 | Cada paso se invoca **por gRPC por su nombre**, nunca por llamada directa. | MVP | ADR-0003; `motor/src/lib.rs::ejecuta_paso` |
+| RF-06 | El motor no conoce la implementación del paso; despacha por nombre. | MVP | ADR-0005 |
+
+### Reintentos
+
+| ID | Requisito | Prioridad | Trazabilidad |
+|---|---|---|---|
+| RF-07 | Cada paso declara un número máximo de **intentos** (total, no extras: 1 = sin reintentos). | MVP | `modelo/src/lib.rs::DefinicionPaso.reintentos` |
+| RF-08 | El motor reintenta mientras el paso no pase y queden intentos. | MVP | `motor/src/lib.rs::ejecuta_con_reintentos` |
+| RF-09 | El **número de intento** (desde 1) llega al paso, que puede usarlo. | MVP | `paso.proto::PeticionPaso.intento` |
+
+### Estados y agregado
+
+| ID | Requisito | Prioridad | Trazabilidad |
+|---|---|---|---|
+| RF-10 | Cada resultado tiene un **estado**: `paso`, `fallo` o `error` (texto, no enum). | MVP | `modelo/src/lib.rs::ResultadoStep.estado` |
+| RF-11 | Un `fallo` (criterio de aceptación no cumplido) es un resultado **válido**, no un error del motor. | MVP | `motor/src/lib.rs::Error` (solo Red/Protobuf) |
+| RF-12 | Un nombre de paso desconocido produce `error`, no pánico. | MVP | `pasos_demo/src/lib.rs::despacha` |
+| RF-13 | Agregado de secuencia: `error` si alguno dio `error`; si no, `fallo` si alguno dio `fallo`; si no, `paso`. | MVP | `modelo/src/lib.rs::ResultadoSecuencia::estado` |
+
+### Contrato del paso (gRPC)
+
+| ID | Requisito | Prioridad | Trazabilidad |
+|---|---|---|---|
+| RF-14 | El contrato del paso se define en `paso.proto`: `PeticionPaso`, `ResultadoPasoProto`, `service EjecutorPasos{rpc Invoca}`. | MVP | `modelo/paso.proto` |
+| RF-15 | La ruta del método es `/EjecutorPasos/Invoca` (sin `package` en el `.proto`). | MVP | `modelo/src/proto.rs::RUTA_INVOCA` |
+| RF-16 | Las medidas viajan como **string**; un campo vacío no se transmite (proto3). | MVP | `modelo/src/proto.rs::a_texto` |
+| RF-17 | Los valores enteros se codifican sin decimales (`"5"`, no `"5.0"`). | MVP | `modelo/src/proto.rs::a_texto` |
+| RF-18 | El contrato es **versionado** y estable; un cambio que rompa compatibilidad exige un ADR/RFC. | MVP | [contrato-grpc.md](contrato-grpc.md) |
+
+### Secuencia como datos
+
+| ID | Requisito | Prioridad | Trazabilidad |
+|---|---|---|---|
+| RF-19 | La secuencia es **datos** (`DefinicionSecuencia`), no código. | MVP | ADR-0002; `modelo/src/lib.rs` |
+| RF-20 | Existe un **schema YAML** para `DefinicionSecuencia` y un cargador. | MVP | [diseno/formato-de-secuencia.md](diseno/formato-de-secuencia.md) *(propuesta)* |
+
+### Reportes / ResultSink
+
+| ID | Requisito | Prioridad | Trazabilidad |
+|---|---|---|---|
+| RF-21 | El resultado de la secuencia se vierte a un **ResultSink** desacoplado. | MVP | [diseno/reportes.md](diseno/reportes.md) *(propuesta)* |
+| RF-22 | ResultSinks mínimos: consola, JSON, CSV, SQLite. | MVP | diseno/reportes.md |
+| RF-23 | El ResultSink reintenta/reconecta ante fallos transitorios (p. ej. corte de red). | MVP-parcial | diseno/reportes.md |
+| RF-24 | STDF y ATML como ResultSinks sectoriales. | post-MVP | diseno/reportes.md |
+
+### Step types y límites
+
+| ID | Requisito | Prioridad | Trazabilidad |
+|---|---|---|---|
+| RF-25 | Built-in **pass/fail** (sin medida, solo `paso`/`fallo`). | MVP | [diseno/modelo-de-pasos.md](diseno/modelo-de-pasos.md) |
+| RF-26 | Built-in **limit test** (medida contra high/low o comparación). | MVP | `modelo/src/lib.rs::ResultadoStep::medido` |
+| RF-27 | Built-in **action**, **sequence call**, **statement**. | MVP-parcial | diseno/modelo-de-pasos.md |
+| RF-28 | **Custom step types** con substeps encapsulados. | post-MVP | diseno/modelo-de-pasos.md |
+| RF-29 | Los límites son **datos first-class** (no aserciones ad-hoc). | MVP-parcial | [diseno/limites-y-estados.md](diseno/limites-y-estados.md) |
+| RF-30 | **Property loader**: límites desde un fichero externo. | MVP-parcial | diseno/limites-y-estados.md |
+
+### Variables y control de flujo
+
+| ID | Requisito | Prioridad | Trazabilidad |
+|---|---|---|---|
+| RF-31 | Variables con scopes **Locals**, **Parameters**, **FileGlobals**. | MVP-parcial | [diseno/variables-y-alcances.md](diseno/variables-y-alcances.md) |
+| RF-32 | **StationGlobals** (compartidas por estación). | post-MVP | diseno/variables-y-alcances.md |
+| RF-33 | **Precondición** por step (el paso se salta si no se cumple). | MVP-parcial | [diseno/motor-de-expresiones.md](diseno/motor-de-expresiones.md) |
+| RF-34 | Control de flujo: **pause-on-fail**, **step**, **disable** de pasos. | MVP-parcial | diseno/motor-de-ejecucion.md |
+| RF-35 | **Expression engine** (sintaxis Python/Scilab/MATLAB-like, **no** C-like). | MVP-parcial | diseno/motor-de-expresiones.md |
+| RF-36 | Integración de instrumentos por **adapter gRPC**. | MVP-parcial | [diseno/integracion-instrumentos.md](diseno/integracion-instrumentos.md) |
+| RF-37 | PyVISA/SCPI nativo. | post-MVP | diseno/integracion-instrumentos.md |
+
+### Process model y UI
+
+| ID | Requisito | Prioridad | Trazabilidad |
+|---|---|---|---|
+| RF-38 | **Process model Sequential** simple; separación secuencia vs. "cómo se corre en producción". | MVP-parcial | [diseno/proceso-de-test.md](diseno/proceso-de-test.md) |
+| RF-39 | Paralelismo (Parallel/Batch) con cancelación jerárquica. | post-MVP | diseno/proceso-de-test.md |
+| RF-40 | **Headless/CLI** primero. | MVP | [diseno/ui-vs-headless.md](diseno/ui-vs-headless.md) |
+| RF-41 | Operator UI web + UIMsgs. | post-MVP | diseno/ui-vs-headless.md |
+
+### Out-of-scope (v1)
+
+- RF-N01: Replicar el process model de TestStand 1:1 (Parallel/Batch +
+  callbacks + entry points).
+- RF-N02: Integración con LabVIEW/CVI.
+- RF-N03: Debugger visual completo.
+
+## Requisitos no funcionales
+
+| ID | Requisito | Prioridad | Trazabilidad |
+|---|---|---|---|
+| RNF-01 | **Portabilidad**: Anvil se compila a `wasm32-wasip2` y corre bajo `wasmtime` en cualquier SO soportado. | MVP | ADR-0001; `rust-toolchain.toml` |
+| RNF-02 | **Aislamiento**: el secuenciador corre en un sandbox WASM; el interior de cada paso es opaco al motor. | MVP | ADR-0001, ADR-0005 |
+| RNF-03 | **Determinismo de reintentos**: para la misma secuencia y los mismos pasos, el número de intentos y el orden son reproducibles. | MVP | `motor/src/lib.rs::ejecuta_con_reintentos` *(verificar en CI)* |
+| RNF-04 | **Rendimiento**: el coste de una llamada gRPC local es despreciable frente al tiempo de un instrumento real (no es cuello de botella). | MVP | ADR-0003 |
+| RNF-05 | **Estabilidad del contrato**: `paso.proto` no se rompe sin versionado y un ADR/RFC. | MVP | [contrato-grpc.md](contrato-grpc.md) |
+| RNF-06 | **Seguridad (hardware real)**: un paso defectuoso no puede dañar equipo; el Cleanup garantizado mitiga estados peligrosos. | MVP | [SECURITY.md](../SECURITY.md); RF-04 |
+| RNF-07 | **Licencia**: el producto es AGPL-3.0; las librerías (WIT, wasi-grpc, wasi-visa) son Apache-2.0. | MVP | ADR-0004; [licencia.md](licencia.md) |
+| RNF-08 | **Reporte congelado**: el formato textual actual (`ResultadoSecuencia::reporte`) es spec; no se cambia sin querer. | MVP | `modelo/src/lib.rs::reporte` |
+| RNF-09 | **No re-investigación**: las decisiones se anclan al repo o a la investigación citada, no a suposiciones. | MVP | convención de redacción |
+
+## Verificación
+
+- Todo RF/RNF es trazable (columna *Trazabilidad*) a un archivo del repo o
+  a un ADR.
+- Los marcados *(propuesta)* son decisiones de diseño a confirmar en su doc
+  de `diseno/`.
+- Las pruebas unitarias actuales (`cargo test`) cubren RF-09, RF-13, RF-16,
+  RF-17, RF-26; el resto se cubrirá al implementar.

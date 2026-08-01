@@ -9,6 +9,12 @@ cada paso, y cada paso se invoca **por gRPC por su nombre** — nunca con una
 llamada directa. Eso aísla los pasos entre sí y deja la puerta abierta a
 escribirlos en cualquier lenguaje.
 
+## Documentación
+
+La documentación de producto (visión, requisitos, arquitectura, ADRs,
+diseño del dominio, licencia y roadmap) vive en [`docs/`](docs/README.md).
+Empieza por [`docs/vision.md`](docs/vision.md).
+
 ## Correr el ejemplo
 
 ```sh
