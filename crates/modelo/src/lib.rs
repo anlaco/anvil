@@ -1,8 +1,5 @@
-//! El modelo de datos del secuenciador y los mensajes de `paso.proto`.
-//!
-//! Port de `secuenciador/modelo.ana` + `secuenciador/rpc/paso_codec.ana`.
-//! La especificación no cambia con la migración a Rust: mismos campos,
-//! mismos estados, mismo contrato en el cable.
+//! El modelo de datos del secuenciador y los mensajes de `paso.proto`:
+//! mismos campos, mismos estados, mismo contrato en el cable.
 
 pub mod proto;
 
@@ -68,12 +65,12 @@ impl ResultadoSecuencia {
         ResultadoSecuencia { nombre: nombre.to_string(), pasos: Vec::new() }
     }
 
-    /// Port de `ejecutor.ana:registra`.
+    /// Añade un resultado de paso al agregado de la secuencia.
     pub fn registra(&mut self, paso: ResultadoStep) {
         self.pasos.push(paso);
     }
 
-    /// Port de `ejecutor.ana:estado_de`. Un `error` en cualquier paso manda
+    /// Estado agregado de la secuencia. Un `error` en cualquier paso manda
     /// sobre un `fallo`; sin ninguno de los dos, la secuencia pasa.
     pub fn estado(&self) -> &'static str {
         if self.pasos.iter().any(|p| p.estado == "error") {
@@ -85,8 +82,8 @@ impl ResultadoSecuencia {
         }
     }
 
-    /// Port de `ejecutor.ana:reporte`. El formato es parte de la spec: la
-    /// salida debe ser idéntica a la de la versión Ana.
+    /// Reporte de la secuencia en texto. El formato es parte de la spec:
+    /// no se toca sin querer tocar la especificación.
     pub fn reporte(&self) {
         println!("=== {}: {} ===", self.nombre, self.estado());
         for p in &self.pasos {

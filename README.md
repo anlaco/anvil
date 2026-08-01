@@ -43,8 +43,8 @@ primer consumidor y la dogfoodea.
 
 ## La especificación
 
-Estas son las decisiones que definen el producto. Sobrevivieron a un cambio
-completo de lenguaje, y no se tocan sin querer tocarlas:
+Estas son las decisiones que definen el producto. No se tocan sin querer
+tocarlas:
 
 - **Semántica de ejecución.** Setup → Main (solo si el Setup fue bien) →
   Cleanup. El Main **corta en el primer fallo**; el Cleanup corre **siempre**
@@ -53,7 +53,7 @@ completo de lenguaje, y no se tocan sin querer tocarlas:
   número de intento llega al paso, que puede usarlo.
 - **Tres estados:** `paso`, `fallo`, `error`. En el agregado de la secuencia,
   un `error` manda sobre un `fallo`.
-- **El contrato** está en `secuenciador/rpc/paso.proto`: `PeticionPaso`,
+- **El contrato** está en `crates/modelo/paso.proto`: `PeticionPaso`,
   `ResultadoPasoProto`, `service EjecutorPasos { rpc Invoca }`. Es la fuente
   de verdad; los structs `prost` de `crates/modelo/src/proto.rs` lo espejan a
   mano (wasi-grpc v0.1 no trae codegen).
@@ -62,14 +62,7 @@ completo de lenguaje, y no se tocan sin querer tocarlas:
 
 ```sh
 cargo test              # tests unitarios
-./verifica_paridad.sh   # la secuencia de ejemplo en 4 combinaciones
 ```
-
-`verifica_paridad.sh` corre `basica_datos` con motor y ejecutor en Rust, en
-Ana, y **cruzados en las dos direcciones**, exigiendo que las cuatro salidas
-sean idénticas. Las cruzadas son las que prueban de verdad que el contrato
-gRPC se respeta byte a byte y que las dos implementaciones son
-intercambiables.
 
 ## Licencia
 
@@ -89,23 +82,3 @@ Las librerías sobre las que se apoya van deliberadamente **Apache-2.0**:
 
 Un paso de test se **linka** con las librerías, así que copyleft ahí
 contagiaría el código de quien las use. En el secuenciador no ocurre.
-
-## La versión en Ana
-
-El proyecto se escribió primero en [Ana](https://github.com/anlaco/anlaco-lang)
-(archivos `.ana`), y ese código **sigue aquí y sigue funcionando**:
-
-```
-grpc/                 pila HTTP/2 + HPACK + protobuf en Ana
-secuenciador/*.ana    modelo, ejecutor, pasos, motor y ejecutor gRPC
-```
-
-No es histórico muerto: es la referencia contra la que se verifica la
-paridad, y la prueba viva de que el contrato es independiente del lenguaje.
-Correrlo necesita `bin/anac`, que no está versionado (es un artefacto de
-build — ver `bin/VERSION.md`).
-
-Ana la desarrolla un equipo independiente. Si algo hace falta y Ana no lo
-tiene, se abre un issue en su repositorio (`gh issue create --repo
-anlaco/anlaco-lang`) — nunca se arregla desde aquí. La guía del lenguaje,
-con el protocolo para reportar, está en `.claude/skills/ana/`.

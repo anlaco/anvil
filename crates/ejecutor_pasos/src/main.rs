@@ -1,6 +1,5 @@
 //! Servidor gRPC que ejecuta pasos por nombre: el adaptador entre el motor
-//! genérico y los pasos concretos. Port de
-//! `secuenciador/rpc/ejecutor_pasos.ana`, ahora sobre `wasi-grpc`.
+//! genérico y los pasos concretos, sobre `wasi-grpc`.
 //!
 //! Correr (desde la raíz del repo):
 //!   cargo build --target wasm32-wasip2 -p ejecutor_pasos

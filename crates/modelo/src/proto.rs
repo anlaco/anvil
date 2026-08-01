@@ -1,10 +1,9 @@
-//! Los mensajes de `secuenciador/rpc/paso.proto`, declarados a mano con
-//! `prost` (v0.1 de wasi-grpc no trae codegen). El `.proto` sigue siendo la
-//! fuente de verdad del contrato: si se toca uno, hay que tocar el otro.
+//! Los mensajes de `paso.proto`, declarados a mano con `prost` (v0.1 de
+//! wasi-grpc no trae codegen). El `.proto` es la fuente de verdad del
+//! contrato: si se toca uno, hay que tocar el otro.
 //!
 //! Los tres campos de medida van como `string` porque así los definió el
-//! contrato y así los manda la versión Ana. En proto3 un `string` vacío no
-//! se transmite, que es justo lo que hacía `paso_codec.ana:texto_o_vacio`.
+//! contrato. En proto3 un `string` vacío no se transmite.
 
 use prost::Message;
 
@@ -39,8 +38,7 @@ pub struct ResultadoPasoProto {
 }
 
 /// Un `f64` opcional al texto que viaja por el cable: vacío si no hay
-/// valor. Los enteros se escriben sin decimales ("5" y no "5.0"), que es
-/// como los formatea Ana.
+/// valor. Los enteros se escriben sin decimales ("5" y no "5.0").
 fn a_texto(v: Option<f64>) -> String {
     match v {
         None => String::new(),
@@ -108,9 +106,8 @@ mod tests {
 
     #[test]
     fn campos_vacios_no_viajan() {
-        // proto3: un string vacío no se serializa. Es lo que hacía
-        // `texto_o_vacio` en el codec de Ana, y por qué el codec de Ana
-        // solo decodifica los tres primeros campos sin romperse.
+        // proto3: un string vacío no se serializa, así que un resultado
+        // sin medida solo viaja con los tres primeros campos.
         let r = ResultadoStep::nuevo("x", "paso", "ok");
         let p: ResultadoPasoProto = (&r).into();
         let bytes = p.encode_to_vec();

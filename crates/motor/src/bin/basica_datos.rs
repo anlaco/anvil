@@ -1,7 +1,6 @@
 //! La secuencia de ejemplo "basica" expresada como **datos** y corrida por
 //! el motor genérico: cada paso se invoca por gRPC contra el ejecutor, no
-//! con una llamada directa. Port de
-//! `secuenciador/ejemplos/basica_datos.ana`.
+//! con una llamada directa.
 //!
 //! Antes de correr esto, en otra terminal:
 //!   wasmtime -S cli -S tcp=y -S inherit-network=y \
