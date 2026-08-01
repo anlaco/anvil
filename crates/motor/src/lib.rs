@@ -1,6 +1,5 @@
 //! Motor genérico de secuencias: lee una `DefinicionSecuencia` (datos) y la
 //! corre invocando cada paso **por gRPC**, nunca con una llamada directa.
-//! Port de `secuenciador/rpc/motor.ana`.
 //!
 //! Que todo paso pase por el cable es deliberado y es la decisión de
 //! arquitectura del proyecto: aísla cada paso y deja la puerta abierta a

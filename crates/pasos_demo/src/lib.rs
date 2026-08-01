@@ -1,6 +1,5 @@
-//! Los pasos de la secuencia de ejemplo "basica". Port de
-//! `secuenciador/pasos_demo.ana`, con el mismo comportamiento simulado —
-//! forma parte de la especificación que la migración conserva.
+//! Los pasos de la secuencia de ejemplo "basica", con comportamiento
+//! simulado — forma parte de la especificación del producto.
 //!
 //! Todos toman `intento` aunque la mayoría lo ignore: es la convención
 //! uniforme que necesita el despacho por nombre.
