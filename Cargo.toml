@@ -5,6 +5,7 @@ members = [
     "crates/pasos_demo",
     "crates/ejecutor_pasos",
     "crates/motor",
+    "crates/cargador",
 ]
 
 [workspace.package]
@@ -20,7 +21,13 @@ license = "AGPL-3.0-or-later"
 [workspace.dependencies]
 modelo = { path = "crates/modelo" }
 pasos_demo = { path = "crates/pasos_demo" }
+cargador = { path = "crates/cargador" }
 prost = "0.14"
+serde = { version = "1", features = ["derive"] }
+# `noyalib` es el YAML serde-mantenido y puro Rust (sin `unsafe`), sucesor
+# de `serde_yaml` (archivado) y de `serde_yml` (hoy un shim deprecado hacia
+# noyalib). Se linka solo en `cargador`; compila a `wasm32-wasip2`.
+noyalib = "0.0.18"
 
 # `wasi-grpc` es un proyecto aparte (github.com/anlaco/wasi-grpc, privado).
 # Se referencia por ruta porque anvil lo dogfoodea: los dos repos se

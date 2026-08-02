@@ -7,9 +7,14 @@ description = "Motor genérico de secuencias del secuenciador anvil"
 
 [dependencies]
 modelo.workspace = true
+cargador.workspace = true
 prost.workspace = true
 wasi-grpc.workspace = true
 
 [[bin]]
 name = "basica_datos"
 path = "src/bin/basica_datos.rs"
+
+[[bin]]
+name = "anvil"
+path = "src/bin/anvil.rs"
