@@ -35,14 +35,18 @@ Lo que ya existe en el repo:
 
 → [diseno/formato-de-secuencia.md](diseno/formato-de-secuencia.md)
 
-## M2 — ResultSink desacoplado · MVP / MVP-parcial
+## M2 — ResultSink desacoplado · MVP / MVP-parcial ✅ (hecho salvo SQLite)
 
 - Reemplazar `println!` por un `ResultSink` con lifecycle (estilo
-  `ResultListener` de OpenTAP): consola, JSON, CSV, SQLite (RF-21, RF-22).
-- Reintento/reconexión ante fallos transitorios (RF-23, MVP-parcial).
-- El reporte textual congelado se conserva como uno de los sinks.
+  `ResultListener` de OpenTAP): **consola, JSON, CSV** (RF-21, RF-22).
+  **SQLite aplazado** (ADR-0007: SQLite es C y no compila en `wasm32-wasip2`
+  en este toolchain; el valor real vs TestStand es el desacoplamiento, no
+  la BD embebida).
+- Reintento/reconexión ante fallos transitorios (RF-23, MVP-parcial):
+  infraestructura ligera de reintento de IO para los sinks de fichero.
+- El reporte textual congelado se conserva como uno de los sinks (RNF-08).
 
-→ [diseno/reportes.md](diseno/reportes.md)
+→ [diseno/reportes.md](diseno/reportes.md), [adr/0007-sqlite-aplazado.md](adr/0007-sqlite-aplazado.md)
 
 ## M3 — Step types built-in + límites como datos · MVP / MVP-parcial
 
@@ -92,6 +96,9 @@ Lo que ya existe en el repo:
   firma del paso (ver [contrato-grpc.md](contrato-grpc.md)). →
   diseno/ui-vs-headless.md, diseno/modelo-de-pasos.md
 - **ResultSinks sectoriales**: STDF / ATML (RF-24). → diseno/reportes.md
+- **Sink SQLite**: persistencia local consultable (aplazado del MVP, ADR-0007;
+  requiere toolchain C→wasm o impl. Rust pura madura, o un sink en el host).
+  → diseno/reportes.md
 - **PyVISA/SCPI nativo** (RF-37). → diseno/integracion-instrumentos.md
 - **StationGlobals** (RF-32). → diseno/variables-y-alcances.md
 - **Custom step types** con substeps (RF-28). → diseno/modelo-de-pasos.md
