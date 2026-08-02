@@ -15,6 +15,19 @@ use wasi_grpc::grpc::Servidor;
 /// propio; un `.wasm` de paso cargado por path es igual a éste.
 const PUERTO_DEFECTO: u16 = 9100;
 
+/// Despacho por nombre: raíz de composición del adapter (M5, RF-36).
+/// Consulta primero el adapter **real** (`pasos_scpi`: instrumento por
+/// SCPI/TCP) y luego los pasos **simulados** (`pasos_demo`). Un nombre
+/// desconocido en ambos cae a `error` en `pasos_demo::despacha` (no
+/// pánico: RF-12). El motor no cambia: sigue pidiendo `nombre` por gRPC
+/// y el paso sigue siendo opaco (ADR-0003/0005). `paso.proto` no cambia.
+fn despacha(nombre: &str, intento: i32) -> modelo::ResultadoStep {
+    if let Some(r) = pasos_scpi::despacha(nombre, intento) {
+        return r;
+    }
+    pasos_demo::despacha(nombre, intento)
+}
+
 fn main() {
     let puerto = std::env::var("ANVIL_PORT")
         .ok()
@@ -76,7 +89,7 @@ fn main() {
             };
             eprintln!("paso pedido: {} intento={}", pet.nombre, pet.intento);
 
-            let resultado = pasos_demo::despacha(&pet.nombre, pet.intento);
+            let resultado = despacha(&pet.nombre, pet.intento);
             let respuesta: ResultadoPasoProto = (&resultado).into();
 
             if let Err(e) = conn.responder(peticion.stream, &respuesta.encode_to_vec()) {

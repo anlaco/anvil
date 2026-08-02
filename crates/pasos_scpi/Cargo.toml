@@ -1,0 +1,9 @@
+[package]
+name = "pasos_scpi"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Pasos de instrumento reales por SCPI/TCP para anvil (adapter gRPC, RF-36)"
+
+[dependencies]
+modelo.workspace = true

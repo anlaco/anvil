@@ -86,7 +86,7 @@ Prioridad: **MVP** (Must), **MVP-parcial** (Should), **post-MVP** (Could),
 | RF-33 | **Precondición** por step (el paso se salta si no se cumple). | MVP-parcial | `motor::evalua_precondicion` (M4-núcleo); [diseno/motor-de-expresiones.md](diseno/motor-de-expresiones.md) |
 | RF-34 | Control de flujo: **pause-on-fail**, **step**, **disable** de pasos. | MVP-parcial | `disable` + `pause_on_fail` en `DefinicionPaso` (M4-núcleo); `step` post-MVP; [diseno/motor-de-ejecucion.md](diseno/motor-de-ejecucion.md) |
 | RF-35 | **Expression engine** (sintaxis **Julia**, **no** C-like). | MVP-parcial | `crates/expr` (M4-núcleo); [diseno/motor-de-expresiones.md](diseno/motor-de-expresiones.md) |
-| RF-36 | Integración de instrumentos por **adapter gRPC**. | MVP-parcial | [diseno/integracion-instrumentos.md](diseno/integracion-instrumentos.md) |
+| RF-36 | Integración de instrumentos por **adapter gRPC**. | MVP-parcial | `crates/pasos_scpi` (M5, SCPI/TCP + mock); [ADR-0017](adr/0017-adapter-grpc-de-instrumento-real-por-scpi-tcp.md); [diseno/integracion-instrumentos.md](diseno/integracion-instrumentos.md) |
 | RF-36.1 | Un paso puede servirse por un **ejecutor gRPC remoto** en otro lenguaje o SO (executores de lenguaje distribuidos en `executores/`); el motor despacha por **nombre→endpoint**. | MVP extendido (M5-ext.1) ✅ | `Motor::desde_programa` + `ejecutores:`/`ejecutor:` (M5-ext.1, ADR-0013); [ADR-0013](adr/0013-cargador-wasm-host-side-y-routing.md); [diseno/executores-lenguaje.md](diseno/executores-lenguaje.md) |
 | RF-36.2 | Un paso **WASM propio** se carga por **path** en runtime (modelo `.vi`), sin recompilar; cada módulo corre aislado. Lo carga el **host** (no el ejecutor embebido: un guest WASM no puede instanciar wasmtime dentro de sí mismo). El `.wasm` es un **componente** que exporta `run` (WIT `anvil:paso`, ADR-0015); el host lo puentea a gRPC. | MVP extendido (M5-ext.2) ✅ | ADR-0015: puente `anvil-puente-wasm` + override `--ejecutor` sintético (el motor nunca ejecuta `Wasm`); [diseno/executores-lenguaje.md](diseno/executores-lenguaje.md) |
 | RF-36.3 | El routing `ejecutores:` vive en el **YAML** de la secuencia con **override por flag** `--ejecutor nombre=host:puerto` (patrón embebido-primero, como los límites). | MVP extendido (M5-ext.1) ✅ | `cargador::aplicar_override_ejecutores` (M5-ext.1, ADR-0013); [diseno/executores-lenguaje.md](diseno/executores-lenguaje.md) |
@@ -97,9 +97,9 @@ Prioridad: **MVP** (Must), **MVP-parcial** (Should), **post-MVP** (Could),
 
 | ID | Requisito | Prioridad | Trazabilidad |
 |---|---|---|---|
-| RF-38 | **Process model Sequential** simple; separación secuencia vs. "cómo se corre en producción". | MVP-parcial | [diseno/proceso-de-test.md](diseno/proceso-de-test.md) |
+| RF-38 | **Process model Sequential** simple; separación secuencia vs. "cómo se corre en producción". | MVP-parcial | `process_models/sequential.yaml` + `cargador::cargar_programa_con_pm` (M5); [ADR-0016](adr/0016-process-model-sequential-como-secuencia-envoltorio.md); [diseno/proceso-de-test.md](diseno/proceso-de-test.md) |
 | RF-39 | Paralelismo (Parallel/Batch) con cancelación jerárquica. | post-MVP | diseno/proceso-de-test.md |
-| RF-40 | **Headless/CLI** primero. | MVP | [diseno/ui-vs-headless.md](diseno/ui-vs-headless.md) |
+| RF-40 | **Headless/CLI** primero. | MVP | `crates/motor/src/bin/anvil.rs` (M5: `--process-model`/`--validate`/`--port`/`--quiet`/`--help`/`--version`); [ADR-0011](adr/0011-distribucion-un-binario-hospeda-wasmtime.md); [diseno/ui-vs-headless.md](diseno/ui-vs-headless.md) |
 | RF-41 | Operator UI web + UIMsgs. | post-MVP | diseno/ui-vs-headless.md |
 
 ### Out-of-scope (v1)

@@ -120,7 +120,14 @@ impl Motor {
     /// `wasm` **no** abre conexión aquí (M5-ext.1 no lo instancia); un
     /// `embebido` declarado explícitamente usa la conexión `EMBEDIDO`.
     pub fn desde_programa(programa: &Programa) -> Result<Self, Error> {
-        let mut motor = Self::conecta("127.0.0.1", 9100)?;
+        Self::desde_programa_en(programa, "127.0.0.1", 9100)
+    }
+
+    /// Igual que `desde_programa`, con el endpoint del **embebido** explícito:
+    /// lo necesita el CLI para honrar `--port` (RF-40) y reintentar la
+    /// conexión mientras el ejecutor arranca.
+    pub fn desde_programa_en(programa: &Programa, host: &str, puerto: u16) -> Result<Self, Error> {
+        let mut motor = Self::conecta(host, puerto)?;
         for (nombre, def) in &programa.ejecutores {
             if let TipoEjecutor::Grpc { host, puerto } = &def.tipo {
                 motor.conexiones.insert(nombre.clone(), Cliente::conectar(host, *puerto)?);

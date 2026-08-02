@@ -1,0 +1,19 @@
+# Secuencia de smoke del adapter SCPI (M5, RF-36). Usa el paso real
+# `medir_voltaje_scpi` del crate `pasos_scpi`: el ejecutor abre un
+# `TcpStream` a `ANVIL_SCPI_ADDR` (default 127.0.0.1:5025), manda
+# `MEASURE:VOLTAGE?\n` y parsea la respuesta. El motor evalúa el límite
+# declarado (4.0–5.0) contra `valor_medido` (ADR-0008).
+#
+# Smoke (dos terminales):
+#   1) mock SCPI en 5025 que responde "4.8\n"  (ver docs/guia-inicio-rapido.md)
+#   2) wasmtime ... target/wasm32-wasip2/debug/ejecutor_pasos.wasm   (9100)
+#   3) wasmtime ... target/wasm32-wasip2/debug/anvil-guest.wasm ejemplos/scpi.yaml
+# El motor evalúa 4.8 contra 4.0–5.0 → `paso`.
+nombre: scpi_demo
+main:
+  - nombre: medir_voltaje_scpi
+    reintentos: 1
+    limite:
+      tipo: rango
+      min: 4.0
+      max: 5.0

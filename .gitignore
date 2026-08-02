@@ -3,3 +3,6 @@
 *.wasm
 /target
 Cargo.lock
+# Salidas de smoke del CLI (./anvil ... --json ./out.json):
+out.json
+out.csv

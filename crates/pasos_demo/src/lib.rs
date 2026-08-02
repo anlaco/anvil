@@ -55,6 +55,24 @@ pub fn desconectar(_intento: i32) -> ResultadoStep {
     ResultadoStep::nuevo("desconectar_equipo", "paso", "equipo desconectado")
 }
 
+/// Plug-in del process model Sequential (M5, RF-38): identifica el UUT.
+/// En fábrica leería el número de serie (escáner, puerto serie…); aquí es
+/// simulado: devuelve `paso` con el serial en `mensaje`, que el `asigna`
+/// del PM vuelca a `locals.uut_id`. Es un paso `grpc` despachado por el
+/// ejecutor, no un callback motor-side — así el PM es datos (ADR-0005).
+pub fn identificar_uut(_intento: i32) -> ResultadoStep {
+    ResultadoStep::nuevo("identificar_uut", "paso", "UUT-DEMO-001")
+}
+
+/// Plug-in del process model Sequential (M5, RF-38): notifica el
+/// resultado del UUT (piloto, buzzer, MES…). Simulado: siempre `paso`.
+/// En el PM canónico corre en `cleanup`, tras el `sequence_call` al
+/// usuario, así el `asigna` del call ya dejó en `locals.estado_usuario`
+/// el agregado de la secuencia del usuario.
+pub fn notificar_resultado(_intento: i32) -> ResultadoStep {
+    ResultadoStep::nuevo("notificar_resultado", "paso", "UUT notificado")
+}
+
 /// Despacho por nombre: el motor invoca los pasos por su nombre, nunca con
 /// una llamada directa, así que este es el único punto donde el nombre del
 /// cable se ata a una función. Un nombre desconocido es `error`, no pánico:
@@ -66,6 +84,8 @@ pub fn despacha(nombre: &str, intento: i32) -> ResultadoStep {
         "verificar_led" => verificar_led(intento),
         "abrir_rele" => abrir_rele(intento),
         "desconectar_equipo" => desconectar(intento),
+        "identificar_uut" => identificar_uut(intento),
+        "notificar_resultado" => notificar_resultado(intento),
         _ => ResultadoStep::nuevo("desconocido", "error", "paso no reconocido"),
     }
 }
@@ -111,5 +131,26 @@ mod tests {
         assert_eq!(despacha("verificar_led", 1).nombre, "verificar_led");
         assert_eq!(despacha("abrir_rele", 1).estado, "paso");
         assert_eq!(despacha("desconectar_equipo", 1).estado, "paso");
+    }
+
+    #[test]
+    fn identificar_uut_devuelve_serial_demo() {
+        let r = identificar_uut(1);
+        assert_eq!(r.estado, "paso");
+        assert_eq!(r.mensaje, "UUT-DEMO-001");
+        assert_eq!(r.nombre, "identificar_uut");
+    }
+
+    #[test]
+    fn notificar_resultado_pasa() {
+        let r = notificar_resultado(1);
+        assert_eq!(r.estado, "paso");
+        assert_eq!(r.nombre, "notificar_resultado");
+    }
+
+    #[test]
+    fn despacha_resuelve_los_dos_plugines_del_pm() {
+        assert_eq!(despacha("identificar_uut", 1).nombre, "identificar_uut");
+        assert_eq!(despacha("notificar_resultado", 1).estado, "paso");
     }
 }

@@ -1,0 +1,43 @@
+# Process model Sequential canónico (M5, RF-38).
+#
+# Encarna la separación de TestStand "el test vs. cómo se corre en
+# producción" **sin** su process model monolítico: el PM es él mismo una
+# secuencia (datos, no código con callbacks) que **envuelve** a la
+# secuencia del usuario. Identifica el UUT en `setup`, la corre en `main`
+# con un `sequence_call`, y notifica en `cleanup`.
+#
+# El `sequence_call` apunta al nombre reservado `secuencia_usuario`: el
+# cargador (`cargar_programa_con_pm`, invocado por `--process-model`) lo
+# reescribe al path canónico de la secuencia del usuario pasada en el CLI.
+# El motor **no se toca** (ADR-0005): ve un `Programa` con una raíz (este
+# PM) y un archivo externo (la secuencia del usuario), y lo orquesta como
+# cualquier `sequence_call` (ADR-0010). El resultado de la secuencia del
+# usuario queda anidado en `sub_pasos` y su estado agregado se captura en
+# `locals.estado_usuario` vía `asigna`.
+#
+# Restricción del PM canónico: declara **sin `parametros`**, así exige que
+# la secuencia del usuario **no declare `parameters`** en su raíz (la
+# firma vacía debe encajar). El usuario gestiona su estado con `locals` /
+# `file_globals`. Un PM custom puede declarar `parametros` para emparejar
+# con una secuencia cuyo `parameters` coincida (post-MVP: librería de PMs).
+#
+# Los plug-ins (`identificar_uut`, `notificar_resultado`) son pasos `grpc`
+# despachados por el ejecutor — pasos reales, no callbacks motor-side —
+# así el PM es datos editables sin recompilar.
+
+nombre: sequential
+locals:
+  uut_id: ""
+  estado_usuario: ""
+setup:
+  - nombre: identificar_uut
+    reintentos: 1
+    asigna: { uut_id: "${resultado.mensaje}" }
+main:
+  - nombre: correr_secuencia_usuario
+    tipo: sequence_call
+    secuencia: secuencia_usuario          # reservado; reescrito por el cargador
+    asigna: { estado_usuario: "${resultado.estado}" }
+cleanup:
+  - nombre: notificar_resultado
+    reintentos: 1
