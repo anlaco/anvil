@@ -1,7 +1,10 @@
 # Diseño: Variables y alcances
 
-> **Prioridad:** MVP-parcial. **Propuesta** (no implementado). Locals /
-> Parameters / FileGlobals en MVP-parcial; StationGlobals post-MVP.
+> **Prioridad:** MVP-parcial. **Locals / Parameters / FileGlobals
+> implementados en M4-núcleo** (motor-side); StationGlobals post-MVP. El
+> cableo de variables al paso por el wire (`paso.proto`) es post-MVP: en MVP
+> las variables viven en el motor y `asigna` vuelca `resultado.*` a `Locals`
+> (ADR-0009).
 
 Modelo mental de TestStand: "una hoja de cálculo para tests" — variables
 tipadas con alcance, para cablear datos entre pasos sin código pegamento

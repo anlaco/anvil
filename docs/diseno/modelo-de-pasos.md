@@ -38,16 +38,29 @@ no tumba el ejecutor (RF-12).
 
 | Tipo | Qué hace | MVP |
 |---|---|---|
-| **pass/fail** | Hace algo y reporta `paso`/`fallo` sin medida. El más simple. | ✅ |
-| **limit test** | Mide y compara contra high/low o comparación → `paso`/`fallo`. | ✅ |
-| **action** | Ejecuta una acción (mover un fixture, abrir un relé); el estado es `paso` si no hubo `error`. | MVP-parcial |
-| **sequence call** | Invoca otra secuencia anidada. | MVP-parcial |
-| **statement** | Evalúa una expresión del expression engine (asignación). | MVP-parcial |
+| **pass/fail** | Hace algo y reporta `paso`/`fallo` sin medida. El más simple. | ✅ hecho (M3) |
+| **limit test** | Mide y compara contra high/low o comparación → `paso`/`fallo`. | ✅ hecho (M3) |
+| **action** | Ejecuta una acción (mover un fixture, abrir un relé); el estado es `paso` si no hubo `error`. | MVP-parcial · hecho (M3) |
+| **sequence call** | Invoca otra secuencia anidada. | MVP-parcial · aplazado a M4 |
+| **statement** | Evalúa una expresión del expression engine (asignación). | MVP-parcial · aplazado a M4 |
 
 Los built-in son **comportamientos** del lado del ejecutor, no del motor:
 el motor sigue siendo genérico (ADR-0005).
 
-## Registro y descubrimiento de pasos (MVP-parcial, pendiente)
+### Cómo se encarnan en M3
+
+- **pass/fail** y **action** no necesitan lógica nueva: son pasos normales que
+  devuelven `paso`/`fallo`/`error` (con o sin medida). `pasos_demo::verificar_led`
+  es pass/fail; `pasos_demo::abrir_rele` es action.
+- **limit test** se habilita con los **límites como datos** (RF-29,
+  [limites-y-estados.md](limites-y-estados.md)): el paso mide y devuelve
+  `valor_medido`; el motor evalúa el `Limite` del YAML y produce el estado
+  (ADR-0008). No hace falta un paso "limit test" dedicado ni tocar el
+  contrato — cualquier paso que mida puede llevar un límite declarado.
+- **sequence call** y **statement** quedan para M4: dependen, respectivamente,
+  de la infraestructura de subsecuencias y del *expression engine* (RF-35).
+
+## Registro y descubrimiento de pasos (MVP-parcial, aplazado a post-M3)
 
 Hoy el despacho es un `match` hardcodeado. Para que un ejecutor pueda
 **descubrir** qué pasos ofrece, y para que un editor los liste, hace falta
@@ -61,7 +74,7 @@ un **registro** de pasos:
   "nombre + parámetros + retorno", para que arrastrar el archivo del code
   module auto-pueble la tabla de parámetros como en TestStand.
 
-## Versionado de pasos (MVP-parcial, pendiente)
+## Versionado de pasos (MVP-parcial, aplazado a post-M3)
 
 Un paso puede evolucionar (firmas, semántica). Propuesta:
 

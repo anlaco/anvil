@@ -48,28 +48,55 @@ Lo que ya existe en el repo:
 
 → [diseno/reportes.md](diseno/reportes.md), [adr/0007-sqlite-aplazado.md](adr/0007-sqlite-aplazado.md)
 
-## M3 — Step types built-in + límites como datos · MVP / MVP-parcial
+## M3 — Step types built-in + límites como datos · MVP / MVP-parcial ✅ (hecho)
 
-- Built-in MVP: **pass/fail**, **limit test**, **action**, **sequence call**,
-  **statement** (RF-25, RF-26, RF-27).
-- Límites high/low/comparación como **datos first-class** (RF-29).
-- **Property loader**: límites desde fichero externo (RF-30, MVP-parcial).
-- Empaquetado/versionado de pasos (registro/descubrimiento).
+- Built-in MVP: **pass/fail**, **limit test**, **action** (RF-25, RF-26,
+  RF-27). **statement** se implementa en M4-núcleo (paso local, sin gRPC);
+  **sequence call** se aplaza a **M4b** (depende de subsecuencias y de
+  Parameters entrada/salida reales).
+- Límites high/low/comparación como **datos first-class** (RF-29): el límite
+  vive en el YAML, no en el código del paso; el paso mide y el **motor**
+  evalúa el límite declarado (ADR-0008). `paso.proto` no cambia.
+- **Property loader**: límites desde un fichero sidecar (RF-30, MVP-parcial);
+  el cargador los inyecta por nombre de paso, sobreescribiendo el embebido.
+- **Empaquetado/versionado de pasos (registro/descubrimiento):** aplazado a
+  post-M3 — toca el contrato gRPC (superficie crítica, RNF-05) y merece un
+  cierre con ADR aparte.
 
 → [diseno/modelo-de-pasos.md](diseno/modelo-de-pasos.md),
-[diseno/limites-y-estados.md](diseno/limites-y-estados.md)
+[diseno/limites-y-estados.md](diseno/limites-y-estados.md),
+[adr/0008-limites-evaluados-por-el-motor.md](adr/0008-limites-evaluados-por-el-motor.md)
 
-## M4 — Variables, control de flujo y expresiones · MVP-parcial
+## M4-núcleo — Variables, control de flujo y expresiones · MVP-parcial ✅ (hecho)
 
-- Scopes **Locals / Parameters / FileGlobals** (RF-31).
-- Precondición por step (RF-33).
-- Control de flujo: **pause-on-fail**, **step**, **disable** (RF-34).
-- **Expression engine** — subconjunto, **sintaxis Python/Scilab/MATLAB-like**
-  (no C-like) (RF-35).
+- **Expression engine** (`crates/expr`) — subconjunto, sintaxis **Julia**
+  (no C-like) (RF-35): `+ - * /`, `== != < > <= >=` (encadenables), `&& || !`
+  (con cortocircuito), `nothing` para ausencia, acceso a scopes y a
+  `resultado.*`, asignación con `=`. AST acotado, sin deps externas (compila
+  a WASM, ADR-0001); Bool estricto (sin truthiness, como Julia).
+- Scopes **Locals / Parameters / FileGlobals** (RF-31), **motor-side**: viven
+  en `EntornoMotor`; el cableo al paso por el wire es post-MVP (ADR-0009).
+- **Precondición** por step (RF-33): el motor evalúa antes de invocar; si
+  falsa, se salta sin gastar intento.
+- Control de flujo: **disable** y **pause_on_fail** (RF-34). `step` se aplaza
+  (WASI P2 sin espera fiable).
+- Paso **statement** local (RF-27): ejecuta sentencias sin gRPC.
+- **Sequence call** (RF-27) aplazado a **M4b**: requiere subsecuencias
+  llamables y Parameters entrada/salida reales. `paso.proto` no cambia
+  (patrón ADR-0008 → ADR-0009).
 
 → [diseno/variables-y-alcances.md](diseno/variables-y-alcances.md),
 [diseno/motor-de-expresiones.md](diseno/motor-de-expresiones.md),
-[diseno/motor-de-ejecucion.md](diseno/motor-de-ejecucion.md)
+[diseno/motor-de-ejecucion.md](diseno/motor-de-ejecucion.md),
+[adr/0009-expresiones-precondiciones-y-asignaciones-las-evalua-el-motor.md](adr/0009-expresiones-precondiciones-y-asignaciones-las-evalua-el-motor.md)
+
+## M4b — Sequence call / subsecuencias · MVP-parcial (pendiente)
+
+- **Sequence call** (RF-27): invocar otra secuencia como un paso, con
+  **Parameters** entrada/salida reales y anidamiento del `ResultadoSecuencia`.
+- Requiere modelo de subsecuencias llamables (cómo se declaran/referencian).
+
+## M5 — Process model Sequential + CLI · MVP-parcial
 
 ## M5 — Process model Sequential + CLI · MVP-parcial
 
