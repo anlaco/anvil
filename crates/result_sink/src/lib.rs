@@ -13,5 +13,10 @@
 //! ver `reintento`).
 
 pub mod consola;
+pub mod csv;
+pub mod json;
+pub mod reintento;
 
 pub use consola::SinkConsola;
+pub use csv::SinkCsv;
+pub use json::SinkJson;

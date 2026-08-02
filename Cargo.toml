@@ -30,6 +30,10 @@ serde = { version = "1", features = ["derive"] }
 # de `serde_yaml` (archivado) y de `serde_yml` (hoy un shim deprecado hacia
 # noyalib). Se linka solo en `cargador`; compila a `wasm32-wasip2`.
 noyalib = "0.0.18"
+# `serde_json` se linka solo en `result_sink` (sinks JSON/CSV), puro Rust y
+# compila a `wasm32-wasip2`. No se añade `serde` con derive a `modelo`: el
+# JSON se ensambla a mano (ver `crates/result_sink/src/json.rs`).
+serde_json = "1"
 
 # `wasi-grpc` es un proyecto aparte (github.com/anlaco/wasi-grpc, privado).
 # Se referencia por ruta porque anvil lo dogfoodea: los dos repos se
