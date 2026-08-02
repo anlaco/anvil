@@ -1,0 +1,10 @@
+[package]
+name = "expr"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Motor de expresiones de anvil (sintaxis Python/MATLAB-like, AST acotado)"
+
+# Sin dependencias externas: compila a wasm32-wasip2 sin fricción (ADR-0001).
+# Las expresiones son datos acotados, no un lenguaje Turing-completo (RF-35).
+[dependencies]
