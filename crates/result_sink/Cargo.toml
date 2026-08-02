@@ -7,3 +7,4 @@ description = "ResultSinks de anvil: consola, JSON, CSV (SQLite aplazado, ADR-00
 
 [dependencies]
 modelo.workspace = true
+serde_json.workspace = true
