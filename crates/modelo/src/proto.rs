@@ -74,6 +74,9 @@ impl From<&crate::ResultadoStep> for ResultadoPasoProto {
 
 impl From<ResultadoPasoProto> for crate::ResultadoStep {
     fn from(p: ResultadoPasoProto) -> Self {
+        // `valor_esperado` y `operador` **no** vienen del cable: el contrato no
+        // lleva límites (ADR-0008). Llegan `None` y los rellena el motor desde
+        // el `Limite` del YAML tras la invocación.
         crate::ResultadoStep {
             nombre: p.nombre,
             estado: p.estado,
@@ -81,6 +84,8 @@ impl From<ResultadoPasoProto> for crate::ResultadoStep {
             valor_medido: de_texto(&p.valor_medido),
             limite_min: de_texto(&p.limite_min),
             limite_max: de_texto(&p.limite_max),
+            valor_esperado: None,
+            operador: None,
         }
     }
 }
