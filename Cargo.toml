@@ -7,6 +7,7 @@ members = [
     "crates/motor",
     "crates/cargador",
     "crates/result_sink",
+    "crates/expr",
 ]
 
 [workspace.package]
@@ -24,6 +25,7 @@ modelo = { path = "crates/modelo" }
 pasos_demo = { path = "crates/pasos_demo" }
 cargador = { path = "crates/cargador" }
 result_sink = { path = "crates/result_sink" }
+expr = { path = "crates/expr" }
 prost = "0.14"
 serde = { version = "1", features = ["derive"] }
 # `noyalib` es el YAML serde-mantenido y puro Rust (sin `unsafe`), sucesor
