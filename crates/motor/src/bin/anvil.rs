@@ -17,7 +17,7 @@
 //! CSV en fichero. Los logs de arranque van a stderr para dejar stdout
 //! limpio para el sink de consola.
 
-use cargador::cargar_de_archivo;
+use cargador::{aplicar_limites, cargar_de_archivo, cargar_limites_de_archivo};
 use modelo::ResultSink;
 use motor::Motor;
 use result_sink::{SinkConsola, SinkCsv, SinkJson};
@@ -28,15 +28,16 @@ fn main() {
     let ruta = match args.next() {
         Some(r) => r,
         None => {
-            eprintln!("uso: anvil <secuencia.yaml> [--json <ruta>] [--csv <ruta>]");
+            eprintln!("uso: anvil <secuencia.yaml> [--json <ruta>] [--csv <ruta>] [--limits <ruta>]");
             std::process::exit(2);
         }
     };
 
     // Parseo manual de flags (sin clap, como el resto del CLI). Acepta
-    // --json <ruta> y --csv <ruta> en cualquier orden tras la secuencia.
+    // --json/--csv/--limits <ruta> en cualquier orden tras la secuencia.
     let mut json_ruta: Option<String> = None;
     let mut csv_ruta: Option<String> = None;
+    let mut limits_ruta: Option<String> = None;
     while let Some(flag) = args.next() {
         let valor = args.next().unwrap_or_else(|| {
             eprintln!("el flag '{flag}' necesita una ruta");
@@ -45,6 +46,7 @@ fn main() {
         match flag.as_str() {
             "--json" => json_ruta = Some(valor),
             "--csv" => csv_ruta = Some(valor),
+            "--limits" => limits_ruta = Some(valor),
             other => {
                 eprintln!("flag desconocido: '{other}'");
                 std::process::exit(2);
@@ -52,7 +54,7 @@ fn main() {
         }
     }
 
-    let definicion = match cargar_de_archivo(&ruta) {
+    let mut definicion = match cargar_de_archivo(&ruta) {
         Ok(d) => d,
         Err(e) => {
             eprintln!("no se pudo cargar la secuencia '{ruta}': {e}");
@@ -60,6 +62,21 @@ fn main() {
         }
     };
     eprintln!("secuencia '{}' cargada ({} pasos)", definicion.nombre, definicion.pasos_main.len());
+
+    // Property loader (RF-30): si se pide un sidecar de límites, se inyecta
+    // por nombre de paso, sobreescribiendo los límites embebidos. Así se
+    // cambian umbrales por lote/variante sin tocar la secuencia.
+    if let Some(r) = limits_ruta.as_deref() {
+        let limites = match cargar_limites_de_archivo(r) {
+            Ok(l) => l,
+            Err(e) => {
+                eprintln!("no se pudo cargar el sidecar de límites '{r}': {e}");
+                std::process::exit(1);
+            }
+        };
+        let n = aplicar_limites(&mut definicion, &limites);
+        eprintln!("sidecar de límites '{r}' aplicado ({n} paso(s) afectado(s))");
+    }
 
     // Abrir los ficheros de salida antes de conectar el motor: si una ruta
     // no se puede crear, fallamos sin haber tocado el ejecutor.
