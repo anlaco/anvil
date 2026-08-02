@@ -26,6 +26,8 @@ const CABECERA: &[&str] = &[
     "valor_medido",
     "limite_min",
     "limite_max",
+    "valor_esperado",
+    "operador",
 ];
 
 /// Verte el resultado a un `Write` como CSV (una fila por paso).
@@ -53,7 +55,7 @@ impl<W: Write> ResultSink for SinkCsv<W> {
     }
 }
 
-/// Construye los 8 campos de una fila de paso, ya como `String`.
+/// Construye los 10 campos de una fila de paso, ya como `String`.
 fn fila_paso(estado_secuencia: &str, p: &ResultadoStep) -> Vec<String> {
     vec![
         estado_secuencia.to_string(),
@@ -64,6 +66,8 @@ fn fila_paso(estado_secuencia: &str, p: &ResultadoStep) -> Vec<String> {
         a_texto(p.valor_medido),
         a_texto(p.limite_min),
         a_texto(p.limite_max),
+        a_texto(p.valor_esperado),
+        p.operador.map(|op| op.simbolo().to_string()).unwrap_or_default(),
     ]
 }
 
@@ -123,10 +127,29 @@ mod tests {
 
         let out = String::from_utf8(sink.salida).unwrap();
         let lineas: Vec<&str> = out.split("\r\n").collect();
-        assert_eq!(lineas[0], "nombre_secuencia,estado,nombre_paso,estado_paso,mensaje,valor_medido,limite_min,limite_max");
-        assert_eq!(lineas[1], "fallo,fallo,medir_voltaje,fallo,fuera de rango,4.2,4.5,5.5");
-        assert_eq!(lineas[2], "fallo,paso,verificar_led,paso,led encendido,,,");
+        assert_eq!(lineas[0], "nombre_secuencia,estado,nombre_paso,estado_paso,mensaje,valor_medido,limite_min,limite_max,valor_esperado,operador");
+        // rango: valor_esperado/operador vacíos (no aplican a un rango).
+        assert_eq!(lineas[1], "fallo,fallo,medir_voltaje,fallo,fuera de rango,4.2,4.5,5.5,,");
+        // sin medida ni límite: los últimos cinco campos vacíos.
+        assert_eq!(lineas[2], "fallo,paso,verificar_led,paso,led encendido,,,,,");
         assert!(lineas[3].is_empty(), "termina en CRLF");
+    }
+
+    #[test]
+    fn comparacion_llena_valor_esperado_y_operador() {
+        use modelo::Operador;
+        let mut s = ResultadoSecuencia::nueva("s");
+        let mut r = ResultadoStep::medido_valor("verificar_frecuencia", "fallo", "990 >= 1000 no cumplido", 990.0);
+        r.operador = Some(Operador::Ge);
+        r.valor_esperado = Some(1000.0);
+        s.registra(r);
+
+        let mut sink = SinkCsv::nuevo(Vec::new());
+        sink.on_fin_secuencia(&s);
+        let out = String::from_utf8(sink.salida).unwrap();
+        let fila = out.split("\r\n").nth(1).unwrap();
+        // valor_medido=990, limite_min/max vacíos, valor_esperado=1000, operador=">=".
+        assert!(fila.contains(",990,,,1000,>="), "fila de comparación: {fila}");
     }
 
     #[test]

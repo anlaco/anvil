@@ -42,8 +42,9 @@ impl<W: Write> ResultSink for SinkJson<W> {
     }
 }
 
-/// Un `ResultadoStep` como objeto JSON: `valor_medido` y límites como
-/// número si los hay, `null` si no.
+/// Un `ResultadoStep` como objeto JSON: `valor_medido`, `limite_min/max` y
+/// `valor_esperado` como número si los hay, `null` si no; `operador` como
+/// símbolo (`">="`, …) o `null`.
 fn paso_a_json(p: &ResultadoStep) -> Value {
     json!({
         "nombre": p.nombre,
@@ -52,6 +53,8 @@ fn paso_a_json(p: &ResultadoStep) -> Value {
         "valor_medido": opt_num(p.valor_medido),
         "limite_min": opt_num(p.limite_min),
         "limite_max": opt_num(p.limite_max),
+        "valor_esperado": opt_num(p.valor_esperado),
+        "operador": p.operador.map(|op| json!(op.simbolo())).unwrap_or(Value::Null),
     })
 }
 
@@ -105,5 +108,27 @@ mod tests {
         let paso1 = &doc["pasos"][1];
         assert!(paso1["valor_medido"].is_null(), "sin medida → null");
         assert!(paso1["limite_min"].is_null());
+    }
+
+    #[test]
+    fn comparacion_aparece_como_valor_esperado_y_operador() {
+        // Un resultado de comparación: el motor rellena valor_esperado y
+        // operador tras evaluar el límite del YAML (ADR-0008).
+        use modelo::Operador;
+        let mut s = ResultadoSecuencia::nueva("s");
+        let mut r = ResultadoStep::medido_valor("verificar_frecuencia", "fallo", "990 >= 1000 no cumplido", 990.0);
+        r.operador = Some(Operador::Ge);
+        r.valor_esperado = Some(1000.0);
+        s.registra(r);
+
+        let mut sink = SinkJson::nuevo(Vec::new());
+        sink.on_fin_secuencia(&s);
+        let doc: Value = serde_json::from_slice(&sink.salida).unwrap();
+        let paso = &doc["pasos"][0];
+        assert_eq!(paso["valor_esperado"], 1000.0);
+        assert_eq!(paso["operador"], ">=");
+        // Sin rango → null.
+        assert!(paso["limite_min"].is_null());
+        assert!(paso["limite_max"].is_null());
     }
 }
