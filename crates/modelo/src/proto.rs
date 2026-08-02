@@ -39,7 +39,11 @@ pub struct ResultadoPasoProto {
 
 /// Un `f64` opcional al texto que viaja por el cable: vacío si no hay
 /// valor. Los enteros se escriben sin decimales ("5" y no "5.0").
-fn a_texto(v: Option<f64>) -> String {
+///
+/// Es `pub` para que los sinks de reporte (CSV) reutilicen el mismo
+/// formato numérico del cable y no lo reimplementen: fuente única de
+/// verdad para cómo se escribe un número de medida.
+pub fn a_texto(v: Option<f64>) -> String {
     match v {
         None => String::new(),
         Some(x) if x.fract() == 0.0 => format!("{}", x as i64),

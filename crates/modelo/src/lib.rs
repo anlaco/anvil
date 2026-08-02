@@ -2,6 +2,8 @@
 //! mismos campos, mismos estados, mismo contrato en el cable.
 
 pub mod proto;
+pub mod result_sink;
+pub use result_sink::{ResultSink, SinkCompuesto};
 
 /// Lo que un paso YA corrido devolvió.
 ///
@@ -82,13 +84,26 @@ impl ResultadoSecuencia {
         }
     }
 
-    /// Reporte de la secuencia en texto. El formato es parte de la spec:
-    /// no se toca sin querer tocar la especificación.
-    pub fn reporte(&self) {
-        println!("=== {}: {} ===", self.nombre, self.estado());
+    /// Reporte de la secuencia en texto. El formato es parte de la spec
+    /// (RNF-08): no se toca sin querer tocar la especificación.
+    ///
+    /// Escribe al `Write` que se le pase, para que el sink de consola (y
+    /// los tests) no se acoplen a stdout. `reporte()` (la API pública
+    /// congelada) delega aquí con `stdout` y produce los mismos bytes que
+    /// el `println!` original.
+    pub fn reporte_a(&self, w: &mut impl std::io::Write) -> std::io::Result<()> {
+        writeln!(w, "=== {}: {} ===", self.nombre, self.estado())?;
         for p in &self.pasos {
-            println!("  [{}] {}: {}", p.estado, p.nombre, p.mensaje);
+            writeln!(w, "  [{}] {}: {}", p.estado, p.nombre, p.mensaje)?;
         }
+        Ok(())
+    }
+
+    /// Reporte de la secuencia a stdout. La API pública congelada (RNF-08):
+    /// delega en `reporte_a` con `stdout` y traga el error de IO, igual
+    /// que hacía el `println!` original.
+    pub fn reporte(&self) {
+        let _ = self.reporte_a(&mut std::io::stdout());
     }
 }
 
@@ -143,5 +158,25 @@ mod tests {
         s.registra(ResultadoStep::nuevo("a", "error", "peor"));
         s.registra(ResultadoStep::nuevo("b", "fallo", "mal"));
         assert_eq!(s.estado(), "error");
+    }
+
+    /// RNF-08: el formato textual de `reporte_a` es spec congelada.
+    /// Este test congela los bytes exactos para detectar cambios
+    /// accidentales.
+    #[test]
+    fn reporte_a_congela_el_formato() {
+        let mut s = ResultadoSecuencia::nueva("basica");
+        s.registra(ResultadoStep::medido("medir_voltaje", "fallo", "voltaje fuera de rango", 4.2, 4.5, 5.5));
+        s.registra(ResultadoStep::nuevo("verificar_led", "paso", "led encendido"));
+
+        let mut out = Vec::new();
+        s.reporte_a(&mut out).unwrap();
+
+        let esperado = "\
+=== basica: fallo ===
+  [fallo] medir_voltaje: voltaje fuera de rango
+  [paso] verificar_led: led encendido
+";
+        assert_eq!(String::from_utf8(out).unwrap(), esperado);
     }
 }
