@@ -1,0 +1,21 @@
+# Secuencia de ejemplo "basica", expresada como datos (ADR-0002).
+# Es el mismo contenido que crates/motor/src/bin/basica_datos.rs, pero en
+# YAML: cargarla con `anvil ejemplos/basica.yaml` produce la misma
+# ejecución que el binario de referencia.
+#
+# Schema de M1 (subconjunto estricto): nombre, reintentos y las tres
+# secciones. Campos de hitos posteriores (limite, disable, etc.) se
+# rechazan aquí —llegan en M3/M4.
+
+nombre: basica
+setup:
+  - nombre: conectar_equipo
+    reintentos: 3
+main:
+  - nombre: medir_voltaje
+    reintentos: 1
+  - nombre: verificar_led
+    reintentos: 1
+cleanup:
+  - nombre: desconectar_equipo
+    reintentos: 1
