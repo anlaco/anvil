@@ -1,0 +1,69 @@
+# M4-núcleo: variables, precondición, asigna, statement y control de flujo.
+#
+# Ejercita los scopes (RF-31), la precondición (RF-33), el control de flujo
+# (RF-34: disable / pause_on_fail), el paso `statement` local (RF-27) y el
+# vuelcado de `resultado` a `Locals` con `asigna`. El cableo al paso por el
+# wire es post-MVP: las variables viven en el motor; el paso gRPC no las recibe.
+#
+# Resultado esperado (medir_voltaje mide 4.2 contra el rango 4.5–5.5 → fallo
+# por límite, ADR-0008; Main corta ahí):
+#   === variables_demo: fallo ===
+#     [paso] init_log: statement ok
+#     [paso] medir_voltaje: 4.2 fuera de rango [4.5, 5.5]
+#     [saltado] paso_obsoleto: disable
+# Estado agregado: "fallo" (hay un fallo; saltado no cuenta). `verificar_frecuencia`
+# no se invoca: Main corta en el primer fallo (pause_on_fail refuerza).
+
+nombre: variables_demo
+
+# Globales del archivo: visibles en toda la ejecución. El motor las carga al
+# iniciar la secuencia. Inmutables durante un paso.
+file_globals:
+  lote: "A-2026-08"   # texto
+  umbral_min: 4.5      # número
+
+# Parámetros vacíos: en M4-núcleo no hay sequence call (reservado para M4b).
+parameters: {}
+
+# Locales de la secuencia: mutables por `asigna` durante la ejecución.
+locals:
+  voltaje_leido: 0.0
+  ok: false
+
+setup:
+  - nombre: conectar_equipo
+    reintentos: 3
+
+main:
+  # Statement local (RF-27): ejecuta una asignación en el motor, sin gRPC.
+  - nombre: init_log
+    tipo: statement
+    statement: 'locals.ok = false'
+
+  # Paso gRPC con precondición (RF-33): sólo mide si hay lote definido. Si la
+  # precondición fuera falsa, el paso se saltaría sin gastar intento.
+  - nombre: medir_voltaje
+    reintentos: 1
+    precondicion: 'file_globals.lote != ""'
+    limite:
+      tipo: rango
+      min: 4.5
+      max: 5.5
+    # Asigna (RF-31): vuelca campos de `resultado` a Locals tras el paso.
+    asigna:
+      voltaje_leido: '${resultado.valor_medido}'
+      ok: '${resultado.estado == "paso"}'
+
+  # Paso deshabilitado (RF-34): se registra como "saltado", no se invoca.
+  - nombre: paso_obsoleto
+    disable: true
+
+  # pause_on_fail (RF-34): si este paso fallara, Main se detendría. Aquí no se
+  # llega: medir_voltaje falla antes y Main corta en el primer fallo.
+  - nombre: verificar_frecuencia
+    reintentos: 1
+    pause_on_fail: true
+
+cleanup:
+  - nombre: desconectar_equipo
+    reintentos: 1

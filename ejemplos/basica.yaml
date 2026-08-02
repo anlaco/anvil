@@ -3,9 +3,11 @@
 # YAML: cargarla con `anvil ejemplos/basica.yaml` produce la misma
 # ejecución que el binario de referencia.
 #
-# Schema de M1 (subconjunto estricto): nombre, reintentos y las tres
-# secciones. Campos de hitos posteriores (limite, disable, etc.) se
-# rechazan aquí —llegan en M3/M4.
+# Schema de M1/M3: nombre, reintentos, las tres secciones y, desde M3, el
+# `limite` por paso (RF-29). El umbral de medir_voltaje vive aquí, no en el
+# código del paso: el paso mide 4.2 V y el motor evalúa el rango 4.5–5.5
+# (ADR-0008). Campos de hitos posteriores (disable, pause_on_fail, etc.)
+# aún se rechazan —llegan en M4.
 
 nombre: basica
 setup:
@@ -14,6 +16,10 @@ setup:
 main:
   - nombre: medir_voltaje
     reintentos: 1
+    limite:
+      tipo: rango
+      min: 4.5
+      max: 5.5
   - nombre: verificar_led
     reintentos: 1
 cleanup:
