@@ -10,15 +10,21 @@
 //!
 //! `--dir=.` expone el directorio actual al WASM para que pueda leer el
 //! YAML desde disco; la ruta se pasa como primer argumento.
+//!
+//! El resultado se vierte a un `ResultSink` (M2): por defecto a consola
+//! (el formato textual congelado, RNF-08). Los flags `--json`/`--csv` se
+//! añaden en el siguiente paso del hito. Los logs de arranque van a stderr
+//! para dejar stdout limpio para el sink de consola.
 
 use cargador::cargar_de_archivo;
 use motor::Motor;
+use result_sink::SinkConsola;
 
 fn main() {
     let ruta = match std::env::args().nth(1) {
         Some(r) => r,
         None => {
-            eprintln!("uso: anvil <secuencia.yaml>");
+            eprintln!("uso: anvil <secuencia.yaml> [--json <ruta>] [--csv <ruta>]");
             std::process::exit(2);
         }
     };
@@ -30,7 +36,7 @@ fn main() {
             std::process::exit(1);
         }
     };
-    println!("secuencia '{}' cargada ({} pasos)", definicion.nombre, definicion.pasos_main.len());
+    eprintln!("secuencia '{}' cargada ({} pasos)", definicion.nombre, definicion.pasos_main.len());
 
     let mut motor = match Motor::conecta("127.0.0.1", 9100) {
         Ok(m) => m,
@@ -39,10 +45,11 @@ fn main() {
             std::process::exit(1);
         }
     };
-    println!("conectado al ejecutor de pasos");
+    eprintln!("conectado al ejecutor de pasos");
 
-    match motor.ejecuta_secuencia(&definicion) {
-        Ok(secuencia) => secuencia.reporte(),
+    let mut consola = SinkConsola::nuevo(std::io::stdout());
+    match motor.ejecuta_secuencia(&definicion, &mut consola) {
+        Ok(_) => {}
         Err(e) => {
             eprintln!("la secuencia se interrumpió: {e}");
             std::process::exit(1);

@@ -7,7 +7,7 @@
 //! irrelevante frente al tiempo de un instrumento real.
 
 use modelo::proto::{PeticionPaso, ResultadoPasoProto, RUTA_INVOCA};
-use modelo::{DefinicionPaso, DefinicionSecuencia, ResultadoSecuencia, ResultadoStep};
+use modelo::{DefinicionPaso, DefinicionSecuencia, ResultadoSecuencia, ResultadoStep, ResultSink};
 use prost::Message;
 use wasi_grpc::grpc::Cliente;
 use wasi_grpc::net;
@@ -75,32 +75,50 @@ impl Motor {
         Ok(resultado)
     }
 
-    /// Corre una secuencia completa. La semántica es la de la spec y no
-    /// cambia con la migración:
+    /// Corre una secuencia completa y vierte el resultado a `sink` a medida
+    /// que avanza. La semántica es la de la spec y no cambia:
     ///
     /// - **Setup**: corren todos; si alguno no pasa, el Main se salta entero.
     /// - **Main**: solo si el Setup fue bien, y **corta en el primer fallo**.
     /// - **Cleanup**: corre siempre, pase lo que pase antes.
+    ///
+    /// El motor dispara el lifecycle del `ResultSink` (`on_inicio_secuencia`
+    /// → `on_inicio_paso`/`on_resultado`/`on_fin_paso` por paso →
+    /// `on_fin_secuencia`). El motor **no sabe** a quién reporta: publica
+    /// eventos, el sink consume.
+    ///
+    /// Si `ejecuta_con_reintentos` propaga un `Error` (red rota), la
+    /// secuencia se interrumpe y **no** se dispara `on_fin_paso` ni
+    /// `on_fin_secuencia` del paso en curso: el lifecycle completo solo se
+    /// garantiza si la secuencia no se interrumpe por error de red.
     pub fn ejecuta_secuencia(
         &mut self,
         definicion: &DefinicionSecuencia,
+        sink: &mut impl ResultSink,
     ) -> Result<ResultadoSecuencia, Error> {
+        sink.on_inicio_secuencia(definicion);
         let mut secuencia = ResultadoSecuencia::nueva(&definicion.nombre);
 
         let mut setup_ok = true;
         for p in &definicion.pasos_setup {
+            sink.on_inicio_paso(p);
             let r = self.ejecuta_con_reintentos(p)?;
+            secuencia.registra(r.clone());
+            sink.on_resultado(&r);
+            sink.on_fin_paso(p);
             if !r.paso() {
                 setup_ok = false;
             }
-            secuencia.registra(r);
         }
 
         if setup_ok {
             for p in &definicion.pasos_main {
+                sink.on_inicio_paso(p);
                 let r = self.ejecuta_con_reintentos(p)?;
                 let corta = !r.paso();
-                secuencia.registra(r);
+                secuencia.registra(r.clone());
+                sink.on_resultado(&r);
+                sink.on_fin_paso(p);
                 if corta {
                     break;
                 }
@@ -110,10 +128,14 @@ impl Motor {
         // Cleanup siempre: un equipo que se quedó encendido es peor que una
         // secuencia que falló.
         for p in &definicion.pasos_cleanup {
+            sink.on_inicio_paso(p);
             let r = self.ejecuta_con_reintentos(p)?;
-            secuencia.registra(r);
+            secuencia.registra(r.clone());
+            sink.on_resultado(&r);
+            sink.on_fin_paso(p);
         }
 
+        sink.on_fin_secuencia(&secuencia);
         Ok(secuencia)
     }
 }

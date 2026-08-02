@@ -8,6 +8,7 @@ description = "Motor genérico de secuencias del secuenciador anvil"
 [dependencies]
 modelo.workspace = true
 cargador.workspace = true
+result_sink.workspace = true
 prost.workspace = true
 wasi-grpc.workspace = true
 
