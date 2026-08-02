@@ -1,0 +1,10 @@
+# Sidecar de límites para ejemplos/limites.yaml (RF-30, property loader).
+# Sobreescribe el límite de medir_voltaje: el rango embebido 4.5–5.5 pasa a
+# una comparacion (>= 4.0), que 4.2 sí cumple. Así la secuencia pasa sin tocar
+# el flujo — el umbral cambia por lote/variante en producción, no en el YAML
+# de la secuencia. El sidecar manda sobre el límite embebido (ADR-0008).
+
+medir_voltaje:
+  tipo: comparacion
+  op: ge
+  esperado: 4.0

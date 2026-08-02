@@ -1,0 +1,32 @@
+# Secuencia de ejemplo para M3: limit test (rango embebido) + action, pensada
+# para correr con el sidecar de límites `limites.limits.yaml` (property loader,
+# RF-30).
+#
+# Sin el sidecar: medir_voltaje mide 4.2 V contra el rango 4.5–5.5 embebido y el
+# motor lo declara fallo (Main corta ahí). Con el sidecar, el límite de
+# medir_voltaje pasa a comparacion (>= 4.0): 4.2 lo cumple y la secuencia pasa.
+# Cambiar el veredicto sin tocar la secuencia es el valor del property loader.
+#
+# Correr (con el ejecutor de pasos levantado en otra terminal):
+#   wasmtime -S cli -S tcp=y -S inherit-network=y --dir=. \
+#     target/wasm32-wasip2/debug/anvil.wasm ejemplos/limites.yaml \
+#     --limits ejemplos/limites.limits.yaml --json /tmp/out.json
+
+nombre: limites
+setup:
+  - nombre: abrir_rele        # action (RF-27): éxito técnico, sin medida
+    reintentos: 1
+  - nombre: conectar_equipo
+    reintentos: 3
+main:
+  - nombre: medir_voltaje     # limit test (RF-26): el motor evalúa el rango
+    reintentos: 1
+    limite:
+      tipo: rango
+      min: 4.5
+      max: 5.5
+  - nombre: verificar_led      # pass/fail (RF-25)
+    reintentos: 1
+cleanup:
+  - nombre: desconectar_equipo
+    reintentos: 1
