@@ -72,7 +72,7 @@ Prioridad: **MVP** (Must), **MVP-parcial** (Should), **post-MVP** (Could),
 |---|---|---|---|
 | RF-25 | Built-in **pass/fail** (sin medida, solo `paso`/`fallo`). | MVP | `pasos_demo/src/lib.rs::verificar_led`; [diseno/modelo-de-pasos.md](diseno/modelo-de-pasos.md) |
 | RF-26 | Built-in **limit test** (medida contra high/low o comparación). | MVP | `motor/src/lib.rs::aplicar_limite`; `modelo/src/lib.rs::Limite` (ADR-0008) |
-| RF-27 | Built-in **action**, **sequence call**, **statement**. | MVP-parcial | action: `pasos_demo/src/lib.rs::abrir_rele`; statement: `motor/src/lib.rs::ejecuta_statement_puro` (M4-núcleo); sequence call: aplazado a M4b |
+| RF-27 | Built-in **action**, **sequence call**, **statement**. | MVP-parcial | action: `pasos_demo/src/lib.rs::abrir_rele`; statement: `motor/src/lib.rs::ejecuta_statement_puro` (M4-núcleo); sequence call: `motor/src/lib.rs::ejecuta_sequence_call` (M4b, inline + path, by-reference; ADR-0010) |
 | RF-28 | **Custom step types** con substeps encapsulados. | post-MVP | diseno/modelo-de-pasos.md |
 | RF-29 | Los límites son **datos first-class** (no aserciones ad-hoc). | MVP-parcial | `modelo/src/lib.rs::Limite`; `cargador/src/lib.rs::LimiteYaml`; [ADR-0008](adr/0008-limites-evaluados-por-el-motor.md) |
 | RF-30 | **Property loader**: límites desde un fichero externo. | MVP-parcial | `cargador/src/lib.rs::cargar_limites_de_archivo` + `aplicar_limites` |
@@ -81,7 +81,7 @@ Prioridad: **MVP** (Must), **MVP-parcial** (Should), **post-MVP** (Could),
 
 | ID | Requisito | Prioridad | Trazabilidad |
 |---|---|---|---|
-| RF-31 | Variables con scopes **Locals**, **Parameters**, **FileGlobals**. | MVP-parcial | `modelo::ValorDefinicion` + `motor::EntornoMotor` (M4-núcleo, motor-side); [diseno/variables-y-alcances.md](diseno/variables-y-alcances.md) |
+| RF-31 | Variables con scopes **Locals**, **Parameters**, **FileGlobals**. | MVP-parcial | `modelo::ValorDefinicion` + `motor::EntornoMotor` (M4-núcleo, motor-side); Parameters entrada/salida by-reference en M4b (`motor::ejecuta_sequence_call`, ADR-0010); [diseno/variables-y-alcances.md](diseno/variables-y-alcances.md) |
 | RF-32 | **StationGlobals** (compartidas por estación). | post-MVP | diseno/variables-y-alcances.md |
 | RF-33 | **Precondición** por step (el paso se salta si no se cumple). | MVP-parcial | `motor::evalua_precondicion` (M4-núcleo); [diseno/motor-de-expresiones.md](diseno/motor-de-expresiones.md) |
 | RF-34 | Control de flujo: **pause-on-fail**, **step**, **disable** de pasos. | MVP-parcial | `disable` + `pause_on_fail` en `DefinicionPaso` (M4-núcleo); `step` post-MVP; [diseno/motor-de-ejecucion.md](diseno/motor-de-ejecucion.md) |

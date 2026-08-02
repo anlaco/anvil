@@ -95,6 +95,17 @@ Y el paso `statement` (RF-27), local (sin gRPC), que ejecuta sentencias del
 lenguaje de expresiones contra el entorno. Ver
 [motor-de-expresiones.md](motor-de-expresiones.md) y ADR-0009.
 
+**M4b** añade el paso `sequence_call` (RF-27), también motor-side (sin gRPC):
+invoca otra secuencia como un paso y anida su `ResultadoSecuencia` en el
+`ResultadoStep` del call. El cargador resuelve la subsecuencia por nombre
+(inline) o por path (archivo externo) al cargar; el motor no abre ficheros
+(ADR-0005). Los `parametros` son by-reference: copia `locals.X` del padre →
+`parameters.P` al iniciar y `parameters.P` (final) → `locals.X` al volver
+(como TestStand). La subsecuencia se ejecuta con `es_raiz=false`: no dispara
+`on_inicio/on_fin_secuencia` (sin doble render), pero sí los hooks de paso.
+Profundidad máxima (64) como red de seguridad ante un ciclo que escapara al
+cargador. Ver ADR-0010.
+
 Atributos de `DefinicionPaso` (campos YAML):
 
 ```yaml
@@ -105,8 +116,11 @@ pasos_main:
     pause_on_fail: false  # si true y falla, detiene la fase
     precondicion: 'locals.contador > 0'  # si falsa, se salta sin intento
     tipo: grpc            # o "statement" (paso local, sin gRPC)
+                          # o "sequence_call" (invoca subsecuencia, M4b)
     statement: 'locals.x = 1'   # sólo si tipo: statement
-    asigna:               # sólo si tipo: grpc; vuelca resultado.* a Locals
+    secuencia: init           # sólo si tipo: sequence_call (nombre o path)
+    parametros: { p: locals.x } # sólo si sequence_call (by-reference)
+    asigna:               # si tipo: grpc o sequence_call; vuelca resultado.* a Locals
       voltaje: '${resultado.valor_medido}'
 ```
 

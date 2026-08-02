@@ -11,6 +11,11 @@ escribirlos en cualquier lenguaje.
 > fija *qué* es Anvil, *por qué* y *cómo* antes de construir el producto.
 > Las docs operativas y de usuario vienen después, cuando haya producto.
 
+## Para empezar ya
+
+**[guia-inicio-rapido.md](guia-inicio-rapido.md)** — de cero a correr una
+secuencia con subsecuencias en 5 minutos (build, tests, smoke end-to-end).
+
 ## Cómo leer esta documentación
 
 Un ingeniero de test que viene de TestStand puede entender qué es Anvil, qué

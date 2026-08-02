@@ -72,6 +72,14 @@ on_fin_secuencia(resultado)   # el ResultadoSecuencia agregado
 > sinks JSON/CSV lo muestran como string en `estado_paso`/`estado`. Sin
 > campos nuevos en `ResultadoStep` ni en `paso.proto` (ADR-0009).
 
+> **Anidamiento de M4b (RNF-08):** un paso `sequence_call` produce un
+> `ResultadoStep` cuyo `estado` es el agregado de la subsecuencia y que lleva
+> sus sub-pasos anidados. La consola los **indenta** (+2 espacios por nivel);
+> JSON los anida como `sub_pasos` (recursivo); CSV los **aplana** como filas
+> extra con `nombre_paso = padre/hijo` **sin añadir columnas** (la cabecera
+> congelada no cambia). Los pasos sin sub-pasos producen la misma línea de
+> siempre. Sin cambios en `paso.proto` (ADR-0010).
+
 ## Reintento y reconexión (MVP-parcial)
 
 TestStand sufre que la conexión de BD cacheada **rompe con corte de red sin

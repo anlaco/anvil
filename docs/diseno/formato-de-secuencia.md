@@ -62,14 +62,35 @@ Reglas:
   `min`/`max` o `op`/`esperado`), `disable` y `pause_on_fail`
   (M4, RF-34, ver [motor-de-ejecucion.md](motor-de-ejecucion.md)),
   `precondicion` (M4, RF-33, ver [motor-de-expresiones.md](motor-de-expresiones.md)),
-  `asigna` (M4, RF-31, vuelca `resultado.*` a `Locals` tras el paso) y
+  `asigna` (M4, RF-31, vuelca `resultado.*` a `Locals` tras el paso),
   `tipo`/`statement` (M4, RF-27: `tipo: grpc|statement`, por defecto `grpc`;
   `statement` trae las sentencias a ejecutar si el paso es local, sin gRPC), y
-  `parametros` (cuando el paso admita firma, post-MVP).
+  desde **M4b** `tipo: sequence_call` con `secuencia` (nombre de subsecuencia
+  inline o path relativo a un archivo externo) y `parametros` (mapa
+  `parameter -> "locals.X"`, by-reference). Un `sequence_call` no admite
+  `reintentos > 1` ni `limite` (no mide; su estado es el agregado de la
+  subsecuencia).
 - Variables: `locals`, `parameters`, `file_globals` a nivel de secuencia
   (M4, RF-31, ver [variables-y-alcances.md](variables-y-alcances.md)). El tipo
   de cada variable se infiere del escalar YAML (`true`→bool, `4.5`→número,
-  `"A"`→texto).
+  `"A"`→texto). Desde **M4b**, `subsecuencias:` a nivel de secuencia declara
+  subsecuencias **inline** (mapa `nombre -> secuencia`), invocables por
+  nombre; el `nombre:` de una inline es opcional (cae al de su clave).
+
+### Subsecuencias: inline o por path (M4b)
+
+Una subsecuencia se declara de dos formas:
+
+- **Inline** bajo `subsecuencias:`, invocada por **nombre**. Privada del
+  archivo. Útil cuando sólo la usa esa secuencia.
+- **En archivo aparte**, invocada por **path relativo**
+  (`secuencia: ./medir_fuentes.yaml`). Reutilizable desde varias secuencias.
+
+Convención para distinguir nombre vs path en `secuencia`: si contiene `/` o
+termina en `.yaml`/`.yml` → path (relativo al directorio del archivo que lo
+contiene); si no → nombre (inline). El cargador resuelve los paths, valida
+lvalues y firma, y detecta ciclos al cargar (fail-fast); el motor no abre
+ficheros. Ver ADR-0010.
 - El subconjunto es **estricto** (`deny_unknown_fields`): un campo no reconocido
   falla la carga en vez de ignorarse en silencio. `precondicion`/`asigna`/
   `statement` se **parsean a AST al cargar** (fail-fast): un error de sintaxis
@@ -100,7 +121,8 @@ flujo, para cambiar umbrales por lote/variante sin tocar la secuencia.
 
 ## Out-of-scope
 
-- Secuencias anidadas como archivos referenciados → cubierto por
-  *sequence call* (post-MVP), no por include de YAML en esta fase.
+- Secuencias anidadas → cubiertas por **sequence call** (M4b): inline
+  (`subsecuencias:`) o por path a archivo externo. **No** por include de
+  YAML: el cargador resuelve los paths al cargar (ver arriba y ADR-0010).
 - Schema formal (JSON Schema / WIT) publicable → post-MVP, cuando el
   contrato de secuencia se estabilice.

@@ -41,8 +41,8 @@ no tumba el ejecutor (RF-12).
 | **pass/fail** | Hace algo y reporta `paso`/`fallo` sin medida. El más simple. | ✅ hecho (M3) |
 | **limit test** | Mide y compara contra high/low o comparación → `paso`/`fallo`. | ✅ hecho (M3) |
 | **action** | Ejecuta una acción (mover un fixture, abrir un relé); el estado es `paso` si no hubo `error`. | MVP-parcial · hecho (M3) |
-| **sequence call** | Invoca otra secuencia anidada. | MVP-parcial · aplazado a M4 |
-| **statement** | Evalúa una expresión del expression engine (asignación). | MVP-parcial · aplazado a M4 |
+| **sequence call** | Invoca otra secuencia anidada. | MVP-parcial · hecho (M4b) |
+| **statement** | Evalúa una expresión del expression engine (asignación). | MVP-parcial · hecho (M4-núcleo) |
 
 Los built-in son **comportamientos** del lado del ejecutor, no del motor:
 el motor sigue siendo genérico (ADR-0005).
@@ -59,6 +59,28 @@ el motor sigue siendo genérico (ADR-0005).
   contrato — cualquier paso que mida puede llevar un límite declarado.
 - **sequence call** y **statement** quedan para M4: dependen, respectivamente,
   de la infraestructura de subsecuencias y del *expression engine* (RF-35).
+  **statement** se implementó en M4-núcleo; **sequence call**, en M4b (ver
+  abajo).
+
+### Cómo se encarna sequence call en M4b
+
+- **Motor-side, sin gRPC**: el motor orquesta la subsecuencia contra su
+  propio `EntornoMotor`; `paso.proto` no cambia (ADR-0010). El resultado se
+  anida en `ResultadoStep.sub_pasos` con el estado agregado de la subsec.
+- **Inline o por path**: la subsecuencia se declara bajo `subsecuencias:`
+  del mismo archivo (invocada por **nombre**) o en un **archivo aparte**
+  (invocada por **path relativo**). Inline = privada del archivo; por path =
+  pública y reutilizable.
+- **Parameters de entrada/salida by-reference** (como TestStand): el call
+  mapea cada `Parameter` a un `locals.X` del padre — copia `locals.X` →
+  `parameters.P` al iniciar y `parameters.P` (final) → `locals.X` al volver.
+  La subsecuencia escribe en sus `parameters` (relajación acotada de "sólo se
+  muta Locals"; el paso gRPC sigue aislado).
+- El **cargador** resuelve paths, valida lvalues y firma, y detecta ciclos
+  al cargar (fail-fast); el motor no abre ficheros (ADR-0005).
+
+  Ver [variables-y-alcances.md](variables-y-alcances.md),
+  [formato-de-secuencia.md](formato-de-secuencia.md) y ADR-0010.
 
 ## Registro y descubrimiento de pasos (MVP-parcial, aplazado a post-M3)
 

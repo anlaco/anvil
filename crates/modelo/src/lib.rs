@@ -130,6 +130,11 @@ pub struct ResultadoStep {
     /// Operador del `Limite::Comparacion` aplicado por el motor. `None` si
     /// el límite es un rango o si no hay límite. No viaja en `paso.proto`.
     pub operador: Option<Operador>,
+    /// Sub-pasos anidados de un **sequence call** (M4b, RF-27): el
+    /// `ResultadoStep` de la llamada lleva, anidados, los resultados de la
+    /// subsecuencia. `None` para cualquier otro tipo de paso. No viaja en
+    /// `paso.proto` (sequence call es motor-side, ADR-0010).
+    pub sub_pasos: Option<Vec<ResultadoStep>>,
 }
 
 impl ResultadoStep {
@@ -144,6 +149,7 @@ impl ResultadoStep {
             limite_max: None,
             valor_esperado: None,
             operador: None,
+            sub_pasos: None,
         }
     }
 
@@ -228,7 +234,23 @@ impl ResultadoSecuencia {
     pub fn reporte_a(&self, w: &mut impl std::io::Write) -> std::io::Result<()> {
         writeln!(w, "=== {}: {} ===", self.nombre, self.estado())?;
         for p in &self.pasos {
-            writeln!(w, "  [{}] {}: {}", p.estado, p.nombre, p.mensaje)?;
+            Self::escribe_paso(w, p, 1)?;
+        }
+        Ok(())
+    }
+
+    /// Escribe un `ResultadoStep` (y, recursivamente, sus `sub_pasos`) al
+    /// reporte textual. `nivel` es la profundidad de indentación (1 para
+    /// los pasos top-level = 2 espacios, como el formato congelado de M0;
+    /// 2+ para sub-pasos de un sequence call). Extensión aditiva de RNF-08:
+    /// un paso sin `sub_pasos` produce exactamente la misma línea que antes.
+    fn escribe_paso(w: &mut impl std::io::Write, p: &ResultadoStep, nivel: usize) -> std::io::Result<()> {
+        let indent = "  ".repeat(nivel);
+        writeln!(w, "{indent}[{}] {}: {}", p.estado, p.nombre, p.mensaje)?;
+        if let Some(sub) = &p.sub_pasos {
+            for sp in sub {
+                Self::escribe_paso(w, sp, nivel + 1)?;
+            }
         }
         Ok(())
     }
@@ -243,8 +265,9 @@ impl ResultadoSecuencia {
 
 /// El tipo de un paso. Por defecto es gRPC (el flujo de M3); `Statement`
 /// es un paso **local** (RF-27) que el motor ejecuta evaluando una sentencia
-/// del lenguaje de expresiones, **sin** ir por el cable. Es la forma de
-/// meter asignaciones/lógica pura de datos en la secuencia sin un paso gRPC.
+/// del lenguaje de expresiones, **sin** ir por el cable. `SequenceCall`
+/// (M4b, RF-27) invoca otra secuencia como un paso — también motor-side, sin
+/// gRPC — anidando su `ResultadoSecuencia` en el resultado del paso.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum TipoPaso {
     /// El motor invoca el paso por gRPC contra el ejecutor, por nombre (M3).
@@ -253,6 +276,10 @@ pub enum TipoPaso {
     /// Paso local (RF-27): el motor evalúa `statement` contra su entorno, sin
     /// gRPC. Útil para inicializar variables o cablear datos entre pasos.
     Statement,
+    /// Invoca otra secuencia como un paso (M4b, RF-27). El motor orquesta la
+    /// subsecuencia contra su propio entorno, sin gRPC; `paso.proto` no
+    /// cambia (ADR-0010). El resultado se anida en `ResultadoStep.sub_pasos`.
+    SequenceCall,
 }
 
 /// Una asignación declarada en el YAML (`asigna`): vuelca el resultado de
@@ -263,6 +290,27 @@ pub enum TipoPaso {
 pub struct Asignacion {
     pub var: String,
     pub expr: expr::Expresion,
+}
+
+/// Un argumento de un **sequence call** (M4b, RF-27): mapea un `Parameter`
+/// de la subsecuencia a una **variable local del padre** (`locals.X`). Es
+/// **by-reference** (como TestStand): al iniciar la subsecuencia, el motor
+/// copia `locals.X` → `parameters.param`; al volver, copia
+/// `parameters.param` (final) → `locals.X`. Un mismo `Parameter` es
+/// entrada y salida.
+///
+/// `origen` debe ser una `Expresion::Var { scope: Locals, campo }` (un
+/// lvalue local puro); el cargador lo valida al cargar. El motor lo lee
+/// para la entrada y escribe en el mismo `campo` para la salida. Ver
+/// [variables-y-alcances.md](../../docs/diseno/variables-y-alcances.md) y
+/// ADR-0010.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Argumento {
+    /// Nombre del `Parameter` de la subsecuencia (la clave en
+    /// `DefinicionSecuencia.parameters` de la hija).
+    pub param: String,
+    /// Lvalue del padre: `Expresion::Var { scope: Locals, campo }`.
+    pub origen: expr::Expresion,
 }
 
 /// El valor literal de una variable declarada en el YAML (scopes
@@ -320,6 +368,15 @@ pub struct DefinicionPaso {
     /// RF-27: sentencias a ejecutar si `tipo == Statement` (paso local, sin
     /// gRPC). `None` si `Grpc`. El cargador valida la coherencia con `tipo`.
     pub statement: Option<Vec<expr::Sentencia>>,
+    /// M4b/RF-27: destino de la subsecuencia si `tipo == SequenceCall`. Es
+    /// un **nombre** (subsecuencia inline del mismo archivo) o un **path
+    /// relativo** (archivo externo); el cargador distingue por la
+    /// convención `es_path` (ver `formato-de-secuencia.md`). `None` si no
+    /// es `SequenceCall`.
+    pub secuencia: Option<String>,
+    /// M4b/RF-27: argumentos by-reference del sequence call (`locals.X`
+    /// ↔ `parameters.param`). `None` si no es `SequenceCall`.
+    pub parametros: Option<Vec<Argumento>>,
 }
 
 impl DefinicionPaso {
@@ -334,6 +391,8 @@ impl DefinicionPaso {
             asigna: None,
             tipo: TipoPaso::Grpc,
             statement: None,
+            secuencia: None,
+            parametros: None,
         }
     }
 
@@ -364,6 +423,30 @@ pub struct DefinicionSecuencia {
     /// RF-31: globales del archivo, compartidas por todas las secuencias del
     /// archivo. Inmutables durante la ejecución de un paso.
     pub file_globals: HashMap<String, ValorDefinicion>,
+    /// M4b/RF-27: subsecuencias declaradas **inline** en el mismo archivo,
+    /// invocables por nombre desde cualquier secuencia de ese archivo.
+    /// **Privadas del archivo**: no se exponen a otros archivos (ésos
+    /// invocan la secuencia raíz por path). El cargador las resuelve al
+    /// cargar; el motor las lee por nombre en `def.subsecuencias`.
+    pub subsecuencias: HashMap<String, DefinicionSecuencia>,
+}
+
+/// Un programa Anvil (M4b): la secuencia raíz a ejecutar más las
+/// subsecuencias de **archivos externos** cargados, keyed por path
+/// normalizado. Las subsecuencias **inline** no viven aquí: viven dentro
+/// de la `DefinicionSecuencia` que las declara (campo `subsecuencias`).
+///
+/// El cargador lo construye (resolución de paths + validación + detección
+/// de ciclos); el motor lo recorre **sin abrir ficheros** (ADR-0005). Es
+/// puros datos: no sabe de YAML ni de `std::fs`.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct Programa {
+    /// La secuencia a ejecutar (la del `nombre:` del archivo de entrada).
+    pub raiz: DefinicionSecuencia,
+    /// Subsecuencias de archivos externos, keyed por path normalizado. El
+    /// valor es la secuencia **raíz** de ese archivo; las inline de cada
+    /// archivo viven dentro de su `DefinicionSecuencia`.
+    pub archivos: HashMap<String, DefinicionSecuencia>,
 }
 
 #[cfg(test)]
@@ -522,5 +605,73 @@ mod tests {
         assert_eq!(p.asigna, None);
         assert_eq!(p.tipo, TipoPaso::Grpc);
         assert_eq!(p.statement, None);
+        // M4b: los campos de sequence call también parten de None.
+        assert_eq!(p.secuencia, None);
+        assert_eq!(p.parametros, None);
+    }
+
+    /// M4b: un `ResultadoStep` nuevo (incluido `medido_valor`) parte con
+    /// `sub_pasos: None`; un sequence call lo rellena con `Some(...)`.
+    #[test]
+    fn resultado_step_nuevo_tiene_sub_pasos_none() {
+        let r = ResultadoStep::nuevo("p", "paso", "ok");
+        assert_eq!(r.sub_pasos, None);
+        let m = ResultadoStep::medido_valor("m", "paso", "ok", 4.2);
+        assert_eq!(m.sub_pasos, None);
+    }
+
+    /// M4b: el estado agregado de un sequence call es el de la subsecuencia
+    /// (se anida en `sub_pasos`); el agregado de la secuencia padre mira
+    /// `p.estado` del call (que ya es el agregado), sin descender.
+    #[test]
+    fn estado_agregado_con_sequence_call_anidado() {
+        let mut call = ResultadoStep::nuevo("test_fuentes", "fallo", "sequence call → fallo");
+        call.sub_pasos = Some(vec![
+            ResultadoStep::nuevo("medir_canal_1", "paso", "ok"),
+            ResultadoStep::nuevo("medir_canal_2", "fallo", "fuera de rango"),
+        ]);
+        let mut s = ResultadoSecuencia::nueva("basica");
+        s.registra(call);
+        // El call ya trae "fallo" (agregado de la sub); la secuencia padre
+        // lo ve sin descender a sub_pasos.
+        assert_eq!(s.estado(), "fallo");
+    }
+
+    /// RNF-08 (extensión aditiva de M4b): el reporte textual anida los
+    /// sub-pasos de un sequence call con +2 espacios por nivel. Los pasos
+    /// sin `sub_pasos` siguen produciendo la misma línea de siempre.
+    #[test]
+    fn reporte_anida_sub_pasos() {
+        let mut call = ResultadoStep::nuevo("test_fuentes", "fallo", "sequence call './medir_fuentes.yaml' → fallo");
+        call.sub_pasos = Some(vec![
+            ResultadoStep::nuevo("medir_canal_1", "paso", "ok"),
+            ResultadoStep::nuevo("medir_canal_2", "fallo", "fuera de rango"),
+            ResultadoStep::nuevo("desconectar", "paso", "ok"),
+        ]);
+        let mut s = ResultadoSecuencia::nueva("basica");
+        s.registra(call);
+
+        let mut out = Vec::new();
+        s.reporte_a(&mut out).unwrap();
+
+        let esperado = "\
+=== basica: fallo ===
+  [fallo] test_fuentes: sequence call './medir_fuentes.yaml' → fallo
+    [paso] medir_canal_1: ok
+    [fallo] medir_canal_2: fuera de rango
+    [paso] desconectar: ok
+";
+        assert_eq!(String::from_utf8(out).unwrap(), esperado);
+    }
+
+    /// M4b: un `DefinicionSecuencia` por defecto tiene `subsecuencias`
+    /// vacío y un `Programa` por defecto tiene la raíz vacía y sin archivos.
+    #[test]
+    fn programa_y_subsecuencias_tienen_defaults_vacios() {
+        let d = DefinicionSecuencia::default();
+        assert!(d.subsecuencias.is_empty());
+        let p = Programa::default();
+        assert!(p.raiz.pasos_main.is_empty());
+        assert!(p.archivos.is_empty());
     }
 }

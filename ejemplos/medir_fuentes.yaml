@@ -1,0 +1,26 @@
+# Subsecuencia externa (M4b): secuencia pública reutilizable por path.
+# La invoca `subsecuencia.yaml` con `secuencia: ./medir_fuentes.yaml`.
+#
+# Demuestra Parameters de entrada/salida by-reference (como TestStand):
+#   - Recibe `canal` del padre al iniciar.
+#   - Lo muta (`parameters.canal = parameters.canal + 1.0`) con un statement.
+#   - Al volver, el motor copia `parameters.canal` (final) al `locals.canal_in`
+#     del padre (el mismo lvalue de la entrada).
+nombre: medir_fuentes
+parameters:
+  canal: 0.0
+main:
+  - nombre: ajustar_canal
+    tipo: statement
+    statement: 'parameters.canal = parameters.canal + 1.0'
+  - nombre: medir_voltaje
+    tipo: grpc
+    reintentos: 1
+    limite:
+      tipo: rango
+      min: 4.0
+      max: 5.0
+cleanup:
+  - nombre: desconectar_equipo
+    tipo: grpc
+    reintentos: 1
