@@ -1,15 +1,120 @@
 //! El modelo de datos del secuenciador y los mensajes de `paso.proto`:
 //! mismos campos, mismos estados, mismo contrato en el cable.
 
+use std::collections::HashMap;
+
 pub mod proto;
 pub mod result_sink;
 pub use result_sink::{ResultSink, SinkCompuesto};
+
+/// Un operador de comparación para un `Limite::Comparacion`.
+///
+/// Vive en el modelo (datos), no en `paso.proto`: el límite no viaja por el
+/// cable ([contrato-grpc.md](../../docs/contrato-grpc.md)). Lo declara la
+/// secuencia en YAML y lo evalúa el motor.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Operador {
+    Eq,
+    Ne,
+    Lt,
+    Le,
+    Gt,
+    Ge,
+}
+
+impl Operador {
+    /// Símbolo del operador para mostrarlo en mensajes y reportes
+    /// (`"="`, `"!="`, `"<"`, `"<="`, `">"`, `">="`).
+    pub fn simbolo(&self) -> &'static str {
+        match self {
+            Operador::Eq => "=",
+            Operador::Ne => "!=",
+            Operador::Lt => "<",
+            Operador::Le => "<=",
+            Operador::Gt => ">",
+            Operador::Ge => ">=",
+        }
+    }
+
+    /// Parsea un operador desde el texto del YAML (`eq`/`ne`/`lt`/`le`/`gt`/
+    /// `ge`). Devuelve `None` si no es uno de los seis — el cargador lo
+    /// convierte en error de validación.
+    pub fn de_texto(s: &str) -> Option<Self> {
+        match s.trim() {
+            "eq" => Some(Operador::Eq),
+            "ne" => Some(Operador::Ne),
+            "lt" => Some(Operador::Lt),
+            "le" => Some(Operador::Le),
+            "gt" => Some(Operador::Gt),
+            "ge" => Some(Operador::Ge),
+            _ => None,
+        }
+    }
+
+    /// Aplica el operador a dos valores. Es lo que `Limite::evalua` usa para
+    /// `Comparacion`.
+    fn aplica(&self, valor: f64, esperado: f64) -> bool {
+        match self {
+            Operador::Eq => valor == esperado,
+            Operador::Ne => valor != esperado,
+            Operador::Lt => valor < esperado,
+            Operador::Le => valor <= esperado,
+            Operador::Gt => valor > esperado,
+            Operador::Ge => valor >= esperado,
+        }
+    }
+}
+
+/// Un límite como **dato first-class** (RF-29): una regla de aceptación que la
+/// secuencia declara en YAML y el motor evalúa contra la medida que devuelve
+/// el paso. El paso **no conoce el umbral**; solo mide.
+///
+/// Esto es lo que separa el *qué es aceptable* (datos, cambia en producción)
+/// del *cómo se mide* (código del paso). Ver
+/// [limites-y-estados.md](../../docs/diseno/limites-y-estados.md) y
+/// ADR-0008.
+#[derive(Debug, Clone, PartialEq)]
+pub enum Limite {
+    /// Rango inclusivo high/low: `min <= valor <= max` → `paso`; si no, `fallo`.
+    Rango { min: f64, max: f64 },
+    /// Comparación contra un valor esperado: `valor {op} esperado` →
+    /// `paso`; si no, `fallo`.
+    Comparacion { op: Operador, esperado: f64 },
+}
+
+impl Limite {
+    /// Evalúa un valor contra el límite → `"paso"` o `"fallo"`. Lógica pura,
+    /// sin gRPC ni IO: el motor la reutiliza, los tests la prueban directa.
+    pub fn evalua(&self, valor: f64) -> &'static str {
+        match self {
+            Limite::Rango { min, max } => {
+                if valor >= *min && valor <= *max {
+                    "paso"
+                } else {
+                    "fallo"
+                }
+            }
+            Limite::Comparacion { op, esperado } => {
+                if op.aplica(valor, *esperado) {
+                    "paso"
+                } else {
+                    "fallo"
+                }
+            }
+        }
+    }
+}
 
 /// Lo que un paso YA corrido devolvió.
 ///
 /// `estado` es uno de `"paso"`, `"fallo"` o `"error"` — se mantiene como
 /// texto (y no como enum) porque viaja así en `paso.proto` y porque el
 /// contrato admite pasos escritos en cualquier lenguaje.
+///
+/// `valor_esperado` y `operador` describen un `Limite::Comparacion` aplicado
+/// por el motor. **No** viajan en `paso.proto`: los rellena el motor tras la
+/// invocación a partir del límite del YAML (ADR-0008); el `ResultadoStep`
+/// enriquecido solo va a los sinks, no vuelve al cable.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ResultadoStep {
     pub nombre: String,
@@ -18,6 +123,13 @@ pub struct ResultadoStep {
     pub valor_medido: Option<f64>,
     pub limite_min: Option<f64>,
     pub limite_max: Option<f64>,
+    /// Valor esperado de un `Limite::Comparacion` aplicado por el motor.
+    /// `None` si el límite es un rango o si no hay límite. No viaja en
+    /// `paso.proto` (ADR-0008).
+    pub valor_esperado: Option<f64>,
+    /// Operador del `Limite::Comparacion` aplicado por el motor. `None` si
+    /// el límite es un rango o si no hay límite. No viaja en `paso.proto`.
+    pub operador: Option<Operador>,
 }
 
 impl ResultadoStep {
@@ -30,10 +142,15 @@ impl ResultadoStep {
             valor_medido: None,
             limite_min: None,
             limite_max: None,
+            valor_esperado: None,
+            operador: None,
         }
     }
 
-    /// Un resultado con medida y límites (p. ej. una medida de voltaje).
+    /// Un resultado con medida y límites high/low (p. ej. una medida de
+    /// voltaje cuyo paso ya conoce el umbral). Hoy solo lo usan los tests y
+    /// los pasos demo legacy; en M3 el flujo normal es `medido_valor` +
+    /// límite evaluado por el motor.
     pub fn medido(
         nombre: &str,
         estado: &str,
@@ -46,6 +163,23 @@ impl ResultadoStep {
             valor_medido: Some(valor),
             limite_min: Some(min),
             limite_max: Some(max),
+            ..ResultadoStep::nuevo(nombre, estado, mensaje)
+        }
+    }
+
+    /// Un resultado con **medida pero sin umbral**: el paso midió un valor y
+    /// no conoce el límite. Es lo que devuelve un paso de *limit test* en M3:
+    /// el motor evalúa el `Limite` del YAML contra `valor_medido` y produce el
+    /// estado final (ADR-0008). El estado que trae aquí es el de la medición
+    /// (`paso` = medí bien; `error` = no pude medir).
+    pub fn medido_valor(
+        nombre: &str,
+        estado: &str,
+        mensaje: impl Into<String>,
+        valor: f64,
+    ) -> Self {
+        ResultadoStep {
+            valor_medido: Some(valor),
             ..ResultadoStep::nuevo(nombre, estado, mensaje)
         }
     }
@@ -107,6 +241,54 @@ impl ResultadoSecuencia {
     }
 }
 
+/// El tipo de un paso. Por defecto es gRPC (el flujo de M3); `Statement`
+/// es un paso **local** (RF-27) que el motor ejecuta evaluando una sentencia
+/// del lenguaje de expresiones, **sin** ir por el cable. Es la forma de
+/// meter asignaciones/lógica pura de datos en la secuencia sin un paso gRPC.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum TipoPaso {
+    /// El motor invoca el paso por gRPC contra el ejecutor, por nombre (M3).
+    #[default]
+    Grpc,
+    /// Paso local (RF-27): el motor evalúa `statement` contra su entorno, sin
+    /// gRPC. Útil para inicializar variables o cablear datos entre pasos.
+    Statement,
+}
+
+/// Una asignación declarada en el YAML (`asigna`): vuelca el resultado de
+/// evaluar `expr` a una **Local** de la secuencia (la regla "sólo se muta
+/// Locals" la hace valer el entorno en runtime). `var` es el nombre de la
+/// Local destino, sin prefijo `locals.` (lo aporta el motor al escribir).
+#[derive(Debug, Clone, PartialEq)]
+pub struct Asignacion {
+    pub var: String,
+    pub expr: expr::Expresion,
+}
+
+/// El valor literal de una variable declarada en el YAML (scopes
+/// `locals`/`parameters`/`file_globals`). El tipo se infiere del escalar YAML:
+/// número, texto o booleano. Sin árbol de propiedades tipado recursivo de
+/// TestStand en el MVP (ver [variables-y-alcances.md](../../docs/diseno/variables-y-alcances.md)).
+#[derive(Debug, Clone, PartialEq)]
+pub enum ValorDefinicion {
+    Numero(f64),
+    Texto(String),
+    Bool(bool),
+}
+
+impl ValorDefinicion {
+    /// Traduce un literal declarado en el YAML al `Value` del expression engine
+    /// (`expr::Value`). Lo usa el motor al materializar el entorno al inicio
+    /// de la secuencia.
+    pub fn a_value(&self) -> expr::Value {
+        match self {
+            ValorDefinicion::Numero(x) => expr::Value::Numero(*x),
+            ValorDefinicion::Texto(s) => expr::Value::Texto(s.clone()),
+            ValorDefinicion::Bool(b) => expr::Value::Bool(*b),
+        }
+    }
+}
+
 /// Los datos que describen QUÉ correr — a diferencia de `ResultadoStep`,
 /// que es lo que un paso ya corrido devolvió.
 #[derive(Debug, Clone, PartialEq)]
@@ -114,11 +296,54 @@ pub struct DefinicionPaso {
     pub nombre: String,
     /// Número máximo de intentos (1 = sin reintentos).
     pub reintentos: u32,
+    /// Regla de aceptación opcional declarada en la secuencia (RF-29). Si la
+    /// hay, el motor la evalúa contra `valor_medido` tras la invocación y
+    /// produce el estado final; el paso no conoce el umbral (ADR-0008).
+    /// `None` = el paso decide por sí mismo (pass/fail, action sin límite).
+    pub limite: Option<Limite>,
+    /// RF-34: si `true`, el motor registra el paso como saltado (`"saltado"`)
+    /// sin invocarlo. Default `false`.
+    pub disable: bool,
+    /// RF-34: si `true` y el paso falla, el motor detiene la fase en curso
+    /// (en Main refuerza el corte en primer fallo; en Setup/Cleanup la corta).
+    /// Default `false`. El modo interactivo "espera input" es post-MVP.
+    pub pause_on_fail: bool,
+    /// RF-33: precondición evaluada por el motor **antes** de invocar el
+    /// paso. Si es falsa, el paso se salta sin gastar intento. AST parseado
+    /// por el cargador al cargar (fail-fast). `None` = siempre corre.
+    pub precondicion: Option<expr::Expresion>,
+    /// RF-31: asignaciones tras el paso (sólo `Grpc`), para volcar campos de
+    /// `resultado` a `Locals`. ASTs parseados al cargar. `None` = sin asignar.
+    pub asigna: Option<Vec<Asignacion>>,
+    /// RF-27: tipo de paso. Default `Grpc` (preserva compat con M3).
+    pub tipo: TipoPaso,
+    /// RF-27: sentencias a ejecutar si `tipo == Statement` (paso local, sin
+    /// gRPC). `None` si `Grpc`. El cargador valida la coherencia con `tipo`.
+    pub statement: Option<Vec<expr::Sentencia>>,
 }
 
 impl DefinicionPaso {
     pub fn nuevo(nombre: &str, reintentos: u32) -> Self {
-        DefinicionPaso { nombre: nombre.to_string(), reintentos }
+        DefinicionPaso {
+            nombre: nombre.to_string(),
+            reintentos,
+            limite: None,
+            disable: false,
+            pause_on_fail: false,
+            precondicion: None,
+            asigna: None,
+            tipo: TipoPaso::Grpc,
+            statement: None,
+        }
+    }
+
+    /// Como `nuevo` pero fijando un límite. Lo usa el cargador al traducir el
+    /// YAML (límite embebido) y el property loader (sidecar).
+    pub fn con_limite(nombre: &str, reintentos: u32, limite: Limite) -> Self {
+        DefinicionPaso {
+            limite: Some(limite),
+            ..DefinicionPaso::nuevo(nombre, reintentos)
+        }
     }
 }
 
@@ -130,6 +355,15 @@ pub struct DefinicionSecuencia {
     pub pasos_setup: Vec<DefinicionPaso>,
     pub pasos_main: Vec<DefinicionPaso>,
     pub pasos_cleanup: Vec<DefinicionPaso>,
+    /// RF-31: variables locales de la secuencia, mutables por `asigna` durante
+    /// la ejecución. Materializadas por el motor al iniciar la secuencia.
+    pub locals: HashMap<String, ValorDefinicion>,
+    /// RF-31: parámetros de entrada/salida. En M4-núcleo (sin sequence call)
+    /// están vacíos y reservados para M4b.
+    pub parameters: HashMap<String, ValorDefinicion>,
+    /// RF-31: globales del archivo, compartidas por todas las secuencias del
+    /// archivo. Inmutables durante la ejecución de un paso.
+    pub file_globals: HashMap<String, ValorDefinicion>,
 }
 
 #[cfg(test)]
@@ -178,5 +412,115 @@ mod tests {
   [paso] verificar_led: led encendido
 ";
         assert_eq!(String::from_utf8(out).unwrap(), esperado);
+    }
+
+    #[test]
+    fn limite_rango_dentro_fuera_y_fronteras() {
+        let r = Limite::Rango { min: 4.5, max: 5.5 };
+        assert_eq!(r.evalua(5.0), "paso", "dentro del rango");
+        assert_eq!(r.evalua(4.2), "fallo", "por debajo");
+        assert_eq!(r.evalua(6.0), "fallo", "por encima");
+        // Fronteras inclusivas.
+        assert_eq!(r.evalua(4.5), "paso", "min incluido");
+        assert_eq!(r.evalua(5.5), "paso", "max incluido");
+    }
+
+    #[test]
+    fn limite_comparacion_cubre_seis_operadores() {
+        use Operador::*;
+        assert_eq!(Limite::Comparacion { op: Eq, esperado: 1000.0 }.evalua(1000.0), "paso");
+        assert_eq!(Limite::Comparacion { op: Eq, esperado: 1000.0 }.evalua(999.0), "fallo");
+        assert_eq!(Limite::Comparacion { op: Ne, esperado: 1000.0 }.evalua(999.0), "paso");
+        assert_eq!(Limite::Comparacion { op: Lt, esperado: 1000.0 }.evalua(999.0), "paso");
+        assert_eq!(Limite::Comparacion { op: Lt, esperado: 1000.0 }.evalua(1000.0), "fallo", "lt excluye el igual");
+        assert_eq!(Limite::Comparacion { op: Le, esperado: 1000.0 }.evalua(1000.0), "paso", "le incluye el igual");
+        assert_eq!(Limite::Comparacion { op: Gt, esperado: 1000.0 }.evalua(1001.0), "paso");
+        assert_eq!(Limite::Comparacion { op: Ge, esperado: 1000.0 }.evalua(1000.0), "paso");
+    }
+
+    #[test]
+    fn operador_simbolo_y_parseo_ida_y_vuelta() {
+        for op in [Operador::Eq, Operador::Ne, Operador::Lt, Operador::Le, Operador::Gt, Operador::Ge] {
+            let texto = match op {
+                Operador::Eq => "eq",
+                Operador::Ne => "ne",
+                Operador::Lt => "lt",
+                Operador::Le => "le",
+                Operador::Gt => "gt",
+                Operador::Ge => "ge",
+            };
+            assert_eq!(Operador::de_texto(texto), Some(op), "parseo de {texto}");
+        }
+        assert_eq!(Operador::de_texto("no_existe"), None);
+        assert_eq!(Operador::de_texto("  eq  "), Some(Operador::Eq), "tolera espacios");
+        // Símbolos conocidos para el reporte.
+        assert_eq!(Operador::Ge.simbolo(), ">=");
+        assert_eq!(Operador::Ne.simbolo(), "!=");
+    }
+
+    #[test]
+    fn definicion_paso_con_limite_lo_guarda() {
+        let p = DefinicionPaso::con_limite("medir_voltaje", 1, Limite::Rango { min: 4.5, max: 5.5 });
+        assert_eq!(p.limite, Some(Limite::Rango { min: 4.5, max: 5.5 }));
+        // Sin límite por defecto: el paso decide (pass/fail, action).
+        assert_eq!(DefinicionPaso::nuevo("verificar_led", 1).limite, None);
+    }
+
+    #[test]
+    fn medido_valor_deja_limites_vacios() {
+        // Un paso que mide sin conocer el umbral: el motor rellena los
+        // campos de límite después, desde el YAML (ADR-0008).
+        let r = ResultadoStep::medido_valor("medir_voltaje", "paso", "medido: 4.2 V", 4.2);
+        assert_eq!(r.valor_medido, Some(4.2));
+        assert_eq!(r.limite_min, None);
+        assert_eq!(r.limite_max, None);
+        assert_eq!(r.valor_esperado, None);
+        assert_eq!(r.operador, None);
+    }
+
+    /// M4: un paso saltado (disable / precondición falsa) es **neutral** en el
+    /// agregado — no cuenta como fallo ni como error. Una secuencia con sólo
+    /// pasos saltados pasa.
+    #[test]
+    fn saltado_no_cuenta_como_fallo_ni_error() {
+        let mut s = ResultadoSecuencia::nueva("s");
+        s.registra(ResultadoStep::nuevo("a", "saltado", "disable"));
+        assert_eq!(s.estado(), "paso");
+        // Un saltado junto a un fallo: manda el fallo, no se anula.
+        s.registra(ResultadoStep::nuevo("b", "fallo", "mal"));
+        assert_eq!(s.estado(), "fallo");
+    }
+
+    /// RNF-08 (extensión aditiva de M4): el estado `"saltado"` aparece en el
+    /// reporte textual congelado. El formato de línea no cambia; sólo se
+    /// añade un nuevo *valor* de estado.
+    #[test]
+    fn reporte_incluye_estado_saltado() {
+        let mut s = ResultadoSecuencia::nueva("variables");
+        s.registra(ResultadoStep::nuevo("init_log", "paso", "statement ok"));
+        s.registra(ResultadoStep::nuevo("paso_obsoleto", "saltado", "disable"));
+
+        let mut out = Vec::new();
+        s.reporte_a(&mut out).unwrap();
+
+        let esperado = "\
+=== variables: paso ===
+  [paso] init_log: statement ok
+  [saltado] paso_obsoleto: disable
+";
+        assert_eq!(String::from_utf8(out).unwrap(), esperado);
+    }
+
+    /// Los defaults de `DefinicionPaso::nuevo` preservan el comportamiento de
+    /// M3 (disable=false, pause_on_fail=false, sin precondición/asigna, Grpc).
+    #[test]
+    fn definicion_paso_nuevo_tiene_defaults_de_m4() {
+        let p = DefinicionPaso::nuevo("verificar_led", 1);
+        assert!(!p.disable);
+        assert!(!p.pause_on_fail);
+        assert_eq!(p.precondicion, None);
+        assert_eq!(p.asigna, None);
+        assert_eq!(p.tipo, TipoPaso::Grpc);
+        assert_eq!(p.statement, None);
     }
 }

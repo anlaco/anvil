@@ -7,3 +7,7 @@ description = "Modelo de datos del secuenciador anvil y los mensajes de paso.pro
 
 [dependencies]
 prost.workspace = true
+# `expr` es de tipos (no de lógica): `DefinicionPaso` guarda los ASTs que el
+# cargador parsea al cargar. El motor los evalúa. El motor sigue siendo genérico
+# (ADR-0005): `expr` no depende de `modelo`.
+expr.workspace = true
