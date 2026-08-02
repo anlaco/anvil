@@ -90,11 +90,24 @@ Lo que ya existe en el repo:
 [diseno/motor-de-ejecucion.md](diseno/motor-de-ejecucion.md),
 [adr/0009-expresiones-precondiciones-y-asignaciones-las-evalua-el-motor.md](adr/0009-expresiones-precondiciones-y-asignaciones-las-evalua-el-motor.md)
 
-## M4b — Sequence call / subsecuencias · MVP-parcial (pendiente)
+## M4b — Sequence call / subsecuencias · MVP-parcial ✅ (hecho)
 
 - **Sequence call** (RF-27): invocar otra secuencia como un paso, con
-  **Parameters** entrada/salida reales y anidamiento del `ResultadoSecuencia`.
-- Requiere modelo de subsecuencias llamables (cómo se declaran/referencian).
+  **Parameters entrada/salida by-reference** reales (como TestStand) y
+  anidamiento del `ResultadoSecuencia`.
+- Subsecuencias **inline** (por nombre, bajo `subsecuencias:`) o **en archivo
+  aparte** (por path relativo). El cargador resuelve paths, valida lvalues y
+  firma, y detecta ciclos al cargar; el motor no abre ficheros (ADR-0005).
+- Relajación acotada de "sólo se muta Locals" (ADR-0009): la subsecuencia
+  escribe en sus `parameters` (retorno); la raíz, no; el paso gRPC sigue
+  aislado.
+- Recortes MVP-parcial: by-value y by-reference transitivo post-MVP; las
+  inline no se llaman entre sí (para eso, archivo externo); sin
+  `reintentos`/`limite` en el call.
+
+→ [diseno/modelo-de-pasos.md](diseno/modelo-de-pasos.md),
+[diseno/variables-y-alcances.md](diseno/variables-y-alcances.md),
+[adr/0010-sequence-call-lo-orquesta-el-motor-cargador-resuelve-paths.md](adr/0010-sequence-call-lo-orquesta-el-motor-cargador-resuelve-paths.md)
 
 ## M5 — Process model Sequential + CLI · MVP-parcial
 
@@ -103,7 +116,11 @@ Lo que ya existe en el repo:
 - Separación "secuencia vs. cómo se corre en producción" (Sequential
   simple + plug-ins, **no** el process model de TestStand 1:1) (RF-38).
 - Adapter gRPC de instrumentos pulido (RF-36).
-- CLI headless maduro (RF-40): `wasmtime run anvil.wasm secuencia.yaml`.
+- CLI headless maduro (RF-40). **Empaquetado como un binario único** que
+  hospeda wasmtime y los dos guests WASM (motor + ejecutor) en sandbox,
+  hablando gRPC por loopback (ADR-0011): `./anvil secuencia.yaml`, sin
+  instalar wasmtime. El guest motor sigue disponible como `.wasm` para
+  depuración con el CLI de wasmtime.
 
 → [diseno/proceso-de-test.md](diseno/proceso-de-test.md),
 [diseno/integracion-instrumentos.md](diseno/integracion-instrumentos.md),

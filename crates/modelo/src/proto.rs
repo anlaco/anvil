@@ -86,6 +86,10 @@ impl From<ResultadoPasoProto> for crate::ResultadoStep {
             limite_max: de_texto(&p.limite_max),
             valor_esperado: None,
             operador: None,
+            // `sub_pasos` no viaja en el cable: sequence call es motor-side
+            // (ADR-0010). Llega `None` y el motor lo rellena al anidar la
+            // subsecuencia.
+            sub_pasos: None,
         }
     }
 }

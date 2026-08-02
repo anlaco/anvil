@@ -17,8 +17,8 @@ mod entorno;
 
 use modelo::proto::{PeticionPaso, ResultadoPasoProto, RUTA_INVOCA};
 use modelo::{
-    Asignacion, DefinicionPaso, DefinicionSecuencia, Limite, ResultadoSecuencia, ResultadoStep,
-    ResultSink, TipoPaso,
+    Asignacion, DefinicionPaso, DefinicionSecuencia, Limite, Programa, ResultadoSecuencia,
+    ResultadoStep, ResultSink, TipoPaso,
 };
 use prost::Message;
 use wasi_grpc::grpc::Cliente;
@@ -26,6 +26,7 @@ use wasi_grpc::net;
 
 pub use entorno::EntornoMotor;
 use expr::{eval, eval_sentencias, Entorno, Expresion, Scope, Sentencia, Value};
+use std::collections::HashMap;
 
 /// El motor: un cliente gRPC contra un ejecutor de pasos.
 pub struct Motor {
@@ -122,104 +123,296 @@ impl Motor {
         definicion: &DefinicionSecuencia,
         sink: &mut impl ResultSink,
     ) -> Result<ResultadoSecuencia, Error> {
-        sink.on_inicio_secuencia(definicion);
-        let mut secuencia = ResultadoSecuencia::nueva(&definicion.nombre);
-        // El entorno de variables vive toda la secuencia: Locals persiste
-        // entre pasos Main; FileGlobals se cargó al inicio.
-        let mut entorno = EntornoMotor::desde_definicion(definicion);
-
-        // --- Setup: corren todos. Un saltado no estropea el setup. ---
-        let mut setup_ok = true;
-        for p in &definicion.pasos_setup {
-            let r = self.corre_un_paso(p, &mut entorno, sink)?;
-            let fallo = !r.paso() && r.estado != "saltado";
-            secuencia.registra(r.clone());
-            if fallo {
-                setup_ok = false;
-            }
-            // pause_on_fail corta el Setup (que por defecto corre todos). El
-            // modo interactivo "espera input" es post-MVP.
-            if p.pause_on_fail && fallo {
-                break;
-            }
-        }
-
-        // --- Main: solo si el Setup fue bien; corta en el primer fallo. ---
-        if setup_ok {
-            for p in &definicion.pasos_main {
-                let r = self.corre_un_paso(p, &mut entorno, sink)?;
-                let fallo = !r.paso() && r.estado != "saltado";
-                secuencia.registra(r.clone());
-                if fallo {
-                    break;
-                }
-                // pause_on_fail aquí es no-op sobre el corte (Main ya corta en
-                // fallo); se respeta el campo por simetría y para futuros modos.
-            }
-        }
-
-        // --- Cleanup siempre: un equipo encendido es peor que una secuencia
-        // que falló. pause_on_fail NO corta el Cleanup (principio "siempre"). ---
-        for p in &definicion.pasos_cleanup {
-            let r = self.corre_un_paso(p, &mut entorno, sink)?;
-            secuencia.registra(r.clone());
-        }
-
-        sink.on_fin_secuencia(&secuencia);
+        // API legacy (M1–M4): una secuencia sin subsecuencias. Construye un
+        // `Programa` trivial y delega en `ejecuta_secuencia_interna`.
+        let programa = Programa { raiz: definicion.clone(), archivos: HashMap::new() };
+        let entorno = EntornoMotor::desde_definicion(&programa.raiz);
+        let (secuencia, _) = ejecuta_secuencia_interna(self, &programa.raiz, entorno, sink, &programa, 0, true)?;
         Ok(secuencia)
     }
 
-    /// Corre un solo paso (Setup/Main/Cleanup comparten esta lógica): disable,
-    /// precondición, invocación (Grpc o statement local), asigna y lifecycle
-    /// del sink. Devuelve el `ResultadoStep` a registrar.
-    fn corre_un_paso(
+    /// Ejecuta un **programa** (M4b, RF-27): la secuencia raíz, con sus
+    /// `sequence_call` resueltos a subsecuencias inline (por nombre) o a
+    /// archivos externos (por path, ya cargados en `programa.archivos`).
+    /// El motor **no** abre ficheros: todo vino resuelto del cargador
+    /// (ADR-0005). El render lo hacen los sinks de formato en
+    /// `on_fin_secuencia`, que aquí sí se dispara (es la raíz).
+    pub fn ejecuta_programa(
         &mut self,
-        p: &DefinicionPaso,
-        ent: &mut EntornoMotor,
+        programa: &Programa,
         sink: &mut impl ResultSink,
-    ) -> Result<ResultadoStep, Error> {
-        sink.on_inicio_paso(p);
+    ) -> Result<ResultadoSecuencia, Error> {
+        let entorno = EntornoMotor::desde_definicion(&programa.raiz);
+        let (secuencia, _) = ejecuta_secuencia_interna(self, &programa.raiz, entorno, sink, programa, 0, true)?;
+        Ok(secuencia)
+    }
+}
 
-        // (a) disable: se salta sin invocar ni evaluar nada.
-        if p.disable {
-            let r = ResultadoStep::nuevo(&p.nombre, "saltado", "disable");
-            sink.on_resultado(&r);
-            sink.on_fin_paso(p);
-            return Ok(r);
+/// Cómo se invoca un paso `Grpc`: el único punto de contacto con la red.
+/// `Motor` lo implementa contra gRPC; los tests del motor usan un mock (sin
+/// red) y así pueden probar el flujo completo —incluido sequence call— sin
+/// levantar un ejecutor. Es la materialización de "motor genérico"
+/// (ADR-0005): la lógica de la secuencia no sabe si el paso corre por gRPC o
+/// por un sustituto.
+pub trait InvocaPasos {
+    fn ejecuta_paso_grpc(&mut self, def: &DefinicionPaso) -> Result<ResultadoStep, Error>;
+}
+
+impl InvocaPasos for Motor {
+    fn ejecuta_paso_grpc(&mut self, def: &DefinicionPaso) -> Result<ResultadoStep, Error> {
+        self.ejecuta_con_reintentos(def)
+    }
+}
+
+/// Profundidad máxima de anidamiento de sequence calls (red de seguridad
+/// ante un ciclo que escapara a la detección del cargador).
+const PROFUNDIDAD_MAX: usize = 64;
+
+/// Núcleo recursivo compartido por la raíz y las subsecuencias. Devuelve
+/// el `ResultadoSecuencia` **y** el `EntornoMotor` final (para que un
+/// sequence call padre extraiga los `parameters` finales y los copie de
+/// vuelta por by-reference).
+///
+/// `es_raiz` distingue la raíz de una subsecuencia: sólo la raíz dispara
+/// `on_inicio/on_fin_secuencia` (los sinks de formato renderizan ahí, así
+/// no duplican reporte por subsecuencia). Los hooks de paso se disparan
+/// siempre, al sink real, para que un futuro sink de streaming vea la
+/// subsecuencia en vivo. `profundidad` acota el anidamiento (64, red de
+/// seguridad ante un ciclo que escapara al cargador).
+fn ejecuta_secuencia_interna<I: InvocaPasos>(
+    inv: &mut I,
+    def: &DefinicionSecuencia,
+    mut entorno: EntornoMotor,
+    sink: &mut impl ResultSink,
+    programa: &Programa,
+    profundidad: usize,
+    es_raiz: bool,
+) -> Result<(ResultadoSecuencia, EntornoMotor), Error> {
+    if es_raiz {
+        sink.on_inicio_secuencia(def);
+    }
+    let mut secuencia = ResultadoSecuencia::nueva(&def.nombre);
+
+    // --- Setup: corren todos. Un saltado no estropea el setup. ---
+    let mut setup_ok = true;
+    for p in &def.pasos_setup {
+        let r = corre_un_paso(inv, p, def, &mut entorno, sink, programa, profundidad)?;
+        let fallo = !r.paso() && r.estado != "saltado";
+        secuencia.registra(r.clone());
+        if fallo {
+            setup_ok = false;
         }
+        if p.pause_on_fail && fallo {
+            break;
+        }
+    }
 
-        // (b) precondición (RF-33): el motor evalúa ANTES de invocar. Si es
-        // falsa, se salta sin gastar intento. Bool estricto: un no-bool es
-        // error de definición.
-        if let Some(pre) = &p.precondicion {
-            match evalua_precondicion(pre, ent, &p.nombre) {
-                VeredictoPre::Continua => {}
-                VeredictoPre::Salta(r) => {
-                    sink.on_resultado(&r);
-                    sink.on_fin_paso(p);
-                    return Ok(r);
+    // --- Main: solo si el Setup fue bien; corta en el primer fallo. ---
+    if setup_ok {
+        for p in &def.pasos_main {
+            let r = corre_un_paso(inv, p, def, &mut entorno, sink, programa, profundidad)?;
+            let fallo = !r.paso() && r.estado != "saltado";
+            secuencia.registra(r.clone());
+            if fallo {
+                break;
+            }
+        }
+    }
+
+    // --- Cleanup siempre. pause_on_fail NO corta el Cleanup. ---
+    for p in &def.pasos_cleanup {
+        let r = corre_un_paso(inv, p, def, &mut entorno, sink, programa, profundidad)?;
+        secuencia.registra(r.clone());
+    }
+
+    if es_raiz {
+        sink.on_fin_secuencia(&secuencia);
+    }
+    Ok((secuencia, entorno))
+}
+
+/// Corre un solo paso (Setup/Main/Cleanup comparten esta lógica): disable,
+/// precondición, invocación (Grpc, statement local o sequence call),
+/// asigna y lifecycle del sink. Devuelve el `ResultadoStep` a registrar.
+fn corre_un_paso<I: InvocaPasos>(
+    inv: &mut I,
+    p: &DefinicionPaso,
+    def_en_curso: &DefinicionSecuencia,
+    ent: &mut EntornoMotor,
+    sink: &mut impl ResultSink,
+    programa: &Programa,
+    profundidad: usize,
+) -> Result<ResultadoStep, Error> {
+    sink.on_inicio_paso(p);
+
+    // (a) disable: se salta sin invocar ni evaluar nada.
+    if p.disable {
+        let r = ResultadoStep::nuevo(&p.nombre, "saltado", "disable");
+        sink.on_resultado(&r);
+        sink.on_fin_paso(p);
+        return Ok(r);
+    }
+
+    // (b) precondición (RF-33): el motor evalúa ANTES de invocar. Si es
+    // falsa, se salta sin gastar intento. Bool estricto: un no-bool es
+    // error de definición.
+    if let Some(pre) = &p.precondicion {
+        match evalua_precondicion(pre, ent, &p.nombre) {
+            VeredictoPre::Continua => {}
+            VeredictoPre::Salta(r) => {
+                sink.on_resultado(&r);
+                sink.on_fin_paso(p);
+                return Ok(r);
+            }
+        }
+    }
+
+    // (c) según tipo de paso (RF-27).
+    let mut r = match p.tipo {
+        TipoPaso::Statement => ejecuta_statement_puro(p.statement.as_deref(), &p.nombre, ent),
+        TipoPaso::Grpc => inv.ejecuta_paso_grpc(p)?,
+        TipoPaso::SequenceCall => {
+            ejecuta_sequence_call(inv, p, def_en_curso, ent, sink, programa, profundidad)?
+        }
+    };
+
+    // (d) asigna (RF-31): tras un paso Grpc o SequenceCall, vuelca campos
+    // de `resultado` a Locals. Un statement asigna dentro de su sentencia.
+    if matches!(p.tipo, TipoPaso::Grpc | TipoPaso::SequenceCall) {
+        if let Some(asignaciones) = &p.asigna {
+            r = aplica_asigna(asignaciones, r, ent);
+        }
+    }
+
+    sink.on_resultado(&r);
+    sink.on_fin_paso(p);
+    Ok(r)
+}
+
+/// Ejecuta un paso `sequence_call` (M4b, RF-27): invoca otra secuencia
+/// como un paso, **sin gRPC**, y anida su `ResultadoSecuencia` en el
+/// `ResultadoStep` del call. Los `parametros` son by-reference: copia
+/// `locals.X` del padre → `parameters.P` al iniciar, y `parameters.P`
+/// (final) → `locals.X` al volver (como TestStand).
+fn ejecuta_sequence_call<I: InvocaPasos>(
+    inv: &mut I,
+    p: &DefinicionPaso,
+    def_en_curso: &DefinicionSecuencia,
+    ent: &mut EntornoMotor,
+    sink: &mut impl ResultSink,
+    programa: &Programa,
+    profundidad: usize,
+) -> Result<ResultadoStep, Error> {
+    let destino = p.secuencia.as_deref().expect("validado en a_definicion");
+
+    // (1) Profundidad: red de seguridad ante un ciclo que escapara al
+    // cargador (no debería; el cargador los detecta al cargar).
+    if profundidad + 1 > PROFUNDIDAD_MAX {
+        return Ok(ResultadoStep::nuevo(
+            &p.nombre,
+            "error",
+            format!("sequence call '{destino}': anidamiento demasiado profundo (>{PROFUNDIDAD_MAX})"),
+        ));
+    }
+
+    // (2) Resolver la subsecuencia: por nombre (inline de `def_en_curso`)
+    // o por path (archivo externo ya cargado en `programa.archivos`).
+    // El cargador ya validó que existe al cargar; si faltara aquí, es
+    // defense in depth: se registra como `"error"` del paso (no pánico,
+    // no propaga `Error` de red).
+    let sub = if cargador::es_path(destino) {
+        match programa.archivos.get(destino) {
+            Some(s) => s,
+            None => {
+                return Ok(ResultadoStep::nuevo(
+                    &p.nombre,
+                    "error",
+                    format!("sequence call '{destino}': no resuelto al cargar"),
+                ));
+            }
+        }
+    } else {
+        match def_en_curso.subsecuencias.get(destino) {
+            Some(s) => s,
+            None => {
+                return Ok(ResultadoStep::nuevo(
+                    &p.nombre,
+                    "error",
+                    format!("sequence call '{destino}': subsecuencia inline inexistente"),
+                ));
+            }
+        }
+    };
+
+    // (3) Entrada by-reference: cada `Argumento.origen` es `Var{Locals,
+    // campo}` (validado al cargar); lee `locals.campo` del padre.
+    let mut argumentos = HashMap::new();
+    if let Some(args) = &p.parametros {
+        for a in args {
+            let valor = match &a.origen {
+                Expresion::Var { scope: Scope::Locals, campo } => {
+                    match ent.lee(Scope::Locals, campo) {
+                        Ok(v) => v,
+                        Err(e) => {
+                            return Ok(ResultadoStep::nuevo(
+                                &p.nombre,
+                                "error",
+                                format!("sequence call '{destino}': argumento '{}': locals.{campo} no existe ({e})", a.param),
+                            ));
+                        }
+                    }
+                }
+                // La forma ya se validó al cargar; defense in depth.
+                _ => {
+                    return Ok(ResultadoStep::nuevo(
+                        &p.nombre,
+                        "error",
+                        format!("sequence call '{destino}': argumento '{}' no es locals.X", a.param),
+                    ));
+                }
+            };
+            argumentos.insert(a.param.clone(), valor);
+        }
+    }
+
+    // (4) Ejecuta la subsecuencia contra un entorno con `parameters`
+    // mutables (by-reference) y los argumentos inyectados. No dispara
+    // `on_inicio/on_fin_secuencia` (es_raiz=false): los sinks de formato
+    // no duplican reporte; el árbol anidado se reconstruye en el paso (6).
+    let sub_entorno = EntornoMotor::desde_definicion_con_argumentos(sub, argumentos, true);
+    let (sub_secuencia, sub_entorno) =
+        ejecuta_secuencia_interna(inv, sub, sub_entorno, sink, programa, profundidad + 1, false)?;
+
+    // (5) Salida by-reference: copia `parameters.P` (final) → `locals.campo`
+    // del padre (el mismo lvalue de la entrada).
+    let mut errores_salida = Vec::new();
+    if let Some(args) = &p.parametros {
+        for a in args {
+            if let Expresion::Var { scope: Scope::Locals, campo } = &a.origen {
+                if let Some(v_final) = sub_entorno.parameters().get(&a.param) {
+                    if let Err(e) = ent.escribe(Scope::Locals, campo, v_final.clone()) {
+                        errores_salida.push(format!("salida '{}': {e}", a.param));
+                    }
                 }
             }
         }
-
-        // (c)/(d) según tipo de paso (RF-27).
-        let mut r = match p.tipo {
-            TipoPaso::Statement => ejecuta_statement_puro(p.statement.as_deref(), &p.nombre, ent),
-            TipoPaso::Grpc => self.ejecuta_con_reintentos(p)?,
-        };
-
-        // (e) asigna (RF-31): sólo tras un paso Grpc, vuelca campos de
-        // `resultado` a Locals. Un statement asigna dentro de su sentencia.
-        if matches!(p.tipo, TipoPaso::Grpc) {
-            if let Some(asignaciones) = &p.asigna {
-                r = aplica_asigna(asignaciones, r, ent);
-            }
-        }
-
-        sink.on_resultado(&r);
-        sink.on_fin_paso(p);
-        Ok(r)
     }
+
+    // (6) Construye el `ResultadoStep` del call: estado agregado de la
+    // subsecuencia + sub-pasos anidados.
+    let estado_sub = sub_secuencia.estado();
+    let mut r = ResultadoStep::nuevo(
+        &p.nombre,
+        estado_sub,
+        format!("sequence call '{destino}' → {estado_sub}"),
+    );
+    r.sub_pasos = Some(sub_secuencia.pasos);
+    if !errores_salida.is_empty() {
+        // Una salida que no puede escribirse es un fallo de definición.
+        r.estado = "error".into();
+        r.mensaje = format!("{} ({})", r.mensaje, errores_salida.join("; "));
+    }
+    Ok(r)
 }
 
 /// Veredicto de la precondición: continuar o saltar (con el `ResultadoStep`
@@ -516,5 +709,252 @@ mod tests {
         let r = aplica_asigna(&asignaciones, res, &mut env);
         assert_eq!(r.estado, "error", "una asigna que falla es un fallo de definición");
         assert!(r.mensaje.contains("asigna"));
+    }
+
+    // --- M4b: sequence call (sin gRPC, con InvocadorMock) ---
+
+    use modelo::{Programa, TipoPaso};
+
+    /// Invocador de mentira: un paso `Grpc` **no** debería aparecer en estos
+    /// tests (las subsecuencias usan `statement`). Si lo hiciera, pánico
+    /// ruidoso para detectarlo.
+    struct InvocadorMock;
+    impl InvocaPasos for InvocadorMock {
+        fn ejecuta_paso_grpc(&mut self, _def: &DefinicionPaso) -> Result<ResultadoStep, Error> {
+            panic!("InvocadorMock no espera pasos grpc en estos tests");
+        }
+    }
+
+    /// Un sink que no hace nada (sólo nos interesa el `ResultadoSecuencia`).
+    struct SinkNulo;
+    impl modelo::ResultSink for SinkNulo {}
+
+    /// Un `Argumento` by-reference: `param` ↔ `locals.campo`.
+    fn arg(param: &str, campo: &str) -> modelo::Argumento {
+        modelo::Argumento {
+            param: param.into(),
+            origen: expr::parse_expresion(&format!("locals.{campo}")).unwrap(),
+        }
+    }
+
+    /// Un paso `sequence_call` hacia `destino` con los argumentos dados.
+    fn call(nombre: &str, destino: &str, args: Vec<modelo::Argumento>) -> DefinicionPaso {
+        let mut p = DefinicionPaso::nuevo(nombre, 1);
+        p.tipo = TipoPaso::SequenceCall;
+        p.secuencia = Some(destino.into());
+        if !args.is_empty() {
+            p.parametros = Some(args);
+        }
+        p
+    }
+
+    /// Una subsecuencia inline `nombre` con un `statement` que copia
+    /// `parameters.canal` a `parameters.listo` (escribe en parameters: by-ref).
+    fn inline_comprueba(nombre: &str) -> DefinicionSecuencia {
+        let mut s = DefinicionSecuencia::default();
+        s.nombre = nombre.into();
+        s.parameters.insert("canal".into(), ValorDefinicion::Numero(0.0));
+        s.parameters.insert("listo".into(), ValorDefinicion::Bool(false));
+        s.pasos_main = vec![{
+            let mut p = DefinicionPaso::nuevo("comprobar", 1);
+            p.tipo = TipoPaso::Statement;
+            p.statement =
+                Some(expr::parse_sentencias("parameters.listo = (parameters.canal >= 0.0)").unwrap());
+            p
+        }];
+        s
+    }
+
+    #[test]
+    fn sequence_call_inline_devuelve_estado_agregado_y_anida() {
+        // Padre: locals { canal: 1.0 }, llama a inline `init` by-reference.
+        let mut padre = DefinicionSecuencia::default();
+        padre.nombre = "padre".into();
+        padre.locals.insert("canal".into(), ValorDefinicion::Numero(1.0));
+        padre.locals.insert("listo".into(), ValorDefinicion::Bool(false));
+        padre.subsecuencias.insert("init".into(), inline_comprueba("init"));
+        padre.pasos_main = vec![call("llamar", "init", vec![arg("canal", "canal"), arg("listo", "listo")])];
+
+        let programa = Programa { raiz: padre.clone(), archivos: HashMap::new() };
+        let entorno = EntornoMotor::desde_definicion(&programa.raiz);
+        let mut inv = InvocadorMock;
+        let mut sink = SinkNulo;
+        let (sec, _) = ejecuta_secuencia_interna(&mut inv, &programa.raiz, entorno, &mut sink, &programa, 0, true).unwrap();
+
+        // El call pasa (la subsecuencia pasa) y anida sus pasos.
+        let r = &sec.pasos[0];
+        assert_eq!(r.estado, "paso");
+        assert_eq!(r.sub_pasos.as_ref().unwrap().len(), 1);
+        assert_eq!(r.sub_pasos.as_ref().unwrap()[0].nombre, "comprobar");
+    }
+
+    #[test]
+    fn sequence_call_by_reference_devuelve_la_salida_al_padre() {
+        // La subsecuencia escribe `parameters.listo` = true (canal=1.0 >= 0.0);
+        // al volver, by-reference copia `parameters.listo` → `locals.listo`.
+        let mut padre = DefinicionSecuencia::default();
+        padre.nombre = "padre".into();
+        padre.locals.insert("canal".into(), ValorDefinicion::Numero(1.0));
+        padre.locals.insert("listo".into(), ValorDefinicion::Bool(false));
+        padre.subsecuencias.insert("init".into(), inline_comprueba("init"));
+        padre.pasos_main = vec![call("llamar", "init", vec![arg("canal", "canal"), arg("listo", "listo")])];
+
+        let programa = Programa { raiz: padre.clone(), archivos: HashMap::new() };
+        let entorno = EntornoMotor::desde_definicion(&programa.raiz);
+        let mut inv = InvocadorMock;
+        let mut sink = SinkNulo;
+        let (sec, env) = ejecuta_secuencia_interna(&mut inv, &programa.raiz, entorno, &mut sink, &programa, 0, true).unwrap();
+
+        assert_eq!(sec.pasos[0].estado, "paso");
+        // La salida by-reference: locals.listo pasó de false a true.
+        assert_eq!(env.locals().get("listo"), Some(&Value::Bool(true)), "by-reference lleva la salida al padre");
+        // Y locals.canal sigue siendo el de entrada (la subsecuencia no lo mutó).
+        assert_eq!(env.locals().get("canal"), Some(&Value::Numero(1.0)));
+    }
+
+    #[test]
+    fn sequence_call_propaga_fallo_de_la_subsecuencia() {
+        // canal = -1.0 → (canal >= 0.0) = false → parameters.listo = false,
+        // pero la subsecuencia misma "pasa" (un statement no falla). Para
+        // forzar un fallo agregado, la subsecuencia lleva un paso grpc mock
+        // que falle… como el mock pánico, usamos otro camino: un paso
+        // statement cuyo `estado` es "paso"; el agregado de la sub es "paso".
+        // Verificamos en cambio el caso de error: una subsecuencia cuyo
+        // statement tiene error de tipo.
+        let mut sub = DefinicionSecuencia::default();
+        sub.nombre = "init".into();
+        sub.parameters.insert("canal".into(), ValorDefinicion::Numero(0.0));
+        sub.pasos_main = vec![{
+            let mut p = DefinicionPaso::nuevo("malo", 1);
+            p.tipo = TipoPaso::Statement;
+            // `!parameters.canal` → error de tipo (canal es número, `!` espera bool).
+            p.statement = Some(expr::parse_sentencias("parameters.canal = !parameters.canal").unwrap());
+            p
+        }];
+        let mut padre = DefinicionSecuencia::default();
+        padre.nombre = "padre".into();
+        padre.locals.insert("canal".into(), ValorDefinicion::Numero(1.0));
+        padre.subsecuencias.insert("init".into(), sub);
+        padre.pasos_main = vec![call("llamar", "init", vec![arg("canal", "canal")])];
+
+        let programa = Programa { raiz: padre.clone(), archivos: HashMap::new() };
+        let entorno = EntornoMotor::desde_definicion(&programa.raiz);
+        let mut inv = InvocadorMock;
+        let mut sink = SinkNulo;
+        let (sec, _) = ejecuta_secuencia_interna(&mut inv, &programa.raiz, entorno, &mut sink, &programa, 0, true).unwrap();
+
+        // El call hereda "error" (agregado de la sub: un statement con error).
+        let r = &sec.pasos[0];
+        assert_eq!(r.estado, "error", "un fallo en la subsecuencia se propaga al call");
+        assert_eq!(r.sub_pasos.as_ref().unwrap()[0].estado, "error");
+    }
+
+    #[test]
+    fn sequence_call_subsecuencia_externa_por_path() {
+        // El cargador ya reescribió `secuencia` a la clave canónica y cargó
+        // el archivo en `programa.archivos`. Aquí simulamos eso a mano.
+        let mut hija = DefinicionSecuencia::default();
+        hija.nombre = "hija".into();
+        hija.parameters.insert("canal".into(), ValorDefinicion::Numero(0.0));
+        hija.pasos_main = vec![{
+            let mut p = DefinicionPaso::nuevo("eco", 1);
+            p.tipo = TipoPaso::Statement;
+            p.statement = Some(expr::parse_sentencias("parameters.canal = parameters.canal + 1.0").unwrap());
+            p
+        }];
+        let mut padre = DefinicionSecuencia::default();
+        padre.nombre = "padre".into();
+        padre.locals.insert("canal".into(), ValorDefinicion::Numero(1.0));
+        padre.pasos_main = vec![call("llamar", "ruta/hija.yaml", vec![arg("canal", "canal")])];
+
+        let programa = Programa {
+            raiz: padre,
+            archivos: HashMap::from([("ruta/hija.yaml".to_string(), hija)]),
+        };
+        let entorno = EntornoMotor::desde_definicion(&programa.raiz);
+        let mut inv = InvocadorMock;
+        let mut sink = SinkNulo;
+        let (sec, env) = ejecuta_secuencia_interna(&mut inv, &programa.raiz, entorno, &mut sink, &programa, 0, true).unwrap();
+
+        assert_eq!(sec.pasos[0].estado, "paso");
+        // La hija hizo canal + 1.0 = 2.0; by-reference lo devuelve a locals.canal.
+        assert_eq!(env.locals().get("canal"), Some(&Value::Numero(2.0)));
+    }
+
+    #[test]
+    fn sequence_call_argumento_a_local_inexistente_es_error() {
+        let mut padre = DefinicionSecuencia::default();
+        padre.nombre = "padre".into();
+        // No declaramos `locals.canal`: el lvalue no existe en el padre.
+        padre.subsecuencias.insert("init".into(), inline_comprueba("init"));
+        padre.pasos_main = vec![call("llamar", "init", vec![arg("canal", "canal")])];
+
+        let programa = Programa { raiz: padre.clone(), archivos: HashMap::new() };
+        let entorno = EntornoMotor::desde_definicion(&programa.raiz);
+        let mut inv = InvocadorMock;
+        let mut sink = SinkNulo;
+        let (sec, _) = ejecuta_secuencia_interna(&mut inv, &programa.raiz, entorno, &mut sink, &programa, 0, true).unwrap();
+
+        // El motor registra el call como "error" (no pánico).
+        assert_eq!(sec.pasos[0].estado, "error");
+        assert!(sec.pasos[0].mensaje.contains("locals.canal"));
+    }
+
+    #[test]
+    fn sequence_call_profundidad_excesiva_es_error() {
+        // Un ciclo por path (A → B → A → …) que el cargador rechazaría al
+        // cargar; aquí lo construimos a mano en el `Programa` para probar la
+        // red de seguridad del motor (profundidad >64 → "error", no pánico).
+        let mut a = DefinicionSecuencia::default();
+        a.nombre = "a".into();
+        a.pasos_main = vec![call("a_b", "b.yaml", vec![])];
+        let mut b = DefinicionSecuencia::default();
+        b.nombre = "b".into();
+        b.pasos_main = vec![call("b_a", "a.yaml", vec![])];
+        let mut padre = DefinicionSecuencia::default();
+        padre.nombre = "padre".into();
+        padre.pasos_main = vec![call("p_a", "a.yaml", vec![])];
+
+        let programa = Programa {
+            raiz: padre,
+            archivos: HashMap::from([("a.yaml".to_string(), a), ("b.yaml".to_string(), b)]),
+        };
+        let entorno = EntornoMotor::desde_definicion(&programa.raiz);
+        let mut inv = InvocadorMock;
+        let mut sink = SinkNulo;
+        let (sec, _) = ejecuta_secuencia_interna(&mut inv, &programa.raiz, entorno, &mut sink, &programa, 0, true).unwrap();
+
+        // En algún nivel la profundidad >64 produce el error de anidamiento.
+        fn busca_prof(p: &ResultadoStep) -> bool {
+            p.estado == "error" && p.mensaje.contains("anidamiento demasiado profundo")
+                || p.sub_pasos.as_ref().map_or(false, |sub| sub.iter().any(busca_prof))
+        }
+        assert!(sec.pasos.iter().any(busca_prof), "profundidad >64 corta con error: {:?}", sec.pasos);
+    }
+
+    #[test]
+    fn subsecuencia_no_dispara_on_fin_secuencia_del_sink() {
+        // Un sink que cuenta `on_fin_secuencia`: debe dispararse una sola
+        // vez (la raíz), no por cada subsecuencia.
+        use std::cell::Cell;
+        struct Contador(Cell<u32>);
+        impl modelo::ResultSink for Contador {
+            fn on_fin_secuencia(&mut self, _: &ResultadoSecuencia) {
+                self.0.set(self.0.get() + 1);
+            }
+        }
+        let mut padre = DefinicionSecuencia::default();
+        padre.nombre = "padre".into();
+        padre.locals.insert("canal".into(), ValorDefinicion::Numero(1.0));
+        padre.locals.insert("listo".into(), ValorDefinicion::Bool(false));
+        padre.subsecuencias.insert("init".into(), inline_comprueba("init"));
+        padre.pasos_main = vec![call("llamar", "init", vec![arg("canal", "canal"), arg("listo", "listo")])];
+
+        let programa = Programa { raiz: padre.clone(), archivos: HashMap::new() };
+        let entorno = EntornoMotor::desde_definicion(&programa.raiz);
+        let mut inv = InvocadorMock;
+        let mut sink = Contador(Cell::new(0));
+        let _ = ejecuta_secuencia_interna(&mut inv, &programa.raiz, entorno, &mut sink, &programa, 0, true).unwrap();
+        assert_eq!(sink.0.get(), 1, "on_fin_secuencia sólo para la raíz, no por subsecuencia");
     }
 }

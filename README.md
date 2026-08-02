@@ -17,20 +17,31 @@ Empieza por [`docs/vision.md`](docs/vision.md).
 
 ## Correr el ejemplo
 
+**Un binario** (`anvil`, ADR-0011) hospeda wasmtime y los dos guests WASM en
+sandbox, sin instalar nada:
+
+```sh
+cargo build --target wasm32-wasip2 -p motor -p ejecutor_pasos              # guests
+cargo build --manifest-path packaging/anvil-host/Cargo.toml               # host (wasmtime embebido)
+
+./packaging/anvil-host/target/debug/anvil ejemplos/subsecuencia.yaml --json ./out.json --csv ./out.csv
+```
+
+Para depurar los guests sueltos con el CLI de wasmtime (dos terminales):
+
 ```sh
 cargo build --target wasm32-wasip2 -p ejecutor_pasos -p motor
-
 # terminal 1
 wasmtime -S cli -S tcp=y -S inherit-network=y \
   target/wasm32-wasip2/debug/ejecutor_pasos.wasm
-
 # terminal 2
-wasmtime -S cli -S tcp=y -S inherit-network=y \
-  target/wasm32-wasip2/debug/basica_datos.wasm
+wasmtime -S cli -S tcp=y -S inherit-network=y --dir=. \
+  target/wasm32-wasip2/debug/anvil-guest.wasm ejemplos/basica.yaml
 ```
 
 Los flags de wasmtime no son opcionales: sin `-S tcp=y -S
-inherit-network=y` el guest no puede tocar la red.
+inherit-network=y` el guest no puede tocar la red. Más en la
+[guía de inicio rápido](docs/guia-inicio-rapido.md).
 
 ## Estructura
 
@@ -39,7 +50,10 @@ crates/
   modelo/          modelo de datos + mensajes de paso.proto (prost)
   pasos_demo/      los pasos de la secuencia de ejemplo
   ejecutor_pasos/  servidor gRPC: despacha pasos por nombre
-  motor/           cliente gRPC: recorre la secuencia
+  motor/           cliente gRPC: recorre la secuencia (bin `anvil-guest`)
+packaging/
+  anvil-host/      host nativo: un binario que hospeda wasmtime + los dos guests
+                   (workspace aparte; el core no arrastraba wasmtime)
 ```
 
 La pila gRPC vive aparte, en

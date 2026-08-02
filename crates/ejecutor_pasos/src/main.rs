@@ -20,48 +20,64 @@ fn main() {
             std::process::exit(1);
         }
     };
-    println!("ejecutor de pasos escuchando en {PUERTO}");
+    eprintln!("ejecutor de pasos escuchando en {PUERTO}");
 
-    let mut conn = match servidor.aceptar() {
-        Ok(c) => c,
-        Err(e) => {
-            eprintln!("no se pudo aceptar: {e}");
-            std::process::exit(1);
-        }
-    };
-    println!("motor conectado");
-
+    // Acepta conexiones en bucle. El host embebido (ADR-0011) hace un
+    // `connect` de prueba para esperar a que el ejecutor escuche antes de
+    // lanzar el motor: con un único `aceptar` esa prueba consumiría la
+    // conexión del motor. El bucle la descarta (se cierra sin peticiones) y
+    // vuelve a aceptar la del motor. Para el smoke de dos terminales, el
+    // ejecutor ya no termina solo: Ctrl-C cuando se acabe.
+    //
+    // Los logs van a **stderr**: stdout es territorio del motor (el reporte);
+    // en el host embebido ambos guests comparten stdio.
     loop {
-        // Un error aquí es normalmente el motor cerrando la conexión al
-        // acabar la secuencia: se sale del bucle sin ruido.
-        let peticion = match conn.siguiente_peticion() {
-            Ok(p) => p,
-            Err(_) => break,
-        };
-
-        if peticion.path != RUTA_INVOCA {
-            eprintln!("ruta desconocida: {}", peticion.path);
-            continue;
-        }
-
-        let pet = match PeticionPaso::decode(&peticion.cuerpo[..]) {
-            Ok(p) => p,
+        let mut conn = match servidor.aceptar() {
+            Ok(c) => c,
             Err(e) => {
-                eprintln!("petición ilegible: {e}");
+                // La sonda del host embebido (connect de prueba que se cierra
+                // sin preface HTTP/2) llega como "stream cerrado"/"EOF". No es
+                // un error real: se silencia.
+                let msg = format!("{e}");
+                if !msg.contains("cerrado") && !msg.contains("closed") && !msg.contains("EOF") {
+                    eprintln!("no se pudo aceptar: {e}");
+                }
                 continue;
             }
         };
-        println!("paso pedido: {} intento={}", pet.nombre, pet.intento);
+        eprintln!("motor conectado");
 
-        let resultado = pasos_demo::despacha(&pet.nombre, pet.intento);
-        let respuesta: ResultadoPasoProto = (&resultado).into();
+        loop {
+            // Un error aquí es normalmente el motor cerrando la conexión al
+            // acabar la secuencia: se sale del bucle sin ruido.
+            let peticion = match conn.siguiente_peticion() {
+                Ok(p) => p,
+                Err(_) => break,
+            };
 
-        if let Err(e) = conn.responder(peticion.stream, &respuesta.encode_to_vec()) {
-            eprintln!("error respondiendo: {e}");
-            break;
+            if peticion.path != RUTA_INVOCA {
+                eprintln!("ruta desconocida: {}", peticion.path);
+                continue;
+            }
+
+            let pet = match PeticionPaso::decode(&peticion.cuerpo[..]) {
+                Ok(p) => p,
+                Err(e) => {
+                    eprintln!("petición ilegible: {e}");
+                    continue;
+                }
+            };
+            eprintln!("paso pedido: {} intento={}", pet.nombre, pet.intento);
+
+            let resultado = pasos_demo::despacha(&pet.nombre, pet.intento);
+            let respuesta: ResultadoPasoProto = (&resultado).into();
+
+            if let Err(e) = conn.responder(peticion.stream, &respuesta.encode_to_vec()) {
+                eprintln!("error respondiendo: {e}");
+                break;
+            }
+            eprintln!("respuesta enviada, stream {}", peticion.stream);
         }
-        println!("respuesta enviada, stream {}", peticion.stream);
+        eprintln!("conexión cerrada; esperando otra");
     }
-
-    println!("ejecutor de pasos cerrado");
 }

@@ -1,0 +1,38 @@
+# Secuencia con subsecuencias (M4b). Demuestra las DOS rutas de sequence call:
+#
+# 1. **Inline** (`init_comun`): declarada bajo `subsecuencias:`, invocada por
+#    nombre (`secuencia: init_comun`). Privada de este archivo. Sólo la usa
+#    esta secuencia, así que se queda dentro.
+# 2. **Externa** (`./medir_fuentes.yaml`): en archivo aparte, invocada por
+#    path. Reutilizable por otras secuencias.
+#
+# Ambas pasan `parametros` by-reference: cada argumento es `locals.X` del
+# padre ↔ `parameters.P` de la subsecuencia (entrada al iniciar, salida al
+# volver). El `asigna` del segundo call vuelca el estado agregado del call
+# (`resultado.estado`) a `locals.estado_fuentes`.
+nombre: basica
+locals:
+  canal_in: 0.5
+  ok_init: false
+  estado_fuentes: ""
+subsecuencias:
+  init_comun:                       # inline, por nombre; toma el nombre de la clave
+    parameters:
+      canal: 0.0
+      listo: false
+    main:
+      - nombre: preparar_canal
+        tipo: statement
+        statement: 'parameters.listo = (parameters.canal >= 0.0)'
+main:
+  - nombre: preparar
+    tipo: sequence_call
+    secuencia: init_comun              # nombre → inline
+    parametros: { canal: locals.canal_in, listo: locals.ok_init }
+    # al volver: locals.ok_init = parameters.listo (final, true)
+  - nombre: test_fuentes
+    tipo: sequence_call
+    secuencia: ./medir_fuentes.yaml    # path → archivo externo
+    parametros: { canal: locals.canal_in }
+    asigna: { estado_fuentes: "${resultado.estado}" }
+    # al volver: locals.canal_in = parameters.canal (final, mutado a 1.5)

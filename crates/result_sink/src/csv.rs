@@ -47,7 +47,10 @@ impl<W: Write> ResultSink for SinkCsv<W> {
         fila(&mut doc, CABECERA.iter().map(|s| (*s).to_string()).collect());
         let estado = secuencia.estado();
         for p in &secuencia.pasos {
-            fila(&mut doc, fila_paso(estado, p));
+            // `padre` es el prefijo de ruta para los sub-pasos anidados
+            // (M4b): el paso top-level no lleva prefijo; sus sub-pasos se
+            // aplanean como `padre/hijo` (recursivo). Sin columnas nuevas.
+            escribe_filas(&mut doc, estado, p, &p.nombre);
         }
         if let Err(e) = escribir_con_reintentos(&mut self.salida, REINTENTOS, doc.as_bytes()) {
             eprintln!("sink csv: no se pudo escribir: {e}");
@@ -55,12 +58,28 @@ impl<W: Write> ResultSink for SinkCsv<W> {
     }
 }
 
-/// Construye los 10 campos de una fila de paso, ya como `String`.
-fn fila_paso(estado_secuencia: &str, p: &ResultadoStep) -> Vec<String> {
+/// Aplanea un paso y, recursivamente, sus `sub_pasos` como filas CSV. El
+/// `prefijo` es el `nombre_paso` acumulado (`padre/hijo/...`); el paso en
+/// curso se emite con `prefijo` como `nombre_paso` y, si tiene sub-pasos,
+/// éstos se emiten a continuación con `prefijo/sub.nombre`.
+fn escribe_filas(doc: &mut String, estado_secuencia: &str, p: &ResultadoStep, prefijo: &str) {
+    fila(doc, fila_paso(estado_secuencia, p, prefijo));
+    if let Some(sub) = &p.sub_pasos {
+        for sp in sub {
+            let hijo = format!("{prefijo}/{}", sp.nombre);
+            escribe_filas(doc, estado_secuencia, sp, &hijo);
+        }
+    }
+}
+
+/// Construye los 10 campos de una fila de paso, ya como `String`. `nombre`
+/// es el `nombre_paso` a emitir (el original o el prefijo `padre/hijo` para
+/// sub-pasos aplanados).
+fn fila_paso(estado_secuencia: &str, p: &ResultadoStep, nombre: &str) -> Vec<String> {
     vec![
         estado_secuencia.to_string(),
         p.estado.clone(),
-        p.nombre.clone(),
+        nombre.to_string(),
         p.estado.clone(),
         p.mensaje.clone(),
         a_texto(p.valor_medido),
@@ -173,5 +192,33 @@ mod tests {
         let out = String::from_utf8(sink.salida).unwrap();
         let fila = out.split("\r\n").nth(1).unwrap();
         assert!(fila.contains(",5,0,10"), "enteros como 5/0/10 sin decimales: {fila}");
+    }
+
+    #[test]
+    fn sequence_call_aplanea_sub_pasos_con_prefijo() {
+        // Un sequence call (M4b): el call se emite con su nombre, y cada
+        // sub-paso como fila extra con `nombre_paso = call/hijo`. La
+        // cabecera no cambia (sin columnas nuevas).
+        let mut call = ResultadoStep::nuevo("test_fuentes", "fallo", "sequence call → fallo");
+        call.sub_pasos = Some(vec![
+            ResultadoStep::nuevo("medir_canal_1", "paso", "ok"),
+            ResultadoStep::nuevo("medir_canal_2", "fallo", "fuera de rango"),
+        ]);
+        let mut s = ResultadoSecuencia::nueva("basica");
+        s.registra(call);
+        let mut sink = SinkCsv::nuevo(Vec::new());
+        sink.on_fin_secuencia(&s);
+        let out = String::from_utf8(sink.salida).unwrap();
+        let lineas: Vec<&str> = out.split("\r\n").collect();
+        // Cabecera sin cambios.
+        assert_eq!(
+            lineas[0],
+            "nombre_secuencia,estado,nombre_paso,estado_paso,mensaje,valor_medido,limite_min,limite_max,valor_esperado,operador"
+        );
+        // Call.
+        assert!(lineas[1].contains(",fallo,test_fuentes,fallo,"), "fila del call: {}", lineas[1]);
+        // Sub-pasos aplanados con prefijo.
+        assert!(lineas[2].contains(",paso,test_fuentes/medir_canal_1,paso,ok,"), "sub-paso 1: {}", lineas[2]);
+        assert!(lineas[3].contains(",fallo,test_fuentes/medir_canal_2,fallo,fuera de rango,"), "sub-paso 2: {}", lineas[3]);
     }
 }

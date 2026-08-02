@@ -9,6 +9,9 @@ members = [
     "crates/result_sink",
     "crates/expr",
 ]
+# Notar: `packaging/anvil-host` es un workspace APARTE (no está aquí). Es el
+# binario de distribución que hospeda wasmtime; aislarlo del core hace que
+# `cargo build` / `cargo test` no arrastren wasmtime (decisión ADR-0011).
 
 [workspace.package]
 version = "0.1.0"

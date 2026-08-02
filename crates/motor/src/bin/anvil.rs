@@ -17,7 +17,7 @@
 //! CSV en fichero. Los logs de arranque van a stderr para dejar stdout
 //! limpio para el sink de consola.
 
-use cargador::{aplicar_limites, cargar_de_archivo, cargar_limites_de_archivo};
+use cargador::{aplicar_limites, cargar_limites_de_archivo, cargar_programa_de_archivo};
 use modelo::ResultSink;
 use motor::Motor;
 use result_sink::{SinkConsola, SinkCsv, SinkJson};
@@ -54,18 +54,24 @@ fn main() {
         }
     }
 
-    let mut definicion = match cargar_de_archivo(&ruta) {
-        Ok(d) => d,
+    let mut programa = match cargar_programa_de_archivo(&ruta) {
+        Ok(p) => p,
         Err(e) => {
             eprintln!("no se pudo cargar la secuencia '{ruta}': {e}");
             std::process::exit(1);
         }
     };
-    eprintln!("secuencia '{}' cargada ({} pasos)", definicion.nombre, definicion.pasos_main.len());
+    eprintln!(
+        "secuencia '{}' cargada ({} pasos, {} subsecuencia(s) externa(s))",
+        programa.raiz.nombre,
+        programa.raiz.pasos_main.len(),
+        programa.archivos.len()
+    );
 
     // Property loader (RF-30): si se pide un sidecar de límites, se inyecta
-    // por nombre de paso, sobreescribiendo los límites embebidos. Así se
-    // cambian umbrales por lote/variante sin tocar la secuencia.
+    // por nombre de paso en la **raíz**, sobreescribiendo los límites
+    // embebidos. (Aplicar el sidecar a las subsecuencias externas es
+    // post-MVP; hoy el sidecar cubre la secuencia principal.)
     if let Some(r) = limits_ruta.as_deref() {
         let limites = match cargar_limites_de_archivo(r) {
             Ok(l) => l,
@@ -74,7 +80,7 @@ fn main() {
                 std::process::exit(1);
             }
         };
-        let n = aplicar_limites(&mut definicion, &limites);
+        let n = aplicar_limites(&mut programa.raiz, &limites);
         eprintln!("sidecar de límites '{r}' aplicado ({n} paso(s) afectado(s))");
     }
 
@@ -122,7 +128,7 @@ fn main() {
     }
     let mut composite = modelo::SinkCompuesto::nuevo(sinks);
 
-    match motor.ejecuta_secuencia(&definicion, &mut composite) {
+    match motor.ejecuta_programa(&programa, &mut composite) {
         Ok(_) => {}
         Err(e) => {
             eprintln!("la secuencia se interrumpió: {e}");

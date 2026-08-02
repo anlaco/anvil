@@ -25,9 +25,10 @@
 //! por lote/variante sin tocar la secuencia. Ver
 //! [`aplicar_limites`](aplicar_limites) y ADR-0008.
 
-use modelo::{Asignacion, DefinicionPaso, DefinicionSecuencia, Limite, Operador, TipoPaso, ValorDefinicion};
+use modelo::{Argumento, Asignacion, DefinicionPaso, DefinicionSecuencia, Limite, Operador, Programa, TipoPaso, ValorDefinicion};
 use serde::Deserialize;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
+use std::path::{Path, PathBuf};
 
 /// Una secuencia como se lee del YAML, antes de traducirse al modelo del
 /// motor. `deny_unknown_fields` hace que un campo no reconocido falle la
@@ -35,6 +36,10 @@ use std::collections::HashMap;
 #[derive(Debug, PartialEq, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct SecuenciaYaml {
+    /// Nombre de la secuencia. Opcional: si se omite, una subsecuencia inline
+    /// toma el nombre de su **clave** en `subsecuencias` (ver
+    /// [`secuencia_yaml_a_definicion`]); la raíz, en cambio, debe tenerlo.
+    #[serde(default)]
     nombre: String,
     /// Opcional: si no viene, no hay pasos de setup.
     #[serde(default)]
@@ -55,6 +60,12 @@ struct SecuenciaYaml {
     /// M4 (RF-31): globales del archivo, compartidas por todas las secuencias.
     #[serde(default)]
     file_globals: HashMap<String, ValorYaml>,
+    /// M4b (RF-27): subsecuencias **inline** del archivo, invocables por
+    /// nombre desde cualquier secuencia de este archivo. Privadas del
+    /// archivo: los otros archivos invocan la secuencia raíz por path, no
+    /// éstas. Es recursivo: una inline es otra `SecuenciaYaml` completa.
+    #[serde(default)]
+    subsecuencias: HashMap<String, SecuenciaYaml>,
 }
 
 /// Un literal de variable declarado en el YAML (scopes de M4). El tipo se
@@ -115,6 +126,16 @@ struct PasoYaml {
     /// RF-27: sentencia(s) a ejecutar si `tipo == "statement"`. Texto → AST.
     #[serde(default)]
     statement: Option<String>,
+    /// M4b (RF-27): destino del sequence call si `tipo == "sequence_call"`.
+    /// Un **nombre** (subsecuencia inline del mismo archivo) o un **path
+    /// relativo** (archivo externo); se distingue con [`es_path`]. Texto.
+    #[serde(default)]
+    secuencia: Option<String>,
+    /// M4b (RF-27): argumentos by-reference del sequence call, mapa
+    /// `nombre_parameter -> "locals.X"`. Cada valor se parsea a AST y se
+    /// valida como `Expresion::Var { scope: Locals, .. }` (un lvalue local).
+    #[serde(default)]
+    parametros: Option<HashMap<String, String>>,
 }
 
 fn reintentos_por_defecto() -> u32 {
@@ -244,25 +265,57 @@ impl From<noyalib::Error> for ErrorCarga {
 }
 
 /// Carga una secuencia desde texto YAML. Es el punto testeable sin tocar
-/// el disco; `cargar_de_archivo` lo envuelve.
+/// el disco; `cargar_de_archivo` lo envuelve. No resuelve sequence calls (ni
+/// valida lvalues contra la secuencia padre): para eso, usar
+/// [`cargar_programa_de_archivo`].
 pub fn cargar_de_texto(texto: &str) -> Result<DefinicionSecuencia, ErrorCarga> {
     let yaml: SecuenciaYaml = noyalib::from_str(texto)?;
+    secuencia_yaml_a_definicion(yaml, None)
+}
 
-    validar(&yaml)?;
+/// Traduce una `SecuenciaYaml` (parseada) a `DefinicionSecuencia`,
+/// validándola (reglas de negocio + límites + expresiones) y traduciendo
+/// recursivamente sus `subsecuencias` inline. `fallback` es la **clave** del
+/// mapa `subsecuencias` cuando se traduce una inline: si el `nombre` del
+/// YAML está vacío, se toma esa clave (DRY: una inline se nombra por su
+/// entrada en el mapa). La raíz no tiene fallback y debe declarar `nombre`.
+fn secuencia_yaml_a_definicion(
+    mut y: SecuenciaYaml,
+    fallback: Option<&str>,
+) -> Result<DefinicionSecuencia, ErrorCarga> {
+    if y.nombre.trim().is_empty() {
+        match fallback {
+            Some(k) => y.nombre = k.to_string(),
+            None => {
+                return Err(ErrorCarga::Validacion(
+                    "el nombre de la secuencia no puede estar vacío".into(),
+                ))
+            }
+        }
+    }
+    validar(&y)?;
 
-    // Validar y traducir los límites embebidos (RF-29) antes de mover los pasos.
     let traduce_pasos = |pasos: Vec<PasoYaml>| -> Result<Vec<DefinicionPaso>, ErrorCarga> {
         pasos.into_iter().map(PasoYaml::a_definicion).collect()
     };
 
+    // Las subsecuencias inline se traducen recursivamente (cada una es una
+    // SecuenciaYaml completa, con su propia validación; el nombre cae al
+    // fallback de la clave).
+    let mut subsecuencias = HashMap::new();
+    for (k, sub) in y.subsecuencias {
+        subsecuencias.insert(k.clone(), secuencia_yaml_a_definicion(sub, Some(&k))?);
+    }
+
     Ok(DefinicionSecuencia {
-        nombre: yaml.nombre,
-        pasos_setup: traduce_pasos(yaml.setup)?,
-        pasos_main: traduce_pasos(yaml.main)?,
-        pasos_cleanup: traduce_pasos(yaml.cleanup)?,
-        locals: yaml.locals.into_iter().map(|(k, v)| (k, v.a_definicion())).collect(),
-        parameters: yaml.parameters.into_iter().map(|(k, v)| (k, v.a_definicion())).collect(),
-        file_globals: yaml.file_globals.into_iter().map(|(k, v)| (k, v.a_definicion())).collect(),
+        nombre: y.nombre,
+        pasos_setup: traduce_pasos(y.setup)?,
+        pasos_main: traduce_pasos(y.main)?,
+        pasos_cleanup: traduce_pasos(y.cleanup)?,
+        locals: y.locals.into_iter().map(|(k, v)| (k, v.a_definicion())).collect(),
+        parameters: y.parameters.into_iter().map(|(k, v)| (k, v.a_definicion())).collect(),
+        file_globals: y.file_globals.into_iter().map(|(k, v)| (k, v.a_definicion())).collect(),
+        subsecuencias,
     })
 }
 
@@ -270,6 +323,213 @@ pub fn cargar_de_texto(texto: &str) -> Result<DefinicionSecuencia, ErrorCarga> {
 pub fn cargar_de_archivo(ruta: &str) -> Result<DefinicionSecuencia, ErrorCarga> {
     let texto = std::fs::read_to_string(ruta)?;
     cargar_de_texto(&texto)
+}
+
+/// ¿Es `destino` un path (archivo externo) y no un nombre (inline)?
+/// Convención de M4b: si contiene `/` o `\`, o termina en `.yaml`/`.yml` →
+/// path relativo al directorio del archivo que lo referencia; si no, es un
+/// nombre de subsecuencia inline del mismo archivo.
+pub fn es_path(destino: &str) -> bool {
+    let t = destino.trim();
+    t.contains('/') || t.contains('\\') || t.ends_with(".yaml") || t.ends_with(".yml")
+}
+
+/// Directorio que contiene a `ruta` (su `parent`), o "" si no tiene.
+fn dir_de(ruta: &str) -> PathBuf {
+    Path::new(ruta).parent().unwrap_or_else(|| Path::new("")).to_path_buf()
+}
+
+/// Normaliza un path relativo a `base` resolviendo `.` y `..` de forma
+/// lógica (sin IO, sin resolver symlinks): la clave canónica estable para
+/// `programa.archivos` y para detectar ciclos.
+fn normalizar(base: &Path, rel: &Path) -> PathBuf {
+    let mut out = if rel.is_absolute() { PathBuf::new() } else { base.to_path_buf() };
+    for comp in rel.components() {
+        match comp {
+            std::path::Component::CurDir => {}
+            std::path::Component::ParentDir => {
+                out.pop();
+            }
+            std::path::Component::Normal(p) => out.push(p),
+            std::path::Component::RootDir => out = PathBuf::from("/"),
+            std::path::Component::Prefix(p) => out = PathBuf::from(p.as_os_str()),
+        }
+    }
+    out
+}
+
+/// Carga un **programa** desde un fichero YAML en disco (M4b, RF-27): la
+/// secuencia raíz más todas las subsecuencias de **archivos externos**
+/// referenciadas por path, ya resueltas y validadas.
+///
+/// Hace tres cosas (fail-fast, antes de ejecutar nada):
+/// 1. **Carga** la raíz y, recursivamente, los archivos externos a los que
+///    apuntan los `sequence_call` por path. Los paths se **reescriben** a su
+///    clave canónica ([`normalizar`]) en cada `DefinicionPaso.secuencia`, así
+///    el motor los resuelve con un mero `programa.archivos[clave]` (sin
+///    conocer el sistema de ficheros, ADR-0005).
+/// 2. **Valida** cada `sequence_call`: que el destino exista (inline por
+///    nombre o archivo por path), que cada argumento `locals.X` esté
+///    declarado en `locals` de la secuencia contenedora, y que la **firma**
+///    encaje (claves de `parametros` == `parameters` de la subsecuencia).
+/// 3. **Detecta ciclos** en el grafo de llamadas (por nombre inline o por
+///    path): `A → B → A` es error.
+pub fn cargar_programa_de_archivo(ruta: &str) -> Result<Programa, ErrorCarga> {
+    let raiz = cargar_de_archivo(ruta)?;
+    let dir_base = dir_de(ruta);
+    let mut programa = Programa { raiz, archivos: HashMap::new() };
+
+    // Cola de (clave_canónica, dir_contenedor) de archivos externos a cargar.
+    let mut cola: Vec<(String, PathBuf)> = Vec::new();
+    let mut cargados: HashSet<String> = HashSet::new();
+
+    // Fase A: reescribir paths de la raíz a claves canónicas y encolar archivos.
+    procesar_secuencia(&mut programa.raiz, &dir_base, &mut cola)?;
+    while let Some((clave, _dir_cont)) = cola.pop() {
+        if cargados.contains(&clave) {
+            continue;
+        }
+        cargados.insert(clave.clone());
+        let path = PathBuf::from(&clave);
+        let texto = std::fs::read_to_string(&path)?;
+        let mut sub = cargar_de_texto(&texto)?;
+        let dir_sub = path.parent().unwrap_or_else(|| Path::new("")).to_path_buf();
+        // Reescribir paths de la subsecuencia externa y encolar los suyos.
+        procesar_secuencia(&mut sub, &dir_sub, &mut cola)?;
+        programa.archivos.insert(clave, sub);
+    }
+
+    // Fase B: validar lvalues, firmas y nombres; detectar ciclos.
+    let id_raiz = normalizar(&dir_base, Path::new(ruta)).to_string_lossy().into_owned();
+    let mut camino: Vec<String> = Vec::new();
+    visitar(&programa, &id_raiz, &programa.raiz, &mut camino)?;
+
+    Ok(programa)
+}
+
+/// Recorre una `DefinicionSecuencia` (y sus `subsecuencias` inline) y, por
+/// cada `sequence_call` por path, reescribe su `secuencia` a la clave
+/// canónica y encola el archivo para cargarlo. Las inline (por nombre) se
+/// dejan tal cual: el motor las resuelve en `def.subsecuencias`.
+fn procesar_secuencia(
+    def: &mut DefinicionSecuencia,
+    dir: &Path,
+    cola: &mut Vec<(String, PathBuf)>,
+) -> Result<(), ErrorCarga> {
+    for paso in def.pasos_setup.iter_mut().chain(&mut def.pasos_main).chain(&mut def.pasos_cleanup) {
+        if paso.tipo == TipoPaso::SequenceCall {
+            if let Some(sec) = paso.secuencia.as_ref() {
+                if es_path(sec) {
+                    let path_dest = normalizar(dir, Path::new(sec));
+                    let clave = path_dest.to_string_lossy().into_owned();
+                    cola.push((
+                        clave.clone(),
+                        path_dest.parent().unwrap_or_else(|| Path::new("")).to_path_buf(),
+                    ));
+                    *paso.secuencia.as_mut().unwrap() = clave;
+                }
+            }
+        }
+    }
+    for sub in def.subsecuencias.values_mut() {
+        procesar_secuencia(sub, dir, cola)?;
+    }
+    Ok(())
+}
+
+/// DFS de validación sobre el grafo de llamadas. `id` identifica al nodo
+/// (path canónico de un archivo, o `{id_archivo}::{nombre_inline}`).
+/// `camino` lleva los ids en curso para detectar `A → B → A`.
+fn visitar(
+    programa: &Programa,
+    id: &str,
+    def: &DefinicionSecuencia,
+    camino: &mut Vec<String>,
+) -> Result<(), ErrorCarga> {
+    if camino.iter().any(|c| c == id) {
+        let mut trail = camino.join(" → ");
+        trail.push_str(" → ");
+        trail.push_str(id);
+        return Err(ErrorCarga::Validacion(format!("ciclo de subsecuencias: {trail}")));
+    }
+    camino.push(id.to_string());
+    for paso in def.pasos_setup.iter().chain(&def.pasos_main).chain(&def.pasos_cleanup) {
+        if paso.tipo != TipoPaso::SequenceCall {
+            continue;
+        }
+        let secuencia = paso.secuencia.as_ref().expect("validado en a_definicion");
+        if es_path(secuencia) {
+            let sub = programa.archivos.get(secuencia).ok_or_else(|| {
+                ErrorCarga::Validacion(format!(
+                    "el sequence call '{}' referencia '{secuencia}' que no se resolvió al cargar",
+                    paso.nombre
+                ))
+            })?;
+            validar_call(paso, def, sub, secuencia)?;
+            visitar(programa, secuencia, sub, camino)?;
+        } else {
+            let sub = def.subsecuencias.get(secuencia).ok_or_else(|| {
+                ErrorCarga::Validacion(format!(
+                    "el sequence call '{}' referencia la subsecuencia inline '{secuencia}' que no existe",
+                    paso.nombre
+                ))
+            })?;
+            validar_call(paso, def, sub, secuencia)?;
+            let id_sub = format!("{id}::{secuencia}");
+            visitar(programa, &id_sub, sub, camino)?;
+        }
+    }
+    camino.pop();
+    Ok(())
+}
+
+/// Valida un `sequence_call` contra la firma de su subsecuencia: que cada
+/// argumento `locals.X` esté declarado en `locals` de la secuencia
+/// contenedora (`padre`) y que las claves de `parametros` coincidan con las
+/// de `parameters` de la subsecuencia (`sub`).
+fn validar_call(
+    paso: &DefinicionPaso,
+    padre: &DefinicionSecuencia,
+    sub: &DefinicionSecuencia,
+    destino: &str,
+) -> Result<(), ErrorCarga> {
+    let args: Vec<&Argumento> = paso.parametros.as_ref().map(|v| v.iter().collect()).unwrap_or_default();
+    // Lvalues: la forma `Var{Locals, campo}` ya se validó en `a_definicion`;
+    // aquí validamos que `campo` esté declarado en `locals` del padre.
+    for a in &args {
+        if let expr::Expresion::Var { scope: expr::Scope::Locals, campo } = &a.origen {
+            if !padre.locals.contains_key(campo) {
+                return Err(ErrorCarga::Validacion(format!(
+                    "el argumento '{}' del sequence call '{}' usa 'locals.{campo}', \
+                     no declarado en locals de su secuencia",
+                    a.param, paso.nombre
+                )));
+            }
+        }
+    }
+    // Firma: claves de los argumentos == claves de `parameters` de la subsec.
+    let claves_args: HashSet<&String> = args.iter().map(|a| &a.param).collect();
+    let claves_sub: HashSet<&String> = sub.parameters.keys().collect();
+    if claves_args != claves_sub {
+        let faltan: Vec<&String> = claves_sub.difference(&claves_args).copied().collect();
+        let sobran: Vec<&String> = claves_args.difference(&claves_sub).copied().collect();
+        let mut detalles = Vec::new();
+        if !faltan.is_empty() {
+            detalles.push(format!("falta(n) {faltan:?}"));
+        }
+        if !sobran.is_empty() {
+            detalles.push(format!("sobran {sobran:?}"));
+        }
+        return Err(ErrorCarga::Validacion(format!(
+            "el sequence call '{}' no encaja con la firma de '{}' \
+             (parameters: {:?}): {}",
+            paso.nombre,
+            destino,
+            sub.parameters.keys().collect::<Vec<_>>(),
+            detalles.join("; ")
+        )));
+    }
+    Ok(())
 }
 
 /// Carga un **sidecar de límites** (RF-30): un YAML que asocia cada nombre de
@@ -324,11 +584,10 @@ pub fn aplicar_limites(
     aplicados
 }
 
-/// Reglas de negocio que el schema por sí solo no expresa.
+/// Reglas de negocio que el schema por sí solo no expresa. No revisa el
+/// `nombre` (eso lo hace [`secuencia_yaml_a_definicion`] con su fallback) ni
+/// las `subsecuencias` (las traduce/recorre la propia función llamadora).
 fn validar(y: &SecuenciaYaml) -> Result<(), ErrorCarga> {
-    if y.nombre.trim().is_empty() {
-        return Err(ErrorCarga::Validacion("el nombre de la secuencia no puede estar vacío".into()));
-    }
     if y.main.is_empty() {
         return Err(ErrorCarga::Validacion(
             "la sección 'main' es obligatoria y no puede estar vacía".into(),
@@ -386,13 +645,14 @@ impl PasoYaml {
             None => None,
         };
 
-        // RF-27: tipo de paso. `grpc` (default) o `statement`.
+        // RF-27: tipo de paso. `grpc` (default), `statement` o `sequence_call` (M4b).
         let tipo = match self.tipo.as_str() {
             "grpc" => TipoPaso::Grpc,
             "statement" => TipoPaso::Statement,
+            "sequence_call" => TipoPaso::SequenceCall,
             otro => {
                 return Err(ErrorCarga::Validacion(format!(
-                    "el paso '{}' tiene tipo '{otro}' inválido (grpc|statement)",
+                    "el paso '{}' tiene tipo '{otro}' inválido (grpc|statement|sequence_call)",
                     self.nombre
                 )))
             }
@@ -408,7 +668,37 @@ impl PasoYaml {
             None => None,
         };
 
-        // Coherencia tipo ↔ statement.
+        // M4b (RF-27): argumentos by-reference del sequence call. Cada valor
+        // es "locals.X" y se parsea a AST; se valida que sea un lvalue local
+        // puro (`Expresion::Var { scope: Locals, .. }`). Que el `campo`
+        // exista en `locals` de la secuencia contenedora se valida al
+        // resolver el programa (ver `cargar_programa_de_archivo`).
+        let parametros = match self.parametros {
+            Some(mapa) if !mapa.is_empty() => Some(
+                mapa.into_iter()
+                    .map(|(param, texto)| {
+                        let origen = expr::parse_expresion(extraer_expr(&texto))
+                            .map_err(|e| ErrorCarga::Validacion(format!(
+                                "parámetro '{param}' del sequence call '{}': {e}", self.nombre
+                            )))?;
+                        match &origen {
+                            expr::Expresion::Var { scope: expr::Scope::Locals, .. } => {}
+                            _ => {
+                                return Err(ErrorCarga::Validacion(format!(
+                                    "el argumento '{param}' del sequence call '{}' debe ser una \
+                                     variable local (locals.X); by-reference no admite expresiones",
+                                    self.nombre
+                                )))
+                            }
+                        }
+                        Ok(Argumento { param, origen })
+                    })
+                    .collect::<Result<Vec<_>, ErrorCarga>>()?,
+            ),
+            _ => None,
+        };
+
+        // Coherencia tipo ↔ campos (fail-fast).
         if matches!(tipo, TipoPaso::Statement) && statement.is_none() {
             return Err(ErrorCarga::Validacion(format!(
                 "el paso '{}' es 'statement' pero no trae 'statement'", self.nombre
@@ -418,6 +708,38 @@ impl PasoYaml {
             return Err(ErrorCarga::Validacion(format!(
                 "el paso '{}' es 'grpc' pero trae 'statement' (reservado para 'statement')",
                 self.nombre
+            )));
+        }
+        if matches!(tipo, TipoPaso::SequenceCall) {
+            if self.secuencia.is_none() {
+                return Err(ErrorCarga::Validacion(format!(
+                    "el paso '{}' es 'sequence_call' pero no trae 'secuencia'", self.nombre
+                )));
+            }
+            if statement.is_some() {
+                return Err(ErrorCarga::Validacion(format!(
+                    "el paso '{}' es 'sequence_call' pero trae 'statement' (reservado para 'statement')",
+                    self.nombre
+                )));
+            }
+            if limite.is_some() {
+                return Err(ErrorCarga::Validacion(format!(
+                    "el paso '{}' es 'sequence_call' y trae 'limite': un sequence call no mide",
+                    self.nombre
+                )));
+            }
+            if self.reintentos > 1 {
+                return Err(ErrorCarga::Validacion(format!(
+                    "el paso '{}' es 'sequence_call' con reintentos={}: no admite reintentos \
+                     (sus pasos internos declaran los suyos)",
+                    self.nombre, self.reintentos
+                )));
+            }
+        }
+        if matches!(tipo, TipoPaso::Grpc | TipoPaso::Statement) && (self.secuencia.is_some() || parametros.is_some()) {
+            return Err(ErrorCarga::Validacion(format!(
+                "el paso '{}' es '{}' pero trae 'secuencia'/'parametros' (reservado para 'sequence_call')",
+                self.nombre, self.tipo
             )));
         }
 
@@ -431,6 +753,8 @@ impl PasoYaml {
             asigna,
             tipo,
             statement,
+            secuencia: self.secuencia,
+            parametros,
         })
     }
 }
@@ -566,8 +890,10 @@ main:
     #[test]
     fn campo_desconocido_es_error() {
         // Desde M4, `disable`/`pause_on_fail`/`precondicion`/`asigna`/`tipo`/
-        // `statement` son campos conocidos. Usamos uno realmente desconocido
-        // (`foo`) para seguir probando `deny_unknown_fields` (fail-fast).
+        // `statement` son campos conocidos; desde M4b también `secuencia`/
+        // `parametros` (paso) y `subsecuencias` (secuencia). Usamos uno
+        // realmente desconocido (`foo`) para seguir probando
+        // `deny_unknown_fields` (fail-fast).
         let yaml = "\
 nombre: s
 main:
@@ -576,6 +902,234 @@ main:
 ";
         let err = cargar_de_texto(yaml).unwrap_err();
         assert!(matches!(err, ErrorCarga::Sintaxis(_)), "campo desconocido debe ser error de schema: {err}");
+    }
+
+    // --- M4b: sequence call, subsecuencias inline y por path ---
+
+    /// Una subsecuencia inline se carga en `subsecuencias` y un `sequence_call`
+    /// por nombre la referencia. El programa resuelve sin archivos externos.
+    #[test]
+    fn sequence_call_inline_se_carga_y_resuelve() {
+        let yaml = "\
+nombre: padre
+locals: { ok: false }
+subsecuencias:
+  init:
+    parameters: { canal: 0.0, listo: false }
+    main:
+      - nombre: comprobar
+        tipo: statement
+        statement: 'parameters.listo = (parameters.canal >= 0.0)'
+main:
+  - nombre: preparar
+    tipo: sequence_call
+    secuencia: init
+    parametros: { canal: locals.ok, listo: locals.ok }
+";
+        let s = cargar_de_texto(yaml).unwrap();
+        assert_eq!(s.subsecuencias.len(), 1);
+        assert_eq!(s.pasos_main[0].tipo, modelo::TipoPaso::SequenceCall);
+        assert_eq!(s.pasos_main[0].secuencia.as_deref(), Some("init"));
+        let args = s.pasos_main[0].parametros.as_ref().unwrap();
+        assert_eq!(args.len(), 2);
+    }
+
+    /// `cargar_de_texto` no resuelve ni valida lvalues/firma (sólo forma);
+    /// `cargar_programa_de_archivo` sí. Aquí probamos la validación de la
+    /// **forma** del lvalue en `a_definicion`.
+    #[test]
+    fn argumento_que_no_es_locals_x_es_error() {
+        let yaml = "\
+nombre: s
+main:
+  - nombre: c
+    tipo: sequence_call
+    secuencia: ./h.yaml
+    parametros: { p: file_globals.g }
+";
+        let err = cargar_de_texto(yaml).unwrap_err();
+        assert!(matches!(err, ErrorCarga::Validacion(m) if m.contains("locals.X")));
+    }
+
+    #[test]
+    fn argumento_expresion_no_es_lvalue_es_error() {
+        let yaml = "\
+nombre: s
+main:
+  - nombre: c
+    tipo: sequence_call
+    secuencia: ./h.yaml
+    parametros: { p: 'locals.x + 1' }
+";
+        let err = cargar_de_texto(yaml).unwrap_err();
+        assert!(matches!(err, ErrorCarga::Validacion(m) if m.contains("by-reference")));
+    }
+
+    /// Sequence call sin `secuencia` → error; con `limite` → error;
+    /// con `reintentos > 1` → error; con `statement` → error.
+    #[test]
+    fn sequence_call_mal_usado_es_error() {
+        let casos = [
+            ("nombre: s\nmain:\n  - nombre: c\n    tipo: sequence_call\n", "no trae 'secuencia'"),
+            ("nombre: s\nmain:\n  - nombre: c\n    tipo: sequence_call\n    secuencia: x\n    limite: { tipo: rango, min: 1, max: 2 }\n", "no mide"),
+            ("nombre: s\nmain:\n  - nombre: c\n    tipo: sequence_call\n    secuencia: x\n    reintentos: 2\n", "no admite reintentos"),
+            ("nombre: s\nmain:\n  - nombre: c\n    tipo: sequence_call\n    secuencia: x\n    statement: 'locals.y = 1'\n", "reservado para 'statement'"),
+        ];
+        for (yaml, frag) in casos {
+            let err = cargar_de_texto(yaml).unwrap_err();
+            assert!(
+                matches!(&err, ErrorCarga::Validacion(m) if m.contains(frag)),
+                "esperaba '{frag}' en {err}"
+            );
+        }
+    }
+
+    /// `grpc`/`statement` no pueden traer `secuencia`/`parametros`.
+    #[test]
+    fn grpc_no_admite_secuencia_ni_parametros() {
+        let yaml = "\
+nombre: s
+main:
+  - nombre: c
+    secuencia: ./h.yaml
+";
+        let err = cargar_de_texto(yaml).unwrap_err();
+        assert!(matches!(err, ErrorCarga::Validacion(m) if m.contains("reservado para 'sequence_call'")));
+    }
+
+    /// Una subsecuencia inline es una secuencia completa: `main` es
+    /// obligatorio (como en la raíz). Ausente → error de schema (Sintaxis).
+    #[test]
+    fn inline_sin_main_es_error() {
+        let yaml = "\
+nombre: s
+subsecuencias:
+  init:
+    nombre: init
+main:
+  - nombre: p
+";
+        let err = cargar_de_texto(yaml).unwrap_err();
+        assert!(matches!(err, ErrorCarga::Sintaxis(_)), "inline sin main: error de schema: {err}");
+    }
+
+    /// Una inline puede omitir `nombre`: toma el de su clave en el mapa.
+    #[test]
+    fn inline_hereda_nombre_de_la_clave() {
+        let yaml = "\
+nombre: s
+subsecuencias:
+  init:
+    main:
+      - nombre: p
+main:
+  - nombre: m
+";
+        let s = cargar_de_texto(yaml).unwrap();
+        assert_eq!(s.subsecuencias.get("init").unwrap().nombre, "init");
+    }
+
+    /// `deny_unknown_fields` también aplica dentro de `subsecuencias`: una
+    /// inline con un campo raro falla.
+    #[test]
+    fn inline_con_campo_desconocido_es_error() {
+        let yaml = "\
+nombre: s
+subsecuencias:
+  init:
+    nombre: init
+    main:
+      - nombre: p
+    foo: bar
+main:
+  - nombre: p
+";
+        let err = cargar_de_texto(yaml).unwrap_err();
+        assert!(matches!(err, ErrorCarga::Sintaxis(_)));
+    }
+
+    /// `cargar_programa_de_archivo` resuelve un archivo externo por path,
+    /// lo registra en `archivos` (clave canónica) y reescribe `secuencia`.
+    #[test]
+    fn programa_resuelve_subsecuencia_externa() {
+        // Escribimos dos archivos en un dir temporal.
+        let dir = std::env::temp_dir().join(format!("anvil_m4b_{}", "ext_ok"));
+        std::fs::create_dir_all(&dir).unwrap();
+        let hija = dir.join("hija.yaml");
+        std::fs::write(&hija, "nombre: hija\nparameters: { canal: 0.0 }\nmain:\n  - nombre: m\n    tipo: grpc\n").unwrap();
+        let padre = dir.join("padre.yaml");
+        std::fs::write(
+            &padre,
+            "nombre: padre\nlocals: { canal: 1.0 }\nmain:\n  - nombre: c\n    tipo: sequence_call\n    secuencia: ./hija.yaml\n    parametros: { canal: locals.canal }\n",
+        )
+        .unwrap();
+
+        let prog = cargar_programa_de_archivo(padre.to_str().unwrap()).unwrap();
+        assert_eq!(prog.raiz.nombre, "padre");
+        assert_eq!(prog.archivos.len(), 1, "una subsecuencia externa cargada");
+        let clave = prog.raiz.pasos_main[0].secuencia.as_deref().unwrap();
+        assert!(es_path(clave), "reescribe a path canónico: {clave}");
+        assert_eq!(prog.archivos.get(clave).map(|d| d.nombre.as_str()).unwrap_or(""), "hija");
+    }
+
+    /// Ciclo por path (A → B → A) se detecta al cargar el programa.
+    #[test]
+    fn programa_detecta_ciclo_por_path() {
+        let dir = std::env::temp_dir().join(format!("anvil_m4b_{}", "ciclo"));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("a.yaml"), "nombre: a\nmain:\n  - nombre: c\n    tipo: sequence_call\n    secuencia: ./b.yaml\n").unwrap();
+        std::fs::write(dir.join("b.yaml"), "nombre: b\nmain:\n  - nombre: c\n    tipo: sequence_call\n    secuencia: ./a.yaml\n").unwrap();
+        let err = cargar_programa_de_archivo(dir.join("a.yaml").to_str().unwrap()).unwrap_err();
+        assert!(matches!(err, ErrorCarga::Validacion(m) if m.contains("ciclo")));
+    }
+
+    /// Firma que no encaja (falta un parámetro) → error al cargar el programa.
+    #[test]
+    fn programa_firma_no_encaja_es_error() {
+        let dir = std::env::temp_dir().join(format!("anvil_m4b_{}", "firma"));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(&dir.join("h.yaml"), "nombre: h\nparameters: { canal: 0.0, extra: 0.0 }\nmain:\n  - nombre: m\n").unwrap();
+        std::fs::write(&dir.join("p.yaml"), "nombre: p\nlocals: { canal: 1.0 }\nmain:\n  - nombre: c\n    tipo: sequence_call\n    secuencia: ./h.yaml\n    parametros: { canal: locals.canal }\n").unwrap();
+        let err = cargar_programa_de_archivo(dir.join("p.yaml").to_str().unwrap()).unwrap_err();
+        assert!(matches!(err, ErrorCarga::Validacion(m) if m.contains("firma")));
+    }
+
+    /// Argumento `locals.X` no declarado en el padre → error al cargar.
+    #[test]
+    fn programa_lvalue_no_declarado_es_error() {
+        let dir = std::env::temp_dir().join(format!("anvil_m4b_{}", "lvalue"));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(&dir.join("h.yaml"), "nombre: h\nparameters: { canal: 0.0 }\nmain:\n  - nombre: m\n").unwrap();
+        std::fs::write(&dir.join("p.yaml"), "nombre: p\nmain:\n  - nombre: c\n    tipo: sequence_call\n    secuencia: ./h.yaml\n    parametros: { canal: locals.inventado }\n").unwrap();
+        let err = cargar_programa_de_archivo(dir.join("p.yaml").to_str().unwrap()).unwrap_err();
+        assert!(matches!(err, ErrorCarga::Validacion(m) if m.contains("locals.inventado")));
+    }
+
+    /// Path no encontrado → error de lectura al cargar el programa.
+    #[test]
+    fn programa_path_no_encontrado_es_error() {
+        let dir = std::env::temp_dir().join(format!("anvil_m4b_{}", "nofile"));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(&dir.join("p.yaml"), "nombre: p\nmain:\n  - nombre: c\n    tipo: sequence_call\n    secuencia: ./no_existe.yaml\n").unwrap();
+        let err = cargar_programa_de_archivo(dir.join("p.yaml").to_str().unwrap()).unwrap_err();
+        assert!(matches!(err, ErrorCarga::Lectura(_)));
+    }
+
+    /// El ejemplo `ejemplos/subsecuencia.yaml` carga como programa: la
+    /// subsecuencia externa `./medir_fuentes.yaml` se resuelve, la inline
+    /// `init_comun` se enlaza por nombre y la firma/lvalues validan.
+    #[test]
+    fn ejemplo_subsecuencia_carga_como_programa() {
+        let ruta = format!("{}/../../ejemplos/subsecuencia.yaml", env!("CARGO_MANIFEST_DIR"));
+        let prog = cargar_programa_de_archivo(&ruta)
+            .unwrap_or_else(|e| panic!("no carga el programa {ruta}: {e}"));
+        assert_eq!(prog.raiz.nombre, "basica");
+        assert_eq!(prog.raiz.subsecuencias.len(), 1, "una inline: init_comun");
+        assert_eq!(prog.archivos.len(), 1, "una externa: medir_fuentes.yaml");
+        // El call externo reescribe su `secuencia` a la clave canónica (path).
+        let call_ext = &prog.raiz.pasos_main[1];
+        assert_eq!(call_ext.tipo, modelo::TipoPaso::SequenceCall);
+        assert!(es_path(call_ext.secuencia.as_deref().unwrap()), "path reescrito");
     }
 
     #[test]
