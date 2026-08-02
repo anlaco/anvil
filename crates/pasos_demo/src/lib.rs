@@ -24,35 +24,31 @@ pub fn conectar(intento: i32) -> ResultadoStep {
     }
 }
 
-/// Mide 4.2 V contra un rango de 4.5–5.5: falla siempre, a propósito. Es
-/// lo que hace que la secuencia de ejemplo corte el Main y demuestre la
-/// semántica de ejecución.
+/// Mide 4.2 V y devuelve la medida **sin conocer el umbral**: en M3 los
+/// límites son datos first-class (RF-29), viven en la secuencia (YAML) y los
+/// evalúa el motor (ADR-0008). El paso solo mide y reporta que la medición
+/// fue bien (`paso`); el motor compara 4.2 contra el rango declarado y, si no
+/// cumple, convierte el estado en `fallo`.
+///
+/// Por eso mide 4.2 contra un rango 4.5–5.5 declarado en `ejemplos/basica.yaml`
+/// y el resultado final de la secuencia sigue siendo `fallo` — solo que ahora
+/// el umbral ya no está grabado aquí.
 pub fn medir_voltaje(_intento: i32) -> ResultadoStep {
     let valor = 4.2;
-    let (min, max) = (4.5, 5.5);
-    if valor < min {
-        ResultadoStep::medido(
-            "medir_voltaje",
-            "fallo",
-            "voltaje fuera de rango",
-            valor,
-            min,
-            max,
-        )
-    } else {
-        ResultadoStep::medido(
-            "medir_voltaje",
-            "paso",
-            "voltaje dentro de rango",
-            valor,
-            min,
-            max,
-        )
-    }
+    ResultadoStep::medido_valor("medir_voltaje", "paso", "medido: 4.2 V", valor)
 }
 
+/// Pass/fail (RF-25): hace algo y reporta `paso`/`fallo` **sin medida**. El
+/// caso más simple de step type built-in.
 pub fn verificar_led(_intento: i32) -> ResultadoStep {
     ResultadoStep::nuevo("verificar_led", "paso", "led encendido")
+}
+
+/// Action (RF-27): ejecuta una acción (abrir un relé) y su estado es `paso`
+/// si no hubo `error` — sin criterio de aceptación, solo éxito técnico. Aquí
+/// siempre pasa; en hardware real devolvería `error` si el relé no responde.
+pub fn abrir_rele(_intento: i32) -> ResultadoStep {
+    ResultadoStep::nuevo("abrir_rele", "paso", "relé abierto")
 }
 
 pub fn desconectar(_intento: i32) -> ResultadoStep {
@@ -68,6 +64,7 @@ pub fn despacha(nombre: &str, intento: i32) -> ResultadoStep {
         "conectar_equipo" => conectar(intento),
         "medir_voltaje" => medir_voltaje(intento),
         "verificar_led" => verificar_led(intento),
+        "abrir_rele" => abrir_rele(intento),
         "desconectar_equipo" => desconectar(intento),
         _ => ResultadoStep::nuevo("desconocido", "error", "paso no reconocido"),
     }
@@ -85,11 +82,21 @@ mod tests {
     }
 
     #[test]
-    fn voltaje_fuera_de_rango() {
+    fn voltaje_mide_y_pasa_el_paso_no_conoce_el_umbral() {
+        // En M3 el paso mide y devuelve `paso` (medición OK); el motor
+        // evalúa el límite del YAML. El paso no trae límites embebidos.
         let r = medir_voltaje(1);
-        assert_eq!(r.estado, "fallo");
+        assert_eq!(r.estado, "paso", "el paso solo mide: la regla la aplica el motor");
         assert_eq!(r.valor_medido, Some(4.2));
-        assert_eq!(r.limite_min, Some(4.5));
+        assert_eq!(r.limite_min, None, "el umbral vive en el YAML, no aquí");
+        assert_eq!(r.limite_max, None);
+    }
+
+    #[test]
+    fn action_abrir_rele_pasa_sin_medida() {
+        let r = abrir_rele(1);
+        assert_eq!(r.estado, "paso");
+        assert_eq!(r.valor_medido, None, "un action no mide");
     }
 
     #[test]
@@ -102,6 +109,7 @@ mod tests {
     #[test]
     fn despacho_por_nombre() {
         assert_eq!(despacha("verificar_led", 1).nombre, "verificar_led");
+        assert_eq!(despacha("abrir_rele", 1).estado, "paso");
         assert_eq!(despacha("desconectar_equipo", 1).estado, "paso");
     }
 }
