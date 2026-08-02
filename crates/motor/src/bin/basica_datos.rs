@@ -11,6 +11,7 @@
 
 use modelo::{DefinicionPaso, DefinicionSecuencia};
 use motor::Motor;
+use result_sink::SinkConsola;
 
 fn main() {
     let definicion = DefinicionSecuencia {
@@ -30,10 +31,11 @@ fn main() {
             std::process::exit(1);
         }
     };
-    println!("conectado al ejecutor de pasos");
+    eprintln!("conectado al ejecutor de pasos");
 
-    match motor.ejecuta_secuencia(&definicion) {
-        Ok(secuencia) => secuencia.reporte(),
+    let mut consola = SinkConsola::nuevo(std::io::stdout());
+    match motor.ejecuta_secuencia(&definicion, &mut consola) {
+        Ok(_) => {}
         Err(e) => {
             eprintln!("la secuencia se interrumpió: {e}");
             std::process::exit(1);

@@ -1,0 +1,9 @@
+[package]
+name = "result_sink"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "ResultSinks de anvil: consola, JSON, CSV (SQLite aplazado, ADR-0007)"
+
+[dependencies]
+modelo.workspace = true
