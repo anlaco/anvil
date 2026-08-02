@@ -1,11 +1,13 @@
 # Diseño: Formato de secuencia
 
-> **Prioridad:** MVP. **Propuesta** (hoy la secuencia se construye en
-> código; este doc define el schema YAML de entrada).
+> **Prioridad:** MVP. El cargador YAML se implementó en M1 (RF-20); los
+> límites por paso (`limite`) llegan en M3 (RF-29). El schema sigue siendo un
+> subconjunto estricto que crece de forma deliberada.
 
-La secuencia es **datos** (ADR-0002). Este doc propone el schema YAML que
-reemplaza la construcción en código de
-`crates/motor/src/bin/basica_datos.rs`.
+La secuencia es **datos** (ADR-0002). El cargador (`crates/cargador`) lee el
+YAML y lo traduce a `DefinicionSecuencia` sin tocar el motor (ADR-0005); el
+binario `crates/motor/src/bin/basica_datos.rs` es la misma secuencia expresada
+en Rust, para referencia.
 
 ## Estado actual
 
@@ -55,20 +57,32 @@ Reglas:
   motor, no negociable).
 - Cada paso tiene `nombre` (obligatorio) y `reintentos` (entero ≥ 1;
   defecto 1).
-- Campos opcionales por paso: `limite` (ver
-  [limites-y-estados.md](limites-y-estados.md)), `disable`, `pause_on_fail`
-  (ver [motor-de-ejecucion.md](motor-de-ejecucion.md)), `precondicion`
-  (ver [motor-de-expresiones.md](motor-de-expresiones.md)), y
+- Campos opcionales por paso: `limite` (desde M3, ver
+  [limites-y-estados.md](limites-y-estados.md) — `tipo: rango|comparacion` con
+  `min`/`max` o `op`/`esperado`), `disable` y `pause_on_fail`
+  (M4, RF-34, ver [motor-de-ejecucion.md](motor-de-ejecucion.md)),
+  `precondicion` (M4, RF-33, ver [motor-de-expresiones.md](motor-de-expresiones.md)),
+  `asigna` (M4, RF-31, vuelca `resultado.*` a `Locals` tras el paso) y
+  `tipo`/`statement` (M4, RF-27: `tipo: grpc|statement`, por defecto `grpc`;
+  `statement` trae las sentencias a ejecutar si el paso es local, sin gRPC), y
   `parametros` (cuando el paso admita firma, post-MVP).
 - Variables: `locals`, `parameters`, `file_globals` a nivel de secuencia
-  (ver [variables-y-alcances.md](variables-y-alcances.md)).
+  (M4, RF-31, ver [variables-y-alcances.md](variables-y-alcances.md)). El tipo
+  de cada variable se infiere del escalar YAML (`true`→bool, `4.5`→número,
+  `"A"`→texto).
+- El subconjunto es **estricto** (`deny_unknown_fields`): un campo no reconocido
+  falla la carga en vez de ignorarse en silencio. `precondicion`/`asigna`/
+  `statement` se **parsean a AST al cargar** (fail-fast): un error de sintaxis
+  se reporta como error de validación con el nombre del paso (ADR-0009).
 
 ## Cargador
 
-- **Validación de schema** al cargar (campos obligatorios, tipos, `reintentos ≥ 1`).
+- **Validación de schema** al cargar (campos obligatorios, tipos, `reintentos ≥ 1`,
+  coherencia `tipo` ↔ `statement`: un `statement` sin `statement` o un `grpc`
+  con `statement` son error).
 - Errores de schema → la secuencia no carga (fail-fast), no se ejecuta a
   medias.
-- El cargador produce `DefinicionSecuencia`; el motor no cambia.
+- El cargador produce `DefinicionSecuencia`; el motor la recorre (ADR-0005).
 
 ## Por qué YAML y no JSON/XML
 

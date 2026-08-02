@@ -71,25 +71,43 @@ Un `error` manda sobre un `fallo` aunque llegue antes (testeado en
   se rompió. La secuencia se interrumpe (`basica_datos.rs` sale con código
   != 0). **No** se confunde con un paso que falla (RF-11).
 
-## Control de flujo (MVP-parcial, pendiente)
+## Control de flujo (MVP-parcial)
 
-Estándar en todo ATE comercial; **no implementado aún**:
+Estándar en todo ATE comercial. **Implementado en M4-núcleo**:
 
-- **pause-on-fail:** detener la ejecución al primer fallo para inspección
-  interactiva (en headless, espera input).
-- **step:** ejecutar paso a paso.
 - **disable:** marcar un paso como saltado (no se invoca) sin borrarlo de la
-  secuencia.
+  secuencia. Se registra con estado `"saltado"` (neutral en el agregado).
+- **pause-on-fail:** detener la ejecución al primer fallo para inspección
+  interactiva. En headless (M4-núcleo) **corta la fase en curso** al fallar —
+  en Setup corta el bucle (que por defecto corre todos); en Main refuerza el
+  corte en primer fallo (que ya corta); en **Cleanup no corta** (respeta el
+  principio "un equipo encendido es peor que una secuencia que falló"). El
+  modo interactivo "espera input" es **post-MVP** (WASI P2 no ofrece espera
+  fiable).
+- **step:** ejecutar paso a paso. **Pendiente (post-MVP)**: requiere un
+  mecanismo de espera/pausa que WASI P2 no da de forma fiable. El cargador
+  sigue rechazando el campo `step` (`deny_unknown_fields`); se dejará para
+  cuando haya un modelo de espera o una UI.
 
-Estos son atributos de `DefinicionPaso` (o del paso en YAML) que el motor
-respeta. Propuesta de campos:
+Además, M4 añade la **precondición** por paso (RF-33): el motor evalúa una
+expresión antes de invocar el paso; si es falsa, lo salta sin gastar intento.
+Y el paso `statement` (RF-27), local (sin gRPC), que ejecuta sentencias del
+lenguaje de expresiones contra el entorno. Ver
+[motor-de-expresiones.md](motor-de-expresiones.md) y ADR-0009.
+
+Atributos de `DefinicionPaso` (campos YAML):
 
 ```yaml
 pasos_main:
   - nombre: medir_voltaje
     reintentos: 1
-    disable: false        # si true, se salta
-    pause_on_fail: false  # si true, detiene al fallar
+    disable: false        # si true, se salta (estado "saltado")
+    pause_on_fail: false  # si true y falla, detiene la fase
+    precondicion: 'locals.contador > 0'  # si falsa, se salta sin intento
+    tipo: grpc            # o "statement" (paso local, sin gRPC)
+    statement: 'locals.x = 1'   # sólo si tipo: statement
+    asigna:               # sólo si tipo: grpc; vuelca resultado.* a Locals
+      voltaje: '${resultado.valor_medido}'
 ```
 
 ## Determinismo

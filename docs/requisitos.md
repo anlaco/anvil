@@ -70,22 +70,22 @@ Prioridad: **MVP** (Must), **MVP-parcial** (Should), **post-MVP** (Could),
 
 | ID | Requisito | Prioridad | Trazabilidad |
 |---|---|---|---|
-| RF-25 | Built-in **pass/fail** (sin medida, solo `paso`/`fallo`). | MVP | [diseno/modelo-de-pasos.md](diseno/modelo-de-pasos.md) |
-| RF-26 | Built-in **limit test** (medida contra high/low o comparación). | MVP | `modelo/src/lib.rs::ResultadoStep::medido` |
-| RF-27 | Built-in **action**, **sequence call**, **statement**. | MVP-parcial | diseno/modelo-de-pasos.md |
+| RF-25 | Built-in **pass/fail** (sin medida, solo `paso`/`fallo`). | MVP | `pasos_demo/src/lib.rs::verificar_led`; [diseno/modelo-de-pasos.md](diseno/modelo-de-pasos.md) |
+| RF-26 | Built-in **limit test** (medida contra high/low o comparación). | MVP | `motor/src/lib.rs::aplicar_limite`; `modelo/src/lib.rs::Limite` (ADR-0008) |
+| RF-27 | Built-in **action**, **sequence call**, **statement**. | MVP-parcial | action: `pasos_demo/src/lib.rs::abrir_rele`; statement: `motor/src/lib.rs::ejecuta_statement_puro` (M4-núcleo); sequence call: aplazado a M4b |
 | RF-28 | **Custom step types** con substeps encapsulados. | post-MVP | diseno/modelo-de-pasos.md |
-| RF-29 | Los límites son **datos first-class** (no aserciones ad-hoc). | MVP-parcial | [diseno/limites-y-estados.md](diseno/limites-y-estados.md) |
-| RF-30 | **Property loader**: límites desde un fichero externo. | MVP-parcial | diseno/limites-y-estados.md |
+| RF-29 | Los límites son **datos first-class** (no aserciones ad-hoc). | MVP-parcial | `modelo/src/lib.rs::Limite`; `cargador/src/lib.rs::LimiteYaml`; [ADR-0008](adr/0008-limites-evaluados-por-el-motor.md) |
+| RF-30 | **Property loader**: límites desde un fichero externo. | MVP-parcial | `cargador/src/lib.rs::cargar_limites_de_archivo` + `aplicar_limites` |
 
 ### Variables y control de flujo
 
 | ID | Requisito | Prioridad | Trazabilidad |
 |---|---|---|---|
-| RF-31 | Variables con scopes **Locals**, **Parameters**, **FileGlobals**. | MVP-parcial | [diseno/variables-y-alcances.md](diseno/variables-y-alcances.md) |
+| RF-31 | Variables con scopes **Locals**, **Parameters**, **FileGlobals**. | MVP-parcial | `modelo::ValorDefinicion` + `motor::EntornoMotor` (M4-núcleo, motor-side); [diseno/variables-y-alcances.md](diseno/variables-y-alcances.md) |
 | RF-32 | **StationGlobals** (compartidas por estación). | post-MVP | diseno/variables-y-alcances.md |
-| RF-33 | **Precondición** por step (el paso se salta si no se cumple). | MVP-parcial | [diseno/motor-de-expresiones.md](diseno/motor-de-expresiones.md) |
-| RF-34 | Control de flujo: **pause-on-fail**, **step**, **disable** de pasos. | MVP-parcial | diseno/motor-de-ejecucion.md |
-| RF-35 | **Expression engine** (sintaxis Python/Scilab/MATLAB-like, **no** C-like). | MVP-parcial | diseno/motor-de-expresiones.md |
+| RF-33 | **Precondición** por step (el paso se salta si no se cumple). | MVP-parcial | `motor::evalua_precondicion` (M4-núcleo); [diseno/motor-de-expresiones.md](diseno/motor-de-expresiones.md) |
+| RF-34 | Control de flujo: **pause-on-fail**, **step**, **disable** de pasos. | MVP-parcial | `disable` + `pause_on_fail` en `DefinicionPaso` (M4-núcleo); `step` post-MVP; [diseno/motor-de-ejecucion.md](diseno/motor-de-ejecucion.md) |
+| RF-35 | **Expression engine** (sintaxis **Julia**, **no** C-like). | MVP-parcial | `crates/expr` (M4-núcleo); [diseno/motor-de-expresiones.md](diseno/motor-de-expresiones.md) |
 | RF-36 | Integración de instrumentos por **adapter gRPC**. | MVP-parcial | [diseno/integracion-instrumentos.md](diseno/integracion-instrumentos.md) |
 | RF-37 | PyVISA/SCPI nativo. | post-MVP | diseno/integracion-instrumentos.md |
 
@@ -126,4 +126,8 @@ Prioridad: **MVP** (Must), **MVP-parcial** (Should), **post-MVP** (Could),
 - Los marcados *(propuesta)* son decisiones de diseño a confirmar en su doc
   de `diseno/`.
 - Las pruebas unitarias actuales (`cargo test`) cubren RF-09, RF-13, RF-16,
-  RF-17, RF-26; el resto se cubrirá al implementar.
+  RF-17, RF-25, RF-26, RF-29, RF-30 (evaluación de límites en `motor` y
+  `modelo`, property loader en `cargador`, sinks JSON/CSV con comparación) y,
+  desde M4-núcleo, RF-27 (statement), RF-31 (variables/scopes en `EntornoMotor`),
+  RF-33 (precondición), RF-34 (disable/pause_on_fail) y RF-35 (expression engine
+  en `crates/expr`: parser, evaluator, reglas de tipo, cortocircuito, `Nulo`).

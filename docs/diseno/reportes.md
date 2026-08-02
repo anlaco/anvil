@@ -64,6 +64,14 @@ on_fin_secuencia(resultado)   # el ResultadoSecuencia agregado
 > no se rompe (RNF-08). Quien dependa del formato de consola actual sigue
 > teniéndolo.
 
+> **Extensión aditiva de M4 (RNF-08):** el reporte añade el estado
+> `"saltado"` para los pasos saltados por `disable` o precondición falsa
+> (RF-33/34). Es un nuevo **valor** de `estado`, no un cambio de formato: la
+> línea sigue siendo `  [estado] nombre: mensaje`. `"saltado"` es **neutral**
+> en el agregado `error > fallo > paso` (no cuenta como fallo ni error). Los
+> sinks JSON/CSV lo muestran como string en `estado_paso`/`estado`. Sin
+> campos nuevos en `ResultadoStep` ni en `paso.proto` (ADR-0009).
+
 ## Reintento y reconexión (MVP-parcial)
 
 TestStand sufre que la conexión de BD cacheada **rompe con corte de red sin
