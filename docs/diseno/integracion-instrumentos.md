@@ -1,7 +1,9 @@
 # Diseño: Integración de instrumentos
 
-> **Prioridad:** MVP-parcial. El adapter gRPC ya existe; SCPI/PyVISA
-> nativo es post-MVP.
+> **Prioridad:** MVP-parcial. **Implementado en M5**: adapter gRPC pulido
+> con `pasos_scpi` (paso real SCPI/TCP + mock determinista, ver
+> [ADR-0017](../adr/0017-adapter-grpc-de-instrumento-real-por-scpi-tcp.md)).
+> PyVISA/`wasi-visa` nativo es post-MVP.
 
 Cómo Anvil habla con hardware real. Trazable a [ADR-0003](../adr/0003-pasos-por-grpc-por-nombre.md)
 y [ADR-0006](../adr/0006-wasi-grpc-propio.md).
@@ -33,9 +35,14 @@ Motor ──gRPC──▶ Paso (Rust/Python/…)
                         └─▶ Instrumento físico
 ```
 
-1. **MVP-parcial — paso gRPC:** un paso Rust que envía comandos SCPI por
-   TCP/serial y parsea la respuesta. El paso traduce `medir_voltaje` →
-   comandos del instrumento concreto.
+1. **MVP-parcial — paso gRPC (implementado en M5):** un paso Rust que envía
+   comandos SCPI por TCP y parsea la respuesta. Vive en `crates/pasos_scpi`
+   (`medir_voltaje_scpi`), se despacha por nombre y se testa contra un
+   servidor TCP mock en loopback. La dirección va en `ANVIL_SCPI_ADDR`
+   (default `127.0.0.1:5025`, loopback en el sandbox del host, ADR-0011).
+   El paso traduce `medir_voltaje` → `MEASURE:VOLTAGE?` del instrumento
+   concreto. El ejecutor compone adaptadores: prueba `pasos_scpi` primero,
+   `pasos_demo` después.
 2. **post-MVP — `wasi-visa` (Apache):** una lib que abstrae VISA/SCPI al
    estilo PyVISA, linkable desde un paso. Permite escribir pasos de
    instrumento sin re implementar el transporte.

@@ -109,16 +109,25 @@ Lo que ya existe en el repo:
 [diseno/variables-y-alcances.md](diseno/variables-y-alcances.md),
 [adr/0010-sequence-call-lo-orquesta-el-motor-cargador-resuelve-paths.md](adr/0010-sequence-call-lo-orquesta-el-motor-cargador-resuelve-paths.md)
 
-## M5 — Process model Sequential + CLI · MVP-parcial
+## M5 — Process model Sequential + CLI · MVP-parcial ✅ (hecho)
 
 - Separación "secuencia vs. cómo se corre en producción" (Sequential
   simple + plug-ins, **no** el process model de TestStand 1:1) (RF-38).
-- Adapter gRPC de instrumentos pulido (RF-36).
-- CLI headless maduro (RF-40). **Empaquetado como un binario único** que
-  hospeda wasmtime y los dos guests WASM (motor + ejecutor) en sandbox,
-  hablando gRPC por loopback (ADR-0011): `./anvil secuencia.yaml`, sin
-  instalar wasmtime. El guest motor sigue disponible como `.wasm` para
-  depuración con el CLI de wasmtime.
+  El PM es una **secuencia YAML envoltorio** (`process_models/sequential.yaml`)
+  cuyo `main` hace `sequence_call` a la secuencia del usuario (nombre
+  reservado `secuencia_usuario`, reescrito por el cargador); el motor no
+  se toca (ADR-0005/0010). Plug-ins (`identificar_uut`, `notificar_resultado`)
+  son pasos `grpc`. Sin callbacks. → ADR-0016.
+- Adapter gRPC de instrumentos pulido (RF-36). Crate `pasos_scpi` con un
+  paso real SCPI/TCP (`medir_voltaje_scpi`), testeado contra un mock TCP en
+  loopback; el ejecutor compone adaptadores (`pasos_scpi` + `pasos_demo`).
+  → ADR-0017.
+- CLI headless maduro (RF-40): `--process-model`, `--validate`, `--port` +
+  reintento de conexión, `--quiet`, `--help`, `--version`. **Empaquetado
+  como un binario único** que hospeda wasmtime y los dos guests WASM
+  (motor + ejecutor) en sandbox, hablando gRPC por loopback (ADR-0011):
+  `./anvil secuencia.yaml`, sin instalar wasmtime. El guest motor sigue
+  disponible como `.wasm` para depuración con el CLI de wasmtime.
 
 ### M5-ext — Executores de lenguaje y cargador de `.wasm` · MVP extendido
 
@@ -185,7 +194,7 @@ Lo que ya existe en el repo:
 [adr/0012-executores-de-lenguaje-como-modulos.md](adr/0012-executores-de-lenguaje-como-modulos.md),
 [adr/0013-cargador-wasm-host-side-y-routing.md](adr/0013-cargador-wasm-host-side-y-routing.md)
 
-**Fin del MVP** ≈ M5. Lo siguiente es post-MVP.
+**Fin del MVP** ✅ M5. Lo siguiente es post-MVP.
 
 ## Post-MVP (explícitamente fuera de v1)
 

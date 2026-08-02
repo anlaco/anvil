@@ -523,6 +523,30 @@ pub fn normalizar_path(base: &Path, rel: &Path) -> PathBuf {
 ///    encaje (claves de `parametros` == `parameters` de la subsecuencia).
 /// 3. **Detecta ciclos** en el grafo de llamadas (por nombre inline o por
 ///    path): `A → B → A` es error.
+/// Lee la sección `ejecutores:` de un YAML y la acumula en `acc` (M5-ext.1,
+/// RF-36.3). Se re-lee el fichero porque la `DefinicionSecuencia` no lleva esa
+/// sección: es dato del `Programa`. Un nombre repetido —dentro del archivo o
+/// contra lo ya acumulado (PM + secuencia del usuario)— es error (fail-fast).
+fn leer_ejecutores(
+    ruta: &str,
+    dir_base: &Path,
+    acc: &mut HashMap<String, DefinicionEjecutor>,
+) -> Result<(), ErrorCarga> {
+    let texto = std::fs::read_to_string(ruta)?;
+    let yaml: SecuenciaYaml = noyalib::from_str(&texto)?;
+    for y in yaml.ejecutores {
+        let def = y.a_definicion(dir_base)?;
+        if acc.contains_key(&def.nombre) {
+            return Err(ErrorCarga::Validacion(format!(
+                "el ejecutor '{}' está declarado más de una vez en 'ejecutores:'",
+                def.nombre
+            )));
+        }
+        acc.insert(def.nombre.clone(), def);
+    }
+    Ok(())
+}
+
 pub fn cargar_programa_de_archivo(ruta: &str) -> Result<Programa, ErrorCarga> {
     let raiz = cargar_de_archivo(ruta)?;
     let dir_base = dir_de(ruta);
@@ -531,19 +555,8 @@ pub fn cargar_programa_de_archivo(ruta: &str) -> Result<Programa, ErrorCarga> {
     // del YAML de la **raíz**. Se re-lee el fichero para esa sección (la
     // `DefinicionSecuencia` no la lleva: es dato del `Programa`). Nombres
     // duplicados → error (fail-fast).
-    let texto = std::fs::read_to_string(ruta)?;
-    let yaml_raiz: SecuenciaYaml = noyalib::from_str(&texto)?;
     let mut ejecutores = HashMap::new();
-    for y in yaml_raiz.ejecutores {
-        let def = y.a_definicion(&dir_base)?;
-        if ejecutores.contains_key(&def.nombre) {
-            return Err(ErrorCarga::Validacion(format!(
-                "el ejecutor '{}' está declarado más de una vez en 'ejecutores:'",
-                def.nombre
-            )));
-        }
-        ejecutores.insert(def.nombre.clone(), def);
-    }
+    leer_ejecutores(ruta, &dir_base, &mut ejecutores)?;
 
     let mut programa = Programa { raiz, archivos: HashMap::new(), ejecutores };
 
@@ -575,7 +588,146 @@ pub fn cargar_programa_de_archivo(ruta: &str) -> Result<Programa, ErrorCarga> {
     Ok(programa)
 }
 
-/// Recorre una `DefinicionSecuencia` (y sus `subsecuencias` inline) y, por
+/// Nombre reservado en la **raíz** de un process model para el
+/// `sequence_call` que invoca a la secuencia del usuario (M5, RF-38). El PM
+/// es genérico y no sabe qué secuencia va a correr; la ruta la da el CLI.
+/// El PM autora `secuencia: secuencia_usuario` (un **nombre**: `es_path()`
+/// es falso, así [`procesar_secuencia`] lo deja intacto) y
+/// [`cargar_programa_con_pm`] lo **reescribe** al path canónico de la
+/// secuencia inyectada. El motor **nunca** ve el placeholder: tras la
+/// reescritura es un path normal que [`ejecuta_sequence_call`] resuelve en
+/// `programa.archivos` como cualquier subsecuencia externa (ADR-0005/0010).
+pub const SECUENCIA_USUARIO: &str = "secuencia_usuario";
+
+/// Carga un **programa con process model** (M5, RF-38): el PM (`ruta_pm`) es
+/// la raíz del `Programa`; su `main` lleva un `sequence_call` al nombre
+/// reservado [`SECUENCIA_USUARIO`], que este cargador reescribe al path
+/// canónico de la secuencia del usuario (`ruta_usuario`) y registra en
+/// `programa.archivos`.
+///
+/// Reusa el pipeline de M4b ([`procesar_secuencia`] + [`visitar`]) sobre el
+/// programa entero (PM + usuario + subsecuencias externas de ambos). El
+/// motor **no cambia**: tras la reescritura, `ejecuta_sequence_call`
+/// resuelve el call por path en `programa.archivos` como hoy. La misma
+/// secuencia del usuario puede correrse con distintos PMs (R&D vs fábrica)
+/// cambiando sólo `--process-model`.
+///
+/// Reglas (fail-fast al cargar):
+/// 1. La raíz del PM tiene **exactamente un** `sequence_call` con
+///    `secuencia: secuencia_usuario` en `main`; cero o más de uno → error.
+/// 2. `secuencia_usuario` no aparece en `subsecuencias` de la raíz del PM
+///    (nombre reservado). El usuario puede usar ese nombre en sus propias
+///    inline sin conflicto (alcance distinto).
+/// 3. La secuencia del usuario se carga y registra en `programa.archivos`
+///    bajo `normalizar(dir_de(ruta_usuario), ruta_usuario)` (la misma clave
+///    que usaría [`cargar_programa_de_archivo`] para ella).
+/// 4. El `secuencia` del placeholder se reescribe a esa clave **después**
+///    de `procesar_secuencia` (si se hiciera antes, `procesar_secuencia`
+///    renormalizaría la clave relativa al directorio del PM y la rompería).
+/// 5. `visitar` sobre el programa entero: ciclos, firma (`validar_call`) y
+///    lvalues. El PM canónico declara sin `parametros`, así exige que la
+///    raíz del usuario no declare `parameters`; un PM custom puede
+///    emparejar `parametros` ↔ `parameters`.
+pub fn cargar_programa_con_pm(ruta_pm: &str, ruta_usuario: &str) -> Result<Programa, ErrorCarga> {
+    let raiz_pm = cargar_de_archivo(ruta_pm)?;
+    let dir_pm = dir_de(ruta_pm);
+
+    // (1+2) Hallar el call placeholder y rechazar el nombre reservado en
+    // subsecuencias inline de la raíz del PM.
+    let call_idx = indice_call_secuencia_usuario(&raiz_pm)?;
+    if raiz_pm.subsecuencias.contains_key(SECUENCIA_USUARIO) {
+        return Err(ErrorCarga::Validacion(format!(
+            "el nombre '{SECUENCIA_USUARIO}' está reservado para la secuencia \
+             del usuario y no puede declararse como subsecuencia inline del PM"
+        )));
+    }
+
+    // (3) Cargar la secuencia del usuario y registrarla en archivos. La
+    // clave canónica es la ruta del usuario tal cual la da el CLI (relativa
+    // al cwd del proceso), normalizada (resolviendo `.`/`..`) **sin
+    // anteponer su directorio**: `ruta_usuario` ya va expresada relativa al
+    // cwd, así que `normalizar(dir_de(ruta_usuario), ruta_usuario)` la
+    // duplicaría (`ejemplos/` + `ejemplos/basica.yaml`). Las subsecuencias
+    // externas del usuario sí se normalizan relativas a `dir_de(ruta_usuario)`
+    // (paso 5a), que es como se leen del disco.
+    let usuario = cargar_de_archivo(ruta_usuario)?;
+    let dir_usuario = dir_de(ruta_usuario);
+    let clave_usuario = normalizar_path(Path::new(""), Path::new(ruta_usuario))
+        .to_string_lossy()
+        .into_owned();
+
+    // Ejecutores (M5-ext.1): los del PM y los de la secuencia del usuario se
+    // unen en una sola tabla; un nombre en ambos es error (leer_ejecutores).
+    let mut ejecutores = HashMap::new();
+    leer_ejecutores(ruta_pm, &dir_pm, &mut ejecutores)?;
+    leer_ejecutores(ruta_usuario, &dir_usuario, &mut ejecutores)?;
+
+    let mut programa = Programa {
+        raiz: raiz_pm,
+        archivos: HashMap::new(),
+        ejecutores,
+    };
+    programa.archivos.insert(clave_usuario.clone(), usuario);
+
+    // (5a) Procesar paths externos del PM (relativos a dir_pm) y del usuario
+    // (relativos a dir_usuario). El placeholder `secuencia_usuario` no es
+    // path → queda intacto en este paso.
+    let mut cola: Vec<(String, PathBuf)> = Vec::new();
+    let mut cargados: HashSet<String> = HashSet::new();
+    procesar_secuencia(&mut programa.raiz, &dir_pm, &mut cola)?;
+    let usuario_def = programa
+        .archivos
+        .get_mut(&clave_usuario)
+        .expect("acabamos de insertar la secuencia del usuario");
+    procesar_secuencia(usuario_def, &dir_usuario, &mut cola)?;
+    while let Some((clave, _dir_cont)) = cola.pop() {
+        if cargados.contains(&clave) {
+            continue;
+        }
+        cargados.insert(clave.clone());
+        let path = PathBuf::from(&clave);
+        let texto = std::fs::read_to_string(&path)?;
+        let mut sub = cargar_de_texto(&texto)?;
+        let dir_sub = path.parent().unwrap_or_else(|| Path::new("")).to_path_buf();
+        procesar_secuencia(&mut sub, &dir_sub, &mut cola)?;
+        programa.archivos.insert(clave, sub);
+    }
+
+    // (4) Reescribir el placeholder a la clave canónica del usuario, ya
+    // **después** de procesar_secuencia (ver regla 4 del docstring).
+    programa.raiz.pasos_main[call_idx].secuencia = Some(clave_usuario.clone());
+
+    // (5b) Visitar el programa entero: ciclos + firma + lvalues. El call al
+    // usuario ya es un path normal y se valida como cualquier externa.
+    let id_pm = normalizar_path(&dir_pm, Path::new(ruta_pm))
+        .to_string_lossy()
+        .into_owned();
+    let mut camino: Vec<String> = Vec::new();
+    visitar(&programa, &id_pm, &programa.raiz, &mut camino)?;
+
+    Ok(programa)
+}
+
+/// Halla el índice del `sequence_call` con `secuencia == secuencia_usuario`
+/// en `main` de la raíz del PM. Exactamente uno; si no hay o hay más, error.
+fn indice_call_secuencia_usuario(pm: &DefinicionSecuencia) -> Result<usize, ErrorCarga> {
+    let mut found: Option<usize> = None;
+    for (i, p) in pm.pasos_main.iter().enumerate() {
+        if p.tipo == TipoPaso::SequenceCall && p.secuencia.as_deref() == Some(SECUENCIA_USUARIO) {
+            if found.is_some() {
+                return Err(ErrorCarga::Validacion(format!(
+                    "el process model declara más de un sequence_call a '{SECUENCIA_USUARIO}'"
+                )));
+            }
+            found = Some(i);
+        }
+    }
+    found.ok_or_else(|| {
+        ErrorCarga::Validacion(format!(
+            "el process model no declara un sequence_call a '{SECUENCIA_USUARIO}' en su main"
+        ))
+    })
+}
 /// cada `sequence_call` por path, reescribe su `secuencia` a la clave
 /// canónica y encola el archivo para cargarlo. Las inline (por nombre) se
 /// dejan tal cual: el motor las resuelve en `def.subsecuencias`.
@@ -1898,5 +2050,198 @@ main:
         assert!(matches!(&err, ErrorCarga::Validacion(m) if m.contains("esperado")), "{err}");
         let err = aplicar_override_ejecutores(&mut prog, &["zzz=1.2.3.4:1".to_string()]).unwrap_err();
         assert!(matches!(&err, ErrorCarga::Validacion(m) if m.contains("no está declarado")), "{err}");
+    }
+
+    // ---- M5: process model Sequential (RF-38) ----
+
+    fn pm_yaml() -> &'static str {
+        "\
+nombre: sequential
+locals: { uut_id: \"\", estado_usuario: \"\" }
+setup:
+  - nombre: identificar_uut
+    reintentos: 1
+    asigna: { uut_id: \"${resultado.mensaje}\" }
+main:
+  - nombre: correr_secuencia_usuario
+    tipo: sequence_call
+    secuencia: secuencia_usuario
+    asigna: { estado_usuario: \"${resultado.estado}\" }
+cleanup:
+  - nombre: notificar_resultado
+    reintentos: 1
+"
+    }
+
+    /// PM canónico + usuario `basica.yaml` (sin parameters): el cargador
+    /// reescribe el placeholder al path canónico del usuario y lo registra.
+    fn dir_pm(tag: &str) -> std::path::PathBuf {
+        let dir = std::env::temp_dir().join(format!("anvil_m5_{tag}"));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    #[test]
+    fn pm_canonico_resuelve_y_reescribe_el_placeholder() {
+        let dir = dir_pm("ok");
+        std::fs::write(dir.join("pm.yaml"), pm_yaml()).unwrap();
+        std::fs::write(dir.join("usuario.yaml"), basica_yaml()).unwrap();
+        let prog = cargar_programa_con_pm(
+            dir.join("pm.yaml").to_str().unwrap(),
+            dir.join("usuario.yaml").to_str().unwrap(),
+        )
+        .unwrap();
+        let call = &prog.raiz.pasos_main[0];
+        let clave = call.secuencia.as_deref().unwrap();
+        assert_ne!(clave, SECUENCIA_USUARIO, "el placeholder se reescribió");
+        assert!(es_path(clave), "ahora es un path canónico: {clave}");
+        assert_eq!(
+            prog.archivos.get(clave).map(|d| d.nombre.as_str()),
+            Some("basica"),
+            "el usuario quedó registrado bajo su clave canónica"
+        );
+    }
+
+    #[test]
+    fn pm_sin_call_a_secuencia_usuario_es_error() {
+        let dir = dir_pm("sin_call");
+        std::fs::write(dir.join("pm.yaml"), "nombre: pm\nmain:\n  - nombre: x\n").unwrap();
+        std::fs::write(dir.join("usuario.yaml"), basica_yaml()).unwrap();
+        let err = cargar_programa_con_pm(
+            dir.join("pm.yaml").to_str().unwrap(),
+            dir.join("usuario.yaml").to_str().unwrap(),
+        )
+        .unwrap_err();
+        assert!(matches!(err, ErrorCarga::Validacion(ref m) if m.contains("secuencia_usuario")));
+    }
+
+    #[test]
+    fn pm_con_dos_calls_a_secuencia_usuario_es_error() {
+        let dir = dir_pm("dos_calls");
+        std::fs::write(
+            dir.join("pm.yaml"),
+            "nombre: pm\nmain:\n  - nombre: a\n    tipo: sequence_call\n    secuencia: secuencia_usuario\n  - nombre: b\n    tipo: sequence_call\n    secuencia: secuencia_usuario\n",
+        )
+        .unwrap();
+        std::fs::write(dir.join("usuario.yaml"), basica_yaml()).unwrap();
+        let err = cargar_programa_con_pm(
+            dir.join("pm.yaml").to_str().unwrap(),
+            dir.join("usuario.yaml").to_str().unwrap(),
+        )
+        .unwrap_err();
+        assert!(matches!(err, ErrorCarga::Validacion(ref m) if m.contains("más de un")));
+    }
+
+    #[test]
+    fn pm_con_secuencia_usuario_en_subsecuencias_es_error() {
+        let dir = dir_pm("reservado");
+        std::fs::write(
+            dir.join("pm.yaml"),
+            "nombre: pm\nsubsecuencias:\n  secuencia_usuario:\n    nombre: secuencia_usuario\n    main:\n      - nombre: x\nmain:\n  - nombre: a\n    tipo: sequence_call\n    secuencia: secuencia_usuario\n",
+        )
+        .unwrap();
+        std::fs::write(dir.join("usuario.yaml"), basica_yaml()).unwrap();
+        let err = cargar_programa_con_pm(
+            dir.join("pm.yaml").to_str().unwrap(),
+            dir.join("usuario.yaml").to_str().unwrap(),
+        )
+        .unwrap_err();
+        assert!(matches!(err, ErrorCarga::Validacion(ref m) if m.contains("reservado")));
+    }
+
+    #[test]
+    fn pm_usuario_con_subsecuencias_externas_las_resuelve() {
+        // El usuario es `ejemplos/subsecuencia.yaml`, que referencia a
+        // `./medir_fuentes.yaml` y a la inline `init_comun`. El PM debe
+        // resolver tanto al usuario como a sus dependencias externas.
+        let dir = dir_pm("subs");
+        std::fs::write(dir.join("pm.yaml"), pm_yaml()).unwrap();
+        std::fs::copy(
+            format!("{}/../../ejemplos/subsecuencia.yaml", env!("CARGO_MANIFEST_DIR")),
+            dir.join("subsecuencia.yaml"),
+        )
+        .unwrap();
+        std::fs::copy(
+            format!("{}/../../ejemplos/medir_fuentes.yaml", env!("CARGO_MANIFEST_DIR")),
+            dir.join("medir_fuentes.yaml"),
+        )
+        .unwrap();
+        let prog = cargar_programa_con_pm(
+            dir.join("pm.yaml").to_str().unwrap(),
+            dir.join("subsecuencia.yaml").to_str().unwrap(),
+        )
+        .unwrap();
+        // archivos contiene al usuario + a medir_fuentes.yaml (su externa).
+        assert!(prog.archivos.len() >= 2, "usuario + subsecuencia externa del usuario");
+        let call = &prog.raiz.pasos_main[0];
+        assert_ne!(call.secuencia.as_deref().unwrap(), SECUENCIA_USUARIO);
+    }
+
+    #[test]
+    fn pm_canonico_sin_parametros_exige_usuario_sin_parameters() {
+        // El PM canónico declara sin `parametros`; un usuario con
+        // `parameters` no encaja la firma (vacía != {p}).
+        let dir = dir_pm("firma");
+        std::fs::write(dir.join("pm.yaml"), pm_yaml()).unwrap();
+        std::fs::write(
+            dir.join("usuario.yaml"),
+            "nombre: u\nparameters: { p: 0.0 }\nmain:\n  - nombre: m\n",
+        )
+        .unwrap();
+        let err = cargar_programa_con_pm(
+            dir.join("pm.yaml").to_str().unwrap(),
+            dir.join("usuario.yaml").to_str().unwrap(),
+        )
+        .unwrap_err();
+        assert!(matches!(err, ErrorCarga::Validacion(ref m) if m.contains("firma")));
+    }
+
+    #[test]
+    fn pm_ciclo_pm_usuario_a_pm_es_error() {
+        // El usuario llama de vuelta al PM (por path) → ciclo al cargar.
+        let dir = dir_pm("ciclo");
+        std::fs::write(dir.join("pm.yaml"), pm_yaml()).unwrap();
+        std::fs::write(
+            dir.join("usuario.yaml"),
+            "nombre: u\nmain:\n  - nombre: vuelta\n    tipo: sequence_call\n    secuencia: ./pm.yaml\n",
+        )
+        .unwrap();
+        let err = cargar_programa_con_pm(
+            dir.join("pm.yaml").to_str().unwrap(),
+            dir.join("usuario.yaml").to_str().unwrap(),
+        )
+        .unwrap_err();
+        assert!(matches!(err, ErrorCarga::Validacion(ref m) if m.contains("ciclo")));
+    }
+
+    #[test]
+    fn pm_usuario_sin_parameters_pasa() {
+        let dir = dir_pm("pasa");
+        std::fs::write(dir.join("pm.yaml"), pm_yaml()).unwrap();
+        std::fs::write(dir.join("usuario.yaml"), basica_yaml()).unwrap();
+        let prog = cargar_programa_con_pm(
+            dir.join("pm.yaml").to_str().unwrap(),
+            dir.join("usuario.yaml").to_str().unwrap(),
+        )
+        .unwrap();
+        assert_eq!(prog.raiz.nombre, "sequential");
+    }
+
+    #[test]
+    fn ejemplo_sequential_carga_como_programa() {
+        // El PM canónico de `process_models/sequential.yaml` envuelve a
+        // `ejemplos/basica.yaml`. Smoke de integración de la convención.
+        let pm = format!("{}/../../process_models/sequential.yaml", env!("CARGO_MANIFEST_DIR"));
+        let usuario = format!("{}/../../ejemplos/basica.yaml", env!("CARGO_MANIFEST_DIR"));
+        let prog = cargar_programa_con_pm(&pm, &usuario)
+            .unwrap_or_else(|e| panic!("no carga el PM {pm} con {usuario}: {e}"));
+        assert_eq!(prog.raiz.nombre, "sequential");
+        let call = &prog.raiz.pasos_main[0];
+        assert_ne!(call.secuencia.as_deref().unwrap(), SECUENCIA_USUARIO);
+        assert_eq!(
+            prog.archivos.get(call.secuencia.as_deref().unwrap()).map(|d| d.nombre.as_str()),
+            Some("basica")
+        );
     }
 }

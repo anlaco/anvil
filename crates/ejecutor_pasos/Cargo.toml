@@ -8,5 +8,6 @@ description = "Servidor gRPC que ejecuta pasos del secuenciador por nombre"
 [dependencies]
 modelo.workspace = true
 pasos_demo.workspace = true
+pasos_scpi.workspace = true
 prost.workspace = true
 wasi-grpc.workspace = true

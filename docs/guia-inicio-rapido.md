@@ -11,10 +11,12 @@ para el porqué.
 Descarga el binario `anvil` y corre:
 
 ```sh
-./anvil <secuencia.yaml> [--json <ruta>] [--csv <ruta>] [--limits <ruta>] [--ejecutor nombre=host:puerto]
+./anvil <secuencia.yaml> [--process-model <pm.yaml>] [--json <ruta>] \
+  [--csv <ruta>] [--limits <ruta>] [--ejecutor nombre=host:puerto] \
+  [--port <n>] [--validate] [--quiet]
 ```
 
-Ejemplos (con los del repo en `ejemplos/`):
+Ejemplos (con los del repo en `ejemplos/` y `process_models/`):
 
 ```sh
 ./anvil ejemplos/subsecuencia.yaml --json ./out.json --csv ./out.csv
@@ -24,10 +26,16 @@ Ejemplos (con los del repo en `ejemplos/`):
 ./anvil ejemplos/basica.yaml --limits ejemplos/limites.limits.yaml
 ./anvil ejemplos/demo_ejecutores.yaml      # routing: embebido + Python en loopback
 ./anvil ejemplos/demo_ejecutores.yaml --ejecutor python=127.0.0.1:9200
+# Con process model (identifica el UUT, corre la secuencia, notifica):
+./anvil ejemplos/basica.yaml --process-model process_models/sequential.yaml
+# Validar sin ejecutar ni tocar hardware (CI):
+./anvil ejemplos/subsecuencia.yaml --validate
 ```
 
 La consola imprime el reporte textual por **stdout** (los diagnósticos van a
-stderr, no lo ensucian). `--json`/`--csv` vuelcan a fichero. No hay
+stderr, no lo ensucian). `--json`/`--csv` vuelcan a fichero. `--process-model`
+envuelve la secuencia en un PM Sequential (RF-38, ADR-0016); `--validate`
+carga y valida sin ejecutar; `--quiet` silencia la consola. No hay
 dependencias que instalar.
 
 > **Routing de ejecutores (M5-ext.1, ADR-0013):** `ejemplos/demo_ejecutores.yaml`
@@ -125,11 +133,16 @@ unitario: `cargo test -p motor sequence_call_by_reference`.
 ## Uso del CLI
 
 ```
-anvil <secuencia.yaml> [--json <ruta>] [--csv <ruta>] [--limits <ruta>] [--ejecutor nombre=host:puerto]
+anvil <secuencia.yaml> [--process-model <pm.yaml>] [--json <ruta>] [--csv <ruta>]
+      [--limits <ruta>] [--ejecutor nombre=host:puerto] [--port <n>]
+      [--validate] [--quiet] [--help] [--version]
 ```
 
-- La secuencia es el primer argumento (obligatorio).
-- Consola siempre; `--json`/`--csv` opcionales (fichero).
+- La secuencia es el primer argumento posicional (obligatorio).
+- Consola salvo `--quiet`; `--json`/`--csv` opcionales (fichero).
+- `--process-model` envuelve la secuencia en un PM Sequential (RF-38).
+- `--validate` carga y valida sin ejecutar ni conectar (CI sin hardware).
+- `--port` fija el puerto del ejecutor embebido (default 9100).
 - `--limits` inyecta un sidecar de límites por nombre de paso (RF-30),
   sobreescribiendo los embebidos (sólo la secuencia raíz hoy).
 - `--ejecutor nombre=host:puerto` re-apunta un ejecutor declarado en

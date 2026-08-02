@@ -13,6 +13,12 @@ pasos_cleanup}` (`crates/modelo/src/lib.rs`); cada paso es
 `DefinicionPaso{nombre, reintentos}`. El motor la recorre en tres fases
 fijas.
 
+> **Process model (M5, ADR-0016):** el motor **no sabe** que vive en un PM.
+> Un PM es una `DefinicionSecuencia` envoltorio cuyo `main` lleva un
+> `sequence_call` a la secuencia del usuario; el cargador reescribe el
+> placeholder `secuencia_usuario` al path del usuario y el motor ve un
+> `Programa` corriente. La inyección la resuelve el cargador, no el núcleo.
+
 ## Semántica de ejecución (spec, no cambia)
 
 1. **Setup** — corren *todos* los pasos. Si alguno **no pasa**, se marca

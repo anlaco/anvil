@@ -125,6 +125,26 @@ ficheros. Ver ADR-0010.
   medias.
 - El cargador produce `DefinicionSecuencia`; el motor la recorre (ADR-0005).
 
+## Process model (M5, ADR-0016)
+
+Un **process model** (PM) es una secuencia YAML envoltorio: una
+`DefinicionSecuencia` más, cuyo `main` lleva un `sequence_call` a la
+secuencia del usuario. El PM canónico es `process_models/sequential.yaml`
+(`identificar_uut` en `setup`, `sequence_call` al usuario en `main`,
+`notificar_resultado` en `cleanup`).
+
+Convención: el PM autora el call con `secuencia: secuencia_usuario` (un
+**nombre reservado**, no un path). El cargador, en
+`cargar_programa_con_pm(ruta_pm, ruta_usuario)`, lo reescribe al path
+canónico de la secuencia del usuario y la registra en `programa.archivos`.
+**No extiende el schema**: un PM es un YAML con `setup`/`main`/`cleanup`/
+`subsecuencias` como cualquier secuencia. El motor no se toca (ADR-0005);
+el CLI lo selecciona con `--process-model <ruta>`.
+
+El PM canónico declara sin `parametros`, así la secuencia del usuario no
+debe declarar `parameters` en su raíz (firma vacía == vacía). Un PM custom
+puede emparejar `parametros` ↔ `parameters` (post-MVP: librería de PMs).
+
 ## Por qué YAML y no JSON/XML
 
 - **Diffable y legible** por no-programadores (ingenieros de test que

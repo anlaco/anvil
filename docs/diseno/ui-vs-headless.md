@@ -17,6 +17,34 @@ Interfaces prod desincronizados).
   campos del YAML (ver [motor-de-ejecucion.md](motor-de-ejecucion.md)).
 - Determinismo: sin UI, la ejecución es reproducible (RNF-03).
 
+### CLI maduro (M5, RF-40)
+
+El CLI `anvil` (`crates/motor/src/bin/anvil.rs`, también distribuido como
+binario único que hospeda wasmtime, ADR-0011) soporta:
+
+```
+anvil <secuencia.yaml> [--process-model <pm.yaml>] [--json <ruta>] \
+  [--csv <ruta>] [--limits <ruta>] [--port <n>] [--validate] [--quiet] \
+  [--help] [--version]
+```
+
+- `--process-model <ruta>` envuelve la secuencia en un PM Sequential
+  (RF-38, ADR-0016). Sin él, la secuencia corre tal cual.
+- `--validate` carga y valida el programa (schema, lvalues, firmas,
+  ciclos) sin ejecutar ni conectar al ejecutor — útil en CI sin hardware.
+- `--port <n>` apunta el motor a un ejecutor en otro puerto (default 9100)
+  y reintenta la conexión si el ejecutor no está listo (5 s máx). En el
+  binario único el host ya espera al ejecutor.
+- `--quiet` silencia el reporte de consola y los logs informativos de
+  stderr; los errores y los exit codes se preservan (RNF-08: el formato
+  congelado se omite, no se cambia). JSON/CSV siguen emitiéndose.
+- `--help`/`--version` salen antes de cargar/conectar.
+
+Parseo manual, sin `clap`/`getopts`: el flag set es pequeño y se evita
+peso en el `.wasm` (ADR-0001). Si el flag set crece > ~10 o aparecen
+subcomandos, se reconsidera con un ADR (post-MVP). El host embebido
+hereda los args al guest motor, así los flags fluyen al binario único.
+
 ## Desacoplo motor ↔ UI: UIMsgs (post-MVP)
 
 TestStand desacopla el motor de la UI de operador con *User Interface

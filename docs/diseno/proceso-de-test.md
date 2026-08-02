@@ -1,8 +1,9 @@
 # Diseño: Proceso de test (process model)
 
-> **Prioridad:** MVP-parcial. **Propuesta** (no implementado). Sequential
-> simple en MVP; Parallel/Batch post-MVP. **No** se replica el process
-> model de TestStand 1:1.
+> **Prioridad:** MVP-parcial. **Implementado en M5** (Sequential simple,
+> PM envoltorio YAML, plug-ins `grpc`, sin callbacks; ver
+> [ADR-0016](../adr/0016-process-model-sequential-como-secuencia-envoltorio.md)).
+> Parallel/Batch post-MVP. **No** se replica el process model de TestStand 1:1.
 
 La idea **especial** de TestStand: separar "el test" (la secuencia) de
 "cómo se corre en producción" (identificar UUT, notificar pass/fail,
@@ -28,7 +29,7 @@ rompe todas las secuencias existentes, investigación §2).
 - MVP = **Sequential simple**: un UUT, una secuencia, sin maquinaria de
   callbacks.
 
-## MVP: Sequential simple + plug-ins (propuesta)
+## MVP: Sequential simple + plug-ins (implementado en M5)
 
 ```
 [identificar UUT] → [correr secuencia] → [notificar] → [loguear/reportar]
@@ -39,6 +40,19 @@ rompe todas las secuencias existentes, investigación §2).
   un process model editable oculto.
 - Extensión por **plug-ins/ResultSinks** (investigación §2, preferencia de
   foro NI: plug-in > tocar el modelo), no por customización del núcleo.
+
+### Cómo se materializa en Anvil (ADR-0016)
+
+El PM es **una secuencia YAML envoltorio** (`process_models/sequential.yaml`)
+cuyo `main` lleva un `sequence_call` a la secuencia del usuario (nombre
+reservado `secuencia_usuario`, que el cargador reescribe al path de la
+secuencia pasada por `--process-model`), con `identificar_uut` en `setup`
+y `notificar_resultado` en `cleanup`. El motor **no se toca** (ADR-0005):
+ve un `Programa` con raíz = PM y un archivo externo = secuencia del
+usuario, y lo orquesta como cualquier `sequence_call` (ADR-0010). El
+resultado del usuario queda anidado en `sub_pasos`. Sin `--process-model`,
+la secuencia corre tal cual (R&D). Así la misma secuencia va de R&D a
+fábrica cambiando un flag, sin recompilar y sin callbacks frágiles.
 
 ## Post-MVP: paralelismo con cancelación jerárquica
 

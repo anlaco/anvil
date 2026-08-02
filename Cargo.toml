@@ -3,6 +3,7 @@ resolver = "2"
 members = [
     "crates/modelo",
     "crates/pasos_demo",
+    "crates/pasos_scpi",
     "crates/ejecutor_pasos",
     "crates/motor",
     "crates/cargador",
@@ -26,6 +27,7 @@ license = "AGPL-3.0-or-later"
 [workspace.dependencies]
 modelo = { path = "crates/modelo" }
 pasos_demo = { path = "crates/pasos_demo" }
+pasos_scpi = { path = "crates/pasos_scpi" }
 cargador = { path = "crates/cargador" }
 result_sink = { path = "crates/result_sink" }
 expr = { path = "crates/expr" }
