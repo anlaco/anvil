@@ -90,7 +90,9 @@ esos ejecutores.
    (instrumentos por red, ficheros pactados). Anvil ve un endpoint gRPC más;
    no sabe ni le importa el SO. **El mecanismo de aislamiento (contenedor/
    VM/firewall de SO) queda a definir al construir**: se fija el patrón, no
-   la tecnología.
+   la tecnología. La investigación de opciones está en
+   [investigacion/aislamiento-lid.md](../investigacion/aislamiento-lid.md);
+   la decisión final se toma al construir el primer LID real.
 
 8. **Rendimiento: WASM compite.** wasmtime compila WASM **JIT a código
    nativo** (Cranelift), no lo interpreta: típicamente 1.5–2× de C/Rust
