@@ -8,6 +8,13 @@ description = "Host nativo de Anvil: un binario que hospeda wasmtime y los dos g
 [dependencies]
 wasmtime = "47"
 wasmtime-wasi = "47"
+# `cargador`/`modelo` del core: el host re-parsea el YAML de la secuencia
+# (M5-ext.1) para recolectar los `ejecutores:` — las IPs no-loopback
+# declaradas (relajación acotada del loopback, ADR-0011) y los `.wasm` por
+# path (M5-ext.2). Son crates puros (sin wasmtime), así que linkan a nativo
+# sin arrastrar nada del sandbox WASM.
+cargador = { path = "../../crates/cargador" }
+modelo = { path = "../../crates/modelo" }
 
 [[bin]]
 name = "anvil"

@@ -137,12 +137,13 @@ paso, hace falta que el paso **exponga metadatos de su firma**.
 - **No** describe el process model. La separación secuencia vs. proceso de
   test es de nivel superior ([diseno/proceso-de-test.md](diseno/proceso-de-test.md)).
 
-## Reuso hacia ejecutores externos (ADR-0012)
+## Reuso hacia ejecutores externos (ADR-0013)
 
 El contrato **no cambia** cuando el paso lo atiende un **ejecutor de
-lenguaje** distribuido (`executores/`, p. ej. Python) o un **módulo `.wasm`
-cargado por path**: todos hablan el mismo `paso.proto` por gRPC, y el motor
-solo añade routing **nombre→endpoint** en su lado. Esto refuerza RNF-05: la
-superficie pública se reusa, no se extiende. Ver
-[diseno/executores-lenguaje.md](diseno/executores-lenguaje.md) y
-[ADR-0012](adr/0012-executores-de-lenguaje-como-modulos.md).
+lenguaje** distribuido (`executores/`, p. ej. Python), un **módulo `.wasm`
+cargado por path** (M5-ext.2; lo carga el host, ADR-0013) o el ejecutor
+embebido: todos hablan el mismo `paso.proto` por gRPC, y el motor solo añade
+routing **nombre→endpoint** en su lado (`ejecutores:`/`ejecutor:` en el
+YAML, M5-ext.1). Esto refuerza RNF-05: la superficie pública se reusa, no
+se extiende. Ver [diseno/executores-lenguaje.md](diseno/executores-lenguaje.md) y
+[ADR-0013](adr/0013-cargador-wasm-host-side-y-routing.md).

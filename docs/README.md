@@ -49,6 +49,8 @@ docs/
 │  ├─ 0004-licencia-dual-agpl-apache.md
 │  ├─ 0005-motor-generico-dirigido-por-datos.md
 │  └─ 0006-wasi-grpc-propio.md
+│  (0007-0012 en la misma carpeta; 0013 reemplaza 0012 en el cargador y el routing)
+├─ planes/                    planes de hito (m4-nucleo, m4b, m5-ext)
 └─ diseno/                    diseño del dominio, un doc por área funcional
    ├─ motor-de-ejecucion.md
    ├─ limites-y-estados.md

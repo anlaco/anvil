@@ -96,15 +96,16 @@ La **frontera gRPC motor↔ejecutor ya existe y es real** (aislamiento
 motor-side). La frontera ejecutor↔paso es en-proceso hoy; el objetivo es
 que sea gRPC para pasos en cualquier lenguaje (ADR-0003).
 
-**M5-ext (ADR-0012):** el ejecutor WASM embebido se mantiene como **de
-serie** (zero-install, ADR-0011) y gana un **cargador de módulos `.wasm`
-por path** (modelo `.vi`); a su lado, **executores de lenguaje** (`executores/`,
-Apache-2.0) atienden pasos con gRPC nativo de su ecosistema. El motor
-despacha por **nombre→endpoint** (`ejecutores:` en el YAML + override
-`--ejecutor`), con IPs no-loopback solo si se declaran (patrón **LID** para
-SO legacy; ver [glosario.md](glosario.md)). Ver
-[diseno/executores-lenguaje.md](diseno/executores-lenguaje.md)
-y [ADR-0012](adr/0012-executores-de-lenguaje-como-modulos.md).
+**M5-ext.1 (ADR-0013):** el ejecutor WASM embebido se mantiene como **de
+serie** (zero-install, ADR-0011); el motor despacha por **nombre→endpoint**
+(`ejecutores:` en el YAML + override `--ejecutor`), con IPs no-loopback
+solo si se declaran. A su lado, **executores de lenguaje** (`executores/`,
+Apache-2.0) atienden pasos con gRPC nativo de su ecosistema. El **cargador
+de módulos `.wasm` por path** (modelo `.vi`) es **M5-ext.2** y lo hace el
+**host** (un guest WASM no puede instanciar wasmtime dentro de sí mismo,
+ADR-0013); el patrón **LID** para SO legacy queda aplazado a post-M5-ext.
+Ver [diseno/executores-lenguaje.md](diseno/executores-lenguaje.md)
+y [ADR-0013](adr/0013-cargador-wasm-host-side-y-routing.md).
 
 ## Nivel 3 — Componentes
 
@@ -112,9 +113,10 @@ y [ADR-0012](adr/0012-executores-de-lenguaje-como-modulos.md).
 
 ```
 Motor
- ├─ conecta(host, puerto)        → Cliente wasi-grpc
- ├─ ejecuta_paso(nombre, intento)→ codifica PeticionPaso, llama RUTA_INVOCA,
- │                                 decodifica ResultadoPasoProto
+ ├─ desde_programa(programa)     → tabla de conexiones por ejecutor (M5-ext.1)
+ ├─ conecta(host, puerto)        → Cliente wasi-grpc (legacy, embebido)
+ ├─ ejecuta_paso(def, programa)  → resuelve endpoint por def.ejecutor, codifica
+ │                                 PeticionPaso, llama RUTA_INVOCA, decodifica
  ├─ ejecuta_con_reintentos(def)  → reintenta mientras !paso() && intento<max
  └─ ejecuta_secuencia(def)       → Setup / Main(corta en 1er fallo) / Cleanup(siempre)
                                    + agrega en ResultadoSecuencia

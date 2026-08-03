@@ -1,11 +1,14 @@
 # Diseño: Executores de lenguaje y cargador de `.wasm`
 
 > **Prioridad:** MVP extendido. El ejecutor WASM embebido ya existe; el
-> cargador de `.wasm` por path y los ejecutores de lenguaje son **MVP
-> extendido** (M5). LID es un patrón de despliegue, no un componente.
+> routing nombre→endpoint está **implementado en M5-ext.1** (ADR-0013); el
+> cargador de `.wasm` por path es **M5-ext.2** (condicionado al formato de
+> Telekino); LID es un patrón de despliegue **aplazado a post-M5-ext**.
 
 Cómo Anvil llama a pasos en **cualquier lenguaje** y a **módulos WASM
-propios** sin recompilar. Trazable a [ADR-0012](../adr/0012-executores-de-lenguaje-como-modulos.md),
+propios** sin recompilar. Trazable a [ADR-0013](../adr/0013-cargador-wasm-host-side-y-routing.md),
+[ADR-0012](../adr/0012-executores-de-lenguaje-como-modulos.md) (superseded
+en el cargador y el routing),
 [ADR-0003](../adr/0003-pasos-por-grpc-por-nombre.md) y
 [ADR-0011](../adr/0011-distribucion-un-binario-hospeda-wasmtime.md).
 
@@ -42,33 +45,66 @@ Motor (WASM) ─gRPC─▶│  │ ejecutor.wasm  │◀──▶│  módulos .
 
 - **Zero-install**: va dentro de `anvil-host` (ADR-0011). WASM/Rust es el
   **lenguaje de serie** de un ejecutor de pruebas.
-- Atiende dos clases de pasos:
-  1. **Built-in**: `pasos_demo` compilado dentro (pass/fail, limit test,
-     action, conectar/medir/desconectar simulados). Siempre disponibles.
-  2. **Módulos `.wasm` cargados por path**: tu paso compilado a WASM,
-     referenciado en la secuencia, cargado en runtime.
+- Atiende los pasos **built-in**: `pasos_demo` compilado dentro (pass/fail,
+  limit test, action, conectar/medir/desconectar simulados). Siempre
+  disponibles, en `127.0.0.1:9100`.
+- **No** carga `.wasm` por path: un guest WASM no puede instanciar wasmtime
+  dentro de sí mismo (ADR-0013). Eso lo hace el **host** (ver abajo).
 
-### Cargador de `.wasm` por path (modelo `.vi`)
+### Routing nombre→endpoint (M5-ext.1, implementado)
+
+El YAML declara `ejecutores:` y cada paso `grpc` puede declarar `ejecutor:`.
+El motor despacha por **nombre→endpoint** (tabla de conexiones en
+`Motor::desde_programa`); sin declaración, todo va al embebido (compat M4b).
+
+```yaml
+ejecutores:
+  - nombre: embebido        # el ejecutor WASM de serie (127.0.0.1:9100)
+    tipo: embebido
+  - nombre: python          # ejecutor de lenguaje aparte
+    tipo: grpc
+    host: 127.0.0.1         # o 192.168.x.y (LID futuro) — solo si se declara
+    puerto: 9101
+main:
+  - nombre: verificar_led   # embebido (default)
+  - nombre: medir_simulador
+    ejecutor: python
+```
+
+Override por CLI: `--ejecutor python=192.168.1.50:9101` (patrón `--limits`).
+IPs no-loopback solo si se declaran (relajación acotada del loopback,
+ADR-0011); flag `--solo-loopback` en el host para rechazarlas.
+
+### Cargador de `.wasm` por path (modelo `.vi`, M5-ext.2 — condicionado a Telekino)
 
 Como en TestStand con un `.vi`: tú compilas el módulo, lo guardas en un
-archivo, y la secuencia lo referencia por path. **No se recompila el
-ejecutor.**
+archivo, y la secuencia lo referencia por path. **No se recompila nada.**
 
 ```yaml
 ejecutores:
   - nombre: mi_paso_wasm      # clave libre para la secuencia
-    tipo: wasm                # módulo cargado por el ejecutor embebido
+    tipo: wasm                # módulo cargado por el HOST (ADR-0013)
     path: ./pasos/mi_paso.wasm  # relativo al YAML
 ```
 
-- El ejecutor carga el `.wasm` **en su propio `Store`** (sandbox separado por
-  módulo): un paso defectuoso no bloquea al ejecutor ni a otros módulos.
+- **El host** (no el ejecutor embebido) carga el `.wasm` en su propio
+  `Store` (sandbox separado por módulo): un paso defectuoso no bloquea al
+  ejecutor ni a otros módulos.
+- En **M5-ext.1** el path se valida al cargar (debe existir) pero el módulo
+  **no se instancia**: ejecutarlo da `Error::EjecutorWasmNoImplementado`
+  ("requiere anvil-host con soporte M5-ext.2"). La instanciación real queda
+  para M5-ext.2, condicionada al formato de Telekino (un `.wasm` por QVI vs.
+  un `.wasm` fusionado que despacha por etiqueta).
 - El contrato de entrada/salida del módulo es el mismo `PeticionPaso` /
   `ResultadoPasoProto` (reusado; ver
   [modelo-de-pasos.md](modelo-de-pasos.md) para cómo se despacha por nombre
-  dentro del módulo).
-- **Rendimiento**: wasmtime compila **JIT a nativo** (no interpreta). La
-  primera invocación paga la compilación una sola vez; cache AOT post-MVP.
+  dentro del módulo). Agnóstico al lenguaje: C, Rust, Zig, lo que sea, si
+  habla `paso.proto` por gRPC en loopback, Anvil lo atiende.
+- **Rendimiento (50+ módulos)**: wasmtime compila **JIT a nativo** (no
+  interpreta). Para el caso Telekino (50 QVIs = 50 `.wasm` en una secuencia
+  larga, como los 50 VIs de TestStand): AOT precompile a `.cwasm` +
+  `StoreLimitsBuilder` + lazy loading + preload al abrir la secuencia. Detalle
+  en `docs/planes/m5-ext.md`.
 
 ## Executores de lenguaje (`executores/`)
 
@@ -92,7 +128,7 @@ executores/
 - Cada módulo es autocontenido y versionable → **descargable desde la UI**
   cuando exista (post-MVP).
 
-### LID: despliegue en SO legacy (patrón, no componente)
+### LID: despliegue en SO legacy (patrón, no componente — aplazado a post-M5-ext)
 
 Cuando el paso exige DLLs/drivers de un SO que Anvil no ofrece (Windows 7/10,
 Ubuntu antiguo), **cualquier** ejecutor de lenguaje puede desplegarse en ese
@@ -102,11 +138,12 @@ SO legacy con **aislamiento declarado** — es un *Legacy Isolation Domain*:
   pactados); el resto está aislado.
 - Anvil ve un endpoint gRPC más: `192.168.x.y:9100` (PC en red) o una
   VM/contenedor local. No sabe ni le importa el SO.
-- **Mecanismo de aislamiento a definir al construir** (contenedor / VM /
-  firewall de SO). El patrón es fijo; la tecnología se decide por caso. La
-  investigación exhaustiva de opciones (QEMU/KVM, Hyper-V, Sandboxie-Plus,
-  Docker, systemd-nspawn, namespaces, Windows Sandbox, Firecracker, gVisor,
-  WSL2, …) con fuentes verificadas y recomendación por topología está en
+- **Aplazado a post-M5-ext** (primero moderno, después legacy): el patrón es
+  fijo, pero el **mecanismo de aislamiento a definir al construir**
+  (contenedor / VM / firewall de SO). La investigación exhaustiva de
+  opciones (QEMU/KVM, Hyper-V, Sandboxie-Plus, Docker, systemd-nspawn,
+  namespaces, Windows Sandbox, Firecracker, gVisor, WSL2, …) con fuentes
+  verificadas y recomendación por topología está en
   [investigacion/aislamiento-lid.md](../investigacion/aislamiento-lid.md).
 
 ## Configuración del routing
@@ -142,43 +179,38 @@ Patrón embebido primero, sidecar después (igual que los límites, RF-30):
 Sin `ejecutores:` declarado, todo va al ejecutor embebido en loopback —
 comportamiento idéntico al de M4b (compatibilidad con ADR-0011).
 
-## Demo M5 (prueba mínima real)
+## Demo M5-ext.1 (hecha, sin Docker)
 
-Tres piezas, una secuencia, la misma tesis:
-
-1. **Paso built-in**: `ejecutores.embebido` sirve `verificar_led` (pasos_demo).
-2. **Paso `.wasm` propio**: un módulo compilado aparte (p. ej. Rust →
-   `mi_paso.wasm`) cargado por path en su propio `Store`.
-3. **Paso en ejecutor Python**: `executores/python/` arrancado en
-   `127.0.0.1:9101`, que para un nombre de paso abre **TCP al simulador de
-   instrumento** (el que está desarrollando otro equipo) y devuelve
-   `ResultadoPasoProto`.
+La demo real es `ejemplos/demo_ejecutores.yaml`: **embebido + Python en
+loopback** (sin Docker, sin LID).
 
 ```yaml
 nombre: demo_ejecutores
 ejecutores:
   - { nombre: embebido, tipo: embebido }
-  - { nombre: mi_paso_wasm, tipo: wasm, path: ./pasos/mi_paso.wasm }
   - { nombre: python, tipo: grpc, host: 127.0.0.1, puerto: 9101 }
 main:
   - nombre: verificar_led        # embebido (default)
   - nombre: medir_simulador, ejecutor: python
-  - nombre: mi_paso_wasm, ejecutor: mi_paso_wasm
+  - nombre: conectar_equipo, ejecutor: python
 ```
 
 Verificación: la secuencia pasa/falla según cada paso, y el reporte muestra
-pasos atendidos por tres ejecutores distintos sin que el motor supiera nada
-del SO ni del lenguaje. Para el escenario LID, la misma secuencia con
-`python` apuntando a `192.168.x.y:9100`.
+pasos atendidos por dos ejecutores distintos sin que el motor supiera nada
+del lenguaje. La demo con un paso `.wasm` propio (`tipo: wasm`) llegará con
+el cargador host-side (M5-ext.2, condicionado a Telekino).
 
 ## Recortes MVP extendido
 
-- Cache AOT de módulos `.wasm` (post-MVP).
+- Cargador `.wasm` por path (M5-ext.2): condicionado al formato de Telekino;
+  en M5-ext.1 el path se valida pero no se instancia.
+- Cache AOT de módulos `.wasm` (con M5-ext.2; post-MVP para el caso 50+).
 - Sidecar de `ejecutores:` (post-MVP).
 - Descubrimiento automático / balanceo / reconnect por endpoint (post-MVP;
   solo reintento por paso existente, RF-07).
 - Descargables desde la UI (post-MVP; la estructura lo permite).
-- Aislamiento del LID: patrón documentado, tecnología a definir al construir.
+- LID: patrón documentado, aplazado a post-M5-ext; tecnología a definir al
+  construir.
 
 ## Out-of-scope
 
