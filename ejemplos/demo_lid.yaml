@@ -1,0 +1,57 @@
+# Demo del LID (Legacy Isolation Domain) — ADR-0012.
+#
+# Escenario: Anvil corre en tu Linux (motor WASM). Un paso lo atiende el
+# ejecutor embebido (built-in, WASM) y otro lo atiende un ejecutor Python
+# que vive en un LID aislado (contenedor Docker con red limitada). El motor
+# despacha por nombre→endpoint; no sabe ni le importa qué SO hay detrás.
+#
+# Topología de la demo:
+#
+#   anvil (host Linux)
+#     ├─ ejecutor embebido (WASM, built-in)  → verificar_led
+#     └─ gRPC 127.0.0.1:9101 → LID (contenedor Docker)
+#                                ├─ medir_simulador (gRPC)
+#                                └─ TCP red_lid → simulador (aislado)
+#
+# El LID solo puede hablar con el simulador (red interna `internal: true`,
+# sin salida a Internet ni a la LAN). Eso son las "puertas declaradas":
+# el ejecutor legacy aislado sale solo por lo pactado.
+#
+# Arrancar el LID (en executores/python/):
+#   docker compose up
+# Correr la secuencia:
+#   ./anvil ejemplos/demo_lid.yaml
+
+nombre: demo_lid
+ejecutores:
+  - nombre: embebido          # el ejecutor WASM de serie
+    tipo: embebido
+  - nombre: lid               # ejecutor Python en el LID (contenedor)
+    tipo: grpc
+    host: 127.0.0.1
+    puerto: 9101              # mapeado por docker compose
+main:
+  # Paso built-in: lo atiende el ejecutor WASM embebido (de serie).
+  - nombre: verificar_led
+    reintentos: 1
+
+  # Paso en el LID: el motor despacha por gRPC al contenedor; el LID habla
+  # por TCP con el simulador aislado y devuelve la medida. El límite lo
+  # evalúa el motor desde el YAML (ADR-0008), no el LID.
+  - nombre: medir_simulador
+    ejecutor: lid
+    reintentos: 1
+    limite:
+      tipo: rango
+      min: 4.0
+      max: 5.0
+
+  # Conexión al equipo simulado: fallo transitorio en el intento 1, pasa
+  # desde el 2 (RF-09: el número de intento llega al paso dentro del LID).
+  - nombre: conectar_equipo
+    ejecutor: lid
+    reintentos: 3
+cleanup:
+  - nombre: desconectar_equipo
+    ejecutor: lid
+    reintentos: 1

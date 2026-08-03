@@ -1,0 +1,51 @@
+# Demo del LID (Legacy Isolation Domain) — ADR-0012.
+#
+# Levanta dos contenedores en una red aislada:
+#
+#   1. simulador: el simulador de instrumento TCP (stand-in del equipo del
+#      simulador). Solo escucha en su puerto; no puede salir a nada.
+#
+#   2. lid: el ejecutor de pasos en Python, aislado. Solo puede salir al
+#      simulador (por la red interna). Expone 9101 al host de Anvil.
+#
+# El motor de Anvil (en el host, fuera de compose) conecta a 127.0.0.1:9101
+# y despacha `medir_simulador` al LID; el LID habla por TCP con el simulador
+# dentro de la red aislada y devuelve el resultado.
+#
+# "Puertas declaradas": el LID no tiene acceso a Internet ni a la red del
+# host — solo a `simulador:4000`. Esto es el patrón LID: el ejecutor legacy
+# aislado, solo sale por las puertas pactadas.
+#
+# Uso:
+#   docker compose up                    # levanta simulador + lid
+#   # en otra terminal: ./anvil ejemplos/demo_lid.yaml
+#   docker compose down                  # parar
+
+services:
+  simulador:
+    build:
+      context: .
+      dockerfile: Dockerfile.simulador
+    networks:
+      - red_lid
+    # Sin puertos expuestos: solo accesible desde dentro de red_lid.
+
+  lid:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "127.0.0.1:9101:9101"   # Anvil (host) -> LID por gRPC
+    networks:
+      - red_lid
+      # Sin red externa: el LID no puede salir a Internet ni a la LAN.
+      # Solo reach simulador por la red interna.
+    command: >
+      python3 server.py --puerto 9101
+      --simulador simulador:4000
+    depends_on:
+      - simulador
+
+networks:
+  red_lid:
+    internal: true   # sin salida externa: solo lo que declaremos

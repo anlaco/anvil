@@ -44,6 +44,8 @@ python3 -m grpc_tools.protoc \
 
 ## Correrlo
 
+### Opción A — directo (desarrollo, sin aislar)
+
 ```sh
 # terminal 1 — simulador TCP (stand-in del equipo del simulador)
 python3 simulador_tcp.py
@@ -54,6 +56,50 @@ python3 server.py                 # 127.0.0.1:9101
 # (variante LID: apuntar el simulador a la caja legacy)
 python3 server.py --simulador 192.168.1.50:4000
 ```
+
+### Opción B — como LID aislado con Docker (demo del patrón)
+
+El patrón LID completo: el ejecutor corre en un contenedor aislado que solo
+puede salir al simulador por una red interna. Anvil (en el host) habla por
+gRPC con el contenedor; el contenedor habla por TCP con el simulador. Ni el
+LID ni el simulador tienen acceso a Internet ni a la LAN — son las "puertas
+declaradas".
+
+```sh
+# genera los stubs (si no existen ya)
+python3 -m grpc_tools.protoc -I ../../crates/modelo \
+  --python_out=. --grpc_python_out=. ../../crates/modelo/paso.proto
+
+# levanta el LID + simulador en una red interna aislada
+docker compose up
+
+# en otra terminal: Anvil corre la secuencia que mezcla embebido + LID
+./anvil ejemplos/demo_lid.yaml
+
+# parar
+docker compose down
+```
+
+Topología de la demo:
+
+```
+anvil (host Linux)
+  ├─ ejecutor embebido (WASM, built-in)  → verificar_led
+  └─ gRPC 127.0.0.1:9101 → LID (contenedor Docker, red_lid internal)
+                             ├─ medir_simulador / conectar_equipo (gRPC)
+                             └─ TCP red_lid → simulador (aislado)
+```
+
+- `red_lid` es `internal: true`: el LID y el simulador no salen a Internet
+  ni a la LAN. Solo se ven entre sí.
+- El LID expone `9101` al host (para que Anvil conecte); el simulador no
+  expone nada (solo accesible desde `red_lid`).
+- Para el escenario Win10 real (Sandboxie-Plus en vez de Docker): mismo
+  patrón, mismo YAML, mismo `ejecutores:` — solo cambia la tecnología del
+  aislamiento detrás; ver
+  [investigacion/aislamiento-lid.md](../../docs/investigacion/aislamiento-lid.md).
+
+Ver [ejemplos/demo_lid.yaml](../../ejemplos/demo_lid.yaml) para la secuencia.
 
 Pasos que atiende:
 
