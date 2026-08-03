@@ -102,15 +102,19 @@ serie** (zero-install, ADR-0011); el motor despacha por **nombre→endpoint**
 solo si se declaran. A su lado, **executores de lenguaje** (`executores/`,
 Apache-2.0) atienden pasos con gRPC nativo de su ecosistema.
 
-**M5-ext.2 (ADR-0014):** el **cargador de módulos `.wasm` por path**
-(modelo `.vi` de TestStand) lo hace el **host**: lee los `tipo: wasm` del
-YAML, instancia un `Store` por path (sandbox loopback-only, puerto efímero
-vía env `ANVIL_PORT`, preload al arrancar) y los expone al motor como
-overrides `--ejecutor` sintéticos — el motor sólo ve `embebido`/`grpc`,
-nunca `Wasm`. El patrón **LID** para SO legacy queda aplazado a post-M5-ext.
-Ver [diseno/executores-lenguaje.md](diseno/executores-lenguaje.md),
-[ADR-0013](adr/0013-cargador-wasm-host-side-y-routing.md) y
-[ADR-0014](adr/0014-cargador-wasm-host-side-m5-ext2.md).
+**M5-ext.2 (ADR-0014/0015):** el **cargador de módulos `.wasm` por path**
+(modelo `.vi` de TestStand) lo hace el **host**: para cada `tipo: wasm` del
+YAML spawnea el **puente** `anvil-puente-wasm` (embebido en el binario,
+extraído a temp), que carga el componente `.wasm` del usuario (interfaz WIT
+`anvil:paso`: una función `run`, sin gRPC ni protobuf) y traduce
+gRPC↔función por tonic. El puente corre con sandbox WASI vacío (el
+componente es una función pura). El motor sólo ve overrides `--ejecutor`
+sintéticos — nunca un `Wasm`. El patrón **LID** para SO legacy queda
+aplazado a post-M5-ext. Ver
+[diseno/executores-lenguaje.md](diseno/executores-lenguaje.md),
+[ADR-0013](adr/0013-cargador-wasm-host-side-y-routing.md),
+[ADR-0014](adr/0014-cargador-wasm-host-side-m5-ext2.md) y
+[ADR-0015](adr/0015-el-wasm-del-usuario-es-una-funcion-puenteado-a-grpc.md).
 
 ## Nivel 3 — Componentes
 

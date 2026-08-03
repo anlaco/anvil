@@ -10,16 +10,19 @@
 ## Decisiones de diseño (acordadas)
 
 1. **El cargador de `.wasm` por path lo hace el host, no el ejecutor
-   embebido** (ADR-0013, ADR-0014). El ejecutor embebido es él mismo un
-   guest WASM: no puede instanciar wasmtime dentro de sí mismo (wasmtime es
-   una lib nativa del host). El host lee los `TipoEjecutor::Wasm { path }`,
-   instancia un `Store` por path (deduplicado) y los expone como endpoints
-   gRPC en loopback (puerto efímero vía `ANVIL_PORT`; el motor los ve como
-   overrides `--ejecutor` — nunca como `Wasm`).
-2. **El motor nunca ejecuta `.wasm`** (ADR-0014): `TipoEjecutor::Wasm` se
-   define en el modelo y se valida al cargar (el path debe existir), pero
-   es una **directiva de carga para el host**, no una variante ejecutable.
-   Correr un `Wasm` sin host da `Error::EjecutorWasmSinHost`.
+   embebido** (ADR-0013, ADR-0014, ADR-0015). El ejecutor embebido es él
+   mismo un guest WASM: no puede instanciar wasmtime dentro de sí mismo
+   (wasmtime es una lib nativa del host). El host lee los
+   `TipoEjecutor::Wasm { path }`, spawnea un **puente** por path
+   (`anvil-puente-wasm`, embebido en `anvil`) y los expone como endpoints
+   gRPC en loopback (puerto efímero; el motor los ve como overrides
+   `--ejecutor` — nunca como `Wasm`).
+2. **El `.wasm` del usuario es una función, no un servidor gRPC**
+   (ADR-0015): componente WASM con interfaz WIT `anvil:paso` (`run`). Se
+   compila con `cargo component` + `wit-bindgen` (público). El puente
+   (nativo: wasmtime + tonic + wit-bindgen) traduce gRPC↔función. Sin
+   `wasi-grpc`, sin `modelo`, sin `ANVIL_PORT` para el usuario. El motor
+   nunca ejecuta `Wasm`; correrlo sin host da `Error::EjecutorWasmSinHost`.
 3. **Routing nombre→endpoint**: `ejecutores:` en el YAML (embebido/wasm/grpc),
    `ejecutor:` por paso (sólo `grpc`), tabla de conexiones en el motor
    (`Motor::desde_programa`), override CLI `--ejecutor nombre=host:puerto`
@@ -111,40 +114,55 @@ Modelo/cargador/motor: `TipoEjecutor` (Embebido/Wasm/Grpc),
 
 - `cargo test` — todo verde (motor: `resolver_endpoint_wasm_es_error_sin_host`).
 - `cargo build --target wasm32-wasip2 -p motor -p ejecutor_pasos` — guests
-  con `ANVIL_PORT` compilan a WASI P2.
+  compilan a WASI P2.
+- `cargo component build --manifest-path ejemplos/hola-paso/Cargo.toml` — el
+  componente demo compila (requiere `cargo component` instalado).
+- `cargo build --manifest-path packaging/anvil-puente-wasm/Cargo.toml` — el
+  puente compila (wasmtime + tonic + wit-bindgen, workspace aparte).
 - `cargo build --manifest-path packaging/anvil-host/Cargo.toml` — el host
-  con `instanciar_wasm`/`esperar_wasm` compila sin warnings.
+  con `instanciar_wasm` (spawn del puente) compila sin warnings.
 - **Smoke manual**: `./anvil ejemplos/demo_wasm.yaml --json out.json` → el
-  host carga `ejecutor_pasos.wasm` por path, le asigna puerto efímero
-  (log: `ejecutor 'mi_paso_wasm' cargado (... → 127.0.0.1:<puerto>)`), el
-  motor despacha los tres pasos (embebido + `.wasm`), límite y reintentos
-  evaluados por el motor, JSON correcto, exit 0.
+  host spawnea el puente (log: `ejecutor 'mi_paso_wasm' cargado (... →
+  127.0.0.1:<puerto>)`), el puente carga el componente y llama a su `run`,
+  el motor despacha los tres pasos (embebido + componente), límite y
+  reintentos evaluados por el motor, JSON correcto, exit 0. Al salir, el
+  puente no queda huérfano (EOF en stdin).
 
 ---
 
-## M5-ext.2 — Cargador de `.wasm` por path host-side ✅ (hecho, ADR-0014)
+## M5-ext.2 — Cargador de `.wasm` por path host-side ✅ (hecho, ADR-0014/0015)
 
-**Agnóstico al origen del `.wasm`.** Anvil expone un contrato
-(`paso.proto` por gRPC en loopback) y un mecanismo de carga (path). Lo que
-hay detrás —C a mano, Rust, Zig, un editor visual, un tercero— es opaco.
-El roadmap avanza por los requisitos de Anvil (el modelo `.vi` de TestStand
-+ la tesis "WASM es el lenguaje de serie" + el caso de uso 50+ módulos en
-una secuencia larga), no por los de un generador externo.
+**Agnóstico al origen del `.wasm`.** Anvil expone un contrato (WIT
+`anvil:paso`) y un mecanismo de carga (path). Lo que hay detrás —C a mano,
+Rust, Zig, un editor visual, un tercero— es opaco. El roadmap avanza por
+los requisitos de Anvil (el modelo `.vi` de TestStand + la tesis "WASM es
+el lenguaje de serie" + el caso de uso 50+ módulos en una secuencia larga),
+no por los de un generador externo.
 
-**Qué se implementó (ADR-0014):**
-- El host instancia un `Store` por `TipoEjecutor::Wasm { path }` (sandbox
-  **loopback-only**, preload al arrancar, readiness por polling), le
-  reserva un **puerto efímero** (`bind 127.0.0.1:0`) y se lo inyecta al
-  guest vía env **`ANVIL_PORT`** (convención del `.wasm` de paso de Anvil;
-  el ejecutor embebido la usa también, default 9100).
+**Qué se implementó (ADR-0014, rework ADR-0015):**
+- El `.wasm` del usuario es un **componente WASM que exporta la función
+  `run`** (interfaz WIT `anvil:paso`: `run(nombre, intento) -> resultado`).
+  Se compila con `cargo component` + `wit-bindgen` (público, crates.io).
+  Sin `wasi-grpc`, sin `modelo`, sin `ANVIL_PORT`, sin clonar el repo.
+- El **host spawnea el puente** `anvil-puente-wasm` (nuevo binario nativo,
+  workspace aparte; embebido en `anvil` y extraído a temp al arrancar) con
+  `--wasm <path> --port <efímero>` (reservado con `bind 127.0.0.1:0`). El
+  puente (wasmtime component API + wit-bindgen host + tonic gRPC) carga el
+  componente en un Store con **sandbox WASI vacío** (función pura) y
+  traduce gRPC↔función: por cada `Invoca` llama `run` y responde
+  `ResultadoPasoProto` (`paso.proto` no cambia, RNF-05).
 - **Deduplicación por path**: dos ejecutores con el mismo `.wasm` → un
-  único Store (1 Store, N llamadas, patrón RTE de TestStand).
+  puente (1 Store, N llamadas, patrón RTE de TestStand). Preload al
+  arrancar, readiness por polling, EOF-en-stdin → el puente sale solo.
 - **El motor nunca ejecuta `Wasm`**: el host compone overrides
   `--ejecutor nombre=127.0.0.1:<puerto>` sintéticos (M5-ext.1, que ya
   convierte `wasm` → `grpc`). `Error::EjecutorWasmNoImplementado`
-  desaparece; correr un `Wasm` sin host da `Error::EjecutorWasmSinHost`.
-- Demo `ejemplos/demo_wasm.yaml` (embebido + `.wasm` por path, verificado
-  end-to-end).
+  desapareció en ADR-0014; correr un `Wasm` sin host da
+  `Error::EjecutorWasmSinHost`.
+- **Caso remoto (Pi, futuro)**: el mismo puente se distribuye suelto y se
+  corre con `--bind 0.0.0.0`; el YAML declara `tipo: grpc`.
+- Demo `ejemplos/demo_wasm.yaml` + componente `ejemplos/hola-paso` (el
+  "hola mundo"), verificado end-to-end.
 - **Post-M5-ext.2**: AOT precompile a `.cwasm`, `StoreLimitsBuilder`, lazy
   loading, modo Debug, pooling/async — si la medición de 50+ Stores lo pide.
 

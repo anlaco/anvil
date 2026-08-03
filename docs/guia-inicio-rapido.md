@@ -158,6 +158,53 @@ El ejecutor en este modo **no termina solo** (loop de aceptar); Ctrl-C al
 acabar. Es sólo para depurar guests por separado; para uso normal, el
 binario `anvil` (host) es lo recomendado.
 
+## Escribir un paso propio en Rust (M5-ext.2, ADR-0015)
+
+El "hola mundo" completo: escribe un paso en Rust, compílalo a `.wasm` y
+ejecútalo con Anvil. **Sin clonar el repo, sin `wasi-grpc`, sin `modelo`.**
+Referencia oficial: `ejemplos/hola-paso/`.
+
+1. Instala la herramienta de componentes (una vez):
+   ```sh
+   cargo install cargo-component --locked
+   ```
+2. Proyecto del paso (`hola/Cargo.toml` con `[lib] crate-type = ["cdylib"]`,
+   `hola/wit/anvil-paso.wit`, `hola/src/lib.rs`). El WIT es el contrato:
+   ```wit
+   package anvil:paso@0.1.0;
+   interface paso {
+     record resultado { estado: string, mensaje: string, valor-medido: option<f64> }
+     run: func(nombre: string, intento: s32) -> resultado;
+   }
+   world anvil-paso { export paso; }
+   ```
+3. La implementación es una función (~15 líneas, con `wit-bindgen`):
+   ```rust
+   #[allow(warnings)]
+   mod bindings;
+   use bindings::exports::anvil::paso::paso::{Guest, Resultado};
+   struct Component;
+   impl Guest for Component {
+       fn run(nombre: String, intento: i32) -> Resultado {
+           Resultado {
+               estado: "paso".to_string(),
+               mensaje: format!("hola {nombre} (intento {intento})"),
+               valor_medido: Some(4.2),
+           }
+       }
+   }
+   bindings::export!(Component with_types_in bindings);
+   ```
+4. Compila a componente:
+   `cargo component build` → `target/wasm32-wasip1/debug/hola.wasm`.
+5. Decláralo en el YAML (`ejecutores: [{ nombre: hola, tipo: wasm, path:
+   ./hola.wasm }]`, paso con `ejecutor: hola`) y ejecuta
+   `./anvil secuencia.yaml`. El host spawnea el puente, que carga tu
+   componente (sandbox WASI vacío: sin ficheros ni red) y traduce
+   gRPC↔función.
+
+Ver [ADR-0015](adr/0015-el-wasm-del-usuario-es-una-funcion-puenteado-a-grpc.md).
+
 ## Solución de problemas
 
 - **`Falta el guest '…'`** al compilar el host → corre primero

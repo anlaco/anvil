@@ -91,15 +91,17 @@ término de TestStand no se replica igual en Anvil, se dice explícitamente.
 
 - **Cargador de `.wasm`.** El **host** (`anvil-host`) carga **módulos `.wasm`
   propios por path** en runtime (modelo `.vi` de TestStand: compilar y
-  referenciar, sin recompilar). Cada módulo corre en su propio `Store`
-  (aislamiento entre pasos); el ejecutor embebido no puede hacerlo (es él
-  mismo un guest WASM). **M5-ext.2, implementado (ADR-0014)**: el host
-  instancia, le asigna un puerto efímero (`ANVIL_PORT`) y lo expone al motor
-  como un endpoint `grpc` más (override `--ejecutor` sintético); el motor
-  nunca ejecuta `Wasm`. Agnóstico al origen del `.wasm` (C, Rust, Zig, un
+  referenciar, sin recompilar). **M5-ext.2, implementado (ADR-0014/0015)**:
+  el host spawnea el **puente** `anvil-puente-wasm` (embebido en `anvil`),
+  que carga el componente del usuario (interfaz WIT `anvil:paso`: una
+  función `run`, sin gRPC ni protobuf) y traduce gRPC↔función. El puente
+  corre con sandbox WASI vacío (el componente es una función pura); el
+  motor ve el endpoint como un `grpc` más (override `--ejecutor` sintético)
+  y nunca ejecuta `Wasm`. Agnóstico al origen del `.wasm` (C, Rust, Zig, un
   editor visual, un tercero). Ver
-  [ADR-0013](adr/0013-cargador-wasm-host-side-y-routing.md) y
-  [ADR-0014](adr/0014-cargador-wasm-host-side-m5-ext2.md).
+  [ADR-0013](adr/0013-cargador-wasm-host-side-y-routing.md),
+  [ADR-0014](adr/0014-cargador-wasm-host-side-m5-ext2.md) y
+  [ADR-0015](adr/0015-el-wasm-del-usuario-es-una-funcion-puenteado-a-grpc.md).
 
 - **Routing nombre→endpoint.** (M5-ext.1, implementado) El YAML declara
   `ejecutores:` y cada paso `grpc` su `ejecutor:`; el motor despacha por

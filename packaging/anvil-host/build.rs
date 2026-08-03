@@ -1,22 +1,24 @@
-//! Build script del host: copia los dos guests WASM ya compilados a
-//! `OUT_DIR` para que `main.rs` los embeba con `include_bytes!`.
+//! Build script del host: copia los dos guests WASM ya compilados y el
+//! binario del puente `anvil-puente-wasm` (M5-ext.2, ADR-0015) a `OUT_DIR`
+//! para que `main.rs` los embeba con `include_bytes!`.
 //!
-//! **No construye los `.wasm` desde aquí** (eso requeriría invocar `cargo`
-//! de forma recursiva y pelearse con el lock del build). El orden de build
-//! es:
+//! **No construye los `.wasm` ni el puente desde aquí** (eso requeriría
+//! invocar `cargo` de forma recursiva y pelearse con el lock del build). El
+//! orden de build es:
 //!
 //! ```sh
 //! cargo build --target wasm32-wasip2 -p motor -p ejecutor_pasos   # guests
-//! cargo build -p anvil-host                                        # host
+//! cargo build --manifest-path packaging/anvil-puente-wasm/Cargo.toml  # puente
+//! cargo build --manifest-path packaging/anvil-host/Cargo.toml        # host
 //! ```
 //!
 //! Si los artifacts no están, falla con un mensaje claro indicando el
 //! comando a correr primero. Busca primero en `debug/` y luego en
 //! `release/` (para que el host se pueda compilar en cualquier profile y
-//! embeber los guests disponibles).
+//! embeber los artifacts disponibles).
 
 use std::env;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::process;
 
 fn main() {
@@ -25,23 +27,45 @@ fn main() {
     let crate_dir = PathBuf::from(env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR"));
     let repo_root = crate_dir.ancestors().nth(2).expect("repo root");
 
-    for name in ["anvil-guest.wasm", "ejecutor_pasos.wasm"] {
-        let dst = out_dir.join(name);
+    // (nombre de salida, subdir del target, dir de origen, comando sugerido)
+    let piezas: Vec<(&str, &str, &str, &str)> = vec![
+        (
+            "anvil-guest.wasm",
+            "target/wasm32-wasip2",
+            "",
+            "cargo build --target wasm32-wasip2 -p motor -p ejecutor_pasos",
+        ),
+        (
+            "ejecutor_pasos.wasm",
+            "target/wasm32-wasip2",
+            "",
+            "cargo build --target wasm32-wasip2 -p motor -p ejecutor_pasos",
+        ),
+        (
+            "anvil-puente-wasm",
+            "target",
+            "packaging/anvil-puente-wasm/",
+            "cargo build --manifest-path packaging/anvil-puente-wasm/Cargo.toml",
+        ),
+    ];
+
+    for (nombre, subdir, dir, comando) in &piezas {
+        let dst = out_dir.join(nombre);
         let src = ["debug", "release"]
             .iter()
-            .map(|p| repo_root.join("target/wasm32-wasip2").join(p).join(name))
+            .map(|p| repo_root.join(dir).join(subdir).join(p).join(nombre))
             .find(|p| p.exists())
             .unwrap_or_else(|| {
-                eprintln!(
-                    "Falta el guest '{name}'. Corre primero:\n  \
-                     cargo build --target wasm32-wasip2 -p motor -p ejecutor_pasos"
-                );
+                eprintln!("Falta el artifact '{nombre}'. Corre primero:\n  {comando}");
                 process::exit(1);
             });
-        std::fs::copy(&src, &dst).expect("copiar wasm a OUT_DIR");
+        std::fs::copy(&src, &dst).expect("copiar artifact a OUT_DIR");
         println!("cargo:rerun-if-changed={}", src.display());
     }
-    // Rebuild del host si cambian los guests.
+    // Rebuild del host si cambian los artifacts.
     println!("cargo:rerun-if-changed={}", repo_root.join("target/wasm32-wasip2").display());
-    let _ = Path::new(&out_dir); // silence unused
+    println!(
+        "cargo:rerun-if-changed={}",
+        repo_root.join("packaging/anvil-puente-wasm/target").display()
+    );
 }
