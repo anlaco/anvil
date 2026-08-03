@@ -81,6 +81,27 @@ término de TestStand no se replica igual en Anvil, se dice explícitamente.
   adaptador entre el motor genérico y los pasos concretos. Hoy es
   `crates/ejecutor_pasos` (binario que escucha en `127.0.0.1:9100`).
 
+- **Ejecutor de lenguaje.** Ejecutor de pasos distribuido como **módulo
+  aparte** (`executores/`), uno por sistema (Python, LabVIEW, MATLAB, …),
+  que habla el mismo `paso.proto` con gRPC nativo de su ecosistema. Son
+  **alternativas opt-in** al ejecutor WASM embebido; pueden mezclarse en la
+  misma secuencia. Licencia Apache-2.0. Ver
+  [diseno/executores-lenguaje.md](diseno/executores-lenguaje.md) y
+  [ADR-0012](adr/0012-executores-de-lenguaje-como-modulos.md).
+
+- **Cargador de `.wasm`.** El ejecutor WASM embebido carga **módulos `.wasm`
+  propios por path** en runtime (modelo `.vi` de TestStand: compilar y
+  referenciar, sin recompilar el ejecutor). Cada módulo corre en su propio
+  `Store` (aislamiento entre pasos). Ver [ADR-0012](adr/0012-executores-de-lenguaje-como-modulos.md).
+
+- **LID** (*Legacy Isolation Domain*). Patrón de despliegue: un ejecutor de
+  lenguaje corre en un **SO legacy** (Windows 7/10, VM, PC en red) con
+  **aislamiento declarado** (solo salen las puertas pactadas: instrumentos
+  por red, ficheros). Anvil lo ve como un endpoint gRPC más; el mecanismo de
+  aislamiento (contenedor/VM/firewall de SO) se define al construir. Ver
+  [diseno/executores-lenguaje.md](diseno/executores-lenguaje.md) y
+  [ADR-0012](adr/0012-executores-de-lenguaje-como-modulos.md).
+
 - **Contrato gRPC.** La superficie pública del paso: `paso.proto` define
   `PeticionPaso`, `ResultadoPasoProto` y `service EjecutorPasos{rpc Invoca}`.
   Es la **fuente de verdad** del contrato; los structs `prost` de

@@ -87,6 +87,10 @@ Prioridad: **MVP** (Must), **MVP-parcial** (Should), **post-MVP** (Could),
 | RF-34 | Control de flujo: **pause-on-fail**, **step**, **disable** de pasos. | MVP-parcial | `disable` + `pause_on_fail` en `DefinicionPaso` (M4-núcleo); `step` post-MVP; [diseno/motor-de-ejecucion.md](diseno/motor-de-ejecucion.md) |
 | RF-35 | **Expression engine** (sintaxis **Julia**, **no** C-like). | MVP-parcial | `crates/expr` (M4-núcleo); [diseno/motor-de-expresiones.md](diseno/motor-de-expresiones.md) |
 | RF-36 | Integración de instrumentos por **adapter gRPC**. | MVP-parcial | [diseno/integracion-instrumentos.md](diseno/integracion-instrumentos.md) |
+| RF-36.1 | Un paso puede servirse por un **ejecutor gRPC remoto** en otro lenguaje o SO (executores de lenguaje distribuidos en `executores/`); el motor despacha por **nombre→endpoint**. | MVP extendido (M5) | [ADR-0012](adr/0012-executores-de-lenguaje-como-modulos.md); [diseno/executores-lenguaje.md](diseno/executores-lenguaje.md) |
+| RF-36.2 | Un paso **WASM propio** se carga por **path** en runtime (modelo `.vi`), sin recompilar el ejecutor; cada módulo corre en su propio `Store`. | MVP extendido (M5) | [ADR-0012](adr/0012-executores-de-lenguaje-como-modulos.md); [diseno/executores-lenguaje.md](diseno/executores-lenguaje.md) |
+| RF-36.3 | El routing `ejecutores:` vive en el **YAML** de la secuencia con **override por flag** `--ejecutor nombre=host:puerto` (patrón embebido-primero, como los límites). | MVP extendido (M5) | [diseno/executores-lenguaje.md](diseno/executores-lenguaje.md) |
+| RF-36.4 | **LID** (despliegue legacy): un ejecutor de lenguaje puede correr en un SO legacy (Win7/VM) con aislamiento declarado; Anvil lo ve como un endpoint gRPC más. | MVP extendido (M5) · mecanismo a definir | [ADR-0012](adr/0012-executores-de-lenguaje-como-modulos.md); [diseno/executores-lenguaje.md](diseno/executores-lenguaje.md) |
 | RF-37 | PyVISA/SCPI nativo. | post-MVP | diseno/integracion-instrumentos.md |
 
 ### Process model y UI
@@ -111,6 +115,7 @@ Prioridad: **MVP** (Must), **MVP-parcial** (Should), **post-MVP** (Could),
 |---|---|---|---|
 | RNF-01 | **Portabilidad**: Anvil se compila a `wasm32-wasip2` y corre bajo `wasmtime` en cualquier SO soportado. | MVP | ADR-0001; `rust-toolchain.toml` |
 | RNF-02 | **Aislamiento**: el secuenciador corre en un sandbox WASM; el interior de cada paso es opaco al motor. | MVP | ADR-0001, ADR-0005 |
+| RNF-02.1 | **Relajación acotada del loopback**: el motor solo conecta a IPs no-loopback **declaradas** (ejecutores de lenguaje, LID); sin declaración, loopback-only (ADR-0011). El sandbox WASM del núcleo se conserva. | MVP extendido (M5) | [ADR-0012](adr/0012-executores-de-lenguaje-como-modulos.md) |
 | RNF-03 | **Determinismo de reintentos**: para la misma secuencia y los mismos pasos, el número de intentos y el orden son reproducibles. | MVP | `motor/src/lib.rs::ejecuta_con_reintentos` *(verificar en CI)* |
 | RNF-04 | **Rendimiento**: el coste de una llamada gRPC local es despreciable frente al tiempo de un instrumento real (no es cuello de botella). | MVP | ADR-0003 |
 | RNF-05 | **Estabilidad del contrato**: `paso.proto` no se rompe sin versionado y un ADR/RFC. | MVP | [contrato-grpc.md](contrato-grpc.md) |

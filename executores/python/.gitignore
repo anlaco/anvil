@@ -1,0 +1,4 @@
+# Generados por grpc_tools desde crates/modelo/paso.proto (ver README.md).
+paso_pb2.py
+paso_pb2_grpc.py
+__pycache__/
