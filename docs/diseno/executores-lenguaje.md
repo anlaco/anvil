@@ -103,7 +103,11 @@ SO legacy con **aislamiento declarado** — es un *Legacy Isolation Domain*:
 - Anvil ve un endpoint gRPC más: `192.168.x.y:9100` (PC en red) o una
   VM/contenedor local. No sabe ni le importa el SO.
 - **Mecanismo de aislamiento a definir al construir** (contenedor / VM /
-  firewall de SO). El patrón es fijo; la tecnología se decide por caso.
+  firewall de SO). El patrón es fijo; la tecnología se decide por caso. La
+  investigación exhaustiva de opciones (QEMU/KVM, Hyper-V, Sandboxie-Plus,
+  Docker, systemd-nspawn, namespaces, Windows Sandbox, Firecracker, gVisor,
+  WSL2, …) con fuentes verificadas y recomendación por topología está en
+  [investigacion/aislamiento-lid.md](../investigacion/aislamiento-lid.md).
 
 ## Configuración del routing
 
