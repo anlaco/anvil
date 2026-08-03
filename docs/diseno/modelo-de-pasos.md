@@ -16,13 +16,13 @@ runtime de vendor (ADR-0003). Hoy el prototipo hospeda `pasos_demo` en el
 mismo `.wasm` del ejecutor; el objetivo es que un paso pueda ser un
 **servidor gRPC en cualquier lenguaje**.
 
-**Materializado en M5-ext (ADR-0013):** Anvil distribuye **executores de
+**Materializado en M5-ext (ADR-0013/0014):** Anvil distribuye **executores de
 lenguaje** como módulos (`executores/`, primero Python) y el routing
 **nombre→endpoint** (M5-ext.1, hecho: `ejecutores:`/`ejecutor:` en el YAML +
 override `--ejecutor`). El **cargador de `.wasm` por path** (modelo `.vi`:
-compilar y referenciar, sin recompilar) es **M5-ext.2** y lo hace el
-**host** (un guest WASM no puede instanciar wasmtime dentro de sí mismo;
-ADR-0013). Ver
+compilar y referenciar, sin recompilar) está **hecho (M5-ext.2)** y lo hace
+el **host** (un guest WASM no puede instanciar wasmtime dentro de sí mismo;
+ADR-0013/0014). Ver
 [diseno/executores-lenguaje.md](executores-lenguaje.md).
 
 ## Despacho por nombre

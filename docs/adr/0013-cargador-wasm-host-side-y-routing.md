@@ -1,10 +1,17 @@
 # ADR-0013: Cargador `.wasm` host-side y routing nombre→endpoint
 
-- **Estado:** Aceptada
+- **Estado:** Aceptada (parcialmente superseded por ADR-0014)
 - **Fecha:** 2026-08-03 (M5-ext.1)
 - **Reemplaza:** ADR-0012 (en la parte del cargador de `.wasm` por path y en
   la del routing; el resto — ejecutores de lenguaje como módulos Apache-2.0,
   LID como patrón — se mantiene, con LID aplazado a post-M5-ext)
+- **Superseded en parte por:** [ADR-0014](0014-cargador-wasm-host-side-m5-ext2.md)
+  (M5-ext.2): el punto 1 de la Decisión ("el motor entiende `Wasm`") y el
+  `Error::EjecutorWasmNoImplementado` quedan reemplazados — el motor **no**
+  ejecuta `Wasm`; el host lo traduce a `grpc` (override `--ejecutor`) y la
+  convención `ANVIL_PORT` fija el puerto de cada módulo. El resto de este
+  ADR (routing nombre→endpoint, relajación acotada del loopback, host como
+  cargador) se mantiene vigente.
 - **Relaciona:** ADR-0001, ADR-0003, ADR-0005, ADR-0008, ADR-0009, ADR-0010,
   ADR-0011, ADR-0012 (superseded),
   [arquitectura.md](../arquitectura.md),
@@ -60,7 +67,8 @@ módulo y los expone como endpoints gRPC en loopback. El ejecutor embebido
 - **En M5-ext.1 un `Wasm` se valida al cargar (el path debe existir) pero no
   se instancia**: ejecutarlo da `Error::EjecutorWasmNoImplementado` con
   mensaje claro ("requiere anvil-host con soporte M5-ext.2"). La
-  instanciación real queda para M5-ext.2.
+  instanciación real queda para M5-ext.2 (**hecho en ADR-0014**, que
+  reemplaza este párrafo: el host instancia y traduce a `grpc`).
 - `paso.proto` no cambia (RNF-05). El motor no sabe qué hay detrás de cada
   endpoint: embebido, `.wasm` cargado por el host (futuro), o Python en otra
   máquina.

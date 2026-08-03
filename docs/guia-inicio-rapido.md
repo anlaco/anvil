@@ -169,11 +169,13 @@ binario `anvil` (host) es lo recomendado.
 
 ## Siguiente lectura
 
-- [roadmap.md](roadmap.md) — qué hay hecho (M0→M4b + M5-ext.1) y qué queda
-  (M5-ext.2 pendiente; LID aplazado).
+- [roadmap.md](roadmap.md) — qué hay hecho (M0→M4b + M5-ext.1/2) y qué queda
+  (LID aplazado).
 - [diseno/formato-de-secuencia.md](diseno/formato-de-secuencia.md) — el
   schema YAML completo.
 - [adr/0011-distribucion-un-binario-hospeda-wasmtime.md](adr/0011-distribucion-un-binario-hospeda-wasmtime.md)
   — por qué un binario hospeda wasmtime.
 - [adr/0013-cargador-wasm-host-side-y-routing.md](adr/0013-cargador-wasm-host-side-y-routing.md)
   — el routing nombre→endpoint y el cargador `.wasm` host-side.
+- [adr/0014-cargador-wasm-host-side-m5-ext2.md](adr/0014-cargador-wasm-host-side-m5-ext2.md)
+  — el cargador de `.wasm` por path (M5-ext.2, implementado).

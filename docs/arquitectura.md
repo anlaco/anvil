@@ -100,12 +100,17 @@ que sea gRPC para pasos en cualquier lenguaje (ADR-0003).
 serie** (zero-install, ADR-0011); el motor despacha por **nombre→endpoint**
 (`ejecutores:` en el YAML + override `--ejecutor`), con IPs no-loopback
 solo si se declaran. A su lado, **executores de lenguaje** (`executores/`,
-Apache-2.0) atienden pasos con gRPC nativo de su ecosistema. El **cargador
-de módulos `.wasm` por path** (modelo `.vi`) es **M5-ext.2** y lo hace el
-**host** (un guest WASM no puede instanciar wasmtime dentro de sí mismo,
-ADR-0013); el patrón **LID** para SO legacy queda aplazado a post-M5-ext.
-Ver [diseno/executores-lenguaje.md](diseno/executores-lenguaje.md)
-y [ADR-0013](adr/0013-cargador-wasm-host-side-y-routing.md).
+Apache-2.0) atienden pasos con gRPC nativo de su ecosistema.
+
+**M5-ext.2 (ADR-0014):** el **cargador de módulos `.wasm` por path**
+(modelo `.vi` de TestStand) lo hace el **host**: lee los `tipo: wasm` del
+YAML, instancia un `Store` por path (sandbox loopback-only, puerto efímero
+vía env `ANVIL_PORT`, preload al arrancar) y los expone al motor como
+overrides `--ejecutor` sintéticos — el motor sólo ve `embebido`/`grpc`,
+nunca `Wasm`. El patrón **LID** para SO legacy queda aplazado a post-M5-ext.
+Ver [diseno/executores-lenguaje.md](diseno/executores-lenguaje.md),
+[ADR-0013](adr/0013-cargador-wasm-host-side-y-routing.md) y
+[ADR-0014](adr/0014-cargador-wasm-host-side-m5-ext2.md).
 
 ## Nivel 3 — Componentes
 

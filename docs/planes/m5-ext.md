@@ -1,8 +1,8 @@
 # Plan: M5-ext — Routing multi-endpoint y cargador de `.wasm` host-side
 
 > **Alcance acordado (2026-08-03):** M5-ext.1 (routing `grpc` + relajación
-> acotada del loopback + demo Python en loopback) **se implementa ya**.
-> M5-ext.2 (cargador `.wasm` por path host-side) queda **pendiente**:
+> acotada del loopback + demo Python en loopback) **implementado**.
+> M5-ext.2 (cargador `.wasm` por path host-side) **implementado** (ADR-0014),
 > independiente del origen del `.wasm` (C a mano, Rust, Zig, un editor
 > visual, un tercero) — Anvil es agnóstico al generador. LID se aplaza a
 > M5-ext.3. `paso.proto` no cambia (RNF-05).
@@ -10,15 +10,16 @@
 ## Decisiones de diseño (acordadas)
 
 1. **El cargador de `.wasm` por path lo hace el host, no el ejecutor
-   embebido** (ADR-0013). El ejecutor embebido es él mismo un guest WASM:
-   no puede instanciar wasmtime dentro de sí mismo (wasmtime es una lib
-   nativa del host). El host lee los `TipoEjecutor::Wasm { path }`, instancia
-   un `Store` por módulo y los expone como endpoints gRPC en loopback.
-2. **M5-ext.1 no instancia `.wasm`**: `TipoEjecutor::Wasm` se define en el
-   modelo y se valida al cargar (el path debe existir), pero ejecutarlo da
-   `Error::EjecutorWasmNoImplementado` ("requiere anvil-host con soporte
-   M5-ext.2; usa `grpc` o `embebido`"). Es un placeholder validado, no una
-   función.
+   embebido** (ADR-0013, ADR-0014). El ejecutor embebido es él mismo un
+   guest WASM: no puede instanciar wasmtime dentro de sí mismo (wasmtime es
+   una lib nativa del host). El host lee los `TipoEjecutor::Wasm { path }`,
+   instancia un `Store` por path (deduplicado) y los expone como endpoints
+   gRPC en loopback (puerto efímero vía `ANVIL_PORT`; el motor los ve como
+   overrides `--ejecutor` — nunca como `Wasm`).
+2. **El motor nunca ejecuta `.wasm`** (ADR-0014): `TipoEjecutor::Wasm` se
+   define en el modelo y se valida al cargar (el path debe existir), pero
+   es una **directiva de carga para el host**, no una variante ejecutable.
+   Correr un `Wasm` sin host da `Error::EjecutorWasmSinHost`.
 3. **Routing nombre→endpoint**: `ejecutores:` en el YAML (embebido/wasm/grpc),
    `ejecutor:` por paso (sólo `grpc`), tabla de conexiones en el motor
    (`Motor::desde_programa`), override CLI `--ejecutor nombre=host:puerto`
@@ -46,7 +47,7 @@
 
 - **RF-36.1** — ejecutor gRPC remoto; despacho nombre→endpoint. ✅ M5-ext.1.
 - **RF-36.2** — paso WASM propio cargado por path en runtime, `Store` propio.
-  → M5-ext.2 (agnóstico al origen del `.wasm`).
+  ✅ M5-ext.2 (agnóstico al origen del `.wasm`).
 - **RF-36.3** — routing en YAML + override `--ejecutor`. ✅ M5-ext.1.
 - **RF-36.4** — LID (SO legacy aislado). → M5-ext.3 (aplazado).
 
@@ -82,8 +83,8 @@ Modelo/cargador/motor: `TipoEjecutor` (Embebido/Wasm/Grpc),
    `__anvil_embebido__` rechazado, `ejecutor` sólo en pasos `grpc`,
    referencias a ejecutores no declarados → error), `aplicar_override_ejecutores`.
 3. **Motor**: `Motor::desde_programa` (tabla de conexiones), `resolver_endpoint`,
-   `Error::EjecutorNoDeclarado/NoConectado/WasmNoImplementado`. `conecta`
-   legacy preservado.
+   `Error::EjecutorNoDeclarado/NoConectado/WasmSinHost` (M5-ext.2 reemplazó
+   `WasmNoImplementado`). `conecta` legacy preservado.
 4. **CLI** (`anvil.rs`): flag `--ejecutor`; conecta con `desde_programa`.
 5. **Host** (`anvil-host`): `wasi_loopback_con_declaradas` (IPs del YAML),
    flag `--solo-loopback`, deps de `cargador`+`modelo` (nativo, sin wasmtime).
@@ -106,49 +107,46 @@ Modelo/cargador/motor: `TipoEjecutor` (Embebido/Wasm/Grpc),
   embebido (9100) + `anvil-guest.wasm ejemplos/demo_ejecutores.yaml` →
   tres pasos en dos ejecutores distintos, JSON/CSV correctos.
 
+### Verificación (M5-ext.2)
+
+- `cargo test` — todo verde (motor: `resolver_endpoint_wasm_es_error_sin_host`).
+- `cargo build --target wasm32-wasip2 -p motor -p ejecutor_pasos` — guests
+  con `ANVIL_PORT` compilan a WASI P2.
+- `cargo build --manifest-path packaging/anvil-host/Cargo.toml` — el host
+  con `instanciar_wasm`/`esperar_wasm` compila sin warnings.
+- **Smoke manual**: `./anvil ejemplos/demo_wasm.yaml --json out.json` → el
+  host carga `ejecutor_pasos.wasm` por path, le asigna puerto efímero
+  (log: `ejecutor 'mi_paso_wasm' cargado (... → 127.0.0.1:<puerto>)`), el
+  motor despacha los tres pasos (embebido + `.wasm`), límite y reintentos
+  evaluados por el motor, JSON correcto, exit 0.
+
 ---
 
-## M5-ext.2 — Cargador de `.wasm` por path host-side
+## M5-ext.2 — Cargador de `.wasm` por path host-side ✅ (hecho, ADR-0014)
 
 **Agnóstico al origen del `.wasm`.** Anvil expone un contrato
 (`paso.proto` por gRPC en loopback) y un mecanismo de carga (path). Lo que
 hay detrás —C a mano, Rust, Zig, un editor visual, un tercero— es opaco.
 El roadmap avanza por los requisitos de Anvil (el modelo `.vi` de TestStand
 + la tesis "WASM es el lenguaje de serie" + el caso de uso 50+ módulos en
-una secuencia larga), no por los de un generador externo. M5-ext.1 ya
-valida los paths y el motor ya entiende `TipoEjecutor::Wasm`; esta fase es
-un incremental del host.
+una secuencia larga), no por los de un generador externo.
 
-**Qué será:**
-- El host instancia un `Store` por `TipoEjecutor::Wasm { path }`, carga el
-  `.wasm` (que habla `paso.proto` por gRPC en loopback, como `server.py` o
-  `ejecutor_pasos`), le asigna un puerto loopback libre y lo registra en la
-  tabla de routing que ve el motor (reusando el override `--ejecutor`
-  internamente). Agnóstico al lenguaje: C, Rust, Zig, lo que sea.
-- **Rendimiento para el caso de uso real (50+ `.wasm` en una secuencia larga,
-  como los 50+ VIs de TestStand)**, verificado en docs de wasmtime:
-  - 1 `Engine` compartido + 1 `Store` por módulo (el patrón soportado; el
-    ejemplo oficial "Fast Instantiation" usa 100 Stores).
-  - **AOT precompile**: `Engine::precompile_component` → `.cwasm` en disco;
-    `Component::deserialize_file` en runtime (sin JIT por arranque). Cache
-    automático de wasmtime como fallback.
-  - **`StoreLimitsBuilder::memory_size`** (p. ej. 1-4 MB por Store) +
-    bajar `memory_guard_size`/`memory_reservation_for_growth`: 50 Stores ≈
-    50-200 MB en vez de GBs de address space.
-  - **Lazy loading**: Store sólo al primer paso que lo use; compartir por
-    path (dos pasos con el mismo `.wasm` → un Store).
-  - **Preload al abrir la secuencia** (como TestStand): cargar todos los
-    `.wasm` al inicio y mantenerlos cacheados hasta cerrar; `Load dynamically`
-    para módulos de diagnóstico.
-  - `wasmtime async` (epoll, pocos threads para muchos Stores) y pooling
-    allocator: **post-M5-ext.2** si la medición RSS/threads lo pide.
-- **Modo Debug** (replica TestStand Dev System): `Config::debug_info(true)`
-  (DWARF en el JIT) + LLDB/GDB attach al host; breakpoints a nivel de
-  función wasm, inspección best-effort. `guest_debug` (stepping por
-  instrucción wasm) es **experimental e incompleto** en wasmtime 47/48:
-  no depender de ello para producción. Aviso: `native_unwind_info` tiene
-  comportamiento cuadrático al cargar/descargar muchos módulos; evaluar
-  desactivarlo con 50+ módulos en debug.
+**Qué se implementó (ADR-0014):**
+- El host instancia un `Store` por `TipoEjecutor::Wasm { path }` (sandbox
+  **loopback-only**, preload al arrancar, readiness por polling), le
+  reserva un **puerto efímero** (`bind 127.0.0.1:0`) y se lo inyecta al
+  guest vía env **`ANVIL_PORT`** (convención del `.wasm` de paso de Anvil;
+  el ejecutor embebido la usa también, default 9100).
+- **Deduplicación por path**: dos ejecutores con el mismo `.wasm` → un
+  único Store (1 Store, N llamadas, patrón RTE de TestStand).
+- **El motor nunca ejecuta `Wasm`**: el host compone overrides
+  `--ejecutor nombre=127.0.0.1:<puerto>` sintéticos (M5-ext.1, que ya
+  convierte `wasm` → `grpc`). `Error::EjecutorWasmNoImplementado`
+  desaparece; correr un `Wasm` sin host da `Error::EjecutorWasmSinHost`.
+- Demo `ejemplos/demo_wasm.yaml` (embebido + `.wasm` por path, verificado
+  end-to-end).
+- **Post-M5-ext.2**: AOT precompile a `.cwasm`, `StoreLimitsBuilder`, lazy
+  loading, modo Debug, pooling/async — si la medición de 50+ Stores lo pide.
 
 > **Patrón soportado desde M5-ext.1** (sin hito propio): un **único `.wasm`
 > que despacha por nombre** (un módulo que atiende N nombres internamente)

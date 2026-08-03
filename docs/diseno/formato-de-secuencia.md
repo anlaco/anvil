@@ -83,8 +83,9 @@ Reglas:
   - `tipo: embebido` — el ejecutor WASM de serie (`127.0.0.1:9100`). Default.
     Sin campos adicionales.
   - `tipo: wasm` — módulo `.wasm` propio cargado por el **host** por path
-    (M5-ext.2, ADR-0013; en M5-ext.1 el path se valida al cargar pero no se
-    instancia). Campo `path` (relativo al YAML, debe existir).
+    (M5-ext.2, ADR-0014; implementado). Campo `path` (relativo al YAML,
+    debe existir). El host lo instancia, le asigna un puerto efímero
+    (`ANVIL_PORT`) y lo expone al motor como `grpc` (override sintético).
   - `tipo: grpc` — ejecutor de lenguaje distribuido (p. ej. Python). Campos
     `host`/`puerto` (obligatorios). IPs no-loopback **sólo si se declaran**
     (relajación acotada del loopback, ADR-0011).
