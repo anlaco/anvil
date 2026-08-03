@@ -131,25 +131,33 @@ Lo que ya existe en el repo:
   declaran en `ejecutores:`; sin declaración, loopback-only. Flag
   `--solo-loopback` en el host.
 - **`TipoEjecutor::Wasm` definido y validado al cargar** (el path debe
-  existir), **sin instanciar** (error claro al ejecutar: requiere M5-ext.2).
+  existir); la instanciación llegó con M5-ext.2 (ADR-0014).
 - Demo `ejemplos/demo_ejecutores.yaml`: embebido + ejecutor Python en
   loopback (sin Docker).
 
-#### M5-ext.2 — Cargador de `.wasm` por path host-side
+#### M5-ext.2 — Cargador de `.wasm` por path host-side ✅ (hecho, ADR-0014)
 
 - **Cargador de `.wasm` por path** (RF-36.2, modelo `.vi` de TestStand): el
   **host** (no el ejecutor embebido — un guest WASM no puede instanciar
-  wasmtime dentro de sí mismo, ADR-0013) instancia un `Store` por módulo y
-  lo expone como endpoint gRPC en loopback. AOT precompile a `.cwasm` +
-  `StoreLimitsBuilder` + lazy loading + preload al abrir la secuencia (como
-  TestStand). Modo Debug con `Config::debug_info(true)` + LLDB.
+  wasmtime dentro de sí mismo, ADR-0013) instancia un `Store` por path
+  (deduplicado: dos ejecutores con el mismo `.wasm` → un Store), sandbox
+  loopback-only, **preload al arrancar**, y lo expone como endpoint gRPC en
+  loopback vía puerto **efímero** inyectado con env `ANVIL_PORT` (la
+  convención del `.wasm` de paso de Anvil, compartida con el ejecutor
+  embebido).
+- **El motor nunca ejecuta `Wasm`** (ADR-0014): el host compone overrides
+  `--ejecutor` sintéticos (M5-ext.1), así el motor sólo ve `embebido`/
+  `grpc`. AOT precompile a `.cwasm` + `StoreLimitsBuilder` + lazy loading
+  + modo Debug + pooling/async: **post-M5-ext.2**, si la medición de 50+
+  Stores lo pide.
 - **Agnóstico al origen del `.wasm`**: Anvil expone un contrato
   (`paso.proto` por gRPC en loopback) y un mecanismo de carga (path). Lo que
   hay detrás —C a mano, Rust, Zig, un editor visual, un tercero— es opaco.
   El roadmap de Anvil avanza por sus propios requisitos (el modelo `.vi` de
   TestStand + la tesis "WASM es el lenguaje de serie" + el caso de uso 50+
   módulos en una secuencia larga), no por los de un generador externo.
-- M5-ext.1 ya valida los paths; esta fase es un incremental del host.
+- Demo `ejemplos/demo_wasm.yaml` (embebido + `.wasm` por path, verificada
+  end-to-end).
 
 > **Patrón soportado desde M5-ext.1** (sin hito propio): un **único `.wasm`
 > que despacha por nombre** (un módulo que atiende N nombres internamente)

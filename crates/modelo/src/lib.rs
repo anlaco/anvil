@@ -294,9 +294,11 @@ pub enum TipoEjecutor {
     /// `ejecutor`.
     Embebido,
     /// Módulo `.wasm` propio que el **host** carga por path en runtime
-    /// (RF-36.2, M5-ext.2; el ejecutor embebido no puede, ADR-0013). En
-    /// M5-ext.1 se define y se valida al cargar, pero el motor no lo
-    /// instancia: ejecutarlo da `Error::EjecutorWasmNoImplementado`.
+    /// (RF-36.2, M5-ext.2; el ejecutor embebido no puede, ADR-0013). Es una
+    /// **directiva de carga para el host** (ADR-0014): el cargador la valida
+    /// al cargar (el path debe existir), el host la instancia y la expone
+    /// como `grpc` (override `--ejecutor`); el motor **nunca la ejecuta**
+    /// (si llega sin traducir, `Error::EjecutorWasmSinHost`).
     Wasm { path: String },
     /// Ejecutor de lenguaje distribuido (Python, …) accesible por gRPC
     /// (RF-36.1). `host:puerto` puede ser no-loopback **sólo si se declara**

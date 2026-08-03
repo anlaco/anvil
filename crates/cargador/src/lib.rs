@@ -300,7 +300,7 @@ impl EjecutorYaml {
                 };
                 // El path debe existir (relativo al directorio del YAML),
                 // como las subsecuencias externas (fail-fast al cargar).
-                let ruta = normalizar(dir_yaml, Path::new(&path));
+                let ruta = normalizar_path(dir_yaml, Path::new(&path));
                 if !ruta.exists() {
                     return Err(ErrorCarga::Validacion(format!(
                         "el ejecutor '{}' es 'wasm' y su 'path' '{}' no existe",
@@ -491,7 +491,7 @@ fn dir_de(ruta: &str) -> PathBuf {
 /// Normaliza un path relativo a `base` resolviendo `.` y `..` de forma
 /// lógica (sin IO, sin resolver symlinks): la clave canónica estable para
 /// `programa.archivos` y para detectar ciclos.
-fn normalizar(base: &Path, rel: &Path) -> PathBuf {
+pub fn normalizar_path(base: &Path, rel: &Path) -> PathBuf {
     let mut out = if rel.is_absolute() { PathBuf::new() } else { base.to_path_buf() };
     for comp in rel.components() {
         match comp {
@@ -514,7 +514,7 @@ fn normalizar(base: &Path, rel: &Path) -> PathBuf {
 /// Hace tres cosas (fail-fast, antes de ejecutar nada):
 /// 1. **Carga** la raíz y, recursivamente, los archivos externos a los que
 ///    apuntan los `sequence_call` por path. Los paths se **reescriben** a su
-///    clave canónica ([`normalizar`]) en cada `DefinicionPaso.secuencia`, así
+///    clave canónica ([`normalizar_path`]) en cada `DefinicionPaso.secuencia`, así
 ///    el motor los resuelve con un mero `programa.archivos[clave]` (sin
 ///    conocer el sistema de ficheros, ADR-0005).
 /// 2. **Valida** cada `sequence_call`: que el destino exista (inline por
@@ -568,7 +568,7 @@ pub fn cargar_programa_de_archivo(ruta: &str) -> Result<Programa, ErrorCarga> {
     }
 
     // Fase B: validar lvalues, firmas y nombres; detectar ciclos.
-    let id_raiz = normalizar(&dir_base, Path::new(ruta)).to_string_lossy().into_owned();
+    let id_raiz = normalizar_path(&dir_base, Path::new(ruta)).to_string_lossy().into_owned();
     let mut camino: Vec<String> = Vec::new();
     visitar(&programa, &id_raiz, &programa.raiz, &mut camino)?;
 
@@ -588,7 +588,7 @@ fn procesar_secuencia(
         if paso.tipo == TipoPaso::SequenceCall {
             if let Some(sec) = paso.secuencia.as_ref() {
                 if es_path(sec) {
-                    let path_dest = normalizar(dir, Path::new(sec));
+                    let path_dest = normalizar_path(dir, Path::new(sec));
                     let clave = path_dest.to_string_lossy().into_owned();
                     cola.push((
                         clave.clone(),

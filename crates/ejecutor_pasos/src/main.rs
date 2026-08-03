@@ -10,17 +10,24 @@ use modelo::proto::{PeticionPaso, ResultadoPasoProto, RUTA_INVOCA};
 use prost::Message;
 use wasi_grpc::grpc::Servidor;
 
-const PUERTO: u16 = 9100;
+/// Puerto por defecto (compat con `wasmtime run` sin host). El host (M5-ext.2,
+/// ADR-0014) inyecta `ANVIL_PORT` para darle a cada `.wasm` un puerto efímero
+/// propio; un `.wasm` de paso cargado por path es igual a éste.
+const PUERTO_DEFECTO: u16 = 9100;
 
 fn main() {
-    let servidor = match Servidor::escuchar("127.0.0.1", PUERTO) {
+    let puerto = std::env::var("ANVIL_PORT")
+        .ok()
+        .and_then(|p| p.parse::<u16>().ok())
+        .unwrap_or(PUERTO_DEFECTO);
+    let servidor = match Servidor::escuchar("127.0.0.1", puerto) {
         Ok(s) => s,
         Err(e) => {
             eprintln!("no se pudo escuchar: {e}");
             std::process::exit(1);
         }
     };
-    eprintln!("ejecutor de pasos escuchando en {PUERTO}");
+    eprintln!("ejecutor de pasos escuchando en {puerto}");
 
     // Acepta conexiones en bucle. El host embebido (ADR-0011) hace un
     // `connect` de prueba para esperar a que el ejecutor escuche antes de

@@ -40,8 +40,10 @@ pub const EMBEDIDO: &str = "__anvil_embebido__";
 /// declarado tiene su `Cliente` propio.
 pub struct Motor {
     /// Conexiones abiertas, keyed por nombre de ejecutor (o `EMBEDIDO`
-    /// para el embebido). Un `TipoEjecutor::Wasm` **no** abre conexión en
-    /// M5-ext.1: al ejecutarlo se devuelve `Error::EjecutorWasmNoImplementado`.
+    /// para el embebido). Un `TipoEjecutor::Wasm` **no** abre conexión: el
+    /// motor nunca lo ejecuta (ADR-0014) — el host lo traduce a `grpc`
+    /// (override `--ejecutor`) antes de que llegue aquí; si llega sin
+    /// traducir, `Error::EjecutorWasmSinHost`.
     conexiones: HashMap<String, Cliente>,
 }
 
@@ -59,10 +61,13 @@ pub enum Error {
     /// El ejecutor del paso no tiene conexión abierta (debería abrirse en
     /// `desde_programa` para los `grpc`; el embebido siempre la tiene).
     EjecutorNoConectado(String),
-    /// El paso declara `ejecutor: <nombre>` con `tipo: wasm`: el cargador
-    /// de `.wasm` por path es M5-ext.2 (condicionado a Telekino, ADR-0013).
-    /// En M5-ext.1 se valida al cargar pero no se instancia.
-    EjecutorWasmNoImplementado(String),
+    /// El paso declara `ejecutor: <nombre>` con `tipo: wasm` y llegó al motor
+    /// **sin traducir**. Eso sólo pasa si se corre el guest motor suelto
+    /// (`wasmtime run anvil.wasm`) sin el host: el cargador de `.wasm` por
+    /// path vive en el host (M5-ext.2, ADR-0014), que lo instancia y lo
+    /// expone como `grpc` (override `--ejecutor`). El motor no ejecuta
+    /// `Wasm` nunca.
+    EjecutorWasmSinHost(String),
 }
 
 impl std::fmt::Display for Error {
@@ -76,10 +81,11 @@ impl std::fmt::Display for Error {
             Error::EjecutorNoConectado(n) => {
                 write!(f, "el ejecutor '{n}' no tiene conexión abierta")
             }
-            Error::EjecutorWasmNoImplementado(n) => write!(
+            Error::EjecutorWasmSinHost(n) => write!(
                 f,
-                "el ejecutor '{n}' es 'wasm': el cargador de `.wasm` por path requiere \
-                 anvil-host con soporte M5-ext.2; usa 'grpc' o 'embebido'"
+                "el ejecutor '{n}' es 'wasm': el cargador de `.wasm` por path vive en \
+                 anvil-host (M5-ext.2); corre con `./anvil <secuencia.yaml>` en vez de \
+                 `wasmtime run anvil.wasm`"
             ),
         }
     }
@@ -125,7 +131,8 @@ impl Motor {
 
     /// Resuelve el endpoint de un paso (M5-ext.1, RF-36.3): sin `ejecutor`
     /// declarado → embebido; `Embebido` declarado → embebido; `Grpc` →
-    /// su nombre (clave de `conexiones`); `Wasm` → error (M5-ext.2).
+    /// su nombre (clave de `conexiones`); `Wasm` → error (M5-ext.2: el motor
+    /// no ejecuta `Wasm`; el host lo traduce a `grpc` antes de llegar aquí).
     fn resolver_endpoint<'a>(
         def: &'a DefinicionPaso,
         programa: &'a Programa,
@@ -136,7 +143,7 @@ impl Motor {
                 Some(DefinicionEjecutor { tipo: TipoEjecutor::Embebido, .. }) => Ok(EMBEDIDO),
                 Some(DefinicionEjecutor { tipo: TipoEjecutor::Grpc { .. }, .. }) => Ok(nombre),
                 Some(DefinicionEjecutor { tipo: TipoEjecutor::Wasm { .. }, .. }) => {
-                    Err(Error::EjecutorWasmNoImplementado(nombre.to_string()))
+                    Err(Error::EjecutorWasmSinHost(nombre.to_string()))
                 }
                 None => Err(Error::EjecutorNoDeclarado(nombre.to_string())),
             },
@@ -1114,13 +1121,13 @@ mod tests {
     }
 
     #[test]
-    fn resolver_endpoint_wasm_es_error_m5_ext_2() {
+    fn resolver_endpoint_wasm_es_error_sin_host() {
         let programa = programa_ruteado();
         let mut p = DefinicionPaso::nuevo("x", 1);
         p.ejecutor = Some("mi_paso".into());
         let err = Motor::resolver_endpoint(&p, &programa).unwrap_err();
-        assert!(matches!(err, Error::EjecutorWasmNoImplementado(ref n) if n == "mi_paso"));
-        assert!(err.to_string().contains("M5-ext.2"));
+        assert!(matches!(err, Error::EjecutorWasmSinHost(ref n) if n == "mi_paso"));
+        assert!(err.to_string().contains("anvil-host"), "apunta al host: {err}");
     }
 
     #[test]
