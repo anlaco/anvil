@@ -25,7 +25,7 @@
 //! por lote/variante sin tocar la secuencia. Ver
 //! [`aplicar_limites`](aplicar_limites) y ADR-0008.
 
-use modelo::{Argumento, Asignacion, DefinicionPaso, DefinicionSecuencia, Limite, Operador, Programa, TipoPaso, ValorDefinicion};
+use modelo::{Argumento, Asignacion, DefinicionEjecutor, DefinicionPaso, DefinicionSecuencia, Limite, Operador, Programa, TipoEjecutor, TipoPaso, ValorDefinicion};
 use serde::Deserialize;
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
@@ -66,6 +66,37 @@ struct SecuenciaYaml {
     /// éstas. Es recursivo: una inline es otra `SecuenciaYaml` completa.
     #[serde(default)]
     subsecuencias: HashMap<String, SecuenciaYaml>,
+    /// M5-ext.1 (RF-36.3): ejecutores declarados en el YAML. Sin esta
+    /// sección, todo paso va al ejecutor embebido (default, compat M4b).
+    #[serde(default)]
+    ejecutores: Vec<EjecutorYaml>,
+}
+
+/// Un ejecutor como se lee del YAML (`ejecutores:`), antes de traducirse a
+/// `modelo::DefinicionEjecutor`. `deny_unknown_fields` (fail-fast) igual que
+/// el resto del schema. La coherencia entre `tipo` y sus campos se valida en
+/// [`EjecutorYaml::a_definicion`].
+#[derive(Debug, PartialEq, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct EjecutorYaml {
+    nombre: String,
+    /// `"embebido"` (default), `"wasm"` o `"grpc"`.
+    #[serde(default = "tipo_ejecutor_por_defecto")]
+    tipo: String,
+    /// Sólo si `tipo == "wasm"`. Path relativo al directorio del YAML.
+    #[serde(default)]
+    path: Option<String>,
+    /// Sólo si `tipo == "grpc"`. Host; puede ser no-loopback **sólo si se
+    /// declara** (relajación acotada del loopback de ADR-0011).
+    #[serde(default)]
+    host: Option<String>,
+    /// Sólo si `tipo == "grpc"`. Puerto.
+    #[serde(default)]
+    puerto: Option<u16>,
+}
+
+fn tipo_ejecutor_por_defecto() -> String {
+    "embebido".into()
 }
 
 /// Un literal de variable declarado en el YAML (scopes de M4). El tipo se
@@ -136,6 +167,11 @@ struct PasoYaml {
     /// valida como `Expresion::Var { scope: Locals, .. }` (un lvalue local).
     #[serde(default)]
     parametros: Option<HashMap<String, String>>,
+    /// M5-ext.1 (RF-36.3): nombre del ejecutor que atiende este paso. Debe
+    /// existir en `ejecutores` de la secuencia (fail-fast al cargar). Si se
+    /// omite, el paso va al ejecutor embebido (default).
+    #[serde(default)]
+    ejecutor: Option<String>,
 }
 
 fn reintentos_por_defecto() -> u32 {
@@ -223,6 +259,119 @@ impl LimiteYaml {
             ))),
         }
     }
+}
+
+/// Nombre de ejecutor reservado del motor (clave interna de la conexión al
+/// ejecutor embebido). No declarable en el YAML: el cargador lo rechaza.
+pub const NOMBRE_EMBEDIDO_RESERVADO: &str = "__anvil_embebido__";
+
+impl EjecutorYaml {
+    /// Traduce a `modelo::DefinicionEjecutor`, validando la coherencia entre
+    /// `tipo` y sus campos (fail-fast). `dir_yaml` es el directorio del
+    /// archivo que declara el ejecutor: los paths `wasm` se resuelven
+    /// relativo a él.
+    fn a_definicion(self, dir_yaml: &Path) -> Result<DefinicionEjecutor, ErrorCarga> {
+        if self.nombre == NOMBRE_EMBEDIDO_RESERVADO {
+            return Err(ErrorCarga::Validacion(format!(
+                "el ejecutor '{NOMBRE_EMBEDIDO_RESERVADO}' está reservado; elige otro nombre"
+            )));
+        }
+        let tipo = match self.tipo.as_str() {
+            "embebido" => {
+                if self.path.is_some() || self.host.is_some() || self.puerto.is_some() {
+                    return Err(ErrorCarga::Validacion(format!(
+                        "el ejecutor '{}' es 'embebido' pero trae 'path'/'host'/'puerto' (no aplican)",
+                        self.nombre
+                    )));
+                }
+                TipoEjecutor::Embebido
+            }
+            "wasm" => {
+                if self.host.is_some() || self.puerto.is_some() {
+                    return Err(ErrorCarga::Validacion(format!(
+                        "el ejecutor '{}' es 'wasm' pero trae 'host'/'puerto' (sólo aplican a 'grpc')",
+                        self.nombre
+                    )));
+                }
+                let Some(path) = self.path else {
+                    return Err(ErrorCarga::Validacion(format!(
+                        "el ejecutor '{}' es 'wasm' pero no trae 'path'", self.nombre
+                    )));
+                };
+                // El path debe existir (relativo al directorio del YAML),
+                // como las subsecuencias externas (fail-fast al cargar).
+                let ruta = normalizar(dir_yaml, Path::new(&path));
+                if !ruta.exists() {
+                    return Err(ErrorCarga::Validacion(format!(
+                        "el ejecutor '{}' es 'wasm' y su 'path' '{}' no existe",
+                        self.nombre, path
+                    )));
+                }
+                TipoEjecutor::Wasm { path }
+            }
+            "grpc" => {
+                if self.path.is_some() {
+                    return Err(ErrorCarga::Validacion(format!(
+                        "el ejecutor '{}' es 'grpc' pero trae 'path' (sólo aplica a 'wasm')",
+                        self.nombre
+                    )));
+                }
+                let (Some(host), Some(puerto)) = (self.host, self.puerto) else {
+                    return Err(ErrorCarga::Validacion(format!(
+                        "el ejecutor '{}' es 'grpc' pero no trae 'host' y 'puerto'",
+                        self.nombre
+                    )));
+                };
+                TipoEjecutor::Grpc { host, puerto }
+            }
+            otro => {
+                return Err(ErrorCarga::Validacion(format!(
+                    "el ejecutor '{}' tiene tipo '{otro}' desconocido (embebido|wasm|grpc)",
+                    self.nombre
+                )))
+            }
+        };
+        Ok(DefinicionEjecutor { nombre: self.nombre, tipo })
+    }
+}
+
+/// Override de ejecutores por CLI (RF-36.3, patrón `--limits`): reescribe la
+/// tabla de `programa.ejecutores` desde la lista de overrides `nombre=host:puerto`
+/// (p. ej. `python=192.168.1.50:9101`).
+///
+/// - El `nombre` debe existir en `ejecutores` (fail-fast): si no, error.
+/// - Un ejecutor `grpc` se re-apunta a `host:puerto`.
+/// - Un ejecutor `embebido` o `wasm` se **convierte** a `grpc` (el override
+///   explícito fuerza remoto, igual que el host re-escribe los `.wasm`).
+///
+/// Devuelve cuántos ejecutores se sobreescribieron (para el log del CLI).
+pub fn aplicar_override_ejecutores(programa: &mut Programa, overrides: &[String]) -> Result<usize, ErrorCarga> {
+    let mut aplicados = 0;
+    for override_ in overrides {
+        let (nombre, resto) = override_.split_once('=').ok_or_else(|| {
+            ErrorCarga::Validacion(format!(
+                "override de ejecutor inválido '{override_}' (esperado 'nombre=host:puerto')"
+            ))
+        })?;
+        let (host, puerto) = resto.split_once(':').ok_or_else(|| {
+            ErrorCarga::Validacion(format!(
+                "override de ejecutor '{override_}' inválido (esperado 'nombre=host:puerto')"
+            ))
+        })?;
+        let puerto: u16 = puerto.parse().map_err(|_| {
+            ErrorCarga::Validacion(format!(
+                "override de ejecutor '{override_}': el puerto '{puerto}' no es un número"
+            ))
+        })?;
+        let ejecutor = programa.ejecutores.get_mut(nombre).ok_or_else(|| {
+            ErrorCarga::Validacion(format!(
+                "override de ejecutor: '{nombre}' no está declarado en 'ejecutores:'"
+            ))
+        })?;
+        ejecutor.tipo = TipoEjecutor::Grpc { host: host.to_string(), puerto };
+        aplicados += 1;
+    }
+    Ok(aplicados)
 }
 
 /// Qué salió mal al cargar una secuencia. Sigue el mismo patrón de errores
@@ -377,7 +526,26 @@ fn normalizar(base: &Path, rel: &Path) -> PathBuf {
 pub fn cargar_programa_de_archivo(ruta: &str) -> Result<Programa, ErrorCarga> {
     let raiz = cargar_de_archivo(ruta)?;
     let dir_base = dir_de(ruta);
-    let mut programa = Programa { raiz, archivos: HashMap::new() };
+
+    // M5-ext.1 (RF-36.3): la tabla de ejecutores declarada en `ejecutores:`
+    // del YAML de la **raíz**. Se re-lee el fichero para esa sección (la
+    // `DefinicionSecuencia` no la lleva: es dato del `Programa`). Nombres
+    // duplicados → error (fail-fast).
+    let texto = std::fs::read_to_string(ruta)?;
+    let yaml_raiz: SecuenciaYaml = noyalib::from_str(&texto)?;
+    let mut ejecutores = HashMap::new();
+    for y in yaml_raiz.ejecutores {
+        let def = y.a_definicion(&dir_base)?;
+        if ejecutores.contains_key(&def.nombre) {
+            return Err(ErrorCarga::Validacion(format!(
+                "el ejecutor '{}' está declarado más de una vez en 'ejecutores:'",
+                def.nombre
+            )));
+        }
+        ejecutores.insert(def.nombre.clone(), def);
+    }
+
+    let mut programa = Programa { raiz, archivos: HashMap::new(), ejecutores };
 
     // Cola de (clave_canónica, dir_contenedor) de archivos externos a cargar.
     let mut cola: Vec<(String, PathBuf)> = Vec::new();
@@ -454,6 +622,17 @@ fn visitar(
     }
     camino.push(id.to_string());
     for paso in def.pasos_setup.iter().chain(&def.pasos_main).chain(&def.pasos_cleanup) {
+        // M5-ext.1 (RF-36.3): un paso con `ejecutor:` debe referenciar un
+        // nombre declarado en `ejecutores:` del YAML de la raíz (fail-fast).
+        // `a_definicion` ya garantizó que sólo un paso `grpc` lo trae.
+        if let Some(nombre) = paso.ejecutor.as_deref() {
+            if !programa.ejecutores.contains_key(nombre) {
+                return Err(ErrorCarga::Validacion(format!(
+                    "el paso '{}' referencia el ejecutor '{nombre}' que no está en 'ejecutores:'",
+                    paso.nombre
+                )));
+            }
+        }
         if paso.tipo != TipoPaso::SequenceCall {
             continue;
         }
@@ -742,6 +921,14 @@ impl PasoYaml {
                 self.nombre, self.tipo
             )));
         }
+        // M5-ext.1 (RF-36.3): `ejecutor` sólo aplica a un paso `Grpc` (los
+        // `statement`/`sequence_call` son motor-side y no van por gRPC).
+        if !matches!(tipo, TipoPaso::Grpc) && self.ejecutor.is_some() {
+            return Err(ErrorCarga::Validacion(format!(
+                "el paso '{}' es '{}' pero trae 'ejecutor' (reservado para 'grpc')",
+                self.nombre, self.tipo
+            )));
+        }
 
         Ok(DefinicionPaso {
             nombre: self.nombre,
@@ -755,6 +942,7 @@ impl PasoYaml {
             statement,
             secuencia: self.secuencia,
             parametros,
+            ejecutor: self.ejecutor,
         })
     }
 }
@@ -854,14 +1042,14 @@ main:
     fn main_ausente_es_error() {
         let yaml = "nombre: s\n";
         let err = cargar_de_texto(yaml).unwrap_err();
-        assert!(matches!(err, ErrorCarga::Sintaxis(_)), "main ausente debe ser error de schema, no de validación: {err}");
+        assert!(matches!(&err, ErrorCarga::Sintaxis(_)), "main ausente debe ser error de schema, no de validación: {err}");
     }
 
     #[test]
     fn main_vacio_es_error_de_validacion() {
         let yaml = "nombre: s\nmain: []\n";
         let err = cargar_de_texto(yaml).unwrap_err();
-        assert!(matches!(err, ErrorCarga::Validacion(ref m) if m.contains("main")));
+        assert!(matches!(&err, ErrorCarga::Validacion(ref m) if m.contains("main")));
     }
 
     #[test]
@@ -872,7 +1060,7 @@ main:
   - nombre: un_paso
 ";
         let err = cargar_de_texto(yaml).unwrap_err();
-        assert!(matches!(err, ErrorCarga::Validacion(ref m) if m.contains("nombre")));
+        assert!(matches!(&err, ErrorCarga::Validacion(ref m) if m.contains("nombre")));
     }
 
     #[test]
@@ -884,7 +1072,7 @@ main:
     reintentos: 0
 ";
         let err = cargar_de_texto(yaml).unwrap_err();
-        assert!(matches!(err, ErrorCarga::Validacion(ref m) if m.contains("reintentos")));
+        assert!(matches!(&err, ErrorCarga::Validacion(ref m) if m.contains("reintentos")));
     }
 
     #[test]
@@ -901,7 +1089,7 @@ main:
     foo: bar
 ";
         let err = cargar_de_texto(yaml).unwrap_err();
-        assert!(matches!(err, ErrorCarga::Sintaxis(_)), "campo desconocido debe ser error de schema: {err}");
+        assert!(matches!(&err, ErrorCarga::Sintaxis(_)), "campo desconocido debe ser error de schema: {err}");
     }
 
     // --- M4b: sequence call, subsecuencias inline y por path ---
@@ -948,7 +1136,7 @@ main:
     parametros: { p: file_globals.g }
 ";
         let err = cargar_de_texto(yaml).unwrap_err();
-        assert!(matches!(err, ErrorCarga::Validacion(m) if m.contains("locals.X")));
+        assert!(matches!(&err, ErrorCarga::Validacion(m) if m.contains("locals.X")));
     }
 
     #[test]
@@ -962,7 +1150,7 @@ main:
     parametros: { p: 'locals.x + 1' }
 ";
         let err = cargar_de_texto(yaml).unwrap_err();
-        assert!(matches!(err, ErrorCarga::Validacion(m) if m.contains("by-reference")));
+        assert!(matches!(&err, ErrorCarga::Validacion(m) if m.contains("by-reference")));
     }
 
     /// Sequence call sin `secuencia` → error; con `limite` → error;
@@ -994,7 +1182,7 @@ main:
     secuencia: ./h.yaml
 ";
         let err = cargar_de_texto(yaml).unwrap_err();
-        assert!(matches!(err, ErrorCarga::Validacion(m) if m.contains("reservado para 'sequence_call'")));
+        assert!(matches!(&err, ErrorCarga::Validacion(m) if m.contains("reservado para 'sequence_call'")));
     }
 
     /// Una subsecuencia inline es una secuencia completa: `main` es
@@ -1010,7 +1198,7 @@ main:
   - nombre: p
 ";
         let err = cargar_de_texto(yaml).unwrap_err();
-        assert!(matches!(err, ErrorCarga::Sintaxis(_)), "inline sin main: error de schema: {err}");
+        assert!(matches!(&err, ErrorCarga::Sintaxis(_)), "inline sin main: error de schema: {err}");
     }
 
     /// Una inline puede omitir `nombre`: toma el de su clave en el mapa.
@@ -1045,7 +1233,7 @@ main:
   - nombre: p
 ";
         let err = cargar_de_texto(yaml).unwrap_err();
-        assert!(matches!(err, ErrorCarga::Sintaxis(_)));
+        assert!(matches!(&err, ErrorCarga::Sintaxis(_)));
     }
 
     /// `cargar_programa_de_archivo` resuelve un archivo externo por path,
@@ -1080,7 +1268,7 @@ main:
         std::fs::write(dir.join("a.yaml"), "nombre: a\nmain:\n  - nombre: c\n    tipo: sequence_call\n    secuencia: ./b.yaml\n").unwrap();
         std::fs::write(dir.join("b.yaml"), "nombre: b\nmain:\n  - nombre: c\n    tipo: sequence_call\n    secuencia: ./a.yaml\n").unwrap();
         let err = cargar_programa_de_archivo(dir.join("a.yaml").to_str().unwrap()).unwrap_err();
-        assert!(matches!(err, ErrorCarga::Validacion(m) if m.contains("ciclo")));
+        assert!(matches!(&err, ErrorCarga::Validacion(m) if m.contains("ciclo")));
     }
 
     /// Firma que no encaja (falta un parámetro) → error al cargar el programa.
@@ -1091,7 +1279,7 @@ main:
         std::fs::write(&dir.join("h.yaml"), "nombre: h\nparameters: { canal: 0.0, extra: 0.0 }\nmain:\n  - nombre: m\n").unwrap();
         std::fs::write(&dir.join("p.yaml"), "nombre: p\nlocals: { canal: 1.0 }\nmain:\n  - nombre: c\n    tipo: sequence_call\n    secuencia: ./h.yaml\n    parametros: { canal: locals.canal }\n").unwrap();
         let err = cargar_programa_de_archivo(dir.join("p.yaml").to_str().unwrap()).unwrap_err();
-        assert!(matches!(err, ErrorCarga::Validacion(m) if m.contains("firma")));
+        assert!(matches!(&err, ErrorCarga::Validacion(m) if m.contains("firma")));
     }
 
     /// Argumento `locals.X` no declarado en el padre → error al cargar.
@@ -1102,7 +1290,7 @@ main:
         std::fs::write(&dir.join("h.yaml"), "nombre: h\nparameters: { canal: 0.0 }\nmain:\n  - nombre: m\n").unwrap();
         std::fs::write(&dir.join("p.yaml"), "nombre: p\nmain:\n  - nombre: c\n    tipo: sequence_call\n    secuencia: ./h.yaml\n    parametros: { canal: locals.inventado }\n").unwrap();
         let err = cargar_programa_de_archivo(dir.join("p.yaml").to_str().unwrap()).unwrap_err();
-        assert!(matches!(err, ErrorCarga::Validacion(m) if m.contains("locals.inventado")));
+        assert!(matches!(&err, ErrorCarga::Validacion(m) if m.contains("locals.inventado")));
     }
 
     /// Path no encontrado → error de lectura al cargar el programa.
@@ -1112,7 +1300,7 @@ main:
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(&dir.join("p.yaml"), "nombre: p\nmain:\n  - nombre: c\n    tipo: sequence_call\n    secuencia: ./no_existe.yaml\n").unwrap();
         let err = cargar_programa_de_archivo(dir.join("p.yaml").to_str().unwrap()).unwrap_err();
-        assert!(matches!(err, ErrorCarga::Lectura(_)));
+        assert!(matches!(&err, ErrorCarga::Lectura(_)));
     }
 
     /// El ejemplo `ejemplos/subsecuencia.yaml` carga como programa: la
@@ -1176,7 +1364,7 @@ main:
       max: 5.5
 ";
         let err = cargar_de_texto(yaml).unwrap_err();
-        assert!(matches!(err, ErrorCarga::Validacion(ref m) if m.contains("min")), "{err}");
+        assert!(matches!(&err, ErrorCarga::Validacion(ref m) if m.contains("min")), "{err}");
     }
 
     #[test]
@@ -1191,7 +1379,7 @@ main:
       max: 5.5
 ";
         let err = cargar_de_texto(yaml).unwrap_err();
-        assert!(matches!(err, ErrorCarga::Validacion(ref m) if m.contains(">")), "{err}");
+        assert!(matches!(&err, ErrorCarga::Validacion(ref m) if m.contains(">")), "{err}");
     }
 
     #[test]
@@ -1206,7 +1394,7 @@ main:
       esperado: 1000.0
 ";
         let err = cargar_de_texto(yaml).unwrap_err();
-        assert!(matches!(err, ErrorCarga::Validacion(ref m) if m.contains("op")), "{err}");
+        assert!(matches!(&err, ErrorCarga::Validacion(ref m) if m.contains("op")), "{err}");
     }
 
     #[test]
@@ -1223,7 +1411,7 @@ main:
       op: ge
 ";
         let err = cargar_de_texto(yaml).unwrap_err();
-        assert!(matches!(err, ErrorCarga::Validacion(ref m) if m.contains("op")), "{err}");
+        assert!(matches!(&err, ErrorCarga::Validacion(ref m) if m.contains("op")), "{err}");
     }
 
     #[test]
@@ -1238,7 +1426,7 @@ main:
       max: 5.5
 ";
         let err = cargar_de_texto(yaml).unwrap_err();
-        assert!(matches!(err, ErrorCarga::Validacion(ref m) if m.contains("tipo")), "{err}");
+        assert!(matches!(&err, ErrorCarga::Validacion(ref m) if m.contains("tipo")), "{err}");
     }
 
     #[test]
@@ -1255,7 +1443,7 @@ main:
       tolerancia: 0.1
 ";
         let err = cargar_de_texto(yaml).unwrap_err();
-        assert!(matches!(err, ErrorCarga::Sintaxis(_)), "{err}");
+        assert!(matches!(&err, ErrorCarga::Sintaxis(_)), "{err}");
     }
 
     #[test]
@@ -1326,7 +1514,7 @@ verificar_frecuencia:
     #[test]
     fn yaml_mal_formado_es_error_de_sintaxis() {
         let err = cargar_de_texto("nombre: [sin cerrar").unwrap_err();
-        assert!(matches!(err, ErrorCarga::Sintaxis(_)));
+        assert!(matches!(&err, ErrorCarga::Sintaxis(_)));
     }
 
     // --- M4: variables, precondición, asigna, statement, control de flujo ---
@@ -1392,7 +1580,7 @@ main:
     precondicion: 'locals.contador >'
 ";
         let err = cargar_de_texto(yaml).unwrap_err();
-        assert!(matches!(err, ErrorCarga::Validacion(ref m) if m.contains("medir") && m.contains("precondición")),
+        assert!(matches!(&err, ErrorCarga::Validacion(ref m) if m.contains("medir") && m.contains("precondición")),
             "el error debe mencionar el paso y la sección: {err}");
     }
 
@@ -1424,7 +1612,7 @@ main:
       x: 'resultado.valor_medido +'
 ";
         let err = cargar_de_texto(yaml).unwrap_err();
-        assert!(matches!(err, ErrorCarga::Validacion(ref m) if m.contains("'x'") && m.contains("medir")),
+        assert!(matches!(&err, ErrorCarga::Validacion(ref m) if m.contains("'x'") && m.contains("medir")),
             "el error debe mencionar la var y el paso: {err}");
     }
 
@@ -1437,7 +1625,7 @@ main:
     tipo: statement
 ";
         let err = cargar_de_texto(yaml).unwrap_err();
-        assert!(matches!(err, ErrorCarga::Validacion(ref m) if m.contains("statement")), "{err}");
+        assert!(matches!(&err, ErrorCarga::Validacion(ref m) if m.contains("statement")), "{err}");
     }
 
     #[test]
@@ -1450,7 +1638,7 @@ main:
     statement: 'locals.x = 1'
 ";
         let err = cargar_de_texto(yaml).unwrap_err();
-        assert!(matches!(err, ErrorCarga::Validacion(ref m) if m.contains("statement")), "{err}");
+        assert!(matches!(&err, ErrorCarga::Validacion(ref m) if m.contains("statement")), "{err}");
     }
 
     #[test]
@@ -1476,7 +1664,7 @@ main:
     tipo: magia
 ";
         let err = cargar_de_texto(yaml).unwrap_err();
-        assert!(matches!(err, ErrorCarga::Validacion(ref m) if m.contains("magia")), "{err}");
+        assert!(matches!(&err, ErrorCarga::Validacion(ref m) if m.contains("magia")), "{err}");
     }
 
     #[test]
@@ -1508,5 +1696,207 @@ main:
         assert!(s.pasos_main[2].disable);
         // verificar_frecuencia: pause_on_fail.
         assert!(s.pasos_main[3].pause_on_fail);
+    }
+
+    // ---- M5-ext.1: ejecutores ----
+
+    /// `ejecutores:` con un embebido y un grpc; pasos que los referencian
+    /// por nombre → `Programa.ejecutores` correcto.
+    #[test]
+    fn ejecutores_yaml_se_parsean() {
+        let dir = std::env::temp_dir().join(format!("anvil_m5ext_{}", "parse"));
+        std::fs::create_dir_all(&dir).unwrap();
+        let y = dir.join("s.yaml");
+        std::fs::write(&y, "\
+nombre: demo
+ejecutores:
+  - { nombre: embebido, tipo: embebido }
+  - { nombre: python, tipo: grpc, host: 127.0.0.1, puerto: 9101 }
+main:
+  - nombre: a
+  - nombre: b
+    ejecutor: python
+").unwrap();
+        let prog = cargar_programa_de_archivo(y.to_str().unwrap()).unwrap();
+        assert_eq!(prog.ejecutores.len(), 2);
+        assert_eq!(prog.ejecutores["embebido"].tipo, TipoEjecutor::Embebido);
+        assert_eq!(
+            prog.ejecutores["python"].tipo,
+            TipoEjecutor::Grpc { host: "127.0.0.1".into(), puerto: 9101 }
+        );
+        // Pasos: el primero sin ejecutor (embebido por defecto), el segundo python.
+        assert_eq!(prog.raiz.pasos_main[0].ejecutor, None);
+        assert_eq!(prog.raiz.pasos_main[1].ejecutor.as_deref(), Some("python"));
+    }
+
+    /// Sin `ejecutores:` → tabla vacía y todos los pasos al embebido (compat M4b).
+    #[test]
+    fn sin_ejecutores_tabla_vacia() {
+        let dir = std::env::temp_dir().join(format!("anvil_m5ext_{}", "vacio"));
+        std::fs::create_dir_all(&dir).unwrap();
+        let y = dir.join("s.yaml");
+        std::fs::write(&y, "nombre: s\nmain:\n  - nombre: a\n").unwrap();
+        let prog = cargar_programa_de_archivo(y.to_str().unwrap()).unwrap();
+        assert!(prog.ejecutores.is_empty());
+        assert_eq!(prog.raiz.pasos_main[0].ejecutor, None);
+    }
+
+    /// Un paso con `ejecutor: X` donde X no está declarado → error al cargar.
+    #[test]
+    fn ejecutor_no_declarado_es_error() {
+        let dir = std::env::temp_dir().join(format!("anvil_m5ext_{}", "indef"));
+        std::fs::create_dir_all(&dir).unwrap();
+        let y = dir.join("s.yaml");
+        std::fs::write(&y, "nombre: s\nmain:\n  - nombre: a\n    ejecutor: inventado\n").unwrap();
+        let err = cargar_programa_de_archivo(y.to_str().unwrap()).unwrap_err();
+        assert!(matches!(&err, ErrorCarga::Validacion(m) if m.contains("inventado")), "{err}");
+    }
+
+    /// `tipo: wasm` sin `path` → error; con `path` inexistente → error.
+    #[test]
+    fn wasm_sin_path_o_inexistente_es_error() {
+        let dir = std::env::temp_dir().join(format!("anvil_m5ext_{}", "wasm"));
+        std::fs::create_dir_all(&dir).unwrap();
+        let y = dir.join("s.yaml");
+        std::fs::write(&y, "nombre: s\nejecutores:\n  - { nombre: p, tipo: wasm }\nmain:\n  - nombre: a\n").unwrap();
+        let err = cargar_programa_de_archivo(y.to_str().unwrap()).unwrap_err();
+        assert!(matches!(&err, ErrorCarga::Validacion(m) if m.contains("'path'")), "{err}");
+
+        std::fs::write(&y, "nombre: s\nejecutores:\n  - { nombre: p, tipo: wasm, path: ./no_existe.wasm }\nmain:\n  - nombre: a\n").unwrap();
+        let err = cargar_programa_de_archivo(y.to_str().unwrap()).unwrap_err();
+        assert!(matches!(&err, ErrorCarga::Validacion(m) if m.contains("no existe")), "{err}");
+    }
+
+    /// `tipo: wasm` con un path que sí existe (se crea en el dir) → carga OK.
+    #[test]
+    fn wasm_con_path_existente_carga() {
+        let dir = std::env::temp_dir().join(format!("anvil_m5ext_{}", "wasm_ok"));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("p.wasm"), b"\0asm").unwrap();
+        let y = dir.join("s.yaml");
+        std::fs::write(&y, "nombre: s\nejecutores:\n  - { nombre: p, tipo: wasm, path: ./p.wasm }\nmain:\n  - nombre: a\n    ejecutor: p\n").unwrap();
+        let prog = cargar_programa_de_archivo(y.to_str().unwrap()).unwrap();
+        assert_eq!(prog.ejecutores["p"].tipo, TipoEjecutor::Wasm { path: "./p.wasm".into() });
+    }
+
+    /// `grpc` sin `host`/`puerto` → error; `grpc` con `path` → error.
+    #[test]
+    fn grpc_incompleto_es_error() {
+        let dir = std::env::temp_dir().join(format!("anvil_m5ext_{}", "grpc"));
+        std::fs::create_dir_all(&dir).unwrap();
+        let y = dir.join("s.yaml");
+        std::fs::write(&y, "nombre: s\nejecutores:\n  - { nombre: p, tipo: grpc, host: 127.0.0.1 }\nmain:\n  - nombre: a\n").unwrap();
+        let err = cargar_programa_de_archivo(y.to_str().unwrap()).unwrap_err();
+        assert!(matches!(&err, ErrorCarga::Validacion(m) if m.contains("'host' y 'puerto'")), "{err}");
+
+        std::fs::write(&y, "nombre: s\nejecutores:\n  - { nombre: p, tipo: grpc, host: 127.0.0.1, puerto: 9101, path: ./p.wasm }\nmain:\n  - nombre: a\n").unwrap();
+        let err = cargar_programa_de_archivo(y.to_str().unwrap()).unwrap_err();
+        assert!(matches!(&err, ErrorCarga::Validacion(m) if m.contains("'path'")), "{err}");
+    }
+
+    /// `embebido` con campos de más → error; tipo desconocido → error.
+    #[test]
+    fn embebido_con_campos_y_tipo_desconocido_son_errores() {
+        let dir = std::env::temp_dir().join(format!("anvil_m5ext_{}", "emb"));
+        std::fs::create_dir_all(&dir).unwrap();
+        let y = dir.join("s.yaml");
+        std::fs::write(&y, "nombre: s\nejecutores:\n  - { nombre: e, tipo: embebido, path: ./p.wasm }\nmain:\n  - nombre: a\n").unwrap();
+        let err = cargar_programa_de_archivo(y.to_str().unwrap()).unwrap_err();
+        assert!(matches!(&err, ErrorCarga::Validacion(m) if m.contains("no aplican")), "{err}");
+
+        std::fs::write(&y, "nombre: s\nejecutores:\n  - { nombre: e, tipo: raro }\nmain:\n  - nombre: a\n").unwrap();
+        let err = cargar_programa_de_archivo(y.to_str().unwrap()).unwrap_err();
+        assert!(matches!(&err, ErrorCarga::Validacion(m) if m.contains("raro")), "{err}");
+    }
+
+    /// Dos ejecutores con el mismo nombre → error. Nombre reservado → error.
+    #[test]
+    fn nombres_duplicados_y_reservados_son_errores() {
+        let dir = std::env::temp_dir().join(format!("anvil_m5ext_{}", "dups"));
+        std::fs::create_dir_all(&dir).unwrap();
+        let y = dir.join("s.yaml");
+        std::fs::write(&y, "nombre: s\nejecutores:\n  - { nombre: a, tipo: embebido }\n  - { nombre: a, tipo: embebido }\nmain:\n  - nombre: p\n").unwrap();
+        let err = cargar_programa_de_archivo(y.to_str().unwrap()).unwrap_err();
+        assert!(matches!(&err, ErrorCarga::Validacion(m) if m.contains("más de una vez")), "{err}");
+
+        std::fs::write(&y, format!("nombre: s\nejecutores:\n  - {{ nombre: {NOMBRE_EMBEDIDO_RESERVADO}, tipo: embebido }}\nmain:\n  - nombre: p\n")).unwrap();
+        let err = cargar_programa_de_archivo(y.to_str().unwrap()).unwrap_err();
+        assert!(matches!(&err, ErrorCarga::Validacion(m) if m.contains("reservado")), "{err}");
+    }
+
+    /// `ejecutor` en un paso `statement`/`sequence_call` → error (es gRPC-only).
+    #[test]
+    fn ejecutor_en_paso_no_grpc_es_error() {
+        let dir = std::env::temp_dir().join(format!("anvil_m5ext_{}", "tipo"));
+        std::fs::create_dir_all(&dir).unwrap();
+        let y = dir.join("s.yaml");
+        std::fs::write(&y, "nombre: s\nejecutores:\n  - { nombre: e, tipo: embebido }\nmain:\n  - nombre: a\n    tipo: statement\n    statement: 'locals.x = 1'\n    ejecutor: e\n").unwrap();
+        let err = cargar_programa_de_archivo(y.to_str().unwrap()).unwrap_err();
+        assert!(matches!(&err, ErrorCarga::Validacion(m) if m.contains("reservado para 'grpc'")), "{err}");
+    }
+
+    /// `deny_unknown_fields` sigue rechazando campos raros en un ejecutor.
+    #[test]
+    fn ejecutor_con_campo_desconocido_es_error() {
+        let dir = std::env::temp_dir().join(format!("anvil_m5ext_{}", "deny"));
+        std::fs::create_dir_all(&dir).unwrap();
+        let y = dir.join("s.yaml");
+        std::fs::write(&y, "nombre: s\nejecutores:\n  - { nombre: e, tipo: embebido, foo: bar }\nmain:\n  - nombre: a\n").unwrap();
+        let err = cargar_programa_de_archivo(y.to_str().unwrap()).unwrap_err();
+        assert!(matches!(&err, ErrorCarga::Sintaxis(_)), "{err}");
+    }
+
+    /// M5-ext.1: el ejemplo `ejemplos/demo_ejecutores.yaml` carga como
+    /// programa: la tabla `ejecutores:` se traduce y los pasos que la
+    /// referencian se enlazan.
+    #[test]
+    fn ejemplo_demo_ejecutores_carga_como_programa() {
+        let ruta = format!("{}/../../ejemplos/demo_ejecutores.yaml", env!("CARGO_MANIFEST_DIR"));
+        let prog = cargar_programa_de_archivo(&ruta)
+            .unwrap_or_else(|e| panic!("no carga el programa {ruta}: {e}"));
+        assert_eq!(prog.raiz.nombre, "demo_ejecutores");
+        assert_eq!(prog.ejecutores.len(), 2, "embebido + python");
+        assert_eq!(
+            prog.ejecutores["python"].tipo,
+            TipoEjecutor::Grpc { host: "127.0.0.1".into(), puerto: 9101 }
+        );
+        assert_eq!(prog.raiz.pasos_main[0].ejecutor, None, "verificar_led → embebido");
+        assert_eq!(
+            prog.raiz.pasos_main[1].ejecutor.as_deref(),
+            Some("python"),
+            "medir_simulador → python"
+        );
+        assert_eq!(
+            prog.raiz.pasos_main[2].ejecutor.as_deref(),
+            Some("python"),
+            "conectar_equipo → python"
+        );
+    }
+
+    /// Override `--ejecutor nombre=host:puerto`: re-apunta un grpc, convierte
+    /// un embebido, y falla si el nombre no está declarado.
+    #[test]
+    fn override_de_ejecutores() {
+        let dir = std::env::temp_dir().join(format!("anvil_m5ext_{}", "override"));
+        std::fs::create_dir_all(&dir).unwrap();
+        let y = dir.join("s.yaml");
+        std::fs::write(&y, "nombre: s\nejecutores:\n  - { nombre: e, tipo: embebido }\n  - { nombre: py, tipo: grpc, host: 127.0.0.1, puerto: 9101 }\nmain:\n  - nombre: a\n").unwrap();
+        let mut prog = cargar_programa_de_archivo(y.to_str().unwrap()).unwrap();
+
+        // Re-apuntar un grpc a remoto.
+        let n = aplicar_override_ejecutores(&mut prog, &["py=192.168.1.50:9200".to_string()]).unwrap();
+        assert_eq!(n, 1);
+        assert_eq!(prog.ejecutores["py"].tipo, TipoEjecutor::Grpc { host: "192.168.1.50".into(), puerto: 9200 });
+
+        // Convertir un embebido en grpc (el usuario fuerza remoto).
+        let n = aplicar_override_ejecutores(&mut prog, &["e=192.168.1.60:9300".to_string()]).unwrap();
+        assert_eq!(n, 1);
+        assert_eq!(prog.ejecutores["e"].tipo, TipoEjecutor::Grpc { host: "192.168.1.60".into(), puerto: 9300 });
+
+        // Formato inválido → error; nombre no declarado → error.
+        let err = aplicar_override_ejecutores(&mut prog, &["mal_formado".to_string()]).unwrap_err();
+        assert!(matches!(&err, ErrorCarga::Validacion(m) if m.contains("esperado")), "{err}");
+        let err = aplicar_override_ejecutores(&mut prog, &["zzz=1.2.3.4:1".to_string()]).unwrap_err();
+        assert!(matches!(&err, ErrorCarga::Validacion(m) if m.contains("no está declarado")), "{err}");
     }
 }

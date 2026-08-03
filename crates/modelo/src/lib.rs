@@ -282,6 +282,40 @@ pub enum TipoPaso {
     SequenceCall,
 }
 
+/// Cómo se invoca un ejecutor de pasos (M5-ext.1, RF-36.3). El motor
+/// despacha por el nombre de ejecutor declarado en `DefinicionPaso.ejecutor`;
+/// sin declaración, va al embebido (default). El motor no sabe qué hay
+/// detrás de cada endpoint: WASM embebido, `.wasm` cargado por el host
+/// (M5-ext.2, ADR-0013) o un gRPC remoto (ADR-0013).
+#[derive(Debug, Clone, PartialEq)]
+pub enum TipoEjecutor {
+    /// El ejecutor WASM de serie, compilado dentro del host (ADR-0011).
+    /// Endpoint fijo `127.0.0.1:9100`. Default si el paso no declara
+    /// `ejecutor`.
+    Embebido,
+    /// Módulo `.wasm` propio que el **host** carga por path en runtime
+    /// (RF-36.2, M5-ext.2; el ejecutor embebido no puede, ADR-0013). En
+    /// M5-ext.1 se define y se valida al cargar, pero el motor no lo
+    /// instancia: ejecutarlo da `Error::EjecutorWasmNoImplementado`.
+    Wasm { path: String },
+    /// Ejecutor de lenguaje distribuido (Python, …) accesible por gRPC
+    /// (RF-36.1). `host:puerto` puede ser no-loopback **sólo si se declara**
+    /// en el YAML (relajación acotada del loopback de ADR-0011).
+    Grpc { host: String, puerto: u16 },
+}
+
+/// Un ejecutor declarado en `ejecutores:` del YAML (M5-ext.1, RF-36.3). El
+/// cargador lo traduce y lo registra en `Programa.ejecutores`; el motor lo
+/// consulta para resolver el endpoint de un paso.
+#[derive(Debug, Clone, PartialEq)]
+pub struct DefinicionEjecutor {
+    /// Nombre declarado en el YAML; los pasos lo referencian con
+    /// `ejecutor: <nombre>`. El nombre interno `__anvil_embebido__` está
+    /// reservado (lo usa el motor; el cargador lo rechaza).
+    pub nombre: String,
+    pub tipo: TipoEjecutor,
+}
+
 /// Una asignación declarada en el YAML (`asigna`): vuelca el resultado de
 /// evaluar `expr` a una **Local** de la secuencia (la regla "sólo se muta
 /// Locals" la hace valer el entorno en runtime). `var` es el nombre de la
@@ -377,6 +411,11 @@ pub struct DefinicionPaso {
     /// M4b/RF-27: argumentos by-reference del sequence call (`locals.X`
     /// ↔ `parameters.param`). `None` si no es `SequenceCall`.
     pub parametros: Option<Vec<Argumento>>,
+    /// M5-ext.1 (RF-36.3): nombre del ejecutor que atiende este paso. Si es
+    /// `None`, el motor usa el ejecutor **embebido** (default,
+    /// `127.0.0.1:9100`) — compat con M4b. El cargador valida que el nombre
+    /// exista en `Programa.ejecutores` (fail-fast al cargar).
+    pub ejecutor: Option<String>,
 }
 
 impl DefinicionPaso {
@@ -393,6 +432,7 @@ impl DefinicionPaso {
             statement: None,
             secuencia: None,
             parametros: None,
+            ejecutor: None,
         }
     }
 
@@ -447,6 +487,11 @@ pub struct Programa {
     /// valor es la secuencia **raíz** de ese archivo; las inline de cada
     /// archivo viven dentro de su `DefinicionSecuencia`.
     pub archivos: HashMap<String, DefinicionSecuencia>,
+    /// M5-ext.1 (RF-36.3): ejecutores declarados en `ejecutores:` del YAML
+    /// de la secuencia raíz, keyed por nombre. El motor los consulta para
+    /// despachar por `DefinicionPaso.ejecutor`. Sin entradas, todo va al
+    /// ejecutor embebido (compat con M4b, ADR-0011).
+    pub ejecutores: HashMap<String, DefinicionEjecutor>,
 }
 
 #[cfg(test)]
@@ -673,5 +718,24 @@ mod tests {
         let p = Programa::default();
         assert!(p.raiz.pasos_main.is_empty());
         assert!(p.archivos.is_empty());
+        // M5-ext.1: `ejecutores` también vacío por defecto.
+        assert!(p.ejecutores.is_empty());
+    }
+
+    /// M5-ext.1: un paso nuevo no declara ejecutor → embebido (compat M4b),
+    /// y el `Programa` vacío no trae ejecutores.
+    #[test]
+    fn paso_nuevo_sin_ejecutor_y_programa_sin_ejecutores() {
+        let p = DefinicionPaso::nuevo("verificar_led", 1);
+        assert_eq!(p.ejecutor, None);
+        assert_eq!(DefinicionPaso::con_limite("m", 1, Limite::Rango { min: 1.0, max: 2.0 }).ejecutor, None);
+    }
+
+    /// M5-ext.1: los tres variantes de `TipoEjecutor` se construyen.
+    #[test]
+    fn tipo_ejecutor_tres_variantes() {
+        assert_eq!(TipoEjecutor::Embebido, TipoEjecutor::Embebido);
+        assert_eq!(TipoEjecutor::Wasm { path: "./p.wasm".into() }, TipoEjecutor::Wasm { path: "./p.wasm".into() });
+        assert_eq!(TipoEjecutor::Grpc { host: "127.0.0.1".into(), puerto: 9101 }, TipoEjecutor::Grpc { host: "127.0.0.1".into(), puerto: 9101 });
     }
 }

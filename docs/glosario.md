@@ -89,18 +89,28 @@ término de TestStand no se replica igual en Anvil, se dice explícitamente.
   [diseno/executores-lenguaje.md](diseno/executores-lenguaje.md) y
   [ADR-0012](adr/0012-executores-de-lenguaje-como-modulos.md).
 
-- **Cargador de `.wasm`.** El ejecutor WASM embebido carga **módulos `.wasm`
+- **Cargador de `.wasm`.** El **host** (`anvil-host`) carga **módulos `.wasm`
   propios por path** en runtime (modelo `.vi` de TestStand: compilar y
-  referenciar, sin recompilar el ejecutor). Cada módulo corre en su propio
-  `Store` (aislamiento entre pasos). Ver [ADR-0012](adr/0012-executores-de-lenguaje-como-modulos.md).
+  referenciar, sin recompilar). Cada módulo corre en su propio `Store`
+  (aislamiento entre pasos). **M5-ext.2, condicionado a Telekino**: el
+  ejecutor embebido no puede hacerlo (es él mismo un guest WASM; ver
+  [ADR-0013](adr/0013-cargador-wasm-host-side-y-routing.md)). En M5-ext.1 el
+  `TipoEjecutor::Wasm` se valida al cargar pero no se instancia.
+
+- **Routing nombre→endpoint.** (M5-ext.1, implementado) El YAML declara
+  `ejecutores:` y cada paso `grpc` su `ejecutor:`; el motor despacha por
+  nombre contra una tabla de conexiones (embebido por defecto). Override por
+  CLI `--ejecutor nombre=host:puerto`. Ver
+  [ADR-0013](adr/0013-cargador-wasm-host-side-y-routing.md).
 
 - **LID** (*Legacy Isolation Domain*). Patrón de despliegue: un ejecutor de
   lenguaje corre en un **SO legacy** (Windows 7/10, VM, PC en red) con
   **aislamiento declarado** (solo salen las puertas pactadas: instrumentos
   por red, ficheros). Anvil lo ve como un endpoint gRPC más; el mecanismo de
-  aislamiento (contenedor/VM/firewall de SO) se define al construir. Ver
+  aislamiento (contenedor/VM/firewall de SO) se define al construir.
+  **Aplazado a post-M5-ext.** Ver
   [diseno/executores-lenguaje.md](diseno/executores-lenguaje.md) y
-  [ADR-0012](adr/0012-executores-de-lenguaje-como-modulos.md).
+  [ADR-0013](adr/0013-cargador-wasm-host-side-y-routing.md).
 
 - **Contrato gRPC.** La superficie pública del paso: `paso.proto` define
   `PeticionPaso`, `ResultadoPasoProto` y `service EjecutorPasos{rpc Invoca}`.

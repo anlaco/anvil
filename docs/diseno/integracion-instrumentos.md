@@ -13,16 +13,17 @@ invoca por gRPC por nombre (ADR-0003): el motor no sabe si el paso habla
 SCPI, VISA, un REST privado o nada. El instrumento vive **detrás del paso**,
 opaco al motor.
 
-**Dónde corre el paso (ADR-0012):** en el ejecutor WASM embebido (built-in o
-`.wasm` cargado por path), o en un **ejecutor de lenguaje** distribuido
-(`executores/`, p. ej. Python) — que puede desplegarse en un **LID** (SO
-legacy con aislamiento declarado) cuando las DLLs/drivers del fabricante lo
-exijan. Anvil solo ve endpoints gRPC; ver
+**Dónde corre el paso (ADR-0013):** en el ejecutor WASM embebido (built-in,
+de serie, en loopback), o en un **ejecutor de lenguaje** distribuido
+(`executores/`, p. ej. Python) que puede correr en loopback (M5-ext.1,
+routing `ejecutores:`/`ejecutor:`) o, en el futuro, en un **LID** (SO legacy
+con aislamiento declarado, aplazado a post-M5-ext) cuando las
+DLLs/drivers del fabricante lo exijan. Anvil solo ve endpoints gRPC; ver
 [executores-lenguaje.md](executores-lenguaje.md).
 
 Hoy (`pasos_demo`) los pasos son simulados (no tocan hardware). La
-frontera gRPC motor↔paso es real; la integración con el instrumento es
-interna del paso.
+frontera gRPC motor↔paso es real (M5-ext.1 la generaliza a varios
+endpoints); la integración con el instrumento es interna del paso.
 
 ## Estrategia por capas (propuesta)
 

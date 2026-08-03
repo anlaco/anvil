@@ -1,6 +1,10 @@
 # ADR-0012: Executores de lenguaje como módulos distribuidos
 
-- **Estado:** Aceptada
+- **Estado:** *Superseded por [ADR-0013](0013-cargador-wasm-host-side-y-routing.md)*
+  (2026-08-03, M5-ext.1: el cargador de `.wasm` por path no lo hace el
+  ejecutor embebido — un guest WASM no puede instanciar wasmtime dentro de
+  sí mismo — sino el host; y el routing nombre→endpoint se implementa en
+  M5-ext.1 con `TipoEjecutor::Wasm` definido pero no instanciado).
 - **Fecha:** 2026-08-03 (M5/alcance MVP extendido)
 - **Relaciona:** ADR-0001, ADR-0003, ADR-0005, ADR-0006,
   ADR-0011, [arquitectura.md](../arquitectura.md),

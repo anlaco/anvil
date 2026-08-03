@@ -76,6 +76,24 @@ Reglas:
   `"A"`→texto). Desde **M4b**, `subsecuencias:` a nivel de secuencia declara
   subsecuencias **inline** (mapa `nombre -> secuencia`), invocables por
   nombre; el `nombre:` de una inline es opcional (cae al de su clave).
+- Desde **M5-ext.1** (RF-36.3, ver [executores-lenguaje.md](executores-lenguaje.md)):
+  `ejecutores:` a nivel de secuencia declara la **tabla de ejecutores** y un
+  paso `grpc` puede declarar `ejecutor: <nombre>` (si se omite, va al
+  embebido). Cada ejecutor tiene `nombre` y `tipo`:
+  - `tipo: embebido` — el ejecutor WASM de serie (`127.0.0.1:9100`). Default.
+    Sin campos adicionales.
+  - `tipo: wasm` — módulo `.wasm` propio cargado por el **host** por path
+    (M5-ext.2, ADR-0013; en M5-ext.1 el path se valida al cargar pero no se
+    instancia). Campo `path` (relativo al YAML, debe existir).
+  - `tipo: grpc` — ejecutor de lenguaje distribuido (p. ej. Python). Campos
+    `host`/`puerto` (obligatorios). IPs no-loopback **sólo si se declaran**
+    (relajación acotada del loopback, ADR-0011).
+  
+  El nombre `__anvil_embebido__` está reservado (lo usa el motor); el
+  cargador lo rechaza. `ejecutor:` en un paso `statement`/`sequence_call`
+  es error (sólo aplica a `grpc`). Override por CLI:
+  `--ejecutor nombre=host:puerto` (re-apunta o convierte un ejecutor sin
+  tocar el YAML, patrón `--limits`).
 
 ### Subsecuencias: inline o por path (M4b)
 

@@ -122,27 +122,56 @@ Lo que ya existe en el repo:
 
 ### M5-ext — Executores de lenguaje y cargador de `.wasm` · MVP extendido
 
-- **Cargador de `.wasm` por path** en el ejecutor embebido (modelo `.vi`):
-  un paso WASM propio se referencia por path en la secuencia y se carga en
-  runtime, **sin recompilar** (ADR-0012). Cada módulo cargado corre en su
-  propio `Store` (aislamiento entre pasos).
-- **Executores de lenguaje como módulos distribuidos** (`executores/`,
-  Apache-2.0): primero **Python** (gRPC server hablando `paso.proto`);
-  LabVIEW/MATLAB futuros. Alternativas opt-in que pueden mezclarse en la
-  misma secuencia.
-- **Routing nombre→endpoint** en el motor: `ejecutores:` en el YAML +
-  override `--ejecutor nombre=host:puerto` (mismo patrón que `--limits`).
-- **Relajación acotada del loopback** de ADR-0011: IPs no-loopback solo si
-  se declaran; sin declaración, loopback-only.
-- **LID** (*Legacy Isolation Domain*): patrón de despliegue para correr un
-  ejecutor de lenguaje en un SO legacy (Win7/VM) con aislamiento declarado;
-  mecanismo de aislamiento a definir al construir.
+#### M5-ext.1 — Routing multi-endpoint y relajación acotada del loopback ✅ (hecho, ADR-0013)
+
+- **Routing nombre→endpoint** (RF-36.1, RF-36.3): `ejecutores:` en el YAML
+  (embebido/wasm/grpc), `ejecutor:` por paso, tabla de conexiones en el
+  motor (`Motor::desde_programa`), override CLI `--ejecutor nombre=host:puerto`.
+- **Relajación acotada del loopback** (ADR-0011): IPs no-loopback solo si se
+  declaran en `ejecutores:`; sin declaración, loopback-only. Flag
+  `--solo-loopback` en el host.
+- **`TipoEjecutor::Wasm` definido y validado al cargar** (el path debe
+  existir), **sin instanciar** (error claro al ejecutar: requiere M5-ext.2).
+- Demo `ejemplos/demo_ejecutores.yaml`: embebido + ejecutor Python en
+  loopback (sin Docker).
+
+#### M5-ext.2 — Cargador de `.wasm` por path host-side · condicionado a Telekino
+
+- **Cargador de `.wasm` por path** (RF-36.2, modelo `.vi`): el **host**
+  (no el ejecutor embebido — un guest WASM no puede instanciar wasmtime
+  dentro de sí mismo, ADR-0013) instancia un `Store` por módulo y lo expone
+  como endpoint gRPC en loopback. AOT precompile a `.cwasm` +
+  `StoreLimitsBuilder` + lazy loading + preload al abrir la secuencia (como
+  TestStand). Modo Debug con `Config::debug_info(true)` + LLDB.
+- **Condicionado a Telekino**: se implementa cuando el equipo de Telekino
+  cierre su formato de salida (un `.wasm` por QVI vs. un `.wasm` fusionado).
+  M5-ext.1 ya valida los paths; esta fase es un incremental del host.
+
+#### M5-ext.3 — Modo Run con `.wasm` fusionado de Telekino · condicionado a Telekino
+
+- Si Telekino genera un **único `.wasm`** que despacha por etiqueta, Anvil lo
+  consume como un endpoint `grpc` más (1 Store, N llamadas). La fusión es
+  responsabilidad de Telekino, no de Anvil.
+- Junto con M5-ext.2 forma la **arquitectura a la larga** (ADR-0013,
+  `docs/planes/m5-ext.md`): Debug con `.wasm` sueltos por QVI + Run con el
+  `.wasm` fusionado — el análogo de TestStand (Dev System depurable vs.
+  Run-Time Engine).
+
+#### M5-ext.4 — LID (Legacy Isolation Domain) · post-M5-ext
+
+- Patrón de despliegue para correr un ejecutor de lenguaje en un SO legacy
+  (Win7/VM) con aislamiento declarado ("puertas declaradas"). **Aplazado**:
+  primero moderno (todo loopback), después legacy. La tecnología de
+  aislamiento (Docker/VM/Sandboxie…) se define al construir el primer LID
+  real; la investigación está en
+  [investigacion/aislamiento-lid.md](investigacion/aislamiento-lid.md).
 
 → [diseno/proceso-de-test.md](diseno/proceso-de-test.md),
 [diseno/integracion-instrumentos.md](diseno/integracion-instrumentos.md),
 [diseno/ui-vs-headless.md](diseno/ui-vs-headless.md),
 [diseno/executores-lenguaje.md](diseno/executores-lenguaje.md),
-[adr/0012-executores-de-lenguaje-como-modulos.md](adr/0012-executores-de-lenguaje-como-modulos.md)
+[adr/0012-executores-de-lenguaje-como-modulos.md](adr/0012-executores-de-lenguaje-como-modulos.md),
+[adr/0013-cargador-wasm-host-side-y-routing.md](adr/0013-cargador-wasm-host-side-y-routing.md)
 
 **Fin del MVP** ≈ M5. Lo siguiente es post-MVP.
 

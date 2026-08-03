@@ -1,0 +1,52 @@
+# Demo del routing multi-endpoint (M5-ext.1, RF-36.3).
+#
+# Sin Docker, sin `.wasm`: el ejecutor embebido (WASM, built-in) atiende un
+# paso y un ejecutor Python en loopback atiende otros dos. El motor despacha
+# por nombre→endpoint (`ejecutor:` en el paso → `ejecutores:` en el YAML);
+# no sabe ni le importa qué hay detrás de cada endpoint (ADR-0013).
+#
+# Arranque:
+#   # terminal 1: simulador TCP (stand-in del equipo del simulador)
+#   python3 executores/python/simulador_tcp.py
+#   # terminal 2: ejecutor Python en loopback (127.0.0.1:9101)
+#   python3 executores/python/server.py
+#   # terminal 3: Anvil (host embebido, ADR-0011)
+#   ./anvil ejemplos/demo_ejecutores.yaml --json /tmp/out.json
+#
+# (Alternativa sin host: wasmtime run anvil.wasm ... con el ejecutor embebido
+#  ya levantado en 9100 — ver guia-inicio-rapido.md.)
+#
+# Variante con override de ejecutor (R&D vs. fábrica, patrón --limits):
+#   ./anvil ejemplos/demo_ejecutores.yaml --ejecutor python=127.0.0.1:9200
+#   (con otro server.py en --puerto 9200; el YAML no se toca)
+
+nombre: demo_ejecutores
+ejecutores:
+  - nombre: embebido
+    tipo: embebido
+  - nombre: python
+    tipo: grpc
+    host: 127.0.0.1
+    puerto: 9101
+main:
+  # Paso built-in: lo atiende el ejecutor WASM embebido (de serie). No
+  # declara `ejecutor` → embebido por defecto.
+  - nombre: verificar_led
+    reintentos: 1
+
+  # Paso en el ejecutor Python en loopback: el motor despacha por gRPC a
+  # 127.0.0.1:9101; el Python habla por TCP con el simulador y devuelve la
+  # medida. El límite lo evalúa el motor desde el YAML (ADR-0008).
+  - nombre: medir_simulador
+    ejecutor: python
+    reintentos: 1
+    limite:
+      tipo: rango
+      min: 4.0
+      max: 5.0
+
+  # Conexión al equipo simulado: fallo transitorio en el intento 1, pasa
+  # desde el 2 (RF-09: el número de intento llega al paso).
+  - nombre: conectar_equipo
+    ejecutor: python
+    reintentos: 3

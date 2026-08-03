@@ -17,8 +17,8 @@ mod entorno;
 
 use modelo::proto::{PeticionPaso, ResultadoPasoProto, RUTA_INVOCA};
 use modelo::{
-    Asignacion, DefinicionPaso, DefinicionSecuencia, Limite, Programa, ResultadoSecuencia,
-    ResultadoStep, ResultSink, TipoPaso,
+    Asignacion, DefinicionEjecutor, DefinicionPaso, DefinicionSecuencia, Limite, Programa,
+    ResultadoSecuencia, ResultadoStep, ResultSink, TipoEjecutor, TipoPaso,
 };
 use prost::Message;
 use wasi_grpc::grpc::Cliente;
@@ -28,18 +28,41 @@ pub use entorno::EntornoMotor;
 use expr::{eval, eval_sentencias, Entorno, Expresion, Scope, Sentencia, Value};
 use std::collections::HashMap;
 
-/// El motor: un cliente gRPC contra un ejecutor de pasos.
+/// Clave interna de la conexión al ejecutor embebido en `Motor.conexiones`.
+/// No es declarable en el YAML: el cargador rechaza un ejecutor con este
+/// nombre (ver `cargador::NOMBRE_EMBEDIDO_RESERVADO`).
+pub const EMBEDIDO: &str = "__anvil_embebido__";
+
+/// El motor: un cliente gRPC contra los ejecutores de pasos. M5-ext.1
+/// (RF-36.3): despacha cada paso al endpoint del ejecutor que declara su
+/// `DefinicionPaso.ejecutor`; sin declaración, va al embebido (`EMBEDIDO`).
+/// La tabla `conexiones` se abre en `desde_programa` y cada `Grpc`
+/// declarado tiene su `Cliente` propio.
 pub struct Motor {
-    cliente: Cliente,
+    /// Conexiones abiertas, keyed por nombre de ejecutor (o `EMBEDIDO`
+    /// para el embebido). Un `TipoEjecutor::Wasm` **no** abre conexión en
+    /// M5-ext.1: al ejecutarlo se devuelve `Error::EjecutorWasmNoImplementado`.
+    conexiones: HashMap<String, Cliente>,
 }
 
 /// Qué salió mal al correr una secuencia. Un paso que *falla* no es un
 /// error del motor — eso es un resultado válido; esto es que la
-/// comunicación se rompió.
+/// comunicación se rompió o el routing de ejecutores falló.
 #[derive(Debug)]
 pub enum Error {
     Red(net::Error),
     Protobuf(prost::DecodeError),
+    /// El paso declara `ejecutor: <nombre>` pero ese ejecutor no está en
+    /// `Programa.ejecutores`. El cargador ya lo rechaza al cargar; esto es
+    /// defense in depth.
+    EjecutorNoDeclarado(String),
+    /// El ejecutor del paso no tiene conexión abierta (debería abrirse en
+    /// `desde_programa` para los `grpc`; el embebido siempre la tiene).
+    EjecutorNoConectado(String),
+    /// El paso declara `ejecutor: <nombre>` con `tipo: wasm`: el cargador
+    /// de `.wasm` por path es M5-ext.2 (condicionado a Telekino, ADR-0013).
+    /// En M5-ext.1 se valida al cargar pero no se instancia.
+    EjecutorWasmNoImplementado(String),
 }
 
 impl std::fmt::Display for Error {
@@ -47,6 +70,17 @@ impl std::fmt::Display for Error {
         match self {
             Error::Red(e) => write!(f, "{e}"),
             Error::Protobuf(e) => write!(f, "respuesta ilegible: {e}"),
+            Error::EjecutorNoDeclarado(n) => {
+                write!(f, "el ejecutor '{n}' no está declarado en 'ejecutores:'")
+            }
+            Error::EjecutorNoConectado(n) => {
+                write!(f, "el ejecutor '{n}' no tiene conexión abierta")
+            }
+            Error::EjecutorWasmNoImplementado(n) => write!(
+                f,
+                "el ejecutor '{n}' es 'wasm': el cargador de `.wasm` por path requiere \
+                 anvil-host con soporte M5-ext.2; usa 'grpc' o 'embebido'"
+            ),
         }
     }
 }
@@ -66,27 +100,80 @@ impl From<prost::DecodeError> for Error {
 }
 
 impl Motor {
+    /// Conecta al ejecutor embebido (`127.0.0.1:9100`) — compat con M4b
+    /// (una secuencia sin `ejecutores:` se corre entera contra él). Es lo
+    /// que usa `ejecuta_secuencia` (legacy).
     pub fn conecta(host: &str, puerto: u16) -> Result<Self, Error> {
-        Ok(Motor { cliente: Cliente::conectar(host, puerto)? })
+        let mut conexiones = HashMap::new();
+        conexiones.insert(EMBEDIDO.into(), Cliente::conectar(host, puerto)?);
+        Ok(Motor { conexiones })
     }
 
-    /// Invoca un paso por nombre. Cada llamada gasta un stream HTTP/2
-    /// nuevo; de eso se encarga el cliente de `wasi-grpc`.
-    fn ejecuta_paso(&mut self, nombre: &str, intento: i32) -> Result<ResultadoStep, Error> {
-        let peticion = PeticionPaso { nombre: nombre.to_string(), intento };
-        let bytes = self.cliente.unaria(RUTA_INVOCA, &peticion.encode_to_vec())?;
+    /// Conecta al embebido y abre una conexión por cada ejecutor `grpc`
+    /// declarado en `Programa.ejecutores` (M5-ext.1, RF-36.3). Un ejecutor
+    /// `wasm` **no** abre conexión aquí (M5-ext.1 no lo instancia); un
+    /// `embebido` declarado explícitamente usa la conexión `EMBEDIDO`.
+    pub fn desde_programa(programa: &Programa) -> Result<Self, Error> {
+        let mut motor = Self::conecta("127.0.0.1", 9100)?;
+        for (nombre, def) in &programa.ejecutores {
+            if let TipoEjecutor::Grpc { host, puerto } = &def.tipo {
+                motor.conexiones.insert(nombre.clone(), Cliente::conectar(host, *puerto)?);
+            }
+        }
+        Ok(motor)
+    }
+
+    /// Resuelve el endpoint de un paso (M5-ext.1, RF-36.3): sin `ejecutor`
+    /// declarado → embebido; `Embebido` declarado → embebido; `Grpc` →
+    /// su nombre (clave de `conexiones`); `Wasm` → error (M5-ext.2).
+    fn resolver_endpoint<'a>(
+        def: &'a DefinicionPaso,
+        programa: &'a Programa,
+    ) -> Result<&'a str, Error> {
+        match def.ejecutor.as_deref() {
+            None => Ok(EMBEDIDO),
+            Some(nombre) => match programa.ejecutores.get(nombre) {
+                Some(DefinicionEjecutor { tipo: TipoEjecutor::Embebido, .. }) => Ok(EMBEDIDO),
+                Some(DefinicionEjecutor { tipo: TipoEjecutor::Grpc { .. }, .. }) => Ok(nombre),
+                Some(DefinicionEjecutor { tipo: TipoEjecutor::Wasm { .. }, .. }) => {
+                    Err(Error::EjecutorWasmNoImplementado(nombre.to_string()))
+                }
+                None => Err(Error::EjecutorNoDeclarado(nombre.to_string())),
+            },
+        }
+    }
+
+    /// Invoca un paso por nombre contra el endpoint de su ejecutor. Cada
+    /// llamada gasta un stream HTTP/2 nuevo; de eso se encarga el cliente
+    /// de `wasi-grpc`.
+    fn ejecuta_paso(
+        &mut self,
+        def: &DefinicionPaso,
+        programa: &Programa,
+        intento: i32,
+    ) -> Result<ResultadoStep, Error> {
+        let endpoint = Self::resolver_endpoint(def, programa)?;
+        let peticion = PeticionPaso { nombre: def.nombre.clone(), intento };
+        let cliente = self.conexiones.get_mut(endpoint).ok_or_else(|| {
+            Error::EjecutorNoConectado(endpoint.to_string())
+        })?;
+        let bytes = cliente.unaria(RUTA_INVOCA, &peticion.encode_to_vec())?;
         Ok(ResultadoPasoProto::decode(&bytes[..])?.into())
     }
 
     /// Corre un paso hasta que pase o se agoten los intentos.
     /// `reintentos` es el número **total** de intentos: 1 = un solo tiro.
-    fn ejecuta_con_reintentos(&mut self, def: &DefinicionPaso) -> Result<ResultadoStep, Error> {
+    fn ejecuta_con_reintentos(
+        &mut self,
+        def: &DefinicionPaso,
+        programa: &Programa,
+    ) -> Result<ResultadoStep, Error> {
         let max = def.reintentos.max(1);
-        let mut resultado = self.ejecuta_paso(&def.nombre, 1)?;
+        let mut resultado = self.ejecuta_paso(def, programa, 1)?;
         let mut intento = 1;
         while !resultado.paso() && intento < max {
             intento += 1;
-            resultado = self.ejecuta_paso(&def.nombre, intento as i32)?;
+            resultado = self.ejecuta_paso(def, programa, intento as i32)?;
         }
         // El límite (si la secuencia lo declara) se evalúa tras la invocación:
         // el paso devuelve la medida, el motor produce el estado final
@@ -125,7 +212,7 @@ impl Motor {
     ) -> Result<ResultadoSecuencia, Error> {
         // API legacy (M1–M4): una secuencia sin subsecuencias. Construye un
         // `Programa` trivial y delega en `ejecuta_secuencia_interna`.
-        let programa = Programa { raiz: definicion.clone(), archivos: HashMap::new() };
+        let programa = Programa { raiz: definicion.clone(), archivos: HashMap::new(), ejecutores: HashMap::new() };
         let entorno = EntornoMotor::desde_definicion(&programa.raiz);
         let (secuencia, _) = ejecuta_secuencia_interna(self, &programa.raiz, entorno, sink, &programa, 0, true)?;
         Ok(secuencia)
@@ -155,12 +242,17 @@ impl Motor {
 /// (ADR-0005): la lógica de la secuencia no sabe si el paso corre por gRPC o
 /// por un sustituto.
 pub trait InvocaPasos {
-    fn ejecuta_paso_grpc(&mut self, def: &DefinicionPaso) -> Result<ResultadoStep, Error>;
+    fn ejecuta_paso_grpc(&mut self, def: &DefinicionPaso, programa: &Programa)
+        -> Result<ResultadoStep, Error>;
 }
 
 impl InvocaPasos for Motor {
-    fn ejecuta_paso_grpc(&mut self, def: &DefinicionPaso) -> Result<ResultadoStep, Error> {
-        self.ejecuta_con_reintentos(def)
+    fn ejecuta_paso_grpc(
+        &mut self,
+        def: &DefinicionPaso,
+        programa: &Programa,
+    ) -> Result<ResultadoStep, Error> {
+        self.ejecuta_con_reintentos(def, programa)
     }
 }
 
@@ -270,7 +362,7 @@ fn corre_un_paso<I: InvocaPasos>(
     // (c) según tipo de paso (RF-27).
     let mut r = match p.tipo {
         TipoPaso::Statement => ejecuta_statement_puro(p.statement.as_deref(), &p.nombre, ent),
-        TipoPaso::Grpc => inv.ejecuta_paso_grpc(p)?,
+        TipoPaso::Grpc => inv.ejecuta_paso_grpc(p, programa)?,
         TipoPaso::SequenceCall => {
             ejecuta_sequence_call(inv, p, def_en_curso, ent, sink, programa, profundidad)?
         }
@@ -720,7 +812,11 @@ mod tests {
     /// ruidoso para detectarlo.
     struct InvocadorMock;
     impl InvocaPasos for InvocadorMock {
-        fn ejecuta_paso_grpc(&mut self, _def: &DefinicionPaso) -> Result<ResultadoStep, Error> {
+        fn ejecuta_paso_grpc(
+            &mut self,
+            _def: &DefinicionPaso,
+            _programa: &Programa,
+        ) -> Result<ResultadoStep, Error> {
             panic!("InvocadorMock no espera pasos grpc en estos tests");
         }
     }
@@ -775,7 +871,7 @@ mod tests {
         padre.subsecuencias.insert("init".into(), inline_comprueba("init"));
         padre.pasos_main = vec![call("llamar", "init", vec![arg("canal", "canal"), arg("listo", "listo")])];
 
-        let programa = Programa { raiz: padre.clone(), archivos: HashMap::new() };
+        let programa = Programa { raiz: padre.clone(), archivos: HashMap::new(), ejecutores: HashMap::new() };
         let entorno = EntornoMotor::desde_definicion(&programa.raiz);
         let mut inv = InvocadorMock;
         let mut sink = SinkNulo;
@@ -799,7 +895,7 @@ mod tests {
         padre.subsecuencias.insert("init".into(), inline_comprueba("init"));
         padre.pasos_main = vec![call("llamar", "init", vec![arg("canal", "canal"), arg("listo", "listo")])];
 
-        let programa = Programa { raiz: padre.clone(), archivos: HashMap::new() };
+        let programa = Programa { raiz: padre.clone(), archivos: HashMap::new(), ejecutores: HashMap::new() };
         let entorno = EntornoMotor::desde_definicion(&programa.raiz);
         let mut inv = InvocadorMock;
         let mut sink = SinkNulo;
@@ -837,7 +933,7 @@ mod tests {
         padre.subsecuencias.insert("init".into(), sub);
         padre.pasos_main = vec![call("llamar", "init", vec![arg("canal", "canal")])];
 
-        let programa = Programa { raiz: padre.clone(), archivos: HashMap::new() };
+        let programa = Programa { raiz: padre.clone(), archivos: HashMap::new(), ejecutores: HashMap::new() };
         let entorno = EntornoMotor::desde_definicion(&programa.raiz);
         let mut inv = InvocadorMock;
         let mut sink = SinkNulo;
@@ -870,6 +966,7 @@ mod tests {
         let programa = Programa {
             raiz: padre,
             archivos: HashMap::from([("ruta/hija.yaml".to_string(), hija)]),
+            ejecutores: HashMap::new(),
         };
         let entorno = EntornoMotor::desde_definicion(&programa.raiz);
         let mut inv = InvocadorMock;
@@ -889,7 +986,7 @@ mod tests {
         padre.subsecuencias.insert("init".into(), inline_comprueba("init"));
         padre.pasos_main = vec![call("llamar", "init", vec![arg("canal", "canal")])];
 
-        let programa = Programa { raiz: padre.clone(), archivos: HashMap::new() };
+        let programa = Programa { raiz: padre.clone(), archivos: HashMap::new(), ejecutores: HashMap::new() };
         let entorno = EntornoMotor::desde_definicion(&programa.raiz);
         let mut inv = InvocadorMock;
         let mut sink = SinkNulo;
@@ -918,6 +1015,7 @@ mod tests {
         let programa = Programa {
             raiz: padre,
             archivos: HashMap::from([("a.yaml".to_string(), a), ("b.yaml".to_string(), b)]),
+            ejecutores: HashMap::new(),
         };
         let entorno = EntornoMotor::desde_definicion(&programa.raiz);
         let mut inv = InvocadorMock;
@@ -950,11 +1048,99 @@ mod tests {
         padre.subsecuencias.insert("init".into(), inline_comprueba("init"));
         padre.pasos_main = vec![call("llamar", "init", vec![arg("canal", "canal"), arg("listo", "listo")])];
 
-        let programa = Programa { raiz: padre.clone(), archivos: HashMap::new() };
+        let programa = Programa { raiz: padre.clone(), archivos: HashMap::new(), ejecutores: HashMap::new() };
         let entorno = EntornoMotor::desde_definicion(&programa.raiz);
         let mut inv = InvocadorMock;
         let mut sink = Contador(Cell::new(0));
         let _ = ejecuta_secuencia_interna(&mut inv, &programa.raiz, entorno, &mut sink, &programa, 0, true).unwrap();
         assert_eq!(sink.0.get(), 1, "on_fin_secuencia sólo para la raíz, no por subsecuencia");
+    }
+
+    // --- M5-ext.1: routing nombre→endpoint ---
+
+    use modelo::{DefinicionEjecutor, TipoEjecutor};
+
+    /// Invocador de mentira que devuelve un resultado distinto según el
+    /// `def.ejecutor` que le llegue (el routing real lo decide el motor:
+    /// `resolver_endpoint` → conexión; aquí el mock ve el `def` ya enrutado).
+    struct InvocadorRuteado;
+    impl InvocaPasos for InvocadorRuteado {
+        fn ejecuta_paso_grpc(
+            &mut self,
+            def: &DefinicionPaso,
+            _programa: &Programa,
+        ) -> Result<ResultadoStep, Error> {
+            let mensaje = match def.ejecutor.as_deref() {
+                None => "embebido",
+                Some(n) => n,
+            };
+            Ok(ResultadoStep::nuevo(&def.nombre, "paso", mensaje))
+        }
+    }
+
+    /// Un `Programa` con raíz + un ejecutor `grpc` (python) y un `embebido`.
+    fn programa_ruteado() -> Programa {
+        let mut raiz = DefinicionSecuencia::default();
+        raiz.nombre = "s".into();
+        let mut p1 = DefinicionPaso::nuevo("a", 1);
+        p1.ejecutor = None; // embebido por defecto
+        let mut p2 = DefinicionPaso::nuevo("b", 1);
+        p2.ejecutor = Some("python".into());
+        let mut p3 = DefinicionPaso::nuevo("c", 1);
+        p3.ejecutor = Some("embebido".into());
+        raiz.pasos_main = vec![p1, p2, p3];
+        Programa {
+            raiz,
+            archivos: HashMap::new(),
+            ejecutores: HashMap::from([
+                ("embebido".to_string(), DefinicionEjecutor { nombre: "embebido".into(), tipo: TipoEjecutor::Embebido }),
+                ("python".to_string(), DefinicionEjecutor { nombre: "python".into(), tipo: TipoEjecutor::Grpc { host: "127.0.0.1".into(), puerto: 9101 } }),
+                ("mi_paso".to_string(), DefinicionEjecutor { nombre: "mi_paso".into(), tipo: TipoEjecutor::Wasm { path: "./p.wasm".into() } }),
+            ]),
+        }
+    }
+
+    #[test]
+    fn resolver_endpoint_embebido_por_defecto_y_por_nombre() {
+        let programa = programa_ruteado();
+        let p = DefinicionPaso::nuevo("a", 1);
+        assert_eq!(Motor::resolver_endpoint(&p, &programa).unwrap(), EMBEDIDO);
+        let mut p = DefinicionPaso::nuevo("b", 1);
+        p.ejecutor = Some("embebido".into());
+        assert_eq!(Motor::resolver_endpoint(&p, &programa).unwrap(), EMBEDIDO);
+        let mut p = DefinicionPaso::nuevo("b", 1);
+        p.ejecutor = Some("python".into());
+        assert_eq!(Motor::resolver_endpoint(&p, &programa).unwrap(), "python");
+    }
+
+    #[test]
+    fn resolver_endpoint_wasm_es_error_m5_ext_2() {
+        let programa = programa_ruteado();
+        let mut p = DefinicionPaso::nuevo("x", 1);
+        p.ejecutor = Some("mi_paso".into());
+        let err = Motor::resolver_endpoint(&p, &programa).unwrap_err();
+        assert!(matches!(err, Error::EjecutorWasmNoImplementado(ref n) if n == "mi_paso"));
+        assert!(err.to_string().contains("M5-ext.2"));
+    }
+
+    #[test]
+    fn resolver_endpoint_no_declarado_es_error() {
+        let programa = programa_ruteado();
+        let mut p = DefinicionPaso::nuevo("x", 1);
+        p.ejecutor = Some("inventado".into());
+        let err = Motor::resolver_endpoint(&p, &programa).unwrap_err();
+        assert!(matches!(err, Error::EjecutorNoDeclarado(n) if n == "inventado"));
+    }
+
+    #[test]
+    fn corre_un_paso_rutea_por_ejecutor() {
+        let programa = programa_ruteado();
+        let entorno = EntornoMotor::desde_definicion(&programa.raiz);
+        let mut inv = InvocadorRuteado;
+        let mut sink = SinkNulo;
+        let (sec, _) = ejecuta_secuencia_interna(&mut inv, &programa.raiz, entorno, &mut sink, &programa, 0, true).unwrap();
+        assert_eq!(sec.pasos[0].mensaje, "embebido", "sin ejecutor → embebido");
+        assert_eq!(sec.pasos[1].mensaje, "python", "ejecutor: python → python");
+        assert_eq!(sec.pasos[2].mensaje, "embebido", "ejecutor: embebido explícito → embebido");
     }
 }

@@ -17,7 +17,10 @@
 //! CSV en fichero. Los logs de arranque van a stderr para dejar stdout
 //! limpio para el sink de consola.
 
-use cargador::{aplicar_limites, cargar_limites_de_archivo, cargar_programa_de_archivo};
+use cargador::{
+    aplicar_limites, aplicar_override_ejecutores, cargar_limites_de_archivo,
+    cargar_programa_de_archivo,
+};
 use modelo::ResultSink;
 use motor::Motor;
 use result_sink::{SinkConsola, SinkCsv, SinkJson};
@@ -28,16 +31,18 @@ fn main() {
     let ruta = match args.next() {
         Some(r) => r,
         None => {
-            eprintln!("uso: anvil <secuencia.yaml> [--json <ruta>] [--csv <ruta>] [--limits <ruta>]");
+            eprintln!("uso: anvil <secuencia.yaml> [--json <ruta>] [--csv <ruta>] [--limits <ruta>] [--ejecutor nombre=host:puerto]");
             std::process::exit(2);
         }
     };
 
     // Parseo manual de flags (sin clap, como el resto del CLI). Acepta
-    // --json/--csv/--limits <ruta> en cualquier orden tras la secuencia.
+    // --json/--csv/--limits/--ejecutor <ruta> en cualquier orden tras la
+    // secuencia.
     let mut json_ruta: Option<String> = None;
     let mut csv_ruta: Option<String> = None;
     let mut limits_ruta: Option<String> = None;
+    let mut overrides_ejecutores: Vec<String> = Vec::new();
     while let Some(flag) = args.next() {
         let valor = args.next().unwrap_or_else(|| {
             eprintln!("el flag '{flag}' necesita una ruta");
@@ -47,6 +52,7 @@ fn main() {
             "--json" => json_ruta = Some(valor),
             "--csv" => csv_ruta = Some(valor),
             "--limits" => limits_ruta = Some(valor),
+            "--ejecutor" => overrides_ejecutores.push(valor),
             other => {
                 eprintln!("flag desconocido: '{other}'");
                 std::process::exit(2);
@@ -62,11 +68,24 @@ fn main() {
         }
     };
     eprintln!(
-        "secuencia '{}' cargada ({} pasos, {} subsecuencia(s) externa(s))",
+        "secuencia '{}' cargada ({} pasos, {} subsecuencia(s) externa(s), {} ejecutor(es))",
         programa.raiz.nombre,
         programa.raiz.pasos_main.len(),
-        programa.archivos.len()
+        programa.archivos.len(),
+        programa.ejecutores.len()
     );
+
+    // Override de ejecutores (RF-36.3, patrón --limits): re-apunta un
+    // ejecutor a otro endpoint sin tocar el YAML (R&D vs. fábrica).
+    if !overrides_ejecutores.is_empty() {
+        match aplicar_override_ejecutores(&mut programa, &overrides_ejecutores) {
+            Ok(n) => eprintln!("override de ejecutores aplicado ({n} afectado(s))"),
+            Err(e) => {
+                eprintln!("no se pudo aplicar el override de ejecutores: {e}");
+                std::process::exit(1);
+            }
+        }
+    }
 
     // Property loader (RF-30): si se pide un sidecar de límites, se inyecta
     // por nombre de paso en la **raíz**, sobreescribiendo los límites
@@ -107,14 +126,14 @@ fn main() {
         None => None,
     };
 
-    let mut motor = match Motor::conecta("127.0.0.1", 9100) {
+    let mut motor = match Motor::desde_programa(&programa) {
         Ok(m) => m,
         Err(e) => {
-            eprintln!("no se pudo conectar al ejecutor de pasos: {e}");
+            eprintln!("no se pudo conectar a los ejecutores de pasos: {e}");
             std::process::exit(1);
         }
     };
-    eprintln!("conectado al ejecutor de pasos");
+    eprintln!("conectado a los ejecutores de pasos");
 
     // Consola siempre; JSON/CSV si se pidieron. El composite los agrupa
     // como un único sink para el motor.
