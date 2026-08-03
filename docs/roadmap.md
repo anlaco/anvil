@@ -111,8 +111,6 @@ Lo que ya existe en el repo:
 
 ## M5 — Process model Sequential + CLI · MVP-parcial
 
-## M5 — Process model Sequential + CLI · MVP-parcial
-
 - Separación "secuencia vs. cómo se corre en producción" (Sequential
   simple + plug-ins, **no** el process model de TestStand 1:1) (RF-38).
 - Adapter gRPC de instrumentos pulido (RF-36).
@@ -122,9 +120,29 @@ Lo que ya existe en el repo:
   instalar wasmtime. El guest motor sigue disponible como `.wasm` para
   depuración con el CLI de wasmtime.
 
+### M5-ext — Executores de lenguaje y cargador de `.wasm` · MVP extendido
+
+- **Cargador de `.wasm` por path** en el ejecutor embebido (modelo `.vi`):
+  un paso WASM propio se referencia por path en la secuencia y se carga en
+  runtime, **sin recompilar** (ADR-0012). Cada módulo cargado corre en su
+  propio `Store` (aislamiento entre pasos).
+- **Executores de lenguaje como módulos distribuidos** (`executores/`,
+  Apache-2.0): primero **Python** (gRPC server hablando `paso.proto`);
+  LabVIEW/MATLAB futuros. Alternativas opt-in que pueden mezclarse en la
+  misma secuencia.
+- **Routing nombre→endpoint** en el motor: `ejecutores:` en el YAML +
+  override `--ejecutor nombre=host:puerto` (mismo patrón que `--limits`).
+- **Relajación acotada del loopback** de ADR-0011: IPs no-loopback solo si
+  se declaran; sin declaración, loopback-only.
+- **LID** (*Legacy Isolation Domain*): patrón de despliegue para correr un
+  ejecutor de lenguaje en un SO legacy (Win7/VM) con aislamiento declarado;
+  mecanismo de aislamiento a definir al construir.
+
 → [diseno/proceso-de-test.md](diseno/proceso-de-test.md),
 [diseno/integracion-instrumentos.md](diseno/integracion-instrumentos.md),
-[diseno/ui-vs-headless.md](diseno/ui-vs-headless.md)
+[diseno/ui-vs-headless.md](diseno/ui-vs-headless.md),
+[diseno/executores-lenguaje.md](diseno/executores-lenguaje.md),
+[adr/0012-executores-de-lenguaje-como-modulos.md](adr/0012-executores-de-lenguaje-como-modulos.md)
 
 **Fin del MVP** ≈ M5. Lo siguiente es post-MVP.
 

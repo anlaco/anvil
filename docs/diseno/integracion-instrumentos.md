@@ -13,6 +13,13 @@ invoca por gRPC por nombre (ADR-0003): el motor no sabe si el paso habla
 SCPI, VISA, un REST privado o nada. El instrumento vive **detrás del paso**,
 opaco al motor.
 
+**Dónde corre el paso (ADR-0012):** en el ejecutor WASM embebido (built-in o
+`.wasm` cargado por path), o en un **ejecutor de lenguaje** distribuido
+(`executores/`, p. ej. Python) — que puede desplegarse en un **LID** (SO
+legacy con aislamiento declarado) cuando las DLLs/drivers del fabricante lo
+exijan. Anvil solo ve endpoints gRPC; ver
+[executores-lenguaje.md](executores-lenguaje.md).
+
 Hoy (`pasos_demo`) los pasos son simulados (no tocan hardware). La
 frontera gRPC motor↔paso es real; la integración con el instrumento es
 interna del paso.

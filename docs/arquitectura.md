@@ -96,6 +96,16 @@ La **frontera gRPC motor↔ejecutor ya existe y es real** (aislamiento
 motor-side). La frontera ejecutor↔paso es en-proceso hoy; el objetivo es
 que sea gRPC para pasos en cualquier lenguaje (ADR-0003).
 
+**M5-ext (ADR-0012):** el ejecutor WASM embebido se mantiene como **de
+serie** (zero-install, ADR-0011) y gana un **cargador de módulos `.wasm`
+por path** (modelo `.vi`); a su lado, **executores de lenguaje** (`executores/`,
+Apache-2.0) atienden pasos con gRPC nativo de su ecosistema. El motor
+despacha por **nombre→endpoint** (`ejecutores:` en el YAML + override
+`--ejecutor`), con IPs no-loopback solo si se declaran (patrón **LID** para
+SO legacy; ver [glosario.md](glosario.md)). Ver
+[diseno/executores-lenguaje.md](diseno/executores-lenguaje.md)
+y [ADR-0012](adr/0012-executores-de-lenguaje-como-modulos.md).
+
 ## Nivel 3 — Componentes
 
 ### Dentro del Motor (`crates/motor/src/lib.rs`)
@@ -140,6 +150,12 @@ del secuenciador; el interior de cada paso es opaco al motor) +
 instalador) + **determinismo** (base para reintentos reproducibles). El
 coste (sin `tonic`/`tokio` → pila propia, sin codegen → structs a mano) se
 paga en [ADR-0006](adr/0006-wasi-grpc-propio.md) y `crates/modelo/src/proto.rs`.
+
+**Rendimiento (ADR-0012):** wasmtime compila WASM **JIT a código nativo**
+(no lo interpreta): ~1.5–2× de C/Rust nativo y muy por delante de Python
+puro; frente a una DLL nativa paga ~10–30% por el sandbox, despreciable
+frente al tiempo de un instrumento real (RNF-04). No hay razón para "lo
+rápido en DLL, lo lento en WASM".
 
 ## Dónde vive el estado
 
