@@ -28,11 +28,13 @@ propio `Store`". Dos problemas:
    routing nombre→endpoint estaba descrito pero sin implementar: no existía
    `ejecutores:` en el YAML, ni `ejecutor:` por paso, ni override por flag.
 
-A la vez, el otro equipo de Anlaco (Telekino) genera `.wasm` desde un editor
-visual (formato `.qvi`): una secuencia larga puede usar 50+ módulos `.wasm`
-distintos (como TestStand usa 50+ VIs). El **formato de salida de Telekino
-no está decidido** (un `.wasm` por QVI vs. un único `.wasm` que despacha por
-etiqueta); la decisión es de Telekino, no de Anvil.
+A la vez, el **modelo `.vi` de TestStand** (compilar un módulo, guardarlo
+en un archivo y referenciarlo por path en la secuencia, sin recompilar el
+secuenciador) es una pieza central de la propuesta de Anvil: WASM es el
+**lenguaje de serie** (ADR-0001), y el cargador de `.wasm` por path lo
+materializa. Una secuencia profesional puede usar 50+ módulos `.wasm`
+distintos (como TestStand usa 50+ VIs); el cargador debe soportar ese caso
+de uso (ver `docs/planes/m5-ext.md`, anexo).
 
 ## Decisión
 
@@ -58,8 +60,7 @@ módulo y los expone como endpoints gRPC en loopback. El ejecutor embebido
 - **En M5-ext.1 un `Wasm` se valida al cargar (el path debe existir) pero no
   se instancia**: ejecutarlo da `Error::EjecutorWasmNoImplementado` con
   mensaje claro ("requiere anvil-host con soporte M5-ext.2"). La
-  instanciación real queda para M5-ext.2, condicionada al formato de
-  Telekino.
+  instanciación real queda para M5-ext.2.
 - `paso.proto` no cambia (RNF-05). El motor no sabe qué hay detrás de cada
   endpoint: embebido, `.wasm` cargado por el host (futuro), o Python en otra
   máquina.
@@ -83,28 +84,31 @@ routing que la justificaba).
 
 ### 5. Arquitectura a la larga (contexto, no implementada)
 
-Como Telekino no ha decidido su formato, Anvil deja la puerta abierta a
-**tres fases** (ver `docs/planes/m5-ext.md`):
+Anvil deja la puerta abierta a **dos fases** (ver `docs/planes/m5-ext.md`):
 
 - **M5-ext.1 (este ADR)**: routing `grpc` + relajación loopback. Hecho.
-- **M5-ext.2 (cuando Telekino cierre formato)**: cargador `.wasm` host-side
-  (un `.wasm` por QVI = un `Store`). AOT precompile a `.cwasm` +
-  `StoreLimitsBuilder` + lazy loading + preload (como TestStand). Modo Debug
-  con `Config::debug_info(true)` + LLDB attach.
-- **M5-ext.3 (modo Run)**: soporte para el `.wasm` fusionado de Telekino
-  (un único `.wasm` que despacha por etiqueta): Anvil lo consume como un
-  endpoint `grpc` más. La fusión es responsabilidad de Telekino.
+- **M5-ext.2**: cargador `.wasm` host-side (un `.wasm` por path = un
+  `Store`). AOT precompile a `.cwasm` + `StoreLimitsBuilder` + lazy loading
+  + preload (como TestStand). Modo Debug con `Config::debug_info(true)` +
+  LLDB attach.
+
+> **Patrón soportado desde M5-ext.1** (sin hito propio): un **único `.wasm`
+> que despacha por nombre** (un módulo que atiende N nombres internamente)
+> es un ejecutor `grpc` más — 1 Store, N llamadas. Anvil no distingue si
+> detrás hay un `.wasm` suelto por path (M5-ext.2) o un módulo que fusiona
+> varios pasos. Es el análogo del Run-Time Engine de TestStand: si un
+> generador produce ese formato, funciona sin nada especial.
 
 ## Por qué esta forma
 
 - **Lo único técnicamente posible**: el host es el único que tiene wasmtime;
   moverle la carga del `.wasm` no es una opción, es la única forma de que
   exista.
-- **Agnóstico al lenguaje y al formato**: el contrato es `paso.proto`; lo
-  que hay detrás (C, Rust, Zig, Python, `.qvi` de Telekino) es opaco al
-  motor.
-- **No bloquea a Telekino**: M5-ext.1 funciona sin depender de su formato;
-  el cargador espera a que Telekino decida (un `.wasm` por QVI vs. fusionado).
+- **Agnóstico al lenguaje y al generador del `.wasm`**: Anvil expone un
+  contrato (`paso.proto` por gRPC en loopback) y un mecanismo de carga
+  (`.wasm` por path); lo que hay detrás —C a mano, Rust, Zig, un editor
+  visual, un tercero— es opaco al motor. El roadmap avanza por los
+  requisitos de Anvil, no por los de un producto externo.
 - **Seguridad conservada**: sin declaración, nada sale de loopback; el
   sandbox WASM y el aislamiento motor↔ejecutor se mantienen.
 - **TestStand como referencia**: el "modelo `.vi`" se replica (cargar por

@@ -2,10 +2,10 @@
 
 > **Alcance acordado (2026-08-03):** M5-ext.1 (routing `grpc` + relajación
 > acotada del loopback + demo Python en loopback) **se implementa ya**.
-> M5-ext.2 (cargador `.wasm` por path host-side) y M5-ext.3 (modo Run con el
-> `.wasm` fusionado de Telekino) quedan **condicionados al formato de salida
-> de Telekino** (otro equipo de Anlaco; el formato `.qvi` aún no está
-> decidido). LID se aplaza a post-M5-ext. `paso.proto` no cambia (RNF-05).
+> M5-ext.2 (cargador `.wasm` por path host-side) queda **pendiente**:
+> independiente del origen del `.wasm` (C a mano, Rust, Zig, un editor
+> visual, un tercero) — Anvil es agnóstico al generador. LID se aplaza a
+> M5-ext.3. `paso.proto` no cambia (RNF-05).
 
 ## Decisiones de diseño (acordadas)
 
@@ -29,10 +29,15 @@
    sandbox del motor; el ejecutor embebido sigue loopback-only. Flag
    `--solo-loopback` en el host (CI/paranoia).
 5. **WASM es la tesis, Python el añadido.** El cargador `.wasm` por path es
-   la pieza central (telekino), no un extra. El ejecutor Python
+   la pieza central de Anvil (WASM es el lenguaje de serie; el modelo `.vi`
+   de TestStand), no un extra. El ejecutor Python
    (`executores/python/`) se mantiene como demo del routing multi-endpoint,
    sin Docker.
-6. **LID aplazado a post-M5-ext** (primero moderno, después legacy). La demo
+6. **Anvil es agnóstico al generador del `.wasm`.** Anvil expone un contrato
+   (`paso.proto` por gRPC en loopback) y un mecanismo de carga (`.wasm` por
+   path). Lo que hay detrás es opaco. El roadmap avanza por los requisitos
+   de Anvil, no por los de un producto externo.
+7. **LID aplazado a M5-ext.3** (primero moderno, después legacy). La demo
    LID con Docker del commit `b8371e2` se **revirtió** (se había adelantado
    sin el routing que la justificaba). La tecnología de aislamiento se
    decide al construir el primer LID real.
@@ -41,9 +46,9 @@
 
 - **RF-36.1** — ejecutor gRPC remoto; despacho nombre→endpoint. ✅ M5-ext.1.
 - **RF-36.2** — paso WASM propio cargado por path en runtime, `Store` propio.
-  → M5-ext.2 (condicionado a Telekino).
+  → M5-ext.2 (agnóstico al origen del `.wasm`).
 - **RF-36.3** — routing en YAML + override `--ejecutor`. ✅ M5-ext.1.
-- **RF-36.4** — LID (SO legacy aislado). → post-M5-ext.
+- **RF-36.4** — LID (SO legacy aislado). → M5-ext.3 (aplazado).
 
 ## Arquitectura (M5-ext.1, implementada)
 
@@ -103,12 +108,16 @@ Modelo/cargador/motor: `TipoEjecutor` (Embebido/Wasm/Grpc),
 
 ---
 
-## M5-ext.2 — Cargador de `.wasm` por path host-side (condicionado a Telekino)
+## M5-ext.2 — Cargador de `.wasm` por path host-side
 
-**Dependencia:** el formato de salida de Telekino (un `.wasm` por QVI vs. un
-único `.wasm` fusionado que despacha por etiqueta). La decisión es de
-Telekino, no de Anvil. Hasta entonces, M5-ext.1 ya valida los paths y el
-motor ya entiende `TipoEjecutor::Wasm`; esta fase es un incremental del host.
+**Agnóstico al origen del `.wasm`.** Anvil expone un contrato
+(`paso.proto` por gRPC en loopback) y un mecanismo de carga (path). Lo que
+hay detrás —C a mano, Rust, Zig, un editor visual, un tercero— es opaco.
+El roadmap avanza por los requisitos de Anvil (el modelo `.vi` de TestStand
++ la tesis "WASM es el lenguaje de serie" + el caso de uso 50+ módulos en
+una secuencia larga), no por los de un generador externo. M5-ext.1 ya
+valida los paths y el motor ya entiende `TipoEjecutor::Wasm`; esta fase es
+un incremental del host.
 
 **Qué será:**
 - El host instancia un `Store` por `TipoEjecutor::Wasm { path }`, carga el
@@ -116,7 +125,7 @@ motor ya entiende `TipoEjecutor::Wasm`; esta fase es un incremental del host.
   `ejecutor_pasos`), le asigna un puerto loopback libre y lo registra en la
   tabla de routing que ve el motor (reusando el override `--ejecutor`
   internamente). Agnóstico al lenguaje: C, Rust, Zig, lo que sea.
-- **Rendimiento para el caso Telekino (50+ `.wasm` en una secuencia larga,
+- **Rendimiento para el caso de uso real (50+ `.wasm` en una secuencia larga,
   como los 50+ VIs de TestStand)**, verificado en docs de wasmtime:
   - 1 `Engine` compartido + 1 `Store` por módulo (el patrón soportado; el
     ejemplo oficial "Fast Instantiation" usa 100 Stores).
@@ -141,28 +150,21 @@ motor ya entiende `TipoEjecutor::Wasm`; esta fase es un incremental del host.
   comportamiento cuadrático al cargar/descargar muchos módulos; evaluar
   desactivarlo con 50+ módulos en debug.
 
-## M5-ext.3 — Modo Run con `.wasm` fusionado de Telekino (condicionado a Telekino)
+> **Patrón soportado desde M5-ext.1** (sin hito propio): un **único `.wasm`
+> que despacha por nombre** (un módulo que atiende N nombres internamente)
+> es un ejecutor `grpc` más — 1 Store, N llamadas. Anvil no distingue si
+> detrás hay un `.wasm` suelto por path (M5-ext.2) o un módulo que fusiona
+> varios pasos. Es el análogo del Run-Time Engine de TestStand: si un
+> generador produce ese formato, funciona sin nada especial.
 
-Si Telekino genera un **único `.wasm`** que despacha por etiqueta (modo Run
-de producción, sin depuración), Anvil lo consume como un endpoint `grpc`
-más (1 Store, N llamadas, despacho por `nombre` dentro del módulo). La
-fusión es responsabilidad de Telekino; Anvil sólo carga el resultado. Es
-incremental sobre M5-ext.1 (un endpoint más), sin cargador especial.
-
-Junto con M5-ext.2 forma la **arquitectura a la larga** (ADR-0013): Debug
-con `.wasm` sueltos por QVI (aislamiento, introspección, depuración) + Run
-con el `.wasm` fusionado (rendimiento máximo). Es el análogo exacto de
-TestStand: LabVIEW Dev System (depurable, más lento) vs. LabVIEW Run-Time
-Engine (no depurable, rápido) — ver anexo.
-
-## Post-M5-ext
+## M5-ext.3 — LID (Legacy Isolation Domain) · aplazado
 
 - **LID** (RF-36.4): patrón de despliegue para SO legacy con "puertas
   declaradas"; la tecnología (Docker/VM/Sandboxie…) se define al construir
   el primer LID real. Investigación en
   [investigacion/aislamiento-lid.md](../investigacion/aislamiento-lid.md).
 - Introspección de firma para el editor visual (post-MVP, ligado al
-  drag-and-drop de QVIs — ver `diseno/ui-vs-headless.md`).
+  drag-and-drop de módulos — ver `diseno/ui-vs-headless.md`).
 - Pooling allocator / wasmtime async / cache AOT persistente: si la medición
   de 50+ Stores lo pide.
 - **Process model Sequential** (RF-38): sigue siendo M5-base, fuera de
@@ -230,10 +232,13 @@ multithreaded / fast-instantiation / async / debugging)
 
 ### Conclusión del anexo
 
-- **50 Stores es un caso de uso real** (Telekino: 50 QVIs = 50 `.wasm`, como
-  50 VIs en TestStand), no un patológico: wasmtime lo soporta (ejemplo
-  oficial de 100 Stores) y las mitigaciones (AOT + StoreLimits + lazy +
-  preload) lo hacen cómodo. Se medirá RSS/threads al construir M5-ext.2.
+- **50 Stores es un caso de uso real** (como los 50+ VIs de TestStand en una
+  secuencia larga: 50+ módulos `.wasm` distintos, cada uno con su Store), no
+  un patológico: wasmtime lo soporta (ejemplo oficial de 100 Stores) y las
+  mitigaciones (AOT + StoreLimits + lazy + preload) lo hacen cómodo. Se
+  medirá RSS/threads al construir M5-ext.2.
 - **El modelo mental a replicar es TestStand**: cargar módulos sueltos por
-  path, preload con `Load dynamically` para raros, Debug (sueltos, depurable)
-  vs. Run (fusionado, rápido). Nada de replicar el process model 1:1.
+  path, preload con `Load dynamically` para raros, Debug (sueltos,
+  depurable) vs. Run (un único `.wasm` que despacha por nombre — soportado
+  desde M5-ext.1 como un endpoint `grpc` más, sin hito propio). Nada de
+  replicar el process model 1:1.
