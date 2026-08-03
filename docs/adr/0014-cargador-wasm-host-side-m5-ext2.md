@@ -1,7 +1,15 @@
 # ADR-0014: Cargador de `.wasm` por path host-side (M5-ext.2)
 
-- **Estado:** Aceptada
+- **Estado:** Aceptada (parcialmente superseded por ADR-0015)
 - **Fecha:** 2026-08-03 (M5-ext.2)
+- **Superseded en parte por:** [ADR-0015](0015-el-wasm-del-usuario-es-una-funcion-puenteado-a-grpc.md)
+  (M5-ext.2 rework): el contrato del `.wasm` del usuario cambia de
+  "servidor gRPC que bindea `ANVIL_PORT`" a "componente WIT (`anvil:paso`)
+  que exporta la función `run`". El host ya no instancia el `.wasm` como
+  guest WASM: spawnea el puente `anvil-puente-wasm` (embebido en `anvil`),
+  que carga el componente y traduce gRPC↔función. El resto de este ADR —
+  host como cargador, puerto efímero, deduplicación por path, overrides
+  `--ejecutor` sintéticos — se mantiene vigente.
 - **Relaciona:** ADR-0001, ADR-0005, ADR-0011, ADR-0013 (superseded en la
   parte del "el motor entiende `Wasm`"),
   [arquitectura.md](../arquitectura.md),

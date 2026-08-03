@@ -135,29 +135,32 @@ Lo que ya existe en el repo:
 - Demo `ejemplos/demo_ejecutores.yaml`: embebido + ejecutor Python en
   loopback (sin Docker).
 
-#### M5-ext.2 — Cargador de `.wasm` por path host-side ✅ (hecho, ADR-0014)
+#### M5-ext.2 — Cargador de `.wasm` por path host-side ✅ (hecho, ADR-0014/0015)
 
 - **Cargador de `.wasm` por path** (RF-36.2, modelo `.vi` de TestStand): el
   **host** (no el ejecutor embebido — un guest WASM no puede instanciar
-  wasmtime dentro de sí mismo, ADR-0013) instancia un `Store` por path
-  (deduplicado: dos ejecutores con el mismo `.wasm` → un Store), sandbox
-  loopback-only, **preload al arrancar**, y lo expone como endpoint gRPC en
-  loopback vía puerto **efímero** inyectado con env `ANVIL_PORT` (la
-  convención del `.wasm` de paso de Anvil, compartida con el ejecutor
-  embebido).
-- **El motor nunca ejecuta `Wasm`** (ADR-0014): el host compone overrides
-  `--ejecutor` sintéticos (M5-ext.1), así el motor sólo ve `embebido`/
-  `grpc`. AOT precompile a `.cwasm` + `StoreLimitsBuilder` + lazy loading
-  + modo Debug + pooling/async: **post-M5-ext.2**, si la medición de 50+
-  Stores lo pide.
-- **Agnóstico al origen del `.wasm`**: Anvil expone un contrato
-  (`paso.proto` por gRPC en loopback) y un mecanismo de carga (path). Lo que
-  hay detrás —C a mano, Rust, Zig, un editor visual, un tercero— es opaco.
-  El roadmap de Anvil avanza por sus propios requisitos (el modelo `.vi` de
-  TestStand + la tesis "WASM es el lenguaje de serie" + el caso de uso 50+
-  módulos en una secuencia larga), no por los de un generador externo.
-- Demo `ejemplos/demo_wasm.yaml` (embebido + `.wasm` por path, verificada
-  end-to-end).
+  wasmtime dentro de sí mismo, ADR-0013) spawnea el **puente**
+  `anvil-puente-wasm` (embebido en `anvil`, extraído a temp) con `--wasm
+  <path> --port <efímero>`; el puente carga el componente y lo sirve como
+  gRPC en loopback. Deduplicación por path (dos ejecutores con el mismo
+  `.wasm` → un puente), preload al arrancar.
+- **El `.wasm` del usuario es una función** (ADR-0015): componente WASM con
+  interfaz WIT `anvil:paso` (`run(nombre, intento) -> resultado`),
+  compilado con `cargo component` + `wit-bindgen` (público). Sin `wasi-grpc`,
+  sin `modelo`, sin `ANVIL_PORT`, sin clonar el repo. El puente (nativo:
+  wasmtime + tonic + wit-bindgen) traduce gRPC↔función; sandbox WASI vacío
+  (el componente es una función pura). `paso.proto` no cambia (RNF-05).
+- **El motor nunca ejecuta `Wasm`**: el host compone overrides `--ejecutor`
+  sintéticos (M5-ext.1), así el motor sólo ve `embebido`/`grpc`. AOT
+  precompile a `.cwasm` + `StoreLimitsBuilder` + lazy loading + modo Debug
+  + pooling/async: **post-M5-ext.2**, si la medición de 50+ Stores lo pide.
+- **Agnóstico al origen del `.wasm`**: Anvil expone un contrato (WIT
+  `anvil:paso`) y un mecanismo de carga (path). Lo que hay detrás —C a
+  mano, Rust, Zig, un editor visual, un tercero— es opaco. El roadmap de
+  Anvil avanza por sus propios requisitos, no por los de un generador
+  externo.
+- Demo `ejemplos/demo_wasm.yaml` + componente `ejemplos/hola-paso` (el
+  "hola mundo"), verificada end-to-end.
 
 > **Patrón soportado desde M5-ext.1** (sin hito propio): un **único `.wasm`
 > que despacha por nombre** (un módulo que atiende N nombres internamente)

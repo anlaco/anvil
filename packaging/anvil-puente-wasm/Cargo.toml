@@ -1,0 +1,37 @@
+[package]
+name = "anvil-puente-wasm"
+version = "0.1.0"
+edition = "2021"
+license = "AGPL-3.0-or-later"
+description = "Puente gRPC↔función: sirve componentes .wasm de paso (anvil:paso) como ejecutor gRPC en loopback"
+
+[dependencies]
+# wasmtime: instancia el componente del usuario y llama a su `run`.
+wasmtime = "47"
+wasmtime-wasi = "47"
+# wit-bindgen: bindings host del WIT `anvil:paso` (cargar y llamar `run`).
+wit-bindgen = "0.41"
+# tonic: servidor gRPC nativo (el motor habla por gRPC en loopback).
+# prost 0.13: la versión que tonic-build 0.12 genera (alinear o los traits
+# `Message` no encajan). El core usa prost 0.14, pero el puente no linka
+# `modelo`: su pb lo genera tonic desde paso.proto.
+tonic = "0.12"
+prost = "0.13"
+# tokio: runtime async que tonic necesita (el puente es nativo, sin
+# restricciones WASM).
+tokio = { version = "1", features = ["rt-multi-thread"] }
+
+[build-dependencies]
+tonic-build = "0.12"
+prost-build = "0.13"
+# protoc empaquetado: el build no depende de protoc instalado en el sistema.
+protoc-bin-vendored = "3"
+
+[[bin]]
+name = "anvil-puente-wasm"
+path = "src/main.rs"
+
+# Workspace standalone: NO forma parte del workspace del core de Anvil, para
+# que el build normal (`cargo build` / `cargo test` en la raíz) no arrastre
+# wasmtime ni tonic. Se compila aparte; ver ADR-0015.
+[workspace]

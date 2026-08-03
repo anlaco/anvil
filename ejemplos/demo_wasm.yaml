@@ -1,26 +1,27 @@
-# Demo del cargador de `.wasm` por path host-side (M5-ext.2, RF-36.2).
+# Demo del cargador de `.wasm` por path host-side (M5-ext.2, ADR-0015).
 #
-# Sin Docker, sin Python: el ejecutor **embebido** (WASM, built-in, 9100)
-# atiende un paso, y un **`.wasm` propio cargado por path** (modelo `.vi`
-# de TestStand) atiende los otros. El host (anvil-host, ADR-0011/0013) lee
-# `tipo: wasm`, instancia el módulo en su propio `Store` (sandbox
-# loopback-only), le asigna un puerto efímero (env `ANVIL_PORT`, ADR-0014) y
-# se lo expone al motor como un endpoint `grpc` más (override interno
-# `--ejecutor`). El motor no sabe que hay un `.wasm` detrás.
+# Sin Docker, sin Python, sin clonar el repo: el `.wasm` es un **componente
+# WASM** que exporta la función `run` (interfaz `anvil:paso`). El usuario
+# escribe el paso en Rust, lo compila a `.wasm`, lo referencia por path
+# (modelo `.vi` de TestStand) y Anvil lo ejecuta. No sabe de gRPC ni de
+# protobuf — el host lo puentea (ADR-0015).
 #
-# El `.wasm` de la demo es el propio `ejecutor_pasos.wasm` (el ejecutor de
-# serie habla el mismo `paso.proto`; su puerto por defecto 9100 queda
-# anulado por `ANVIL_PORT`). Cualquier `.wasm` que hable `paso.proto` por
-# gRPC en loopback y lea `ANVIL_PORT` vale (agnóstico al generador).
+# El `.wasm` de la demo es `ejemplos/hola-paso` (el "hola mundo" de la guía).
+#
+# Compilar el componente (requiere cargo-component instalado):
+#   cargo install cargo-component --locked
+#   cargo component build --manifest-path ejemplos/hola-paso/Cargo.toml
+#   # → ejemplos/hola-paso/target/wasm32-wasip1/debug/hola_paso.wasm
 #
 # Arranque (desde la raíz del repo):
-#   cargo build --target wasm32-wasip2 -p ejecutor_pasos   # el módulo
+#   cargo build --target wasm32-wasip2 -p motor -p ejecutor_pasos
+#   cargo build --manifest-path packaging/anvil-puente-wasm/Cargo.toml
 #   cargo build --manifest-path packaging/anvil-host/Cargo.toml
 #   ./packaging/anvil-host/target/debug/anvil ejemplos/demo_wasm.yaml --json out.json
 #
 # (El `path:` es relativo al directorio del YAML (`ejemplos/`); al resolver
-# queda `target/wasm32-wasip2/debug/ejecutor_pasos.wasm`. El host loguea el
-# mapeo `nombre → 127.0.0.1:<puerto efímero>` al cargar.)
+# queda `ejemplos/hola-paso/target/wasm32-wasip1/debug/hola_paso.wasm`. El
+# host spawnea el puente y loguea `nombre → 127.0.0.1:<puerto efímero>`.)
 
 nombre: demo_wasm
 ejecutores:
@@ -28,16 +29,16 @@ ejecutores:
     tipo: embebido
   - nombre: mi_paso_wasm
     tipo: wasm
-    path: ../target/wasm32-wasip2/debug/ejecutor_pasos.wasm
+    path: hola-paso/target/wasm32-wasip1/debug/hola_paso.wasm
 main:
   # Paso built-in: lo atiende el ejecutor WASM embebido (de serie). No
   # declara `ejecutor` → embebido por defecto.
   - nombre: verificar_led
     reintentos: 1
 
-  # Paso en el `.wasm` cargado por path: el host lo instancia y el motor
-  # despacha por gRPC a su puerto efímero. El límite lo evalúa el motor
-  # desde el YAML (ADR-0008).
+  # Paso en el `.wasm` cargado por path: el host spawnea el puente, que
+  # llama a `run` del componente. El componente devuelve valor_medido 4.2;
+  # el límite lo evalúa el motor desde el YAML (ADR-0008).
   - nombre: medir_voltaje
     ejecutor: mi_paso_wasm
     reintentos: 1
@@ -47,7 +48,7 @@ main:
       max: 5.0
 
   # Otro paso en el mismo `.wasm` (mismo path → el host comparte un único
-  # Store: 1 Store, N llamadas, patrón RTE de TestStand).
+  # puente: 1 Store, N llamadas, patrón RTE de TestStand).
   - nombre: conectar_equipo
     ejecutor: mi_paso_wasm
     reintentos: 3

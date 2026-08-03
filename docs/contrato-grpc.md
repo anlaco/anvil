@@ -139,11 +139,19 @@ paso, hace falta que el paso **exponga metadatos de su firma**.
 
 ## Reuso hacia ejecutores externos (ADR-0013)
 
-El contrato **no cambia** cuando el paso lo atiende un **ejecutor de
-lenguaje** distribuido (`executores/`, p. ej. Python), un **módulo `.wasm`
-cargado por path** (M5-ext.2; lo carga el host, ADR-0013) o el ejecutor
-embebido: todos hablan el mismo `paso.proto` por gRPC, y el motor solo añade
-routing **nombre→endpoint** en su lado (`ejecutores:`/`ejecutor:` en el
-YAML, M5-ext.1). Esto refuerza RNF-05: la superficie pública se reusa, no
-se extiende. Ver [diseno/executores-lenguaje.md](diseno/executores-lenguaje.md) y
-[ADR-0013](adr/0013-cargador-wasm-host-side-y-routing.md).
+El contrato **no cambia** desde el punto de vista del motor: un paso lo
+atiende un **ejecutor de lenguaje** distribuido (`executores/`, p. ej.
+Python), un **componente `.wasm` cargado por path** (M5-ext.2; lo carga el
+host, ADR-0015) o el ejecutor embebido — el motor siempre habla el mismo
+`paso.proto` por gRPC y solo añade routing **nombre→endpoint** en su lado
+(`ejecutores:`/`ejecutor:` en el YAML, M5-ext.1).
+
+Lo que cambia es **dentro del ejecutor**: un componente `.wasm` de paso no
+habla `paso.proto` — exporta la función `run` (interfaz WIT `anvil:paso`,
+ADR-0015) y el **puente** (`anvil-puente-wasm`, nativo) traduce
+`paso.proto` ↔ `anvil:paso` por cada `Invoca`. `paso.proto` sigue siendo
+la superficie pública del cable (RNF-05); la traducción vive en el puente,
+que es código de Anvil. Ver
+[diseno/executores-lenguaje.md](diseno/executores-lenguaje.md),
+[ADR-0013](adr/0013-cargador-wasm-host-side-y-routing.md) y
+[ADR-0015](adr/0015-el-wasm-del-usuario-es-una-funcion-puenteado-a-grpc.md).

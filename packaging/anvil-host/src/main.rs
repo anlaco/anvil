@@ -18,10 +18,12 @@
 //!  2. Arranca el ejecutor (thread) que bindea `127.0.0.1:9100` en su sandbox
 //!     (loopback-only, sin relajación).
 //!  3. Espera a que escuche (un `connect` de prueba; el ejecutor lo descarta).
-//!  4. **M5-ext.2:** instancia cada ejecutor `tipo: wasm` del YAML (un
-//!     `Store` por path, sandbox loopback-only, puerto efímero `ANVIL_PORT`)
-//!     y lo expone al motor como un override `--ejecutor` sintético (M5-ext.1
-//!     convierte `wasm` → `grpc` al aplicarlo). Espera a cada uno (readiness).
+//!  4. **M5-ext.2 (ADR-0015):** instancia cada ejecutor `tipo: wasm` del
+//!     YAML spawneando el **puente** `anvil-puente-wasm` (embebido en este
+//!     binario, extraído a temp) con `--wasm <path> --port <efímero>`. El
+//!     puente carga el componente `.wasm` del usuario (interfaz `anvil:paso`,
+//!     una función `run`) y lo sirve como gRPC en loopback. Espera a cada
+//!     uno (readiness).
 //!  5. Arranca el motor (main) cuyo sandbox permite loopback **más** las IPs
 //!     no-loopback declaradas en `ejecutores:` (sólo ésas). Conecta, corre la
 //!     secuencia y sale.
@@ -34,8 +36,9 @@
 //! aislamiento motor↔ejecutor (un `Store` por guest) se preservan.
 
 use std::collections::{HashMap, HashSet};
+use std::io::Write;
 use std::net::{IpAddr, TcpListener, TcpStream};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::thread;
 use std::time::Duration;
 use wasmtime::component::{Component, Linker, ResourceTable};
@@ -43,9 +46,11 @@ use wasmtime::{Engine, Store};
 use wasmtime_wasi::{DirPerms, FilePerms, WasiCtx, WasiCtxBuilder, WasiCtxView, WasiView};
 
 /// Guests embebidos (construidos a `wasm32-wasip2` y copiados a `OUT_DIR` por
-/// `build.rs`).
+/// `build.rs`) + el binario del puente (nativo, copiado a `OUT_DIR` por
+/// `build.rs`; se extrae a temp al arrancar para spawnearlo, M5-ext.2).
 const ANVIL_GUEST: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/anvil-guest.wasm"));
 const EJECUTOR: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/ejecutor_pasos.wasm"));
+const PUENTE: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/anvil-puente-wasm"));
 
 const PUERTO: u16 = 9100;
 
@@ -122,34 +127,65 @@ fn correr_guest(
     command.wasi_cli_run().call_run(&mut store)
 }
 
-/// Un ejecutor `.wasm` cargado por path (M5-ext.2, ADR-0014): el host lo
-/// instancia en un `Store` propio (sandbox loopback-only), le asigna un
-/// **puerto efímero** de loopback vía env `ANVIL_PORT`, y lo corre en un
-/// thread (detached: se aborta al salir el proceso, como el ejecutor
-/// embebido). El guest habla `paso.proto` por gRPC, igual que el embebido.
+/// Un ejecutor `.wasm` cargado por path (M5-ext.2, ADR-0015): el host
+/// spawnea el **puente** (`anvil-puente-wasm`, embebido en este binario),
+/// que carga el componente `.wasm` del usuario (interfaz `anvil:paso`, una
+/// función `run`) y lo sirve como ejecutor gRPC en loopback. El `.wasm` del
+/// usuario NO es un servidor gRPC: es una función pura; el puente traduce
+/// gRPC↔función.
 ///
-/// `puerto` es el asignado (para el readiness y para exponerlo al motor).
-/// Un `.wasm` por path = un Store; dos ejecutores que comparten path
-/// comparten Store (la deduplicación la hace el llamador).
+/// `puerto` es el asignado (efímero) para el readiness y para exponerlo al
+/// motor. `_child` se mantiene vivo para conservar el pipe de stdin: si el
+/// host muere, el pipe se cierra → EOF → el puente sale solo (sin
+/// huérfanos).
 struct EjecutorWasm {
     nombre: String,
     path: String,
     puerto: u16,
+    _child: std::process::Child,
 }
 
-/// Carga un `.wasm` por path en un `Store` propio con sandbox loopback-only
-/// (sólo recibe del motor, nunca de la red exterior), le inyecta `ANVIL_PORT`
-/// con un **puerto efímero** (`bind 127.0.0.1:0`), y lo arranca en un thread.
+/// Extrae el binario del puente embebido a un fichero temporal (con hash
+/// del contenido: cada versión del binario tiene su propio fichero, sin
+/// reescribir si ya existe). Devuelve su ruta.
+fn extraer_puente() -> Result<PathBuf, String> {
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    use std::hash::{Hash, Hasher};
+    PUENTE.hash(&mut h);
+    let ruta = std::env::temp_dir().join(format!("anvil-puente-wasm-{:016x}", h.finish()));
+    if !ruta.exists() {
+        let mut f = std::fs::File::create(&ruta)
+            .map_err(|e| format!("no se pudo crear '{}': {e}", ruta.display()))?;
+        f.write_all(PUENTE)
+            .map_err(|e| format!("no se pudo escribir el puente: {e}"))?;
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mut perm = std::fs::metadata(&ruta)
+                .map_err(|e| format!("{e}"))?
+                .permissions();
+            perm.set_mode(0o755);
+            std::fs::set_permissions(&ruta, perm).map_err(|e| format!("{e}"))?;
+        }
+    }
+    Ok(ruta)
+}
+
+/// Spawnea el puente para un `.wasm` por path (M5-ext.2, ADR-0015):
 ///
-/// El puerto efímero lo reserva el host (bind+drop antes de lanzar el guest):
-/// el guest bindea `127.0.0.1:<puerto>` él mismo (convención `ANVIL_PORT`,
-/// ADR-0014). Hay una ventana mínima entre el drop y el bind del guest; es la
-/// misma técnica que ya usa `esperar_ejecutor` y suficiente para MVP.
-fn instanciar_wasm(engine: &Engine, nombre: &str, path: &Path) -> Result<EjecutorWasm, String> {
+/// 1. Reserva un **puerto efímero** de loopback (`bind 127.0.0.1:0`).
+/// 2. Extrae `anvil-puente-wasm` (embebido) a un fichero temporal.
+/// 3. Spawnea `anvil-puente-wasm --wasm <path> --port <puerto>` con stdin
+///    en pipe: el puente sale solo si el host muere (EOF).
+///
+/// El puente es quien carga el componente en su propio Store (sandbox WASI
+/// vacío: sin ficheros ni red — el componente es una función pura).
+fn instanciar_wasm(nombre: &str, path: &Path) -> Result<EjecutorWasm, String> {
     let bytes = std::fs::read(path)
         .map_err(|e| format!("el ejecutor '{nombre}' ({}) no se pudo leer: {e}", path.display()))?;
+    drop(bytes); // el puente es quien lee el fichero; aquí sólo validamos.
 
-    // Reservar un puerto efímero de loopback para el guest.
+    // Reservar un puerto efímero de loopback para el puente.
     let listener = TcpListener::bind("127.0.0.1:0")
         .map_err(|e| format!("no se pudo reservar puerto para el ejecutor '{nombre}': {e}"))?;
     let puerto = listener.local_addr().map_err(|e| {
@@ -157,24 +193,17 @@ fn instanciar_wasm(engine: &Engine, nombre: &str, path: &Path) -> Result<Ejecuto
     })?.port();
     drop(listener);
 
-    // Sandbox: loopback-only, sin relajación (sólo atiende al motor).
-    let mut wasi = wasi_loopback();
-    wasi.env("ANVIL_PORT", &puerto.to_string());
-    let wasi = wasi.build();
+    let puente = extraer_puente()?;
+    let child = std::process::Command::new(&puente)
+        .args(["--wasm", &path.display().to_string(), "--port", &puerto.to_string()])
+        .stdin(std::process::Stdio::piped())
+        .spawn()
+        .map_err(|e| format!("no se pudo lanzar el puente para '{nombre}': {e}"))?;
 
-    let engine = engine.clone();
-    let nombre_thread = format!("ejecutor-wasm-{nombre}");
-    let _ = thread::Builder::new()
-        .name(nombre_thread)
-        .spawn(move || {
-            let _ = correr_guest(&engine, wasi, &bytes);
-        })
-        .map_err(|e| format!("no se pudo lanzar el thread del ejecutor '{nombre}': {e}"))?;
-
-    Ok(EjecutorWasm { nombre: nombre.into(), path: path.display().to_string(), puerto })
+    Ok(EjecutorWasm { nombre: nombre.into(), path: path.display().to_string(), puerto, _child: child })
 }
 
-/// Espera a que un ejecutor `.wasm` escuche en su puerto asignado (mismo
+/// Espera a que el puente del ejecutor `.wasm` escuche en su puerto (mismo
 /// patrón polling que `esperar_ejecutor`). Timeout agregado por módulo;
 /// falla con un mensaje claro nombrando al ejecutor.
 fn esperar_wasm(exec: &EjecutorWasm) -> Result<(), String> {
@@ -267,7 +296,7 @@ fn main() {
                 let puerto = if let Some(puerto) = stores_por_path.get(&clave) {
                     *puerto
                 } else {
-                    let exec = match instanciar_wasm(&engine, nombre, &ruta) {
+                    let exec = match instanciar_wasm(nombre, &ruta) {
                         Ok(e) => e,
                         Err(e) => {
                             errores.push(e);
