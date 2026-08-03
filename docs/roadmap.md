@@ -135,29 +135,30 @@ Lo que ya existe en el repo:
 - Demo `ejemplos/demo_ejecutores.yaml`: embebido + ejecutor Python en
   loopback (sin Docker).
 
-#### M5-ext.2 — Cargador de `.wasm` por path host-side · condicionado a Telekino
+#### M5-ext.2 — Cargador de `.wasm` por path host-side
 
-- **Cargador de `.wasm` por path** (RF-36.2, modelo `.vi`): el **host**
-  (no el ejecutor embebido — un guest WASM no puede instanciar wasmtime
-  dentro de sí mismo, ADR-0013) instancia un `Store` por módulo y lo expone
-  como endpoint gRPC en loopback. AOT precompile a `.cwasm` +
+- **Cargador de `.wasm` por path** (RF-36.2, modelo `.vi` de TestStand): el
+  **host** (no el ejecutor embebido — un guest WASM no puede instanciar
+  wasmtime dentro de sí mismo, ADR-0013) instancia un `Store` por módulo y
+  lo expone como endpoint gRPC en loopback. AOT precompile a `.cwasm` +
   `StoreLimitsBuilder` + lazy loading + preload al abrir la secuencia (como
   TestStand). Modo Debug con `Config::debug_info(true)` + LLDB.
-- **Condicionado a Telekino**: se implementa cuando el equipo de Telekino
-  cierre su formato de salida (un `.wasm` por QVI vs. un `.wasm` fusionado).
-  M5-ext.1 ya valida los paths; esta fase es un incremental del host.
+- **Agnóstico al origen del `.wasm`**: Anvil expone un contrato
+  (`paso.proto` por gRPC en loopback) y un mecanismo de carga (path). Lo que
+  hay detrás —C a mano, Rust, Zig, un editor visual, un tercero— es opaco.
+  El roadmap de Anvil avanza por sus propios requisitos (el modelo `.vi` de
+  TestStand + la tesis "WASM es el lenguaje de serie" + el caso de uso 50+
+  módulos en una secuencia larga), no por los de un generador externo.
+- M5-ext.1 ya valida los paths; esta fase es un incremental del host.
 
-#### M5-ext.3 — Modo Run con `.wasm` fusionado de Telekino · condicionado a Telekino
+> **Patrón soportado desde M5-ext.1** (sin hito propio): un **único `.wasm`
+> que despacha por nombre** (un módulo que atiende N nombres internamente)
+> es un ejecutor `grpc` más — 1 Store, N llamadas. Anvil no distingue si
+> detrás hay un `.wasm` suelto por path (M5-ext.2) o un módulo que fusiona
+> varios pasos. Es el análogo del Run-Time Engine de TestStand: si un
+> generador produce ese formato, funciona sin nada especial.
 
-- Si Telekino genera un **único `.wasm`** que despacha por etiqueta, Anvil lo
-  consume como un endpoint `grpc` más (1 Store, N llamadas). La fusión es
-  responsabilidad de Telekino, no de Anvil.
-- Junto con M5-ext.2 forma la **arquitectura a la larga** (ADR-0013,
-  `docs/planes/m5-ext.md`): Debug con `.wasm` sueltos por QVI + Run con el
-  `.wasm` fusionado — el análogo de TestStand (Dev System depurable vs.
-  Run-Time Engine).
-
-#### M5-ext.4 — LID (Legacy Isolation Domain) · post-M5-ext
+#### M5-ext.3 — LID (Legacy Isolation Domain) · aplazado
 
 - Patrón de despliegue para correr un ejecutor de lenguaje en un SO legacy
   (Win7/VM) con aislamiento declarado ("puertas declaradas"). **Aplazado**:

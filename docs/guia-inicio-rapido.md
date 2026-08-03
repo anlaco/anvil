@@ -170,7 +170,7 @@ binario `anvil` (host) es lo recomendado.
 ## Siguiente lectura
 
 - [roadmap.md](roadmap.md) — qué hay hecho (M0→M4b + M5-ext.1) y qué queda
-  (M5-ext.2/3 condicionados a Telekino, LID post-M5-ext).
+  (M5-ext.2 pendiente; LID aplazado).
 - [diseno/formato-de-secuencia.md](diseno/formato-de-secuencia.md) — el
   schema YAML completo.
 - [adr/0011-distribucion-un-binario-hospeda-wasmtime.md](adr/0011-distribucion-un-binario-hospeda-wasmtime.md)

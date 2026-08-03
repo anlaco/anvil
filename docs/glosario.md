@@ -92,10 +92,11 @@ término de TestStand no se replica igual en Anvil, se dice explícitamente.
 - **Cargador de `.wasm`.** El **host** (`anvil-host`) carga **módulos `.wasm`
   propios por path** en runtime (modelo `.vi` de TestStand: compilar y
   referenciar, sin recompilar). Cada módulo corre en su propio `Store`
-  (aislamiento entre pasos). **M5-ext.2, condicionado a Telekino**: el
-  ejecutor embebido no puede hacerlo (es él mismo un guest WASM; ver
+  (aislamiento entre pasos). **M5-ext.2**: el ejecutor embebido no puede
+  hacerlo (es él mismo un guest WASM; ver
   [ADR-0013](adr/0013-cargador-wasm-host-side-y-routing.md)). En M5-ext.1 el
-  `TipoEjecutor::Wasm` se valida al cargar pero no se instancia.
+  `TipoEjecutor::Wasm` se valida al cargar pero no se instancia. Agnóstico al
+  origen del `.wasm` (C, Rust, Zig, un editor visual, un tercero).
 
 - **Routing nombre→endpoint.** (M5-ext.1, implementado) El YAML declara
   `ejecutores:` y cada paso `grpc` su `ejecutor:`; el motor despacha por

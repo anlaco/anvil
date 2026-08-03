@@ -2,8 +2,8 @@
 
 > **Prioridad:** MVP extendido. El ejecutor WASM embebido ya existe; el
 > routing nombre→endpoint está **implementado en M5-ext.1** (ADR-0013); el
-> cargador de `.wasm` por path es **M5-ext.2** (condicionado al formato de
-> Telekino); LID es un patrón de despliegue **aplazado a post-M5-ext**.
+> cargador de `.wasm` por path es **M5-ext.2** (agnóstico al origen del
+> `.wasm`); LID es un patrón de despliegue **aplazado a M5-ext.3**.
 
 Cómo Anvil llama a pasos en **cualquier lenguaje** y a **módulos WASM
 propios** sin recompilar. Trazable a [ADR-0013](../adr/0013-cargador-wasm-host-side-y-routing.md),
@@ -75,7 +75,7 @@ Override por CLI: `--ejecutor python=192.168.1.50:9101` (patrón `--limits`).
 IPs no-loopback solo si se declaran (relajación acotada del loopback,
 ADR-0011); flag `--solo-loopback` en el host para rechazarlas.
 
-### Cargador de `.wasm` por path (modelo `.vi`, M5-ext.2 — condicionado a Telekino)
+### Cargador de `.wasm` por path (modelo `.vi`, M5-ext.2)
 
 Como en TestStand con un `.vi`: tú compilas el módulo, lo guardas en un
 archivo, y la secuencia lo referencia por path. **No se recompila nada.**
@@ -93,18 +93,26 @@ ejecutores:
 - En **M5-ext.1** el path se valida al cargar (debe existir) pero el módulo
   **no se instancia**: ejecutarlo da `Error::EjecutorWasmNoImplementado`
   ("requiere anvil-host con soporte M5-ext.2"). La instanciación real queda
-  para M5-ext.2, condicionada al formato de Telekino (un `.wasm` por QVI vs.
-  un `.wasm` fusionado que despacha por etiqueta).
+  para M5-ext.2.
 - El contrato de entrada/salida del módulo es el mismo `PeticionPaso` /
   `ResultadoPasoProto` (reusado; ver
   [modelo-de-pasos.md](modelo-de-pasos.md) para cómo se despacha por nombre
-  dentro del módulo). Agnóstico al lenguaje: C, Rust, Zig, lo que sea, si
-  habla `paso.proto` por gRPC en loopback, Anvil lo atiende.
+  dentro del módulo). **Agnóstico al lenguaje y al generador del `.wasm`**:
+  C a mano, Rust, Zig, un editor visual, un tercero — si habla `paso.proto`
+  por gRPC en loopback, Anvil lo atiende. El roadmap avanza por los
+  requisitos de Anvil, no por los de un producto externo.
 - **Rendimiento (50+ módulos)**: wasmtime compila **JIT a nativo** (no
-  interpreta). Para el caso Telekino (50 QVIs = 50 `.wasm` en una secuencia
-  larga, como los 50 VIs de TestStand): AOT precompile a `.cwasm` +
-  `StoreLimitsBuilder` + lazy loading + preload al abrir la secuencia. Detalle
-  en `docs/planes/m5-ext.md`.
+  interpreta). Para el caso de uso real (50+ módulos `.wasm` en una
+  secuencia larga, como los 50+ VIs de TestStand): AOT precompile a `.cwasm`
+  + `StoreLimitsBuilder` + lazy loading + preload al abrir la secuencia.
+  Detalle en `docs/planes/m5-ext.md`.
+
+> **Patrón soportado desde M5-ext.1** (sin hito propio): un **único `.wasm`
+> que despacha por nombre** (un módulo que atiende N nombres internamente)
+> es un ejecutor `grpc` más — 1 Store, N llamadas. Anvil no distingue si
+> detrás hay un `.wasm` suelto por path (M5-ext.2) o un módulo que fusiona
+> varios pasos. Es el análogo del Run-Time Engine de TestStand: si un
+> generador produce ese formato, funciona sin nada especial.
 
 ## Executores de lenguaje (`executores/`)
 
@@ -198,18 +206,18 @@ main:
 Verificación: la secuencia pasa/falla según cada paso, y el reporte muestra
 pasos atendidos por dos ejecutores distintos sin que el motor supiera nada
 del lenguaje. La demo con un paso `.wasm` propio (`tipo: wasm`) llegará con
-el cargador host-side (M5-ext.2, condicionado a Telekino).
+el cargador host-side (M5-ext.2).
 
 ## Recortes MVP extendido
 
-- Cargador `.wasm` por path (M5-ext.2): condicionado al formato de Telekino;
-  en M5-ext.1 el path se valida pero no se instancia.
+- Cargador `.wasm` por path (M5-ext.2): en M5-ext.1 el path se valida pero
+  no se instancia. Agnóstico al origen del `.wasm`.
 - Cache AOT de módulos `.wasm` (con M5-ext.2; post-MVP para el caso 50+).
 - Sidecar de `ejecutores:` (post-MVP).
 - Descubrimiento automático / balanceo / reconnect por endpoint (post-MVP;
   solo reintento por paso existente, RF-07).
 - Descargables desde la UI (post-MVP; la estructura lo permite).
-- LID: patrón documentado, aplazado a post-M5-ext; tecnología a definir al
+- LID: patrón documentado, aplazado a M5-ext.3; tecnología a definir al
   construir.
 
 ## Out-of-scope
