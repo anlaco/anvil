@@ -109,16 +109,23 @@ Lo que ya existe en el repo:
 [diseno/variables-y-alcances.md](diseno/variables-y-alcances.md),
 [adr/0010-sequence-call-lo-orquesta-el-motor-cargador-resuelve-paths.md](adr/0010-sequence-call-lo-orquesta-el-motor-cargador-resuelve-paths.md)
 
-## M5 — Process model Sequential + CLI · MVP-parcial
+## M5 — Process model Sequential + CLI · MVP-parcial ✅ (hecho)
 
 - Separación "secuencia vs. cómo se corre en producción" (Sequential
-  simple + plug-ins, **no** el process model de TestStand 1:1) (RF-38).
-- Adapter gRPC de instrumentos pulido (RF-36).
-- CLI headless maduro (RF-40). **Empaquetado como un binario único** que
-  hospeda wasmtime y los dos guests WASM (motor + ejecutor) en sandbox,
-  hablando gRPC por loopback (ADR-0011): `./anvil secuencia.yaml`, sin
-  instalar wasmtime. El guest motor sigue disponible como `.wasm` para
-  depuración con el CLI de wasmtime.
+  simple + plug-ins, **no** el process model de TestStand 1:1) (RF-38):
+  el process model es un **YAML envoltorio** que se corre con
+  `--process-model pm.yaml secuencia.yaml`; la secuencia del operador se
+  inyecta como subsecuencia usuario (`secuencia_usuario: true`) y el PM la
+  envuelve con identificar/notificar/reportar (ADR-0016, reusa M4b).
+- Adapter gRPC de instrumentos pulido (RF-36): routing multi-endpoint
+  (M5-ext.1) + cargador `.wasm` por path (M5-ext.2) + paths `wasm`
+  normalizados al cargar (ADR-0016).
+- CLI headless maduro (RF-40): `--help`/`-h`, `--version`/`-V`, errores de
+  parseo claros, `--process-model` documentado. **Empaquetado como un
+  binario único** que hospeda wasmtime y los dos guests WASM (motor +
+  ejecutor) en sandbox, hablando gRPC por loopback (ADR-0011):
+  `./anvil secuencia.yaml`, sin instalar wasmtime. El guest motor sigue
+  disponible como `.wasm` para depuración con el CLI de wasmtime.
 
 ### M5-ext — Executores de lenguaje y cargador de `.wasm` · MVP extendido
 

@@ -245,13 +245,38 @@ fn main() {
     let args_motor: Vec<String> =
         args.iter().filter(|a| *a != "--solo-loopback").cloned().collect();
 
-    // M5-ext.1/2: leer el YAML para recolectar los `ejecutores:` declarados.
-    // El primer argumento del motor es la ruta de la secuencia (si falta, el
-    // motor ya se queja; aquí no hacemos nada especial).
+    // M5-ext.1/2 + M5 (RF-38): leer el YAML para recolectar los
+    // `ejecutores:` declarados. La ruta de la secuencia es el primer
+    // argumento **posicional** (los flags pueden ir antes, p. ej.
+    // `anvil --process-model pm.yaml s.yaml`); los flags con valor se
+    // saltan junto a su valor para no confundirlos con un posicional.
+    // Con `--process-model`, la raíz es el PM y la secuencia del operador
+    // se inyecta como subsecuencia usuario (ADR-0016): los ejecutores de
+    // ambos se recolectan igual.
+    let flags_con_valor = ["--process-model", "--json", "--csv", "--limits", "--ejecutor"];
+    let mut ruta: Option<String> = None;
+    {
+        let mut i = 0;
+        while i < args_motor.len() {
+            if flags_con_valor.contains(&args_motor[i].as_str()) {
+                i += 2;
+            } else if args_motor[i].starts_with("--") {
+                i += 1;
+            } else {
+                ruta = Some(args_motor[i].clone());
+                break;
+            }
+        }
+    }
+    let pm = args_motor.iter().position(|a| a == "--process-model").and_then(|i| args_motor.get(i + 1));
     let mut ips_no_loopback: HashSet<IpAddr> = HashSet::new();
     let mut programa: Option<modelo::Programa> = None;
-    if let Some(ruta) = args_motor.first() {
-        match cargador::cargar_programa_de_archivo(ruta) {
+    if let Some(ruta) = ruta {
+        let resultado = match pm {
+            Some(pm) => cargador::cargar_programa_con_process_model(pm, &ruta),
+            None => cargador::cargar_programa_de_archivo(&ruta),
+        };
+        match resultado {
             Ok(p) => {
                 ips_no_loopback = ips_no_loopback_declaradas(&p);
                 if solo_loopback && !ips_no_loopback.is_empty() {
@@ -278,21 +303,20 @@ fn main() {
     // --- recibe un `Programa` en memoria), así que el host no puede
     // --- reescribirle el modelo: compone `--ejecutor nombre=127.0.0.1:puerto`
     // --- (M5-ext.1, que ya convierte `wasm` → `grpc` al aplicarlo).
-    let ruta_yaml = args_motor.first().cloned().unwrap_or_default();
-    let dir_yaml = Path::new(&ruta_yaml).parent().unwrap_or_else(|| Path::new("")).to_path_buf();
     let mut ejecutores_wasm: Vec<EjecutorWasm> = Vec::new();
     let mut overrides_motor: Vec<String> = Vec::new();
     let mut args_motor_final: Vec<String> = args_motor;
     if let Some(p) = programa.as_ref() {
         // Deduplicar por path (dos ejecutores con el mismo `.wasm` → un Store).
+        // El cargador ya normalizó los paths a clave canónica (M5/RF-38): se
+        // usan tal cual, sin re-resolver contra el directorio de la secuencia
+        // (que con un process model es otro directorio).
         let mut stores_por_path: HashMap<String, u16> = HashMap::new();
         let mut errores: Vec<String> = Vec::new();
         for (nombre, def) in &p.ejecutores {
             if let modelo::TipoEjecutor::Wasm { path } = &def.tipo {
-                // El cargador ya validó que el path existe (fail-fast al
-                // cargar); aquí lo resolvemos relativo al directorio del YAML.
-                let ruta = cargador::normalizar_path(&dir_yaml, Path::new(path));
-                let clave = ruta.to_string_lossy().into_owned();
+                let ruta = PathBuf::from(path);
+                let clave = path.clone();
                 let puerto = if let Some(puerto) = stores_por_path.get(&clave) {
                     *puerto
                 } else {

@@ -1,8 +1,8 @@
 # Diseño: Proceso de test (process model)
 
-> **Prioridad:** MVP-parcial. **Propuesta** (no implementado). Sequential
-> simple en MVP; Parallel/Batch post-MVP. **No** se replica el process
-> model de TestStand 1:1.
+> **Prioridad:** MVP-parcial. **Implementado (M5, ADR-0016)**: Sequential
+> simple como envoltorio de secuencia. Parallel/Batch post-MVP. **No** se
+> replica el process model de TestStand 1:1.
 
 La idea **especial** de TestStand: separar "el test" (la secuencia) de
 "cómo se corre en producción" (identificar UUT, notificar pass/fail,
@@ -28,17 +28,31 @@ rompe todas las secuencias existentes, investigación §2).
 - MVP = **Sequential simple**: un UUT, una secuencia, sin maquinaria de
   callbacks.
 
-## MVP: Sequential simple + plug-ins (propuesta)
+## MVP: Sequential simple + plug-ins (implementado, ADR-0016)
 
 ```
 [identificar UUT] → [correr secuencia] → [notificar] → [loguear/reportar]
 ```
 
+- El process model es un **YAML envoltorio** que se corre con
+  `--process-model`:
+
+  ```sh
+  ./anvil --process-model pm.yaml secuencia_del_operador.yaml
+  ```
+
+  El PM es la raíz; la secuencia del operador se inyecta como subsecuencia
+  usuario y se invoca con `secuencia_usuario: true` (reusa la maquinaria de
+  sequence call de M4b, ADR-0010; ver ADR-0016). Ejemplo:
+  `ejemplos/process_model_sequential.yaml`.
 - Las operaciones comunes (identificar, notificar, reportar) son **pasos
   plug-in** que el motor corre alrededor de la secuencia del usuario, no
   un process model editable oculto.
 - Extensión por **plug-ins/ResultSinks** (investigación §2, preferencia de
   foro NI: plug-in > tocar el modelo), no por customización del núcleo.
+- Cada grupo/línea mantiene su propio PM como un YAML aparte y lo reutiliza
+  con distintas secuencias sin tocarlas (patrón plug-in, no callback
+  override).
 
 ## Post-MVP: paralelismo con cancelación jerárquica
 

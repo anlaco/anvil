@@ -419,7 +419,21 @@ fn ejecuta_sequence_call<I: InvocaPasos>(
     // El cargador ya validó que existe al cargar; si faltara aquí, es
     // defense in depth: se registra como `"error"` del paso (no pánico,
     // no propaga `Error` de red).
-    let sub = if cargador::es_path(destino) {
+    // M5 (RF-38): un paso `secuencia_usuario` apunta a la secuencia usuario
+    // (clave canónica `CLAVE_SECUENCIA_USUARIO` en `programa.archivos`),
+    // inyectada por el cargador con `--process-model` (ADR-0016).
+    let sub = if p.secuencia_usuario {
+        match programa.archivos.get(modelo::CLAVE_SECUENCIA_USUARIO) {
+            Some(s) => s,
+            None => {
+                return Ok(ResultadoStep::nuevo(
+                    &p.nombre,
+                    "error",
+                    format!("sequence call '{destino}': sin secuencia usuario (¿se corrió sin --process-model?)"),
+                ));
+            }
+        }
+    } else if cargador::es_path(destino) {
         match programa.archivos.get(destino) {
             Some(s) => s,
             None => {
@@ -1149,5 +1163,72 @@ mod tests {
         assert_eq!(sec.pasos[0].mensaje, "embebido", "sin ejecutor → embebido");
         assert_eq!(sec.pasos[1].mensaje, "python", "ejecutor: python → python");
         assert_eq!(sec.pasos[2].mensaje, "embebido", "ejecutor: embebido explícito → embebido");
+    }
+
+    // --- M5 (RF-38): process model Sequential (ADR-0016) ---
+
+    /// Un paso `secuencia_usuario` resuelve la secuencia usuario inyectada
+    /// bajo `CLAVE_SECUENCIA_USUARIO`, la anida en `sub_pasos` y el `asigna`
+    /// captura su estado agregado en un local del PM.
+    #[test]
+    fn process_model_invoca_secuencia_usuario_y_captura_estado() {
+        // PM: raíz con un call `secuencia_usuario` (el cargador lo reescribe
+        // a la clave canónica) + un statement que vuelca el estado.
+        let mut pm = DefinicionSecuencia::default();
+        pm.nombre = "process_model_sequential".into();
+        pm.locals.insert("estado_uut".into(), ValorDefinicion::Texto("".into()));
+        let mut call_usuario = DefinicionPaso::nuevo("test_uut", 1);
+        call_usuario.tipo = TipoPaso::SequenceCall;
+        call_usuario.secuencia_usuario = true;
+        call_usuario.secuencia = Some(modelo::CLAVE_SECUENCIA_USUARIO.into());
+        call_usuario.asigna = Some(vec![modelo::Asignacion {
+            var: "estado_uut".into(),
+            expr: expr::parse_expresion("resultado.estado").unwrap(),
+        }]);
+        pm.pasos_main = vec![call_usuario];
+
+        // Secuencia usuario: un statement (paso, para ver el agregado).
+        let mut usuario = DefinicionSecuencia::default();
+        usuario.nombre = "usuario".into();
+        let mut p = DefinicionPaso::nuevo("medir", 1);
+        p.tipo = TipoPaso::Statement;
+        p.statement = Some(expr::parse_sentencias("locals.x = 1").unwrap());
+        usuario.pasos_main = vec![p];
+
+        let programa = Programa {
+            raiz: pm,
+            archivos: HashMap::from([(modelo::CLAVE_SECUENCIA_USUARIO.to_string(), usuario)]),
+            ejecutores: HashMap::new(),
+        };
+        let entorno = EntornoMotor::desde_definicion(&programa.raiz);
+        let mut inv = InvocadorMock;
+        let mut sink = SinkNulo;
+        let (sec, ent) = ejecuta_secuencia_interna(&mut inv, &programa.raiz, entorno, &mut sink, &programa, 0, true).unwrap();
+
+        let call = &sec.pasos[0];
+        assert_eq!(call.estado, "paso", "el call hereda el agregado de la subsecuencia");
+        assert_eq!(call.sub_pasos.as_ref().map(|s| s.len()), Some(1), "anida los pasos del usuario");
+        assert_eq!(ent.lee(expr::Scope::Locals, "estado_uut").unwrap(), expr::Value::Texto("paso".into()));
+    }
+
+    /// Sin secuencia usuario inyectada, un paso `secuencia_usuario` se
+    /// registra como `"error"` (defense in depth, no pánico).
+    #[test]
+    fn process_model_sin_usuario_inyectado_es_error() {
+        let mut pm = DefinicionSecuencia::default();
+        pm.nombre = "pm".into();
+        let mut call_usuario = DefinicionPaso::nuevo("test_uut", 1);
+        call_usuario.tipo = TipoPaso::SequenceCall;
+        call_usuario.secuencia_usuario = true;
+        call_usuario.secuencia = Some(modelo::CLAVE_SECUENCIA_USUARIO.into());
+        pm.pasos_main = vec![call_usuario];
+
+        let programa = Programa { raiz: pm, archivos: HashMap::new(), ejecutores: HashMap::new() };
+        let entorno = EntornoMotor::desde_definicion(&programa.raiz);
+        let mut inv = InvocadorMock;
+        let mut sink = SinkNulo;
+        let (sec, _) = ejecuta_secuencia_interna(&mut inv, &programa.raiz, entorno, &mut sink, &programa, 0, true).unwrap();
+        assert_eq!(sec.pasos[0].estado, "error");
+        assert!(sec.pasos[0].mensaje.contains("--process-model"), "{}", sec.pasos[0].mensaje);
     }
 }

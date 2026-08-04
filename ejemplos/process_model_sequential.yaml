@@ -1,0 +1,51 @@
+# Process model Sequential simple (M5, RF-38, ADR-0016).
+#
+# Es el análogo del ProcessModel.seq de TestStand, pero en **datos**: un
+# YAML que envuelve la secuencia del operador con las operaciones comunes
+# de producción (identificar UUT, notificar, reportar). La secuencia del
+# operador se invoca con `secuencia_usuario: true` (el cargador la inyecta
+# cuando se corre con `--process-model`).
+#
+# Correr:
+#   ./anvil --process-model ejemplos/process_model_sequential.yaml \
+#     ejemplos/basica.yaml --json out.json
+#
+# Cada grupo/línea mantiene su propio process model como un YAML aparte y
+# lo reutiliza con distintas secuencias sin tocarlas (la misma secuencia va
+# de I&D a fábrica cambiando solo el process model).
+#
+# Fases (reusan las de cualquier secuencia):
+#   setup   → process setup (una vez por ejecución)
+#   main    → pre-UUT → test del operador → post-UUT (un UUT, sin loop en
+#             MVP-parcial; el loop sobre UUTs es post-MVP, ligado a RF-39)
+#   cleanup → process cleanup (siempre, pase lo que pase)
+#
+# Los pasos de identificación/notificación son `statement` (motor-side):
+# el motor de expresiones sólo asigna, así que "notificar" construye el
+# mensaje en un local. En producción serían pasos plug-in reales (scanner
+# de serial, MES, luz de operador) servidos por un ejecutor gRPC.
+
+nombre: process_model_sequential
+locals:
+  serial_uut: ""
+  estado_uut: ""
+  notificacion: ""
+setup:
+  - nombre: abrir_fixture
+    tipo: statement
+    statement: 'locals.serial_uut = ""'
+main:
+  - nombre: identificar_uut
+    tipo: statement
+    statement: 'locals.serial_uut = "SIM-0001"'
+  - nombre: test_uut
+    secuencia_usuario: true
+    asigna:
+      estado_uut: "${resultado.estado}"
+  - nombre: notificar_uut
+    tipo: statement
+    statement: 'locals.notificacion = "UUT " + locals.serial_uut + " → " + locals.estado_uut'
+cleanup:
+  - nombre: cerrar_fixture
+    tipo: statement
+    statement: 'locals.serial_uut = ""'

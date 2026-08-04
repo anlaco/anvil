@@ -410,6 +410,15 @@ pub struct DefinicionPaso {
     /// convención `es_path` (ver `formato-de-secuencia.md`). `None` si no
     /// es `SequenceCall`.
     pub secuencia: Option<String>,
+    /// M5/RF-38: si `true`, el sequence call invoca a la **secuencia
+    /// usuario** (la que el operador pasa por CLI), inyectada por el
+    /// cargador bajo [`CLAVE_SECUENCIA_USUARIO`] cuando se corre con
+    /// `--process-model`. Es el "MainSequence" del process model
+    /// Sequential (ADR-0016): el process model envuelve la secuencia del
+    /// usuario con pasos pre/post. `secuencia` se ignora y `parametros`
+    /// debe ser `None` (MVP-parcial: la frontera PM↔usuario se comunica
+    /// por `asigna`/`locals`). Default `false`.
+    pub secuencia_usuario: bool,
     /// M4b/RF-27: argumentos by-reference del sequence call (`locals.X`
     /// ↔ `parameters.param`). `None` si no es `SequenceCall`.
     pub parametros: Option<Vec<Argumento>>,
@@ -433,6 +442,7 @@ impl DefinicionPaso {
             tipo: TipoPaso::Grpc,
             statement: None,
             secuencia: None,
+            secuencia_usuario: false,
             parametros: None,
             ejecutor: None,
         }
@@ -472,6 +482,14 @@ pub struct DefinicionSecuencia {
     /// cargar; el motor las lee por nombre en `def.subsecuencias`.
     pub subsecuencias: HashMap<String, DefinicionSecuencia>,
 }
+
+/// Clave canónica bajo la que el cargador registra la **secuencia usuario**
+/// en `Programa.archivos` cuando se corre con `--process-model` (M5/RF-38,
+/// ADR-0016). El process model la invoca con un paso `secuencia_usuario:
+/// true`; el cargador reescribe ese paso a `secuencia: Some(CLAVE...)` para
+/// que el motor la resuelva como cualquier subsecuencia externa por path
+/// (sin cambios en el motor).
+pub const CLAVE_SECUENCIA_USUARIO: &str = "__anvil_usuario__";
 
 /// Un programa Anvil (M4b): la secuencia raíz a ejecutar más las
 /// subsecuencias de **archivos externos** cargados, keyed por path

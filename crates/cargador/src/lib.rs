@@ -167,6 +167,15 @@ struct PasoYaml {
     /// valida como `Expresion::Var { scope: Locals, .. }` (un lvalue local).
     #[serde(default)]
     parametros: Option<HashMap<String, String>>,
+    /// M5 (RF-38): si `true`, el sequence call invoca a la **secuencia
+    /// usuario** (la que el operador pasa por CLI), inyectada por el
+    /// cargador bajo `CLAVE_SECUENCIA_USUARIO` cuando se corre con
+    /// `--process-model` (ADR-0016). Implica `tipo: sequence_call`; no
+    /// admite `secuencia` ni `parametros` (MVP-parcial: la frontera
+    /// PM↔usuario se comunica por `asigna`/`locals`). Sin `--process-model`,
+    /// cargar un YAML con este flag es error (fail-fast).
+    #[serde(default)]
+    secuencia_usuario: bool,
     /// M5-ext.1 (RF-36.3): nombre del ejecutor que atiende este paso. Debe
     /// existir en `ejecutores` de la secuencia (fail-fast al cargar). Si se
     /// omite, el paso va al ejecutor embebido (default).
@@ -299,7 +308,11 @@ impl EjecutorYaml {
                     )));
                 };
                 // El path debe existir (relativo al directorio del YAML),
-                // como las subsecuencias externas (fail-fast al cargar).
+                // como las subsecuencias externas (fail-fast al cargar). Se
+                // guarda **normalizado a clave canónica** (M5/RF-38): el host
+                // lo usa tal cual para instanciar el puente, sin re-resolver
+                // contra el directorio de la secuencia usuario (que con un
+                // process model es otro directorio).
                 let ruta = normalizar_path(dir_yaml, Path::new(&path));
                 if !ruta.exists() {
                     return Err(ErrorCarga::Validacion(format!(
@@ -307,7 +320,7 @@ impl EjecutorYaml {
                         self.nombre, path
                     )));
                 }
-                TipoEjecutor::Wasm { path }
+                TipoEjecutor::Wasm { path: ruta.to_string_lossy().into_owned() }
             }
             "grpc" => {
                 if self.path.is_some() {
@@ -524,6 +537,91 @@ pub fn normalizar_path(base: &Path, rel: &Path) -> PathBuf {
 /// 3. **Detecta ciclos** en el grafo de llamadas (por nombre inline o por
 ///    path): `A → B → A` es error.
 pub fn cargar_programa_de_archivo(ruta: &str) -> Result<Programa, ErrorCarga> {
+    let programa = cargar_programa_resuelto(ruta)?;
+    validar_programa(&programa, ruta)?;
+    Ok(programa)
+}
+
+/// Carga un **programa con process model** (M5, RF-38, ADR-0016): el
+/// process model (`ruta_pm`) es la raíz y la **secuencia usuario**
+/// (`ruta_usuario`, la que el operador pasa por CLI) se inyecta como
+/// subsecuencia externa bajo [`modelo::CLAVE_SECUENCIA_USUARIO`]. El PM la
+/// invoca con un paso `secuencia_usuario: true`; el motor la resuelve como
+/// cualquier subsecuencia externa (sin cambios de semántica).
+///
+/// Fail-fast:
+/// - El PM debe invocar a la secuencia usuario (algún paso con
+///   `secuencia_usuario: true`); si no, error.
+/// - La secuencia usuario no puede usar `secuencia_usuario` (sólo el PM).
+/// - Colisiones de claves de subsecuencias externas o de nombres de
+///   ejecutores entre PM y usuario → error.
+/// - Ciclos: si la secuencia usuario referencia al PM (o a sí misma), el
+///   grafo completo se revalida y se detecta.
+pub fn cargar_programa_con_process_model(
+    ruta_pm: &str,
+    ruta_usuario: &str,
+) -> Result<Programa, ErrorCarga> {
+    let mut programa = cargar_programa_resuelto(ruta_pm)?;
+    let usuario = cargar_programa_de_archivo(ruta_usuario)?;
+
+    if !tiene_secuencia_usuario(&programa) {
+        return Err(ErrorCarga::Validacion(format!(
+            "el process model '{ruta_pm}' no invoca a la secuencia usuario \
+             (ningún paso con 'secuencia_usuario: true')"
+        )));
+    }
+    if programa.archivos.contains_key(modelo::CLAVE_SECUENCIA_USUARIO) {
+        return Err(ErrorCarga::Validacion(format!(
+            "el process model '{ruta_pm}' ya declara una subsecuencia externa con la \
+             clave reservada '{}'",
+            modelo::CLAVE_SECUENCIA_USUARIO
+        )));
+    }
+    programa.archivos.insert(modelo::CLAVE_SECUENCIA_USUARIO.to_string(), usuario.raiz);
+    for (clave, sub) in usuario.archivos {
+        if programa.archivos.contains_key(&clave) {
+            return Err(ErrorCarga::Validacion(format!(
+                "colisión de subsecuencia externa '{clave}' entre el process model \
+                 y la secuencia usuario"
+            )));
+        }
+        programa.archivos.insert(clave, sub);
+    }
+    for (nombre, def) in usuario.ejecutores {
+        if programa.ejecutores.contains_key(&nombre) {
+            return Err(ErrorCarga::Validacion(format!(
+                "colisión de ejecutor '{nombre}' entre el process model y la secuencia usuario"
+            )));
+        }
+        programa.ejecutores.insert(nombre, def);
+    }
+
+    validar_programa(&programa, ruta_pm)?;
+    Ok(programa)
+}
+
+/// ¿Algún paso del programa (raíz o subsecuencias externas) invoca a la
+/// secuencia usuario (`secuencia_usuario: true`)?
+fn tiene_secuencia_usuario(programa: &Programa) -> bool {
+    let mut encontrado = false;
+    let mut revisa = |def: &DefinicionSecuencia| {
+        for paso in def.pasos_setup.iter().chain(&def.pasos_main).chain(&def.pasos_cleanup) {
+            if paso.secuencia_usuario {
+                encontrado = true;
+            }
+        }
+    };
+    revisa(&programa.raiz);
+    for sub in programa.archivos.values() {
+        revisa(sub);
+    }
+    encontrado
+}
+
+/// Carga la raíz y resuelve los archivos externos (sin validar el grafo).
+/// Lo usa [`cargar_programa_de_archivo`] y [`cargar_programa_con_process_model`]
+/// (que valida tras inyectar la secuencia usuario).
+fn cargar_programa_resuelto(ruta: &str) -> Result<Programa, ErrorCarga> {
     let raiz = cargar_de_archivo(ruta)?;
     let dir_base = dir_de(ruta);
 
@@ -567,18 +665,28 @@ pub fn cargar_programa_de_archivo(ruta: &str) -> Result<Programa, ErrorCarga> {
         programa.archivos.insert(clave, sub);
     }
 
-    // Fase B: validar lvalues, firmas y nombres; detectar ciclos.
+    Ok(programa)
+}
+
+/// Valida el grafo de llamadas del programa (lvalues, firmas, ciclos) y
+/// que los `secuencia_usuario` estén resueltos. `ruta` sólo para mensajes.
+fn validar_programa(programa: &Programa, ruta: &str) -> Result<(), ErrorCarga> {
+    let dir_base = dir_de(ruta);
     let id_raiz = normalizar_path(&dir_base, Path::new(ruta)).to_string_lossy().into_owned();
     let mut camino: Vec<String> = Vec::new();
-    visitar(&programa, &id_raiz, &programa.raiz, &mut camino)?;
-
-    Ok(programa)
+    visitar(programa, &id_raiz, &programa.raiz, &mut camino)
 }
 
 /// Recorre una `DefinicionSecuencia` (y sus `subsecuencias` inline) y, por
 /// cada `sequence_call` por path, reescribe su `secuencia` a la clave
 /// canónica y encola el archivo para cargarlo. Las inline (por nombre) se
 /// dejan tal cual: el motor las resuelve en `def.subsecuencias`.
+///
+/// M5 (RF-38): un paso con `secuencia_usuario: true` se reescribe a
+/// `secuencia: Some(CLAVE_SECUENCIA_USUARIO)` (sin encolar nada: la
+/// secuencia usuario la inyecta `cargar_programa_con_process_model`). Así
+/// el motor la resuelve como cualquier subsecuencia externa por path, sin
+/// aprender un caso nuevo.
 fn procesar_secuencia(
     def: &mut DefinicionSecuencia,
     dir: &Path,
@@ -586,6 +694,10 @@ fn procesar_secuencia(
 ) -> Result<(), ErrorCarga> {
     for paso in def.pasos_setup.iter_mut().chain(&mut def.pasos_main).chain(&mut def.pasos_cleanup) {
         if paso.tipo == TipoPaso::SequenceCall {
+            if paso.secuencia_usuario {
+                paso.secuencia = Some(modelo::CLAVE_SECUENCIA_USUARIO.to_string());
+                continue;
+            }
             if let Some(sec) = paso.secuencia.as_ref() {
                 if es_path(sec) {
                     let path_dest = normalizar_path(dir, Path::new(sec));
@@ -634,6 +746,22 @@ fn visitar(
             }
         }
         if paso.tipo != TipoPaso::SequenceCall {
+            continue;
+        }
+        // M5 (RF-38): un paso `secuencia_usuario` apunta a la secuencia
+        // usuario, inyectada bajo `CLAVE_SECUENCIA_USUARIO` por
+        // `cargar_programa_con_process_model`. Sin `--process-model`, la
+        // clave no existe → error claro (fail-fast).
+        if paso.secuencia_usuario {
+            let sub = programa.archivos.get(modelo::CLAVE_SECUENCIA_USUARIO).ok_or_else(|| {
+                ErrorCarga::Validacion(format!(
+                    "el paso '{}' usa 'secuencia_usuario: true' pero no se corre con \
+                     --process-model (no hay secuencia usuario que invocar)",
+                    paso.nombre
+                ))
+            })?;
+            validar_call(paso, def, sub, modelo::CLAVE_SECUENCIA_USUARIO)?;
+            visitar(programa, modelo::CLAVE_SECUENCIA_USUARIO, sub, camino)?;
             continue;
         }
         let secuencia = paso.secuencia.as_ref().expect("validado en a_definicion");
@@ -825,7 +953,10 @@ impl PasoYaml {
         };
 
         // RF-27: tipo de paso. `grpc` (default), `statement` o `sequence_call` (M4b).
+        // M5 (RF-38): `secuencia_usuario: true` implica `sequence_call` (el
+        // operador no tiene que escribirlo); si declara otro tipo, error.
         let tipo = match self.tipo.as_str() {
+            "grpc" if self.secuencia_usuario => TipoPaso::SequenceCall,
             "grpc" => TipoPaso::Grpc,
             "statement" => TipoPaso::Statement,
             "sequence_call" => TipoPaso::SequenceCall,
@@ -890,7 +1021,25 @@ impl PasoYaml {
             )));
         }
         if matches!(tipo, TipoPaso::SequenceCall) {
-            if self.secuencia.is_none() {
+            if self.secuencia_usuario {
+                // M5 (RF-38): la secuencia usuario se inyecta; no admite
+                // destino propio ni argumentos (MVP-parcial: la frontera
+                // PM↔usuario se comunica por `asigna`/`locals`).
+                if self.secuencia.is_some() {
+                    return Err(ErrorCarga::Validacion(format!(
+                        "el paso '{}' usa 'secuencia_usuario: true' y trae 'secuencia' \
+                         (la secuencia usuario se inyecta; no se declara destino)",
+                        self.nombre
+                    )));
+                }
+                if parametros.is_some() {
+                    return Err(ErrorCarga::Validacion(format!(
+                        "el paso '{}' usa 'secuencia_usuario: true' y trae 'parametros' \
+                         (MVP-parcial: la frontera PM↔usuario se comunica por 'asigna'/'locals')",
+                        self.nombre
+                    )));
+                }
+            } else if self.secuencia.is_none() {
                 return Err(ErrorCarga::Validacion(format!(
                     "el paso '{}' es 'sequence_call' pero no trae 'secuencia'", self.nombre
                 )));
@@ -941,6 +1090,7 @@ impl PasoYaml {
             tipo,
             statement,
             secuencia: self.secuencia,
+            secuencia_usuario: self.secuencia_usuario,
             parametros,
             ejecutor: self.ejecutor,
         })
@@ -1776,7 +1926,8 @@ main:
         let y = dir.join("s.yaml");
         std::fs::write(&y, "nombre: s\nejecutores:\n  - { nombre: p, tipo: wasm, path: ./p.wasm }\nmain:\n  - nombre: a\n    ejecutor: p\n").unwrap();
         let prog = cargar_programa_de_archivo(y.to_str().unwrap()).unwrap();
-        assert_eq!(prog.ejecutores["p"].tipo, TipoEjecutor::Wasm { path: "./p.wasm".into() });
+        let clave = dir.join("p.wasm").to_string_lossy().into_owned();
+        assert_eq!(prog.ejecutores["p"].tipo, TipoEjecutor::Wasm { path: clave });
     }
 
     /// `grpc` sin `host`/`puerto` → error; `grpc` con `path` → error.
@@ -1898,5 +2049,184 @@ main:
         assert!(matches!(&err, ErrorCarga::Validacion(m) if m.contains("esperado")), "{err}");
         let err = aplicar_override_ejecutores(&mut prog, &["zzz=1.2.3.4:1".to_string()]).unwrap_err();
         assert!(matches!(&err, ErrorCarga::Validacion(m) if m.contains("no está declarado")), "{err}");
+    }
+
+    // --- M5 (RF-38): process model Sequential (ADR-0016) ---
+
+    /// `secuencia_usuario: true` implica `sequence_call` y se reescribe a la
+    /// clave canónica de la secuencia usuario al cargar el programa.
+    #[test]
+    fn secuencia_usuario_implica_sequence_call() {
+        let yaml = "\
+nombre: pm
+main:
+  - nombre: test_uut
+    secuencia_usuario: true
+";
+        let s = cargar_de_texto(yaml).unwrap();
+        let paso = &s.pasos_main[0];
+        assert_eq!(paso.tipo, modelo::TipoPaso::SequenceCall);
+        assert!(paso.secuencia_usuario);
+        assert_eq!(paso.secuencia, None, "el destino se inyecta al cargar el programa");
+    }
+
+    /// `secuencia_usuario: true` con `secuencia` o `parametros` → error
+    /// (la frontera PM↔usuario se comunica por `asigna`/`locals`).
+    #[test]
+    fn secuencia_usuario_con_destino_o_parametros_es_error() {
+        let casos = [
+            (
+                "nombre: pm\nmain:\n  - nombre: c\n    secuencia_usuario: true\n    secuencia: ./h.yaml\n",
+                "no se declara destino",
+            ),
+            (
+                "nombre: pm\nmain:\n  - nombre: c\n    secuencia_usuario: true\n    parametros: { p: locals.x }\n",
+                "MVP-parcial",
+            ),
+        ];
+        for (yaml, frag) in casos {
+            let err = cargar_de_texto(yaml).unwrap_err();
+            assert!(
+                matches!(&err, ErrorCarga::Validacion(m) if m.contains(frag)),
+                "esperaba '{frag}' en {err}"
+            );
+        }
+    }
+
+    /// Sin `--process-model`, un YAML con `secuencia_usuario: true` falla al
+    /// cargar el programa (no hay secuencia usuario que invocar).
+    #[test]
+    fn secuencia_usuario_sin_process_model_es_error() {
+        let dir = std::env::temp_dir().join(format!("anvil_m5_{}", "sin_pm"));
+        std::fs::create_dir_all(&dir).unwrap();
+        let y = dir.join("pm.yaml");
+        std::fs::write(&y, "nombre: pm\nmain:\n  - nombre: c\n    secuencia_usuario: true\n").unwrap();
+        let err = cargar_programa_de_archivo(y.to_str().unwrap()).unwrap_err();
+        assert!(
+            matches!(&err, ErrorCarga::Validacion(m) if m.contains("--process-model")),
+            "{err}"
+        );
+    }
+
+    /// `cargar_programa_con_process_model`: el PM es la raíz, la secuencia
+    /// usuario se inyecta bajo `CLAVE_SECUENCIA_USUARIO` y el call se
+    /// reescribe a esa clave.
+    #[test]
+    fn process_model_inyecta_secuencia_usuario() {
+        let dir = std::env::temp_dir().join(format!("anvil_m5_{}", "pm_ok"));
+        std::fs::create_dir_all(&dir).unwrap();
+        let pm = dir.join("pm.yaml");
+        std::fs::write(
+            &pm,
+            "nombre: pm\nlocals: { estado_uut: '' }\nmain:\n  - nombre: test_uut\n    secuencia_usuario: true\n    asigna: { estado_uut: '${resultado.estado}' }\n",
+        )
+        .unwrap();
+        let usuario = dir.join("usuario.yaml");
+        std::fs::write(&usuario, "nombre: usuario\nmain:\n  - nombre: m\n").unwrap();
+
+        let prog = cargar_programa_con_process_model(pm.to_str().unwrap(), usuario.to_str().unwrap()).unwrap();
+        assert_eq!(prog.raiz.nombre, "pm", "el PM es la raíz");
+        let call = &prog.raiz.pasos_main[0];
+        assert_eq!(call.secuencia.as_deref(), Some(modelo::CLAVE_SECUENCIA_USUARIO));
+        let sub = prog.archivos.get(modelo::CLAVE_SECUENCIA_USUARIO).unwrap();
+        assert_eq!(sub.nombre, "usuario");
+    }
+
+    /// Un PM que no invoca a la secuencia usuario → error claro.
+    #[test]
+    fn process_model_sin_invocacion_usuario_es_error() {
+        let dir = std::env::temp_dir().join(format!("anvil_m5_{}", "pm_sin_call"));
+        std::fs::create_dir_all(&dir).unwrap();
+        let pm = dir.join("pm.yaml");
+        std::fs::write(&pm, "nombre: pm\nmain:\n  - nombre: m\n").unwrap();
+        let usuario = dir.join("usuario.yaml");
+        std::fs::write(&usuario, "nombre: usuario\nmain:\n  - nombre: m\n").unwrap();
+
+        let err = cargar_programa_con_process_model(pm.to_str().unwrap(), usuario.to_str().unwrap()).unwrap_err();
+        assert!(
+            matches!(&err, ErrorCarga::Validacion(m) if m.contains("no invoca a la secuencia usuario")),
+            "{err}"
+        );
+    }
+
+    /// La secuencia usuario no puede usar `secuencia_usuario` (sólo el PM):
+    /// al cargarla como programa (sin `--process-model`) ya falla.
+    #[test]
+    fn process_model_usuario_con_secuencia_usuario_es_error() {
+        let dir = std::env::temp_dir().join(format!("anvil_m5_{}", "pm_usuario_flag"));
+        std::fs::create_dir_all(&dir).unwrap();
+        let pm = dir.join("pm.yaml");
+        std::fs::write(&pm, "nombre: pm\nmain:\n  - nombre: c\n    secuencia_usuario: true\n").unwrap();
+        let usuario = dir.join("usuario.yaml");
+        std::fs::write(&usuario, "nombre: usuario\nmain:\n  - nombre: c\n    secuencia_usuario: true\n").unwrap();
+
+        let err = cargar_programa_con_process_model(pm.to_str().unwrap(), usuario.to_str().unwrap()).unwrap_err();
+        assert!(
+            matches!(&err, ErrorCarga::Validacion(m) if m.contains("--process-model")),
+            "{err}"
+        );
+    }
+
+    /// La secuencia usuario no puede referenciar al PM: el PM se carga como
+    /// subsecuencia externa del usuario y su `secuencia_usuario` falla (no
+    /// hay `--process-model` en ese contexto) — el ciclo queda cortado por
+    /// construcción.
+    #[test]
+    fn process_model_usuario_no_puede_referenciar_al_pm() {
+        let dir = std::env::temp_dir().join(format!("anvil_m5_{}", "pm_usuario_a_pm"));
+        std::fs::create_dir_all(&dir).unwrap();
+        let pm = dir.join("pm.yaml");
+        std::fs::write(&pm, "nombre: pm\nmain:\n  - nombre: c\n    secuencia_usuario: true\n").unwrap();
+        let usuario = dir.join("usuario.yaml");
+        std::fs::write(&usuario, "nombre: usuario\nmain:\n  - nombre: c\n    tipo: sequence_call\n    secuencia: ./pm.yaml\n").unwrap();
+
+        let err = cargar_programa_con_process_model(pm.to_str().unwrap(), usuario.to_str().unwrap()).unwrap_err();
+        assert!(
+            matches!(&err, ErrorCarga::Validacion(m) if m.contains("--process-model")),
+            "{err}"
+        );
+    }
+
+    /// Colisión de subsecuencia externa entre PM y usuario → error.
+    #[test]
+    fn process_model_colision_de_subsecuencia_es_error() {
+        let dir = std::env::temp_dir().join(format!("anvil_m5_{}", "pm_colision"));
+        std::fs::create_dir_all(&dir).unwrap();
+        let pm = dir.join("pm.yaml");
+        std::fs::write(
+            &pm,
+            "nombre: pm\nmain:\n  - nombre: c\n    secuencia_usuario: true\n  - nombre: c2\n    tipo: sequence_call\n    secuencia: ./comun.yaml\n",
+        )
+        .unwrap();
+        std::fs::write(&dir.join("comun.yaml"), "nombre: comun\nmain:\n  - nombre: m\n").unwrap();
+        let usuario = dir.join("usuario.yaml");
+        std::fs::write(
+            &usuario,
+            "nombre: usuario\nmain:\n  - nombre: c\n    tipo: sequence_call\n    secuencia: ./comun.yaml\n",
+        )
+        .unwrap();
+
+        let err = cargar_programa_con_process_model(pm.to_str().unwrap(), usuario.to_str().unwrap()).unwrap_err();
+        assert!(
+            matches!(&err, ErrorCarga::Validacion(m) if m.contains("colisión")),
+            "{err}"
+        );
+    }
+
+    /// El ejemplo `ejemplos/process_model_sequential.yaml` carga como PM con
+    /// la secuencia usuario inyectada.
+    #[test]
+    fn ejemplo_process_model_carga_con_usuario() {
+        let pm = format!("{}/../../ejemplos/process_model_sequential.yaml", env!("CARGO_MANIFEST_DIR"));
+        let usuario = format!("{}/../../ejemplos/basica.yaml", env!("CARGO_MANIFEST_DIR"));
+        let prog = cargar_programa_con_process_model(&pm, &usuario)
+            .unwrap_or_else(|e| panic!("no carga el PM {pm}: {e}"));
+        assert_eq!(prog.raiz.nombre, "process_model_sequential");
+        let call = prog.raiz.pasos_main.iter().find(|p| p.secuencia_usuario).expect("el PM invoca al usuario");
+        assert_eq!(call.secuencia.as_deref(), Some(modelo::CLAVE_SECUENCIA_USUARIO));
+        assert_eq!(
+            prog.archivos.get(modelo::CLAVE_SECUENCIA_USUARIO).map(|d| d.nombre.as_str()),
+            Some("basica")
+        );
     }
 }

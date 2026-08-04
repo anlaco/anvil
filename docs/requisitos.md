@@ -97,9 +97,9 @@ Prioridad: **MVP** (Must), **MVP-parcial** (Should), **post-MVP** (Could),
 
 | ID | Requisito | Prioridad | Trazabilidad |
 |---|---|---|---|
-| RF-38 | **Process model Sequential** simple; separación secuencia vs. "cómo se corre en producción". | MVP-parcial | [diseno/proceso-de-test.md](diseno/proceso-de-test.md) |
+| RF-38 | **Process model Sequential** simple; separación secuencia vs. "cómo se corre en producción". | MVP-parcial ✅ (M5) | `cargador::cargar_programa_con_process_model` + `DefinicionPaso.secuencia_usuario` + flag `--process-model` (ADR-0016); [diseno/proceso-de-test.md](diseno/proceso-de-test.md) |
 | RF-39 | Paralelismo (Parallel/Batch) con cancelación jerárquica. | post-MVP | diseno/proceso-de-test.md |
-| RF-40 | **Headless/CLI** primero. | MVP | [diseno/ui-vs-headless.md](diseno/ui-vs-headless.md) |
+| RF-40 | **Headless/CLI** primero. | MVP ✅ (M5) | `crates/motor/src/bin/anvil.rs` (`--help`/`-h`, `--version`/`-V`, `--process-model`, errores claros); [diseno/ui-vs-headless.md](diseno/ui-vs-headless.md) |
 | RF-41 | Operator UI web + UIMsgs. | post-MVP | diseno/ui-vs-headless.md |
 
 ### Out-of-scope (v1)

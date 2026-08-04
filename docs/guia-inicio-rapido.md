@@ -11,7 +11,7 @@ para el porqué.
 Descarga el binario `anvil` y corre:
 
 ```sh
-./anvil <secuencia.yaml> [--json <ruta>] [--csv <ruta>] [--limits <ruta>] [--ejecutor nombre=host:puerto]
+./anvil <secuencia.yaml> [--process-model <pm.yaml>] [--json <ruta>] [--csv <ruta>] [--limits <ruta>] [--ejecutor nombre=host:puerto]
 ```
 
 Ejemplos (con los del repo en `ejemplos/`):
@@ -24,11 +24,20 @@ Ejemplos (con los del repo en `ejemplos/`):
 ./anvil ejemplos/basica.yaml --limits ejemplos/limites.limits.yaml
 ./anvil ejemplos/demo_ejecutores.yaml      # routing: embebido + Python en loopback
 ./anvil ejemplos/demo_ejecutores.yaml --ejecutor python=127.0.0.1:9200
+./anvil --process-model ejemplos/process_model_sequential.yaml ejemplos/basica.yaml  # process model (M5)
 ```
 
 La consola imprime el reporte textual por **stdout** (los diagnósticos van a
 stderr, no lo ensucian). `--json`/`--csv` vuelcan a fichero. No hay
 dependencias que instalar.
+
+> **Process model (M5, RF-38, ADR-0016):** `--process-model pm.yaml` corre
+> la secuencia del operador **envuelta** en un process model: el PM es la
+> raíz (identificar UUT → invocar la secuencia del operador → notificar) y
+> la secuencia del operador se inyecta como subsecuencia usuario
+> (`secuencia_usuario: true` en el PM). La misma secuencia va de I&D a
+> fábrica cambiando solo el PM. Ver
+> [diseno/proceso-de-test.md](diseno/proceso-de-test.md).
 
 > **Routing de ejecutores (M5-ext.1, ADR-0013):** `ejemplos/demo_ejecutores.yaml`
 > demuestra el despacho por nombre→endpoint: `verificar_led` lo atiende el
@@ -125,16 +134,22 @@ unitario: `cargo test -p motor sequence_call_by_reference`.
 ## Uso del CLI
 
 ```
-anvil <secuencia.yaml> [--json <ruta>] [--csv <ruta>] [--limits <ruta>] [--ejecutor nombre=host:puerto]
+anvil <secuencia.yaml> [--process-model <pm.yaml>] [--json <ruta>] [--csv <ruta>] [--limits <ruta>] [--ejecutor nombre=host:puerto]
 ```
 
-- La secuencia es el primer argumento (obligatorio).
+- La secuencia es el primer argumento posicional (obligatorio); los flags
+  pueden ir antes o después.
+- `--process-model <pm.yaml>` corre la secuencia envuelta en un process
+  model (M5, RF-38): el PM es la raíz y la secuencia del operador se
+  inyecta como subsecuencia usuario (ADR-0016). Sin él, la secuencia es la
+  raíz (compat).
 - Consola siempre; `--json`/`--csv` opcionales (fichero).
 - `--limits` inyecta un sidecar de límites por nombre de paso (RF-30),
   sobreescribiendo los embebidos (sólo la secuencia raíz hoy).
 - `--ejecutor nombre=host:puerto` re-apunta un ejecutor declarado en
   `ejecutores:` a otro endpoint sin tocar el YAML (R&D vs. fábrica, RF-36.3);
   puede repetirse. Si el nombre no está declarado, error al cargar.
+- `--help`/`-h` muestra la ayuda; `--version`/`-V` la versión.
 - Flag del host: `--solo-loopback` rechaza cualquier `grpc` no-loopback
   declarado (CI/paranoia).
 - Los diagnósticos van a **stderr**; stdout queda limpio para el reporte.
@@ -216,13 +231,17 @@ Ver [ADR-0015](adr/0015-el-wasm-del-usuario-es-una-funcion-puenteado-a-grpc.md).
 
 ## Siguiente lectura
 
-- [roadmap.md](roadmap.md) — qué hay hecho (M0→M4b + M5-ext.1/2) y qué queda
-  (LID aplazado).
+- [roadmap.md](roadmap.md) — qué hay hecho (M0→M5) y qué queda (LID
+  aplazado, post-MVP).
 - [diseno/formato-de-secuencia.md](diseno/formato-de-secuencia.md) — el
   schema YAML completo.
+- [diseno/proceso-de-test.md](diseno/proceso-de-test.md) — el process model
+  Sequential (M5, RF-38).
 - [adr/0011-distribucion-un-binario-hospeda-wasmtime.md](adr/0011-distribucion-un-binario-hospeda-wasmtime.md)
   — por qué un binario hospeda wasmtime.
 - [adr/0013-cargador-wasm-host-side-y-routing.md](adr/0013-cargador-wasm-host-side-y-routing.md)
   — el routing nombre→endpoint y el cargador `.wasm` host-side.
 - [adr/0014-cargador-wasm-host-side-m5-ext2.md](adr/0014-cargador-wasm-host-side-m5-ext2.md)
   — el cargador de `.wasm` por path (M5-ext.2, implementado).
+- [adr/0016-process-model-sequential-como-envoltorio.md](adr/0016-process-model-sequential-como-envoltorio.md)
+  — el process model Sequential (M5, implementado).
