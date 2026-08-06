@@ -1,0 +1,34 @@
+# BUG-3 (subsecuencia) — `asigna` sobre un nombre declarado como `parameter`
+# crea en silencio un Local que lo ensombrece.
+#
+# `asigna` escribe siempre en Locals (ADR-0009). Si el destino coincide con el
+# nombre de un `parameter` declarado, el motor NO avisa: crea un local nuevo, el
+# parameter se queda con su valor inicial, y el retorno by-reference devuelve ese
+# valor inicial al padre. Todo el test sale verde con datos que no son los medidos.
+#
+# Se invoca desde bug3-padre-asigna-parameter.yaml.
+#
+# Comportamiento observado:
+#   [paso]    medir_voltaje                     -> mide 4.2
+#   [saltado] verificar_led: precondicion falsa -> parameters.p sigue siendo 0.0
+#   [paso]    abrir_rele                        -> locals.p SI vale 4.2 (el shadow)
+#
+# Criterio de aceptacion: el cargador deberia rechazar (o al menos avisar de)
+# un `asigna` cuyo destino es un nombre declarado en `parameters:`.
+
+nombre: sub_asigna_parameter
+parameters:
+  p: 0.0
+main:
+  - nombre: medir_voltaje
+    reintentos: 1
+    asigna:
+      p: '${resultado.valor_medido}'
+  # lee el PARAMETER: sigue a 0.0 -> se salta
+  - nombre: verificar_led
+    reintentos: 1
+    precondicion: 'parameters.p > 4.0'
+  # lee el LOCAL homonimo creado por asigna: vale 4.2 -> se ejecuta
+  - nombre: abrir_rele
+    reintentos: 1
+    precondicion: 'locals.p > 4.0'

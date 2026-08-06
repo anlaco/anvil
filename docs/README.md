@@ -30,6 +30,10 @@ hace, qué no hace y por qué leyendo solo tres archivos, en este orden:
 El resto profundiza por área. Si un término no queda claro, está en el
 [glosario](glosario.md).
 
+Lo que se ha encontrado al usar el producto de verdad está en
+**[qa/informe-beta-2026-08.md](qa/informe-beta-2026-08.md)**, con las
+reproducciones ejecutables en [`qa/regresion/`](qa/regresion/).
+
 ## Mapa del árbol
 
 ```
@@ -51,6 +55,9 @@ docs/
 │  └─ 0006-wasi-grpc-propio.md
 │  (0007-0012 en la misma carpeta; 0013 reemplaza 0012 en el cargador y el routing)
 ├─ planes/                    planes de hito (m4-nucleo, m4b, m5-ext)
+├─ qa/                        informes de campo y regresión de defectos
+│  ├─ informe-beta-2026-08.md  hallazgos de la 1ª beta externa (4 defectos + diagnóstico)
+│  └─ regresion/               reproducciones mínimas ejecutables (`run.sh`)
 └─ diseno/                    diseño del dominio, un doc por área funcional
    ├─ motor-de-ejecucion.md
    ├─ limites-y-estados.md
