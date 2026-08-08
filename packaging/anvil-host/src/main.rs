@@ -91,6 +91,31 @@ fn wasi_loopback_con_declaradas(ips_declaradas: HashSet<IpAddr>) -> WasiCtxBuild
     b
 }
 
+/// Flags del CLI del guest motor que **consumen el argumento siguiente**
+/// (M5, RF-40). El host los conoce sólo para saber cuál de los argumentos es
+/// la ruta de la secuencia; el parseo de verdad lo hace el guest.
+const FLAGS_CON_VALOR: [&str; 6] =
+    ["--process-model", "--json", "--csv", "--limits", "--ejecutor", "--port"];
+
+/// La ruta de la secuencia: el primer argumento **posicional**, saltando los
+/// flags y sus valores. `None` si no hay ninguno, o si se pidió
+/// `--help`/`--version` (ahí no hay YAML que pre-escanear y avisar de que
+/// "no se pudo leer '--help'" sólo ensuciaría la ayuda).
+fn ruta_de_secuencia(args: &[String]) -> Option<String> {
+    let mut it = args.iter();
+    while let Some(a) = it.next() {
+        if a == "--help" || a == "--version" {
+            return None;
+        }
+        if FLAGS_CON_VALOR.contains(&a.as_str()) {
+            it.next();
+        } else if !a.starts_with("--") {
+            return Some(a.clone());
+        }
+    }
+    None
+}
+
 /// IPs no-loopback declaradas en `ejecutores:` del YAML de la secuencia
 /// (sólo `tipo: grpc` con `host` no-loopback). Es la "declaración" que
 /// justifica la relajación del loopback de ADR-0011: nada sale de loopback
@@ -203,12 +228,19 @@ fn instanciar_wasm(nombre: &str, path: &Path) -> Result<EjecutorWasm, String> {
     Ok(EjecutorWasm { nombre: nombre.into(), path: path.display().to_string(), puerto, _child: child })
 }
 
+/// Sondeos de 10 ms al esperar a que un ejecutor empiece a escuchar (60 s).
+/// Generoso a propósito: en un build **debug** wasmtime compila el guest sin
+/// optimizar y el ejecutor puede tardar decenas de segundos en llegar al
+/// `bind` (en release es inmediato). El timeout sólo se agota cuando algo va
+/// mal de verdad, así que pasarse de largo no cuesta nada.
+const SONDEOS_ARRANQUE: u32 = 6000;
+
 /// Espera a que el puente del ejecutor `.wasm` escuche en su puerto (mismo
 /// patrón polling que `esperar_ejecutor`). Timeout agregado por módulo;
 /// falla con un mensaje claro nombrando al ejecutor.
 fn esperar_wasm(exec: &EjecutorWasm) -> Result<(), String> {
     let addr = format!("127.0.0.1:{}", exec.puerto);
-    for _ in 0..500 {
+    for _ in 0..SONDEOS_ARRANQUE {
         if let Ok(c) = TcpStream::connect(&addr) {
             drop(c);
             return Ok(());
@@ -225,7 +257,7 @@ fn esperar_wasm(exec: &EjecutorWasm) -> Result<(), String> {
 /// de prueba. El ejecutor (loop de aceptar) descarta esa conexión.
 fn esperar_ejecutor() {
     let addr = format!("127.0.0.1:{PUERTO}");
-    for _ in 0..500 {
+    for _ in 0..SONDEOS_ARRANQUE {
         if let Ok(c) = TcpStream::connect(&addr) {
             drop(c); // conexión de prueba: se cierra; el ejecutor la descarta.
             return;
@@ -246,11 +278,13 @@ fn main() {
         args.iter().filter(|a| *a != "--solo-loopback").cloned().collect();
 
     // M5-ext.1/2: leer el YAML para recolectar los `ejecutores:` declarados.
-    // El primer argumento del motor es la ruta de la secuencia (si falta, el
-    // motor ya se queja; aquí no hacemos nada especial).
+    // La ruta es el primer argumento **posicional** (M5, RF-40: el CLI acepta
+    // flags antes de la secuencia); si falta, o si sólo se pidió ayuda, no hay
+    // nada que pre-escanear y el guest motor se encarga.
     let mut ips_no_loopback: HashSet<IpAddr> = HashSet::new();
     let mut programa: Option<modelo::Programa> = None;
-    if let Some(ruta) = args_motor.first() {
+    let ruta_secuencia = ruta_de_secuencia(&args_motor);
+    if let Some(ruta) = ruta_secuencia.as_ref() {
         match cargador::cargar_programa_de_archivo(ruta) {
             Ok(p) => {
                 ips_no_loopback = ips_no_loopback_declaradas(&p);
@@ -278,7 +312,7 @@ fn main() {
     // --- recibe un `Programa` en memoria), así que el host no puede
     // --- reescribirle el modelo: compone `--ejecutor nombre=127.0.0.1:puerto`
     // --- (M5-ext.1, que ya convierte `wasm` → `grpc` al aplicarlo).
-    let ruta_yaml = args_motor.first().cloned().unwrap_or_default();
+    let ruta_yaml = ruta_secuencia.clone().unwrap_or_default();
     let dir_yaml = Path::new(&ruta_yaml).parent().unwrap_or_else(|| Path::new("")).to_path_buf();
     let mut ejecutores_wasm: Vec<EjecutorWasm> = Vec::new();
     let mut overrides_motor: Vec<String> = Vec::new();
@@ -333,8 +367,12 @@ fn main() {
     let exec_engine = engine.clone();
     let exec_handle = thread::spawn(move || {
         let wasi = wasi_loopback().build();
-        // El ejecutor loop infinito de aceptar; su resultado se ignora.
-        let _ = correr_guest(&exec_engine, wasi, EJECUTOR);
+        // El ejecutor es un loop infinito de aceptar: si termina, es un fallo.
+        // El error va a stderr — si no, el usuario sólo ve el timeout de
+        // `esperar_ejecutor()` sin la causa.
+        if let Err(e) = correr_guest(&exec_engine, wasi, EJECUTOR) {
+            eprintln!("el ejecutor de pasos terminó con error: {e:?}");
+        }
     });
 
     // --- Esperar a que escuche antes de lanzar el motor (que no reintenta). ---
@@ -378,4 +416,58 @@ fn main() {
     drop(exec_handle);
     drop(ejecutores_wasm);
     std::process::exit(exit_code);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::ruta_de_secuencia;
+
+    fn args(v: &[&str]) -> Vec<String> {
+        v.iter().map(|s| s.to_string()).collect()
+    }
+
+    #[test]
+    fn ruta_sola() {
+        assert_eq!(ruta_de_secuencia(&args(&["s.yaml"])), Some("s.yaml".into()));
+    }
+
+    #[test]
+    fn flags_antes_de_la_ruta() {
+        let a = args(&["--process-model", "pm.yaml", "--quiet", "s.yaml"]);
+        assert_eq!(ruta_de_secuencia(&a), Some("s.yaml".into()));
+    }
+
+    #[test]
+    fn el_valor_de_un_flag_no_es_la_ruta() {
+        // `pm.yaml` es el valor de `--process-model`, no la secuencia.
+        let a = args(&["--process-model", "pm.yaml"]);
+        assert_eq!(ruta_de_secuencia(&a), None);
+    }
+
+    #[test]
+    fn flags_despues_de_la_ruta() {
+        let a = args(&["s.yaml", "--json", "o.json", "--csv", "o.csv"]);
+        assert_eq!(ruta_de_secuencia(&a), Some("s.yaml".into()));
+    }
+
+    #[test]
+    fn help_y_version_no_tienen_ruta() {
+        assert_eq!(ruta_de_secuencia(&args(&["--help"])), None);
+        assert_eq!(ruta_de_secuencia(&args(&["--version"])), None);
+        // También si van detrás de la secuencia: el guest sale por ayuda y el
+        // host no debe pre-escanear ni quejarse del YAML.
+        assert_eq!(ruta_de_secuencia(&args(&["s.yaml", "--help"])), Some("s.yaml".into()));
+    }
+
+    #[test]
+    fn sin_argumentos() {
+        assert_eq!(ruta_de_secuencia(&[]), None);
+    }
+
+    #[test]
+    fn flag_desconocido_no_se_confunde_con_la_ruta() {
+        // El guest se quejará; el host sólo debe no tomarlo por un path.
+        let a = args(&["--inventado", "s.yaml"]);
+        assert_eq!(ruta_de_secuencia(&a), Some("s.yaml".into()));
+    }
 }
