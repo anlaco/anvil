@@ -1003,6 +1003,77 @@ pub fn limites_sin_aplicar(
     sobran
 }
 
+/// Inyecta los límites del sidecar en **todo el programa**: la raíz, las
+/// subsecuencias de archivos externos y las inline de cada una. Devuelve
+/// cuántos pasos recibieron un límite.
+///
+/// Aplicarlo sólo a la raíz era DEF-1 del informe de beta: con
+/// `--process-model` la raíz es el **process model**
+/// ([`cargar_programa_con_pm`]) y la secuencia del operador queda en
+/// `archivos`, así que el sidecar no afectaba a nada —en silencio— justo en
+/// el modo de producción, que es para el que existe (variar umbrales por
+/// lote sin re-deploy, RF-30). El criterio es uniforme: **el sidecar casa
+/// por nombre de paso en cualquier secuencia del programa**.
+pub fn aplicar_limites_programa(
+    programa: &mut Programa,
+    limites: &HashMap<String, Limite>,
+) -> usize {
+    let mut aplicados = aplicar_limites_recursivo(&mut programa.raiz, limites);
+    for sec in programa.archivos.values_mut() {
+        aplicados += aplicar_limites_recursivo(sec, limites);
+    }
+    aplicados
+}
+
+/// [`aplicar_limites`] sobre una secuencia y sus subsecuencias **inline**
+/// (las externas las recorre [`aplicar_limites_programa`] por `archivos`).
+fn aplicar_limites_recursivo(
+    secuencia: &mut DefinicionSecuencia,
+    limites: &HashMap<String, Limite>,
+) -> usize {
+    let mut aplicados = aplicar_limites(secuencia, limites);
+    for sub in secuencia.subsecuencias.values_mut() {
+        aplicados += aplicar_limites_recursivo(sub, limites);
+    }
+    aplicados
+}
+
+/// Los nombres del sidecar que no corresponden a ningún paso de **ningún**
+/// lugar del programa (DIAG-1 sobre el alcance de
+/// [`aplicar_limites_programa`]). Ordenados, para que el aviso sea estable.
+pub fn limites_sin_aplicar_programa(
+    programa: &Programa,
+    limites: &HashMap<String, Limite>,
+) -> Vec<String> {
+    let mut nombres: HashSet<&str> = HashSet::new();
+    recoge_nombres_de_paso(&programa.raiz, &mut nombres);
+    for sec in programa.archivos.values() {
+        recoge_nombres_de_paso(sec, &mut nombres);
+    }
+    let mut sobran: Vec<String> = limites
+        .keys()
+        .filter(|n| !nombres.contains(n.as_str()))
+        .cloned()
+        .collect();
+    sobran.sort();
+    sobran
+}
+
+/// Nombres de todos los pasos de una secuencia y de sus inline.
+fn recoge_nombres_de_paso<'a>(secuencia: &'a DefinicionSecuencia, nombres: &mut HashSet<&'a str>) {
+    nombres.extend(
+        secuencia
+            .pasos_setup
+            .iter()
+            .chain(&secuencia.pasos_main)
+            .chain(&secuencia.pasos_cleanup)
+            .map(|p| p.nombre.as_str()),
+    );
+    for sub in secuencia.subsecuencias.values() {
+        recoge_nombres_de_paso(sub, nombres);
+    }
+}
+
 /// Reglas de negocio que el schema por sí solo no expresa. No revisa el
 /// `nombre` (eso lo hace [`secuencia_yaml_a_definicion`] con su fallback) ni
 /// las `subsecuencias` (las traduce/recorre la propia función llamadora).
@@ -1853,6 +1924,112 @@ main:
             Limite::Rango { min: 0.0, max: 1.0 },
         )]);
         assert!(limites_sin_aplicar(&s, &lim).is_empty());
+    }
+
+    /// DEF-1 del informe de beta: con `--process-model` la raíz es el PM y la
+    /// secuencia del operador vive en `archivos`. El sidecar tiene que llegar
+    /// igual, o el mecanismo de variabilidad por lote no funciona justo en
+    /// producción.
+    #[test]
+    fn property_loader_alcanza_la_secuencia_del_operador_bajo_un_pm() {
+        let dir = std::env::temp_dir().join("anvil_def1_sidecar_pm");
+        std::fs::create_dir_all(&dir).unwrap();
+        let pm = dir.join("pm.yaml");
+        std::fs::write(
+            &pm,
+            "nombre: pm\nmain:\n  - nombre: test_uut\n    tipo: sequence_call\n    secuencia: secuencia_usuario\n",
+        )
+        .unwrap();
+        let usuario = dir.join("usuario.yaml");
+        std::fs::write(
+            &usuario,
+            "nombre: usuario\nmain:\n  - nombre: medir_voltaje\n    tipo: grpc\n",
+        )
+        .unwrap();
+
+        let mut prog =
+            cargar_programa_con_pm(pm.to_str().unwrap(), usuario.to_str().unwrap()).unwrap();
+        let lim = HashMap::from([(
+            "medir_voltaje".to_string(),
+            Limite::Rango { min: 4.0, max: 6.0 },
+        )]);
+
+        // La primitiva por secuencia sólo ve el PM: ahí no hay nada que casar.
+        assert_eq!(
+            aplicar_limites(&mut prog.raiz, &lim),
+            0,
+            "el PM no tiene un paso 'medir_voltaje'"
+        );
+
+        assert!(
+            limites_sin_aplicar_programa(&prog, &lim).is_empty(),
+            "el nombre sí existe en el programa, no es huérfano"
+        );
+        assert_eq!(
+            aplicar_limites_programa(&mut prog, &lim),
+            1,
+            "el sidecar llega a la secuencia del operador"
+        );
+        let clave = prog.raiz.pasos_main[0].secuencia.as_deref().unwrap();
+        assert_eq!(
+            prog.archivos[clave].pasos_main[0].limite,
+            Some(Limite::Rango { min: 4.0, max: 6.0 })
+        );
+    }
+
+    /// El criterio es uniforme: el sidecar casa por nombre en cualquier
+    /// secuencia del programa, también en las **inline**.
+    #[test]
+    fn property_loader_programa_alcanza_raiz_externas_e_inline() {
+        let dir = std::env::temp_dir().join("anvil_def1_sidecar_alcance");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(
+            dir.join("hija.yaml"),
+            "nombre: hija\nmain:\n  - nombre: medir_voltaje\n    tipo: grpc\n",
+        )
+        .unwrap();
+        let padre = dir.join("padre.yaml");
+        std::fs::write(
+            &padre,
+            "nombre: padre\nsubsecuencias:\n  inline:\n    nombre: inline\n    main:\n      - nombre: medir_voltaje\n        tipo: grpc\nmain:\n  - nombre: medir_voltaje\n    tipo: grpc\n  - nombre: c1\n    tipo: sequence_call\n    secuencia: ./hija.yaml\n  - nombre: c2\n    tipo: sequence_call\n    secuencia: inline\n",
+        )
+        .unwrap();
+
+        let mut prog = cargar_programa_de_archivo(padre.to_str().unwrap()).unwrap();
+        let lim = HashMap::from([(
+            "medir_voltaje".to_string(),
+            Limite::Rango { min: 4.0, max: 6.0 },
+        )]);
+        assert_eq!(
+            aplicar_limites_programa(&mut prog, &lim),
+            3,
+            "raíz + externa + inline"
+        );
+    }
+
+    #[test]
+    fn limites_sin_aplicar_programa_lista_los_huerfanos_de_todo_el_programa() {
+        let mut prog = Programa {
+            raiz: cargar_de_texto(basica_yaml()).unwrap(),
+            ..Default::default()
+        };
+        prog.archivos.insert(
+            "hija.yaml".to_string(),
+            cargar_de_texto("nombre: hija\nmain:\n  - nombre: solo_en_la_hija\n    tipo: grpc\n")
+                .unwrap(),
+        );
+        let rango = Limite::Rango { min: 0.0, max: 1.0 };
+        let lim = HashMap::from([
+            ("medir_voltaje".to_string(), rango.clone()), // en la raíz
+            ("solo_en_la_hija".to_string(), rango.clone()), // en la externa
+            ("zeta_inventado".to_string(), rango.clone()),
+            ("alfa_inventado".to_string(), rango),
+        ]);
+        assert_eq!(
+            limites_sin_aplicar_programa(&prog, &lim),
+            vec!["alfa_inventado", "zeta_inventado"],
+            "sólo los que no casan en ninguna secuencia, en orden estable"
+        );
     }
 
     #[test]

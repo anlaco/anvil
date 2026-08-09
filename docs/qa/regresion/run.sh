@@ -71,8 +71,15 @@ grep -qE '\[saltado\] verificar_led' "$TMP/d3b.out" && res=1 || res=0
 check DEF-3b "retorno by-reference trae el valor medido al padre" $res
 
 # ---- DIAG-1: avisar cuando el sidecar no afecta a ningún paso ----
-$A --process-model process_models/sequential.yaml \
-   ejemplos/limites.yaml --limits ejemplos/limites.limits.yaml 2>&1 |
+# Antes este caso reusaba el comando de DEF-1, que daba 0 afectados **por el
+# defecto**. Arreglado DEF-1, hace falta un sidecar huérfano de verdad.
+cat >"$TMP/huerfano.limits.yaml" <<'YAML'
+paso_que_no_existe:
+  tipo: comparacion
+  op: ge
+  esperado: 4.0
+YAML
+$A ejemplos/limites.yaml --limits "$TMP/huerfano.limits.yaml" 2>&1 |
   grep -qiE 'aviso.*sidecar|sidecar.*no afect|ningún paso'
 check DIAG-1 "aviso cuando el sidecar afecta a 0 pasos" $?
 
