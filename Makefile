@@ -8,7 +8,8 @@
 #   make build     todo en debug
 #   make release   todo en release  ← el binario que se distribuye
 #   make test      tests del core y del host
-#   make check     fmt + clippy de los tres workspaces
+#   make check     fmt + clippy de los tres workspaces (lo que exigirá la CI)
+#   make fmt       aplica el formato
 #   make run       corre el ejemplo básico con el binario debug
 #   make clean     limpia los tres targets
 #
@@ -23,7 +24,7 @@ TARGET  := wasm32-wasip2
 ANVIL_DEBUG   := packaging/anvil-host/target/debug/anvil
 ANVIL_RELEASE := packaging/anvil-host/target/release/anvil
 
-.PHONY: all build release test test-core test-host check run clean help
+.PHONY: all build release test test-core test-host check fmt run clean help
 
 all: build
 
@@ -53,15 +54,22 @@ test-core:
 test-host: build
 	cargo test --manifest-path $(HOST)
 
-## Clippy de los tres workspaces. **Informa, no corta**: hoy el core y el
-## puente tienen lints pendientes (el host está limpio). Cuando se limpien,
-## esto pasa a `-D warnings` y la CI puede exigirlo.
-## `cargo fmt` no se incluye a propósito: el repo nunca ha pasado por rustfmt
-## y adoptarlo es un reformateo masivo que merece decidirse aparte.
+## Formato y lints de los tres workspaces, tal como los exigirá la CI.
+## `rustfmt.toml` (raíz) vale para los tres; los lints están a cero, así que
+## `-D warnings` corta: un aviso nuevo es un fallo, no ruido de fondo.
 check:
-	cargo clippy --all-targets
-	cargo clippy --manifest-path $(HOST) --all-targets
-	cargo clippy --manifest-path $(PUENTE) --all-targets
+	cargo fmt --check
+	cargo fmt --check --manifest-path $(HOST)
+	cargo fmt --check --manifest-path $(PUENTE)
+	cargo clippy --all-targets -- -D warnings
+	cargo clippy --manifest-path $(HOST) --all-targets -- -D warnings
+	cargo clippy --manifest-path $(PUENTE) --all-targets -- -D warnings
+
+## Aplica el formato (lo que `check` verifica).
+fmt:
+	cargo fmt
+	cargo fmt --manifest-path $(HOST)
+	cargo fmt --manifest-path $(PUENTE)
 
 ## Humo: corre el ejemplo básico con el binario recién construido.
 run: build
