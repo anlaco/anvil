@@ -55,6 +55,17 @@ dependencias que instalar.
 - Sin `wasmtime` necesario: el host lo embebe como librería. (El CLI de
   `wasmtime` sólo hace falta si quieres correr los guests sueltos para
   depurar — ver abajo.)
+- **El repo hermano [`wasi-grpc`](https://github.com/anlaco/wasi-grpc) clonado
+  al lado** de éste: `motor` y `ejecutor_pasos` lo referencian por
+  `path = "../wasi-grpc"` (dogfooding, ver `Cargo.toml`). Sin él cargo **no
+  lee ni el workspace** — falla antes de compilar nada, con un
+  `failed to load manifest for workspace member`. El layout esperado es:
+
+  ```
+  ..../
+    anvil/
+    wasi-grpc/
+  ```
 
 ### Compilar
 
@@ -239,8 +250,40 @@ Referencia oficial: `ejemplos/hola-paso/`.
 
 Ver [ADR-0015](adr/0015-el-wasm-del-usuario-es-una-funcion-puenteado-a-grpc.md).
 
+## Integración continua
+
+`.github/workflows/ci.yml` corre en cada push a `main` y en cada PR: `make
+check` (fmt + clippy de los tres workspaces), los tests del core, `make
+release`, los tests del host y la regresión de la beta (informativa mientras
+queden defectos abiertos).
+
+Lo único que no es evidente es el acceso al repo hermano. Como la CI necesita
+clonar `wasi-grpc` —privado— y el `GITHUB_TOKEN` que GitHub da a cada job
+sólo cubre el propio repositorio, el workflow usa una **deploy key de sólo
+lectura**: la pública está instalada en `wasi-grpc` («anvil CI»), la privada
+es el secret `WASI_GRPC_DEPLOY_KEY` de este repo. Es la credencial más
+acotada que sirve: da lectura de ese repo y de nada más.
+
+El job reproduce el layout de hermanos con dos checkouts (`path: anvil` y
+`path: wasi-grpc`), porque la dependencia es por ruta relativa.
+
+**Para rotarla:**
+
+```sh
+ssh-keygen -t ed25519 -N "" -C "anvil CI" -f /tmp/k
+gh repo deploy-key add /tmp/k.pub --repo anlaco/wasi-grpc --title "anvil CI"
+gh secret set WASI_GRPC_DEPLOY_KEY --repo anlaco/anvil < /tmp/k
+gh repo deploy-key delete <id-de-la-vieja> --repo anlaco/wasi-grpc
+shred -u /tmp/k /tmp/k.pub
+```
+
+Cuando `wasi-grpc` se estabilice y se publique, la dependencia pasa a ser una
+versión y todo esto sobra.
+
 ## Solución de problemas
 
+- **`failed to load manifest for workspace member 'crates/ejecutor_pasos'`**
+  → falta el repo hermano `wasi-grpc` al lado de éste (ver Prerrequisitos).
 - **`Falta el artifact '…'`** al compilar el host → `make build` (o `make
   release`) desde la raíz, que encadena los tres pasos en orden.
 - **`no se pudo cargar la secuencia`** → el path del YAML no existe o no es

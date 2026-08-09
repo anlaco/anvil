@@ -1,0 +1,85 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  ci:
+    runs-on: ubuntu-latest
+    steps:
+      # `wasi-grpc` es un repo hermano privado y anvil lo referencia por
+      # `path = "../wasi-grpc"` (dogfooding: los dos se desarrollan a la vez).
+      # Sin él, cargo ni siquiera lee el workspace, así que el layout del
+      # runner tiene que reproducir el del disco:
+      #
+      #   $GITHUB_WORKSPACE/
+      #     anvil/       ← este repo
+      #     wasi-grpc/   ← el hermano
+      #
+      # De ahí el `path:` de los dos checkouts y el `working-directory` del
+      # job. El acceso al hermano va con una deploy key de SÓLO LECTURA
+      # (secret `WASI_GRPC_DEPLOY_KEY`): el `GITHUB_TOKEN` por defecto sólo
+      # cubre el propio repositorio.
+      - name: Checkout anvil
+        uses: actions/checkout@v4
+        with:
+          path: anvil
+
+      - name: Checkout wasi-grpc (repo hermano privado)
+        uses: actions/checkout@v4
+        with:
+          repository: anlaco/wasi-grpc
+          ssh-key: ${{ secrets.WASI_GRPC_DEPLOY_KEY }}
+          path: wasi-grpc
+
+      # `rust-toolchain.toml` fija el canal y el target wasm32-wasip2, así que
+      # basta con que la acción lo respete.
+      - name: Toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-wasip2
+          components: rustfmt, clippy
+
+      # Los tres workspaces tienen `target/` separados (ADR-0011: el core no
+      # arrastra wasmtime). wasmtime tarda ~2 min en frío, así que la caché
+      # es lo que hace que este job dure minutos y no decenas de minutos.
+      - name: Caché de cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            anvil
+            anvil/packaging/anvil-host
+            anvil/packaging/anvil-puente-wasm
+
+      - name: Formato y lints
+        working-directory: anvil
+        run: make check
+
+      - name: Tests del core
+        working-directory: anvil
+        run: cargo test
+
+      # Compila en release y corre los tests del host: en debug wasmtime
+      # compila los guests sin optimizar y el binario tarda ~26 s en arrancar
+      # (~1,2 s en release), lo que haría inviables las pruebas que lo ejecutan.
+      - name: Build release
+        working-directory: anvil
+        run: make release
+
+      - name: Tests del host
+        working-directory: anvil
+        run: cargo test --manifest-path packaging/anvil-host/Cargo.toml
+
+      # Los casos del informe de beta afirman el comportamiento CORRECTO, así
+      # que hoy fallan a propósito (5 de 6 defectos abiertos). Se ejecutan para
+      # ver el marcador en cada commit, sin cortar el build; cuando estén todos
+      # arreglados, se quita el `|| true` y pasa a ser una regresión de verdad.
+      - name: Regresión de la beta (informativo)
+        working-directory: anvil
+        run: ./docs/qa/regresion/run.sh || true
