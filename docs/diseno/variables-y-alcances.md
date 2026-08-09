@@ -48,10 +48,18 @@ main:
 - **Escritura:** un paso escribe su resultado en la variable indicada
   (`asigna`), y muta solo **Locals** de su secuencia (no FileGlobals ni
   StationGlobals — eso lo hace el motor, no el paso, para mantener el paso
-  aislado por contrato).
+  aislado por contrato). Ver el recorte de `Parameters` en sequence call, más
+  abajo.
 - **Tipado:** declaración con tipo básico (numérico, texto, booleano); la
   validación es al cargar (fail-fast). Sin el árbol de propiedades tipado
   recursivo de TestStand en el MVP.
+- **Destinos declarados:** el destino de `asigna` y los lvalues de
+  `statement` (`locals.X`/`parameters.P`) deben estar declarados en su
+  `locals:`/`parameters:` — el cargador lo rechaza si no (DEF-3 del informe
+  de beta). Sin esto, un destino mal escrito o el nombre de un `parameter`
+  crea una `Local` nueva en silencio en vez de fallar: el resto de la
+  secuencia sigue leyendo la variable original, sin tocar, y el veredicto es
+  el que no se pidió. Ver [informe-beta-2026-08.md](../qa/informe-beta-2026-08.md#def-3).
 
 ## Por qué este recorte
 
@@ -71,7 +79,9 @@ salida con la secuencia llamadora, como TestStand by-reference (default):
   padre: `parametros: { P: locals.X }`.
 - **Entrada:** el motor copia `locals.X` → `parameters.P` al iniciar la
   subsecuencia.
-- La subsecuencia **escribe en `parameters.P`** con `statement`/`asigna`.
+- La subsecuencia **escribe en `parameters.P`** con `statement` (`asigna`
+  escribe siempre en `locals`, aunque el nombre coincida con un `parameter`
+  declarado — el cargador lo rechaza, ver arriba).
 - **Salida:** al volver, el motor copia `parameters.P` (final) → `locals.X`
   (el mismo lvalue de la entrada). Un mismo `Parameter` es entrada y salida.
 

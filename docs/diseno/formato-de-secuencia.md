@@ -121,6 +121,11 @@ ficheros. Ver ADR-0010.
 - **Validación de schema** al cargar (campos obligatorios, tipos, `reintentos ≥ 1`,
   coherencia `tipo` ↔ `statement`: un `statement` sin `statement` o un `grpc`
   con `statement` son error).
+- El destino de `asigna` y los lvalues de `statement` deben estar declarados
+  en `locals`/`parameters` de su secuencia, y `asigna` no puede nombrar un
+  `parameter` (DEF-3 del informe de beta: sin esto, un destino mal escrito o
+  el nombre de un `parameter` creaba una `Local` nueva en silencio en vez de
+  fallar). Ver [variables-y-alcances.md](variables-y-alcances.md).
 - Errores de schema → la secuencia no carga (fail-fast), no se ejecuta a
   medias.
 - El cargador produce `DefinicionSecuencia`; el motor la recorre (ADR-0005).

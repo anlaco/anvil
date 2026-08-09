@@ -469,7 +469,7 @@ fn secuencia_yaml_a_definicion(
         subsecuencias.insert(k.clone(), secuencia_yaml_a_definicion(sub, Some(&k))?);
     }
 
-    Ok(DefinicionSecuencia {
+    let def = DefinicionSecuencia {
         nombre: y.nombre,
         pasos_setup: traduce_pasos(y.setup)?,
         pasos_main: traduce_pasos(y.main)?,
@@ -490,7 +490,87 @@ fn secuencia_yaml_a_definicion(
             .map(|(k, v)| (k, v.a_definicion()))
             .collect(),
         subsecuencias,
-    })
+    };
+    validar_lvalues(&def)?;
+    Ok(def)
+}
+
+/// DEF-3 del informe de beta: `asigna` escribe siempre en Locals (ADR-0009).
+/// Si su destino coincide con el nombre de un `parameter` declarado, el
+/// motor no avisa: crea un local homónimo, el `parameter` conserva su valor
+/// inicial y el retorno by-reference de un sequence call devuelve **ese**
+/// valor inicial al padre — un verde falso, sin ningún indicio en el YAML ni
+/// en la carga. La misma clase de fallo silencioso la produce un **typo** en
+/// el destino: se crea el local mal escrito, el declarado se queda con su
+/// valor inicial, y quien lo lea después decide con el dato equivocado.
+///
+/// Regla, fail-fast al cargar (simétrica con `validar_call` para los
+/// argumentos de un sequence call, más abajo):
+/// - destino de `asigna` que coincide con un `parameter` declarado → error.
+/// - destino de `asigna` no declarado en `locals` → error.
+/// - lvalue de `statement` (`locals.X`/`parameters.P`) no declarado en su
+///   scope → error.
+///
+/// Recorre `def` ya traducida (AST, no texto). Se invoca una vez por cada
+/// nivel de `secuencia_yaml_a_definicion` (raíz, y cada inline por su propia
+/// llamada recursiva), así que **no** hace falta bajar aquí a
+/// `def.subsecuencias`; cada archivo externo tiene su propia llamada a
+/// `cargar_de_texto`.
+fn validar_lvalues(def: &DefinicionSecuencia) -> Result<(), ErrorCarga> {
+    for p in def
+        .pasos_setup
+        .iter()
+        .chain(&def.pasos_main)
+        .chain(&def.pasos_cleanup)
+    {
+        if let Some(asignaciones) = &p.asigna {
+            for a in asignaciones {
+                if def.parameters.contains_key(&a.var) {
+                    return Err(ErrorCarga::Validacion(format!(
+                        "el paso '{}' asigna a '{}', declarado en 'parameters' de \
+                         la secuencia '{}'. 'asigna' escribe siempre en locals y \
+                         crearía un local homónimo que lo ensombrece: usa un paso \
+                         'tipo: statement' con 'parameters.{} = …' si quieres \
+                         devolver el valor al llamador",
+                        p.nombre, a.var, def.nombre, a.var
+                    )));
+                }
+                if !def.locals.contains_key(&a.var) {
+                    return Err(ErrorCarga::Validacion(format!(
+                        "el paso '{}' asigna a '{}', no declarado en 'locals' de \
+                         la secuencia '{}'. Decláralo en 'locals:' con su valor \
+                         inicial",
+                        p.nombre, a.var, def.nombre
+                    )));
+                }
+            }
+        }
+        if let Some(stmts) = &p.statement {
+            for s in stmts {
+                let expr::Sentencia::Assign { scope, campo, .. } = s;
+                let declarado = match scope {
+                    expr::Scope::Locals => def.locals.contains_key(campo),
+                    expr::Scope::Parameters => def.parameters.contains_key(campo),
+                    // FileGlobals/Resultado no son lvalues válidos aquí; el
+                    // motor los rechaza al evaluar (error de evaluación, no
+                    // silencioso). Nada que validar al cargar.
+                    _ => true,
+                };
+                if !declarado {
+                    return Err(ErrorCarga::Validacion(format!(
+                        "el paso '{}' tiene un statement que escribe en \
+                         '{}.{campo}', no declarado en '{}' de la secuencia '{}'. \
+                         Decláralo con su valor inicial",
+                        p.nombre,
+                        scope.nombre(),
+                        scope.nombre(),
+                        def.nombre
+                    )));
+                }
+            }
+        }
+    }
+    Ok(())
 }
 
 /// Carga una secuencia desde un fichero YAML en disco.
@@ -2152,6 +2232,9 @@ main:
     fn asigna_se_parsea_y_acepta_las_dos_formas() {
         let yaml = "\
 nombre: s
+locals:
+  voltaje: 0.0
+  ok: false
 main:
   - nombre: medir
     asigna:
@@ -2217,6 +2300,9 @@ main:
     fn statement_se_parsea_a_sentencias() {
         let yaml = "\
 nombre: s
+locals:
+  ok: false
+  contador: 0
 main:
   - nombre: init
     tipo: statement
@@ -2225,6 +2311,126 @@ main:
         let s = cargar_de_texto(yaml).unwrap();
         let stmts = s.pasos_main[0].statement.as_ref().unwrap();
         assert_eq!(stmts.len(), 2, "dos sentencias separadas por ';'");
+    }
+
+    // --- DEF-3: `asigna`/`statement` sobre un destino no declarado ---
+
+    #[test]
+    fn asigna_sobre_un_parameter_declarado_es_error() {
+        // DEF-3 del informe de beta: `asigna` escribe siempre en locals; que
+        // el destino coincida con un `parameter` era un local homónimo
+        // silencioso, sin avisar ni al cargar ni al ejecutar.
+        let yaml = "\
+nombre: s
+parameters:
+  p: 0.0
+main:
+  - nombre: medir_voltaje
+    asigna: { p: '${resultado.valor_medido}' }
+";
+        let err = cargar_de_texto(yaml).unwrap_err();
+        assert!(
+            matches!(&err, ErrorCarga::Validacion(ref m)
+                if m.contains("medir_voltaje") && m.contains("'p'") && m.contains("parameters")),
+            "el error debe nombrar el paso, la variable y 'parameters': {err}"
+        );
+    }
+
+    #[test]
+    fn asigna_a_un_local_no_declarado_es_error() {
+        // Mismo footgun por la otra vía: un typo en el destino crea un local
+        // nuevo en vez de fallar, y quien lea el nombre bien escrito no ve
+        // nunca el valor.
+        let yaml = "\
+nombre: s
+locals:
+  voltaje: 0.0
+main:
+  - nombre: medir_voltaje
+    asigna: { voltage: '${resultado.valor_medido}' }
+";
+        let err = cargar_de_texto(yaml).unwrap_err();
+        assert!(
+            matches!(&err, ErrorCarga::Validacion(ref m)
+                if m.contains("medir_voltaje") && m.contains("'voltage'") && m.contains("locals")),
+            "el error debe nombrar el paso, la variable y 'locals': {err}"
+        );
+    }
+
+    #[test]
+    fn statement_a_un_local_no_declarado_es_error() {
+        let yaml = "\
+nombre: s
+main:
+  - nombre: init
+    tipo: statement
+    statement: 'locals.x = 1'
+";
+        let err = cargar_de_texto(yaml).unwrap_err();
+        assert!(
+            matches!(&err, ErrorCarga::Validacion(ref m)
+                if m.contains("init") && m.contains("locals.x")),
+            "{err}"
+        );
+    }
+
+    #[test]
+    fn statement_a_un_parameter_no_declarado_es_error() {
+        let yaml = "\
+nombre: s
+main:
+  - nombre: init
+    tipo: statement
+    statement: 'parameters.p = 1'
+";
+        let err = cargar_de_texto(yaml).unwrap_err();
+        assert!(
+            matches!(&err, ErrorCarga::Validacion(ref m)
+                if m.contains("init") && m.contains("parameters.p")),
+            "{err}"
+        );
+    }
+
+    #[test]
+    fn statement_a_parameter_declarado_es_valido() {
+        // No debe romper el canal de retorno by-reference de una subsecuencia
+        // (patrón de ejemplos/medir_fuentes.yaml).
+        let yaml = "\
+nombre: s
+parameters:
+  canal: 0.0
+main:
+  - nombre: ajustar_canal
+    tipo: statement
+    statement: 'parameters.canal = parameters.canal + 1.0'
+";
+        assert!(cargar_de_texto(yaml).is_ok());
+    }
+
+    #[test]
+    fn asigna_sobre_parameter_declarado_en_subsecuencia_inline_es_error() {
+        // La validación baja también a las inline, con sus propios scopes.
+        let yaml = "\
+nombre: s
+subsecuencias:
+  init:
+    parameters:
+      p: 0.0
+    main:
+      - nombre: medir
+        asigna: { p: '${resultado.valor_medido}' }
+main:
+  - nombre: c
+    tipo: sequence_call
+    secuencia: init
+    parametros: {}
+";
+        let err = cargar_de_texto(yaml).unwrap_err();
+        assert!(
+            matches!(&err, ErrorCarga::Validacion(ref m)
+                if m.contains("medir") && m.contains("'p'") && m.contains("parameters")),
+            "{err}"
+        );
     }
 
     #[test]
