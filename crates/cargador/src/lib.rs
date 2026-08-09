@@ -507,22 +507,6 @@ pub fn normalizar_path(base: &Path, rel: &Path) -> PathBuf {
     out
 }
 
-/// Carga un **programa** desde un fichero YAML en disco (M4b, RF-27): la
-/// secuencia raíz más todas las subsecuencias de **archivos externos**
-/// referenciadas por path, ya resueltas y validadas.
-///
-/// Hace tres cosas (fail-fast, antes de ejecutar nada):
-/// 1. **Carga** la raíz y, recursivamente, los archivos externos a los que
-///    apuntan los `sequence_call` por path. Los paths se **reescriben** a su
-///    clave canónica ([`normalizar_path`]) en cada `DefinicionPaso.secuencia`, así
-///    el motor los resuelve con un mero `programa.archivos[clave]` (sin
-///    conocer el sistema de ficheros, ADR-0005).
-/// 2. **Valida** cada `sequence_call`: que el destino exista (inline por
-///    nombre o archivo por path), que cada argumento `locals.X` esté
-///    declarado en `locals` de la secuencia contenedora, y que la **firma**
-///    encaje (claves de `parametros` == `parameters` de la subsecuencia).
-/// 3. **Detecta ciclos** en el grafo de llamadas (por nombre inline o por
-///    path): `A → B → A` es error.
 /// Lee la sección `ejecutores:` de un YAML y la acumula en `acc` (M5-ext.1,
 /// RF-36.3). Se re-lee el fichero porque la `DefinicionSecuencia` no lleva esa
 /// sección: es dato del `Programa`. Un nombre repetido —dentro del archivo o
@@ -547,6 +531,23 @@ fn leer_ejecutores(
     Ok(())
 }
 
+/// Carga un **programa** desde un fichero YAML en disco (M4b, RF-27): la
+/// secuencia raíz más todas las subsecuencias de **archivos externos**
+/// referenciadas por path, ya resueltas y validadas.
+///
+/// Hace tres cosas (fail-fast, antes de ejecutar nada):
+///
+/// 1. **Carga** la raíz y, recursivamente, los archivos externos a los que
+///    apuntan los `sequence_call` por path. Los paths se **reescriben** a su
+///    clave canónica ([`normalizar_path`]) en cada `DefinicionPaso.secuencia`,
+///    así el motor los resuelve con un mero `programa.archivos[clave]` (sin
+///    conocer el sistema de ficheros, ADR-0005).
+/// 2. **Valida** cada `sequence_call`: que el destino exista (inline por
+///    nombre o archivo por path), que cada argumento `locals.X` esté
+///    declarado en `locals` de la secuencia contenedora, y que la **firma**
+///    encaje (claves de `parametros` == `parameters` de la subsecuencia).
+/// 3. **Detecta ciclos** en el grafo de llamadas (por nombre inline o por
+///    path): `A → B → A` es error.
 pub fn cargar_programa_de_archivo(ruta: &str) -> Result<Programa, ErrorCarga> {
     let raiz = cargar_de_archivo(ruta)?;
     let dir_base = dir_de(ruta);
@@ -1428,8 +1429,8 @@ main:
     fn programa_firma_no_encaja_es_error() {
         let dir = std::env::temp_dir().join(format!("anvil_m4b_{}", "firma"));
         std::fs::create_dir_all(&dir).unwrap();
-        std::fs::write(&dir.join("h.yaml"), "nombre: h\nparameters: { canal: 0.0, extra: 0.0 }\nmain:\n  - nombre: m\n").unwrap();
-        std::fs::write(&dir.join("p.yaml"), "nombre: p\nlocals: { canal: 1.0 }\nmain:\n  - nombre: c\n    tipo: sequence_call\n    secuencia: ./h.yaml\n    parametros: { canal: locals.canal }\n").unwrap();
+        std::fs::write(dir.join("h.yaml"), "nombre: h\nparameters: { canal: 0.0, extra: 0.0 }\nmain:\n  - nombre: m\n").unwrap();
+        std::fs::write(dir.join("p.yaml"), "nombre: p\nlocals: { canal: 1.0 }\nmain:\n  - nombre: c\n    tipo: sequence_call\n    secuencia: ./h.yaml\n    parametros: { canal: locals.canal }\n").unwrap();
         let err = cargar_programa_de_archivo(dir.join("p.yaml").to_str().unwrap()).unwrap_err();
         assert!(matches!(&err, ErrorCarga::Validacion(m) if m.contains("firma")));
     }
@@ -1439,8 +1440,8 @@ main:
     fn programa_lvalue_no_declarado_es_error() {
         let dir = std::env::temp_dir().join(format!("anvil_m4b_{}", "lvalue"));
         std::fs::create_dir_all(&dir).unwrap();
-        std::fs::write(&dir.join("h.yaml"), "nombre: h\nparameters: { canal: 0.0 }\nmain:\n  - nombre: m\n").unwrap();
-        std::fs::write(&dir.join("p.yaml"), "nombre: p\nmain:\n  - nombre: c\n    tipo: sequence_call\n    secuencia: ./h.yaml\n    parametros: { canal: locals.inventado }\n").unwrap();
+        std::fs::write(dir.join("h.yaml"), "nombre: h\nparameters: { canal: 0.0 }\nmain:\n  - nombre: m\n").unwrap();
+        std::fs::write(dir.join("p.yaml"), "nombre: p\nmain:\n  - nombre: c\n    tipo: sequence_call\n    secuencia: ./h.yaml\n    parametros: { canal: locals.inventado }\n").unwrap();
         let err = cargar_programa_de_archivo(dir.join("p.yaml").to_str().unwrap()).unwrap_err();
         assert!(matches!(&err, ErrorCarga::Validacion(m) if m.contains("locals.inventado")));
     }
@@ -1450,7 +1451,7 @@ main:
     fn programa_path_no_encontrado_es_error() {
         let dir = std::env::temp_dir().join(format!("anvil_m4b_{}", "nofile"));
         std::fs::create_dir_all(&dir).unwrap();
-        std::fs::write(&dir.join("p.yaml"), "nombre: p\nmain:\n  - nombre: c\n    tipo: sequence_call\n    secuencia: ./no_existe.yaml\n").unwrap();
+        std::fs::write(dir.join("p.yaml"), "nombre: p\nmain:\n  - nombre: c\n    tipo: sequence_call\n    secuencia: ./no_existe.yaml\n").unwrap();
         let err = cargar_programa_de_archivo(dir.join("p.yaml").to_str().unwrap()).unwrap_err();
         assert!(matches!(&err, ErrorCarga::Lectura(_)));
     }

@@ -170,8 +170,7 @@ mod tests {
     use modelo::{DefinicionSecuencia, ResultadoStep, ValorDefinicion};
 
     fn secuencia_con(locals: &[(&str, ValorDefinicion)]) -> DefinicionSecuencia {
-        let mut def = DefinicionSecuencia::default();
-        def.nombre = "t".into();
+        let mut def = DefinicionSecuencia { nombre: "t".into(), ..Default::default() };
         def.pasos_main = vec![modelo::DefinicionPaso::nuevo("p", 1)];
         for (k, v) in locals {
             def.locals.insert((*k).to_string(), v.clone());
