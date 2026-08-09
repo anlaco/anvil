@@ -58,7 +58,12 @@ test-host: build
 ## Sin `rustfmt.toml`: el formato es el estilo oficial de Rust por defecto.
 ## Los lints están a cero, así que `-D warnings` corta: un aviso nuevo es un
 ## fallo, no ruido de fondo.
-check:
+##
+## Depende de `build` porque clippy sobre el host **ejecuta su `build.rs`**, y
+## ése exige los guests y el puente ya compilados (`cargo fmt` no, que no
+## corre build scripts). Sin esta dependencia, `make check` en un árbol limpio
+## muere con `failed to run custom build command for anvil-host`.
+check: build
 	cargo fmt --check
 	cargo fmt --check --manifest-path $(HOST)
 	cargo fmt --check --manifest-path $(PUENTE)
