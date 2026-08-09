@@ -114,12 +114,20 @@ y `operador` — **no** van en `paso.proto`: los rellena el motor; el
 
 Cargar límites desde un **fichero sidecar** (YAML), separando los datos de
 test del flujo. El cargador los inyecta en `limite` antes de ejecutar
-(`cargador::cargar_limites_de_archivo` + `cargador::aplicar_limites`),
+(`cargador::cargar_limites_de_archivo` + `cargador::aplicar_limites_programa`),
 asociando cada límite al paso por `nombre`. El sidecar **manda** sobre el
 límite embebido en la secuencia: es el mecanismo para cambiar umbrales por
 lote/variante sin tocar la secuencia. Ejemplo en `ejemplos/limites.yaml` +
 `ejemplos/limites.limits.yaml`, invocado con
 `anvil secuencia.yaml --limits limites.limits.yaml`.
+
+**Alcance: el programa entero.** El nombre casa en la raíz, en las
+subsecuencias de archivos externos y en las inline. Que cubriera sólo la raíz
+era DEF-1 del informe de beta: bajo `--process-model` la raíz es el process
+model y la secuencia del operador queda como subsecuencia, así que el sidecar
+no afectaba a nada —y sin decirlo— justo en el modo para el que existe. Un
+nombre que no casa en **ninguna** secuencia se avisa por stderr
+(`cargador::limites_sin_aplicar_programa`, DIAG-1).
 
 ## Out-of-scope
 

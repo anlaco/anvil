@@ -173,7 +173,10 @@ anvil <secuencia.yaml> [--process-model <pm.yaml>] [--json <ruta>] [--csv <ruta>
 - `--validate` carga y valida sin ejecutar ni conectar (CI sin hardware).
 - `--port` fija el puerto del ejecutor embebido (default 9100).
 - `--limits` inyecta un sidecar de límites por nombre de paso (RF-30),
-  sobreescribiendo los embebidos (sólo la secuencia raíz hoy). Si algún
+  sobreescribiendo los embebidos. Casa en **cualquier** secuencia del programa
+  —la raíz, las subsecuencias externas e inline, y la secuencia del operador
+  bajo `--process-model`—, que es lo que hace utilizable el mecanismo en
+  producción. Si algún
   nombre del sidecar no casa con ningún paso, **avisa por stderr y los
   nombra** —incluso con `--quiet`—: un límite que no se aplica deja en pie el
   embebido y da un veredicto que no es el que pediste.

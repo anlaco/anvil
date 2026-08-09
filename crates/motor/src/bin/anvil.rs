@@ -23,8 +23,8 @@
 //! terminales (wasmtime) o un ejecutor externo.
 
 use cargador::{
-    aplicar_limites, aplicar_override_ejecutores, cargar_limites_de_archivo,
-    cargar_programa_con_pm, cargar_programa_de_archivo, limites_sin_aplicar,
+    aplicar_limites_programa, aplicar_override_ejecutores, cargar_limites_de_archivo,
+    cargar_programa_con_pm, cargar_programa_de_archivo, limites_sin_aplicar_programa,
 };
 use modelo::{Programa, ResultSink};
 use motor::Motor;
@@ -200,13 +200,15 @@ fn main() {
     }
 
     // Property loader (RF-30): sidecar de límites opcional, inyectado por
-    // nombre de paso en la **raíz**, sobreescribiendo los embebidos. (Aplicar
-    // el sidecar a las subsecuencias externas es post-MVP.)
+    // nombre de paso en **todo el programa** (raíz + subsecuencias externas e
+    // inline), sobreescribiendo los embebidos. Que cubriera sólo la raíz era
+    // DEF-1: con `--process-model` la raíz es el PM y la secuencia del
+    // operador queda en `archivos`, así que el sidecar no llegaba a ella.
     if let Some(r) = cli.limits.as_deref() {
         match cargar_limites_de_archivo(r) {
             Ok(l) => {
-                let sobran = limites_sin_aplicar(&programa.raiz, &l);
-                let n = aplicar_limites(&mut programa.raiz, &l);
+                let sobran = limites_sin_aplicar_programa(&programa, &l);
+                let n = aplicar_limites_programa(&mut programa, &l);
                 if !cli.quiet {
                     eprintln!("sidecar de límites '{r}' aplicado ({n} paso(s) afectado(s))");
                 }
@@ -223,13 +225,7 @@ fn main() {
                     if n == 0 {
                         eprintln!(
                             "aviso: el sidecar no afectó a ningún paso. Comprueba que los \
-                             nombres coincidan{}",
-                            if cli.process_model.is_some() {
-                                "; con --process-model el sidecar se aplica al process model, \
-                                 no a la secuencia del operador"
-                            } else {
-                                ""
-                            }
+                             nombres coincidan con los de los pasos de la secuencia"
                         );
                     }
                 }
