@@ -1,0 +1,27 @@
+# BUG-2 — la columna `nombre_secuencia` del CSV contiene el ESTADO, no el nombre
+#
+# Reproducción:
+#   ./anvil regresion/bug2-csv-nombre.yaml --csv salida.csv
+#
+# Cabecera emitida:
+#   nombre_secuencia,estado,nombre_paso,estado_paso,mensaje,valor_medido,...
+# Fila emitida:
+#   paso,paso,verificar_led,paso,led encendido,,,,,
+#   ^^^^ deberia ser "regresion_csv_nombre"
+#
+# El nombre de la secuencia no aparece en NINGUNA columna del CSV, asi que un
+# CSV agregado de varias secuencias no permite saber de que secuencia es cada
+# fila. El JSON si lo emite correctamente (campo "secuencia").
+#
+# Criterio de aceptacion: la primera columna debe contener
+# "regresion_csv_nombre" en las tres filas.
+
+nombre: regresion_csv_nombre
+main:
+  - nombre: verificar_led
+    reintentos: 1
+  - nombre: abrir_rele
+    reintentos: 1
+  - nombre: medir_voltaje
+    reintentos: 1
+    limite: { tipo: comparacion, op: ge, esperado: 4.0 }
