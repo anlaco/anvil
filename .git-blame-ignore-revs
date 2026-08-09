@@ -1,0 +1,8 @@
+# Revisiones que sólo cambian formato: git blame las salta.
+#
+#   git config blame.ignoreRevsFile .git-blame-ignore-revs
+#
+# (GitHub lo aplica solo.)
+
+# style: adoptar rustfmt (commit de sólo formato)
+97169b20d6f2eea00deb4c21d881853342e9e7d3
