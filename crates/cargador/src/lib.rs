@@ -307,6 +307,18 @@ impl EjecutorYaml {
                         self.nombre
                     )));
                 };
+                // El cargador corre dentro del sandbox WASM del motor, que
+                // solo tiene preabierto el directorio del YAML (DEF-4): un
+                // path absoluto es invisible para `exists()` exista o no en
+                // el host, así que se distingue antes de comprobar.
+                if Path::new(&path).is_absolute() {
+                    return Err(ErrorCarga::Validacion(format!(
+                        "el ejecutor '{}' es 'wasm' con 'path' absoluto '{}': el \
+                         cargador corre en un sandbox que solo ve el directorio \
+                         del YAML; usa un path relativo",
+                        self.nombre, path
+                    )));
+                }
                 // El path debe existir (relativo al directorio del YAML),
                 // como las subsecuencias externas (fail-fast al cargar).
                 let ruta = normalizar_path(dir_yaml, Path::new(&path));
@@ -2674,6 +2686,31 @@ main:
         let err = cargar_programa_de_archivo(y.to_str().unwrap()).unwrap_err();
         assert!(
             matches!(&err, ErrorCarga::Validacion(m) if m.contains("inventado")),
+            "{err}"
+        );
+    }
+
+    /// `tipo: wasm` con `path` absoluto → error que explica el sandbox
+    /// (DEF-4), no que el fichero "no existe" (el fichero sí existe en
+    /// disco; el cargador solo no puede verlo desde su sandbox).
+    #[test]
+    fn wasm_con_path_absoluto_es_error_explicativo() {
+        let dir = std::env::temp_dir().join(format!("anvil_m5ext_{}", "wasm_absoluto"));
+        std::fs::create_dir_all(&dir).unwrap();
+        let wasm = dir.join("p.wasm");
+        std::fs::write(&wasm, b"\0asm").unwrap();
+        let y = dir.join("s.yaml");
+        std::fs::write(
+            &y,
+            format!(
+                "nombre: s\nejecutores:\n  - {{ nombre: p, tipo: wasm, path: {} }}\nmain:\n  - nombre: a\n",
+                wasm.display()
+            ),
+        )
+        .unwrap();
+        let err = cargar_programa_de_archivo(y.to_str().unwrap()).unwrap_err();
+        assert!(
+            matches!(&err, ErrorCarga::Validacion(m) if m.contains("absoluto") && !m.contains("no existe")),
             "{err}"
         );
     }
