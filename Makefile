@@ -55,8 +55,9 @@ test-host: build
 	cargo test --manifest-path $(HOST)
 
 ## Formato y lints de los tres workspaces, tal como los exigirá la CI.
-## `rustfmt.toml` (raíz) vale para los tres; los lints están a cero, así que
-## `-D warnings` corta: un aviso nuevo es un fallo, no ruido de fondo.
+## Sin `rustfmt.toml`: el formato es el estilo oficial de Rust por defecto.
+## Los lints están a cero, así que `-D warnings` corta: un aviso nuevo es un
+## fallo, no ruido de fondo.
 check:
 	cargo fmt --check
 	cargo fmt --check --manifest-path $(HOST)
