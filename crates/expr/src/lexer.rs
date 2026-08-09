@@ -101,7 +101,11 @@ pub fn lex(src: &str) -> Result<Vec<Tok>, ErrorExpr> {
             let n: f64 = texto.parse().map_err(|_| {
                 ErrorExpr::lexico(start, j - start, format!("número inválido: '{texto}'"))
             })?;
-            toks.push(Tok { kind: TokKind::Numero(n), pos: start, len: j - start });
+            toks.push(Tok {
+                kind: TokKind::Numero(n),
+                pos: start,
+                len: j - start,
+            });
             i = j;
             continue;
         }
@@ -123,7 +127,11 @@ pub fn lex(src: &str) -> Result<Vec<Tok>, ErrorExpr> {
                 // normales y el parser las rechazará (no son scopes).
                 otro => TokKind::Ident(otro.to_string()),
             };
-            toks.push(Tok { kind, pos: start, len: j - start });
+            toks.push(Tok {
+                kind,
+                pos: start,
+                len: j - start,
+            });
             i = j;
             continue;
         }
@@ -135,17 +143,29 @@ pub fn lex(src: &str) -> Result<Vec<Tok>, ErrorExpr> {
                 j += 1;
             }
             if j >= bytes.len() {
-                return Err(ErrorExpr::lexico(start, bytes.len() - start, "string sin cerrar"));
+                return Err(ErrorExpr::lexico(
+                    start,
+                    bytes.len() - start,
+                    "string sin cerrar",
+                ));
             }
             // j apunta a la comilla de cierre.
             let texto = src[i + 1..j].to_string();
-            toks.push(Tok { kind: TokKind::Texto(texto), pos: start, len: j + 1 - start });
+            toks.push(Tok {
+                kind: TokKind::Texto(texto),
+                pos: start,
+                len: j + 1 - start,
+            });
             i = j + 1;
             continue;
         }
 
         // Símbolos de dos caracteres primero (==, !=, <=, >=, &&, ||).
-        let dos = if i + 1 < bytes.len() { Some(&src[i..i + 2]) } else { None };
+        let dos = if i + 1 < bytes.len() {
+            Some(&src[i..i + 2])
+        } else {
+            None
+        };
         if let Some(dd) = dos {
             let kind = match dd {
                 "==" => Some(TokKind::EqEq),
@@ -157,7 +177,11 @@ pub fn lex(src: &str) -> Result<Vec<Tok>, ErrorExpr> {
                 _ => None,
             };
             if let Some(k) = kind {
-                toks.push(Tok { kind: k, pos: start, len: 2 });
+                toks.push(Tok {
+                    kind: k,
+                    pos: start,
+                    len: 2,
+                });
                 i += 2;
                 continue;
             }
@@ -189,11 +213,19 @@ pub fn lex(src: &str) -> Result<Vec<Tok>, ErrorExpr> {
                 ));
             }
         };
-        toks.push(Tok { kind, pos: start, len: 1 });
+        toks.push(Tok {
+            kind,
+            pos: start,
+            len: 1,
+        });
         i += 1;
     }
 
-    toks.push(Tok { kind: TokKind::Eof, pos: bytes.len(), len: 0 });
+    toks.push(Tok {
+        kind: TokKind::Eof,
+        pos: bytes.len(),
+        len: 0,
+    });
     Ok(toks)
 }
 
@@ -207,8 +239,14 @@ mod tests {
 
     #[test]
     fn numeros_enteros_y_decimales() {
-        assert!(matches!(kinds("5").as_slice(), [TokKind::Numero(5.0), TokKind::Eof]));
-        assert!(matches!(kinds("4.2").as_slice(), [TokKind::Numero(_), TokKind::Eof]));
+        assert!(matches!(
+            kinds("5").as_slice(),
+            [TokKind::Numero(5.0), TokKind::Eof]
+        ));
+        assert!(matches!(
+            kinds("4.2").as_slice(),
+            [TokKind::Numero(_), TokKind::Eof]
+        ));
     }
 
     #[test]

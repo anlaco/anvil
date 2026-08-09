@@ -40,19 +40,44 @@ pub struct ErrorExpr {
 
 impl ErrorExpr {
     pub fn sintaxis(pos: usize, len: usize, mensaje: impl Into<String>) -> Self {
-        ErrorExpr { kind: ErrorKind::Sintaxis, pos, len, mensaje: mensaje.into() }
+        ErrorExpr {
+            kind: ErrorKind::Sintaxis,
+            pos,
+            len,
+            mensaje: mensaje.into(),
+        }
     }
     pub fn lexico(pos: usize, len: usize, mensaje: impl Into<String>) -> Self {
-        ErrorExpr { kind: ErrorKind::Lexico, pos, len, mensaje: mensaje.into() }
+        ErrorExpr {
+            kind: ErrorKind::Lexico,
+            pos,
+            len,
+            mensaje: mensaje.into(),
+        }
     }
     pub fn tipo(pos: usize, mensaje: impl Into<String>) -> Self {
-        ErrorExpr { kind: ErrorKind::Tipo, pos, len: 0, mensaje: mensaje.into() }
+        ErrorExpr {
+            kind: ErrorKind::Tipo,
+            pos,
+            len: 0,
+            mensaje: mensaje.into(),
+        }
     }
     pub fn evaluacion(pos: usize, mensaje: impl Into<String>) -> Self {
-        ErrorExpr { kind: ErrorKind::Evaluacion, pos, len: 0, mensaje: mensaje.into() }
+        ErrorExpr {
+            kind: ErrorKind::Evaluacion,
+            pos,
+            len: 0,
+            mensaje: mensaje.into(),
+        }
     }
     pub fn entorno(pos: usize, mensaje: impl Into<String>) -> Self {
-        ErrorExpr { kind: ErrorKind::Entorno, pos, len: 0, mensaje: mensaje.into() }
+        ErrorExpr {
+            kind: ErrorKind::Entorno,
+            pos,
+            len: 0,
+            mensaje: mensaje.into(),
+        }
     }
 }
 

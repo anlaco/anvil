@@ -87,7 +87,11 @@ pub enum Expresion {
     /// `resultado.valor_medido`).
     Var { scope: Scope, campo: String },
     /// Operación binaria.
-    BinOp { op: BinOp, izq: Box<Expresion>, der: Box<Expresion> },
+    BinOp {
+        op: BinOp,
+        izq: Box<Expresion>,
+        der: Box<Expresion>,
+    },
     /// Operación unaria.
     UnOp { op: UnOp, operando: Box<Expresion> },
 }
@@ -99,5 +103,9 @@ pub enum Sentencia {
     /// `scope.campo = expresion`. El motor hace valer que `scope` sea `Locals`
     /// (regla "sólo se muta Locals"); escribir en otro scope es error de
     /// evaluación, no de sintaxis.
-    Assign { scope: Scope, campo: String, valor: Expresion },
+    Assign {
+        scope: Scope,
+        campo: String,
+        valor: Expresion,
+    },
 }

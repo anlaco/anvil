@@ -63,7 +63,10 @@ struct State {
 
 impl WasiView for State {
     fn ctx(&mut self) -> WasiCtxView<'_> {
-        WasiCtxView { ctx: &mut self.wasi, table: &mut self.table }
+        WasiCtxView {
+            ctx: &mut self.wasi,
+            table: &mut self.table,
+        }
     }
 }
 
@@ -94,8 +97,14 @@ fn wasi_loopback_con_declaradas(ips_declaradas: HashSet<IpAddr>) -> WasiCtxBuild
 /// Flags del CLI del guest motor que **consumen el argumento siguiente**
 /// (M5, RF-40). El host los conoce sólo para saber cuál de los argumentos es
 /// la ruta de la secuencia; el parseo de verdad lo hace el guest.
-const FLAGS_CON_VALOR: [&str; 6] =
-    ["--process-model", "--json", "--csv", "--limits", "--ejecutor", "--port"];
+const FLAGS_CON_VALOR: [&str; 6] = [
+    "--process-model",
+    "--json",
+    "--csv",
+    "--limits",
+    "--ejecutor",
+    "--port",
+];
 
 /// La ruta de la secuencia: el primer argumento **posicional**, saltando los
 /// flags y sus valores. `None` si no hay ninguno, o si se pidió
@@ -140,7 +149,10 @@ fn ips_no_loopback_declaradas(programa: &modelo::Programa) -> HashSet<IpAddr> {
 fn correr_guest(engine: &Engine, wasi: WasiCtx, bytes: &[u8]) -> wasmtime::Result<Result<(), ()>> {
     let mut linker = Linker::new(engine);
     wasmtime_wasi::p2::add_to_linker_sync(&mut linker)?;
-    let state = State { wasi, table: ResourceTable::new() };
+    let state = State {
+        wasi,
+        table: ResourceTable::new(),
+    };
     let mut store = Store::new(engine, state);
     let component = Component::from_binary(engine, bytes)?;
     let command =
@@ -177,11 +189,14 @@ fn extraer_puente() -> Result<PathBuf, String> {
     if !ruta.exists() {
         let mut f = std::fs::File::create(&ruta)
             .map_err(|e| format!("no se pudo crear '{}': {e}", ruta.display()))?;
-        f.write_all(PUENTE).map_err(|e| format!("no se pudo escribir el puente: {e}"))?;
+        f.write_all(PUENTE)
+            .map_err(|e| format!("no se pudo escribir el puente: {e}"))?;
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
-            let mut perm = std::fs::metadata(&ruta).map_err(|e| format!("{e}"))?.permissions();
+            let mut perm = std::fs::metadata(&ruta)
+                .map_err(|e| format!("{e}"))?
+                .permissions();
             perm.set_mode(0o755);
             std::fs::set_permissions(&ruta, perm).map_err(|e| format!("{e}"))?;
         }
@@ -199,8 +214,12 @@ fn extraer_puente() -> Result<PathBuf, String> {
 /// El puente es quien carga el componente en su propio Store (sandbox WASI
 /// vacío: sin ficheros ni red — el componente es una función pura).
 fn instanciar_wasm(nombre: &str, path: &Path) -> Result<EjecutorWasm, String> {
-    let bytes = std::fs::read(path)
-        .map_err(|e| format!("el ejecutor '{nombre}' ({}) no se pudo leer: {e}", path.display()))?;
+    let bytes = std::fs::read(path).map_err(|e| {
+        format!(
+            "el ejecutor '{nombre}' ({}) no se pudo leer: {e}",
+            path.display()
+        )
+    })?;
     drop(bytes); // el puente es quien lee el fichero; aquí sólo validamos.
 
     // Reservar un puerto efímero de loopback para el puente.
@@ -216,7 +235,12 @@ fn instanciar_wasm(nombre: &str, path: &Path) -> Result<EjecutorWasm, String> {
 
     let puente = extraer_puente()?;
     let child = std::process::Command::new(&puente)
-        .args(["--wasm", &path.display().to_string(), "--port", &puerto.to_string()])
+        .args([
+            "--wasm",
+            &path.display().to_string(),
+            "--port",
+            &puerto.to_string(),
+        ])
         .stdin(std::process::Stdio::piped())
         .spawn()
         .map_err(|e| format!("no se pudo lanzar el puente para '{nombre}': {e}"))?;
@@ -248,7 +272,10 @@ fn esperar_wasm(exec: &EjecutorWasm) -> Result<(), String> {
         }
         thread::sleep(Duration::from_millis(10));
     }
-    Err(format!("el ejecutor '{}' ({}) no empezó a escuchar en {addr}", exec.nombre, exec.path))
+    Err(format!(
+        "el ejecutor '{}' ({}) no empezó a escuchar en {addr}",
+        exec.nombre, exec.path
+    ))
 }
 
 /// Espera a que el ejecutor escuche en `127.0.0.1:PUERTO` con un `connect`
@@ -272,8 +299,11 @@ fn main() {
     // la línea de comandos se pasa tal cual al guest motor.
     let args: Vec<String> = std::env::args().skip(1).collect();
     let solo_loopback = args.iter().any(|a| a == "--solo-loopback");
-    let args_motor: Vec<String> =
-        args.iter().filter(|a| *a != "--solo-loopback").cloned().collect();
+    let args_motor: Vec<String> = args
+        .iter()
+        .filter(|a| *a != "--solo-loopback")
+        .cloned()
+        .collect();
 
     // M5-ext.1/2: leer el YAML para recolectar los `ejecutores:` declarados.
     // La ruta es el primer argumento **posicional** (M5, RF-40: el CLI acepta
@@ -312,7 +342,10 @@ fn main() {
     // --- reescribirle el modelo: compone `--ejecutor nombre=127.0.0.1:puerto`
     // --- (M5-ext.1, que ya convierte `wasm` → `grpc` al aplicarlo).
     let ruta_yaml = ruta_secuencia.clone().unwrap_or_default();
-    let dir_yaml = Path::new(&ruta_yaml).parent().unwrap_or_else(|| Path::new("")).to_path_buf();
+    let dir_yaml = Path::new(&ruta_yaml)
+        .parent()
+        .unwrap_or_else(|| Path::new(""))
+        .to_path_buf();
     let mut ejecutores_wasm: Vec<EjecutorWasm> = Vec::new();
     let mut overrides_motor: Vec<String> = Vec::new();
     let mut args_motor_final: Vec<String> = args_motor;
@@ -460,7 +493,10 @@ mod tests {
         assert_eq!(ruta_de_secuencia(&args(&["--version"])), None);
         // También si van detrás de la secuencia: el guest sale por ayuda y el
         // host no debe pre-escanear ni quejarse del YAML.
-        assert_eq!(ruta_de_secuencia(&args(&["s.yaml", "--help"])), Some("s.yaml".into()));
+        assert_eq!(
+            ruta_de_secuencia(&args(&["s.yaml", "--help"])),
+            Some("s.yaml".into())
+        );
     }
 
     #[test]

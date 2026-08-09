@@ -149,7 +149,10 @@ impl Entorno for EntornoMotor {
             // `resultado` nunca se escribe directamente (lo setea el motor).
             Scope::Parameters | Scope::FileGlobals | Scope::Resultado => Err(ErrorExpr::entorno(
                 0,
-                format!("no se puede escribir en '{}.{campo}' (sólo locals)", scope.nombre()),
+                format!(
+                    "no se puede escribir en '{}.{campo}' (sólo locals)",
+                    scope.nombre()
+                ),
             )),
         }
     }
@@ -168,7 +171,10 @@ mod tests {
     use modelo::{DefinicionSecuencia, ResultadoStep, ValorDefinicion};
 
     fn secuencia_con(locals: &[(&str, ValorDefinicion)]) -> DefinicionSecuencia {
-        let mut def = DefinicionSecuencia { nombre: "t".into(), ..Default::default() };
+        let mut def = DefinicionSecuencia {
+            nombre: "t".into(),
+            ..Default::default()
+        };
         def.pasos_main = vec![modelo::DefinicionPaso::nuevo("p", 1)];
         for (k, v) in locals {
             def.locals.insert((*k).to_string(), v.clone());
@@ -190,7 +196,8 @@ mod tests {
     #[test]
     fn file_globals_se_leen_como_value() {
         let mut def = DefinicionSecuencia::default();
-        def.file_globals.insert("lote".into(), ValorDefinicion::Texto("A".into()));
+        def.file_globals
+            .insert("lote".into(), ValorDefinicion::Texto("A".into()));
         let env = EntornoMotor::desde_definicion(&def);
         let e = expr::parse_expresion("file_globals.lote").unwrap();
         assert_eq!(eval(&e, &env).unwrap(), Value::Texto("A".into()));
@@ -222,7 +229,11 @@ mod tests {
             Value::Texto("paso".into())
         );
         assert_eq!(
-            eval(&expr::parse_expresion("resultado.valor_medido").unwrap(), &env).unwrap(),
+            eval(
+                &expr::parse_expresion("resultado.valor_medido").unwrap(),
+                &env
+            )
+            .unwrap(),
             Value::Numero(4.2)
         );
     }
@@ -261,14 +272,18 @@ mod tests {
     #[test]
     fn raiz_no_puede_escribir_en_parameters() {
         let mut def = DefinicionSecuencia::default();
-        def.parameters.insert("p".into(), ValorDefinicion::Numero(0.0));
+        def.parameters
+            .insert("p".into(), ValorDefinicion::Numero(0.0));
         let mut env = EntornoMotor::desde_definicion(&def);
         let stmts = vec![Sentencia::Assign {
             scope: Scope::Parameters,
             campo: "p".into(),
             valor: Expresion::Lit(Value::Numero(1.0)),
         }];
-        assert!(eval_sentencias(&stmts, &mut env).is_err(), "raíz: parameters es read-only");
+        assert!(
+            eval_sentencias(&stmts, &mut env).is_err(),
+            "raíz: parameters es read-only"
+        );
         // El valor original sigue ahí (no se mutó).
         assert_eq!(env.parameters().get("p"), Some(&Value::Numero(0.0)));
     }
@@ -278,7 +293,8 @@ mod tests {
     #[test]
     fn subsecuencia_puede_escribir_en_parameters() {
         let mut def = DefinicionSecuencia::default();
-        def.parameters.insert("p".into(), ValorDefinicion::Numero(0.0));
+        def.parameters
+            .insert("p".into(), ValorDefinicion::Numero(0.0));
         let args = HashMap::from([("p".to_string(), Value::Numero(5.0))]);
         let mut env = EntornoMotor::desde_definicion_con_argumentos(&def, args, true);
         let stmts = vec![Sentencia::Assign {
@@ -295,7 +311,8 @@ mod tests {
     #[test]
     fn subsecuencia_no_puede_escribir_en_file_globals() {
         let mut def = DefinicionSecuencia::default();
-        def.file_globals.insert("g".into(), ValorDefinicion::Numero(0.0));
+        def.file_globals
+            .insert("g".into(), ValorDefinicion::Numero(0.0));
         let args = HashMap::new();
         let mut env = EntornoMotor::desde_definicion_con_argumentos(&def, args, true);
         let stmts = vec![Sentencia::Assign {
@@ -303,6 +320,9 @@ mod tests {
             campo: "g".into(),
             valor: Expresion::Lit(Value::Numero(1.0)),
         }];
-        assert!(eval_sentencias(&stmts, &mut env).is_err(), "file_globals nunca escribible");
+        assert!(
+            eval_sentencias(&stmts, &mut env).is_err(),
+            "file_globals nunca escribible"
+        );
     }
 }

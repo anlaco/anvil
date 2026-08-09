@@ -166,7 +166,10 @@ fn main() {
     let mut programa = match cargar(&cli) {
         Ok(p) => p,
         Err(e) => {
-            eprintln!("no se pudo cargar la secuencia '{ruta}': {e}", ruta = cli.ruta);
+            eprintln!(
+                "no se pudo cargar la secuencia '{ruta}': {e}",
+                ruta = cli.ruta
+            );
             std::process::exit(1);
         }
     };
@@ -245,12 +248,19 @@ fn main() {
         }
     };
     if !cli.quiet {
-        eprintln!("conectado a los ejecutores de pasos (embebido en 127.0.0.1:{})", cli.port);
+        eprintln!(
+            "conectado a los ejecutores de pasos (embebido en 127.0.0.1:{})",
+            cli.port
+        );
     }
 
     // Sinks: consola salvo --quiet; JSON/CSV si se piden. El composite los
     // agrupa como un único sink para el motor.
-    let mut consola = if cli.quiet { None } else { Some(SinkConsola::nuevo(std::io::stdout())) };
+    let mut consola = if cli.quiet {
+        None
+    } else {
+        Some(SinkConsola::nuevo(std::io::stdout()))
+    };
     let mut sinks: Vec<&mut dyn ResultSink> = Vec::new();
     if let Some(c) = consola.as_mut() {
         sinks.push(c);
@@ -320,12 +330,18 @@ mod tests {
 
     #[test]
     fn parse_help_es_early_exit() {
-        assert!(matches!(parse_cli(vec!["--help".into()]), Err(AccionEarlyExit::Help)));
+        assert!(matches!(
+            parse_cli(vec!["--help".into()]),
+            Err(AccionEarlyExit::Help)
+        ));
     }
 
     #[test]
     fn parse_version_es_early_exit() {
-        assert!(matches!(parse_cli(vec!["--version".into()]), Err(AccionEarlyExit::Version)));
+        assert!(matches!(
+            parse_cli(vec!["--version".into()]),
+            Err(AccionEarlyExit::Version)
+        ));
     }
 
     #[test]
@@ -377,8 +393,12 @@ mod tests {
 
     #[test]
     fn parse_process_model() {
-        let c =
-            parse_cli(vec!["s.yaml".into(), "--process-model".into(), "pm.yaml".into()]).unwrap();
+        let c = parse_cli(vec![
+            "s.yaml".into(),
+            "--process-model".into(),
+            "pm.yaml".into(),
+        ])
+        .unwrap();
         assert_eq!(c.process_model.as_deref(), Some("pm.yaml"));
     }
 

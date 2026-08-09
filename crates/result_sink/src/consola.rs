@@ -46,7 +46,11 @@ mod tests {
             4.5,
             5.5,
         ));
-        s.registra(ResultadoStep::nuevo("verificar_led", "paso", "led encendido"));
+        s.registra(ResultadoStep::nuevo(
+            "verificar_led",
+            "paso",
+            "led encendido",
+        ));
 
         let mut sink = SinkConsola::nuevo(Vec::new());
         sink.on_fin_secuencia(&s);

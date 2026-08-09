@@ -60,7 +60,10 @@ fn paso_a_json(p: &ResultadoStep) -> Value {
     match &p.sub_pasos {
         Some(sub) => {
             let mut obj = base.as_object().unwrap().clone();
-            obj.insert("sub_pasos".into(), Value::Array(sub.iter().map(paso_a_json).collect()));
+            obj.insert(
+                "sub_pasos".into(),
+                Value::Array(sub.iter().map(paso_a_json).collect()),
+            );
             Value::Object(obj)
         }
         None => base,
@@ -91,7 +94,11 @@ mod tests {
             4.5,
             5.5,
         ));
-        s.registra(ResultadoStep::nuevo("verificar_led", "paso", "led encendido"));
+        s.registra(ResultadoStep::nuevo(
+            "verificar_led",
+            "paso",
+            "led encendido",
+        ));
         s
     }
 

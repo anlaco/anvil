@@ -184,7 +184,10 @@ impl ResultadoStep {
         mensaje: impl Into<String>,
         valor: f64,
     ) -> Self {
-        ResultadoStep { valor_medido: Some(valor), ..ResultadoStep::nuevo(nombre, estado, mensaje) }
+        ResultadoStep {
+            valor_medido: Some(valor),
+            ..ResultadoStep::nuevo(nombre, estado, mensaje)
+        }
     }
 
     pub fn paso(&self) -> bool {
@@ -201,7 +204,10 @@ pub struct ResultadoSecuencia {
 
 impl ResultadoSecuencia {
     pub fn nueva(nombre: &str) -> Self {
-        ResultadoSecuencia { nombre: nombre.to_string(), pasos: Vec::new() }
+        ResultadoSecuencia {
+            nombre: nombre.to_string(),
+            pasos: Vec::new(),
+        }
     }
 
     /// Añade un resultado de paso al agregado de la secuencia.
@@ -442,7 +448,10 @@ impl DefinicionPaso {
     /// Como `nuevo` pero fijando un límite. Lo usa el cargador al traducir el
     /// YAML (límite embebido) y el property loader (sidecar).
     pub fn con_limite(nombre: &str, reintentos: u32, limite: Limite) -> Self {
-        DefinicionPaso { limite: Some(limite), ..DefinicionPaso::nuevo(nombre, reintentos) }
+        DefinicionPaso {
+            limite: Some(limite),
+            ..DefinicionPaso::nuevo(nombre, reintentos)
+        }
     }
 }
 
@@ -536,7 +545,11 @@ mod tests {
             4.5,
             5.5,
         ));
-        s.registra(ResultadoStep::nuevo("verificar_led", "paso", "led encendido"));
+        s.registra(ResultadoStep::nuevo(
+            "verificar_led",
+            "paso",
+            "led encendido",
+        ));
 
         let mut out = Vec::new();
         s.reporte_a(&mut out).unwrap();
@@ -563,29 +576,84 @@ mod tests {
     #[test]
     fn limite_comparacion_cubre_seis_operadores() {
         use Operador::*;
-        assert_eq!(Limite::Comparacion { op: Eq, esperado: 1000.0 }.evalua(1000.0), "paso");
-        assert_eq!(Limite::Comparacion { op: Eq, esperado: 1000.0 }.evalua(999.0), "fallo");
-        assert_eq!(Limite::Comparacion { op: Ne, esperado: 1000.0 }.evalua(999.0), "paso");
-        assert_eq!(Limite::Comparacion { op: Lt, esperado: 1000.0 }.evalua(999.0), "paso");
         assert_eq!(
-            Limite::Comparacion { op: Lt, esperado: 1000.0 }.evalua(1000.0),
+            Limite::Comparacion {
+                op: Eq,
+                esperado: 1000.0
+            }
+            .evalua(1000.0),
+            "paso"
+        );
+        assert_eq!(
+            Limite::Comparacion {
+                op: Eq,
+                esperado: 1000.0
+            }
+            .evalua(999.0),
+            "fallo"
+        );
+        assert_eq!(
+            Limite::Comparacion {
+                op: Ne,
+                esperado: 1000.0
+            }
+            .evalua(999.0),
+            "paso"
+        );
+        assert_eq!(
+            Limite::Comparacion {
+                op: Lt,
+                esperado: 1000.0
+            }
+            .evalua(999.0),
+            "paso"
+        );
+        assert_eq!(
+            Limite::Comparacion {
+                op: Lt,
+                esperado: 1000.0
+            }
+            .evalua(1000.0),
             "fallo",
             "lt excluye el igual"
         );
         assert_eq!(
-            Limite::Comparacion { op: Le, esperado: 1000.0 }.evalua(1000.0),
+            Limite::Comparacion {
+                op: Le,
+                esperado: 1000.0
+            }
+            .evalua(1000.0),
             "paso",
             "le incluye el igual"
         );
-        assert_eq!(Limite::Comparacion { op: Gt, esperado: 1000.0 }.evalua(1001.0), "paso");
-        assert_eq!(Limite::Comparacion { op: Ge, esperado: 1000.0 }.evalua(1000.0), "paso");
+        assert_eq!(
+            Limite::Comparacion {
+                op: Gt,
+                esperado: 1000.0
+            }
+            .evalua(1001.0),
+            "paso"
+        );
+        assert_eq!(
+            Limite::Comparacion {
+                op: Ge,
+                esperado: 1000.0
+            }
+            .evalua(1000.0),
+            "paso"
+        );
     }
 
     #[test]
     fn operador_simbolo_y_parseo_ida_y_vuelta() {
-        for op in
-            [Operador::Eq, Operador::Ne, Operador::Lt, Operador::Le, Operador::Gt, Operador::Ge]
-        {
+        for op in [
+            Operador::Eq,
+            Operador::Ne,
+            Operador::Lt,
+            Operador::Le,
+            Operador::Gt,
+            Operador::Ge,
+        ] {
             let texto = match op {
                 Operador::Eq => "eq",
                 Operador::Ne => "ne",
@@ -597,7 +665,11 @@ mod tests {
             assert_eq!(Operador::de_texto(texto), Some(op), "parseo de {texto}");
         }
         assert_eq!(Operador::de_texto("no_existe"), None);
-        assert_eq!(Operador::de_texto("  eq  "), Some(Operador::Eq), "tolera espacios");
+        assert_eq!(
+            Operador::de_texto("  eq  "),
+            Some(Operador::Eq),
+            "tolera espacios"
+        );
         // Símbolos conocidos para el reporte.
         assert_eq!(Operador::Ge.simbolo(), ">=");
         assert_eq!(Operador::Ne.simbolo(), "!=");
@@ -761,12 +833,22 @@ mod tests {
     fn tipo_ejecutor_tres_variantes() {
         assert_eq!(TipoEjecutor::Embebido, TipoEjecutor::Embebido);
         assert_eq!(
-            TipoEjecutor::Wasm { path: "./p.wasm".into() },
-            TipoEjecutor::Wasm { path: "./p.wasm".into() }
+            TipoEjecutor::Wasm {
+                path: "./p.wasm".into()
+            },
+            TipoEjecutor::Wasm {
+                path: "./p.wasm".into()
+            }
         );
         assert_eq!(
-            TipoEjecutor::Grpc { host: "127.0.0.1".into(), puerto: 9101 },
-            TipoEjecutor::Grpc { host: "127.0.0.1".into(), puerto: 9101 }
+            TipoEjecutor::Grpc {
+                host: "127.0.0.1".into(),
+                puerto: 9101
+            },
+            TipoEjecutor::Grpc {
+                host: "127.0.0.1".into(),
+                puerto: 9101
+            }
         );
     }
 }
