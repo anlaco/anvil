@@ -214,8 +214,11 @@ arreglo. Lo hecho se marca:
 - ✅ **DEF-2** — la primera columna del CSV lleva el nombre de la secuencia
   (antes repetía el estado agregado); la segunda columna (`estado`) pasa a
   llevar ese estado agregado, que antes duplicaba `estado_paso` (#3).
-- Pendientes: DEF-4 (path absoluto de ejecutor wasm, #5), DIAG-3/4/5 y la
-  trazabilidad del reporte (#8, #9, #10), contacto de seguridad (#11).
+- ✅ **DEF-4** — un `path` absoluto de ejecutor `wasm` da un error que explica
+  el sandbox del cargador (solo ve el directorio del YAML), en vez de
+  afirmar que el fichero "no existe" cuando sí existe en el host (#5).
+- Pendientes: DIAG-3/4/5 y la trazabilidad del reporte (#8, #9, #10),
+  contacto de seguridad (#11).
 
 ## Post-MVP (explícitamente fuera de v1)
 
