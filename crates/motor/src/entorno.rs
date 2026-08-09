@@ -106,11 +106,11 @@ impl Entorno for EntornoMotor {
                 .get(campo)
                 .cloned()
                 .ok_or_else(|| ErrorExpr::entorno(0, format!("no existe 'parameters.{campo}'"))),
-            Scope::FileGlobals => self
-                .file_globals
-                .get(campo)
-                .cloned()
-                .ok_or_else(|| ErrorExpr::entorno(0, format!("no existe 'file_globals.{campo}'"))),
+            Scope::FileGlobals => {
+                self.file_globals.get(campo).cloned().ok_or_else(|| {
+                    ErrorExpr::entorno(0, format!("no existe 'file_globals.{campo}'"))
+                })
+            }
             Scope::Resultado => Ok(match campo {
                 // Laxa: si no hay resultado en curso, todo es Nulo.
                 "estado" => self
@@ -158,9 +158,7 @@ impl Entorno for EntornoMotor {
 /// Convierte un mapa de `ValorDefinicion` (datos del YAML) a `expr::Value`
 /// (runtime). Es la materialización que hace `desde_definicion`.
 fn valor_map(map: &HashMap<String, ValorDefinicion>) -> HashMap<String, Value> {
-    map.iter()
-        .map(|(k, v)| (k.clone(), v.a_value()))
-        .collect()
+    map.iter().map(|(k, v)| (k.clone(), v.a_value())).collect()
 }
 
 #[cfg(test)]
@@ -180,7 +178,10 @@ mod tests {
 
     #[test]
     fn materializa_locals_de_la_definicion() {
-        let def = secuencia_con(&[("x", ValorDefinicion::Numero(0.0)), ("ok", ValorDefinicion::Bool(false))]);
+        let def = secuencia_con(&[
+            ("x", ValorDefinicion::Numero(0.0)),
+            ("ok", ValorDefinicion::Bool(false)),
+        ]);
         let env = EntornoMotor::desde_definicion(&def);
         assert_eq!(env.locals().get("x"), Some(&Value::Numero(0.0)));
         assert_eq!(env.locals().get("ok"), Some(&Value::Bool(false)));
@@ -216,8 +217,14 @@ mod tests {
         let def = secuencia_con(&[]);
         let mut env = EntornoMotor::desde_definicion(&def);
         env.set_resultado(ResultadoStep::medido_valor("m", "paso", "ok", 4.2));
-        assert_eq!(eval(&expr::parse_expresion("resultado.estado").unwrap(), &env).unwrap(), Value::Texto("paso".into()));
-        assert_eq!(eval(&expr::parse_expresion("resultado.valor_medido").unwrap(), &env).unwrap(), Value::Numero(4.2));
+        assert_eq!(
+            eval(&expr::parse_expresion("resultado.estado").unwrap(), &env).unwrap(),
+            Value::Texto("paso".into())
+        );
+        assert_eq!(
+            eval(&expr::parse_expresion("resultado.valor_medido").unwrap(), &env).unwrap(),
+            Value::Numero(4.2)
+        );
     }
 
     #[test]

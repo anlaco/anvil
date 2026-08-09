@@ -126,10 +126,9 @@ fn ips_no_loopback_declaradas(programa: &modelo::Programa) -> HashSet<IpAddr> {
         .ejecutores
         .values()
         .filter_map(|def| match &def.tipo {
-            modelo::TipoEjecutor::Grpc { host, .. } => host
-                .parse::<IpAddr>()
-                .ok()
-                .filter(|ip| !ip.is_loopback()),
+            modelo::TipoEjecutor::Grpc { host, .. } => {
+                host.parse::<IpAddr>().ok().filter(|ip| !ip.is_loopback())
+            }
             _ => None,
         })
         .collect()
@@ -138,17 +137,14 @@ fn ips_no_loopback_declaradas(programa: &modelo::Programa) -> HashSet<IpAddr> {
 /// Instancia y ejecuta un guest (componente WASI P2 `wasi:cli/run`) en su
 /// propio `Store`. Devuelve el resultado de `call_run` para que el llamador
 /// decida el exit. `bytes` = el `.wasm` embebido.
-fn correr_guest(
-    engine: &Engine,
-    wasi: WasiCtx,
-    bytes: &[u8],
-) -> wasmtime::Result<Result<(), ()>> {
+fn correr_guest(engine: &Engine, wasi: WasiCtx, bytes: &[u8]) -> wasmtime::Result<Result<(), ()>> {
     let mut linker = Linker::new(engine);
     wasmtime_wasi::p2::add_to_linker_sync(&mut linker)?;
     let state = State { wasi, table: ResourceTable::new() };
     let mut store = Store::new(engine, state);
     let component = Component::from_binary(engine, bytes)?;
-    let command = wasmtime_wasi::p2::bindings::sync::Command::instantiate(&mut store, &component, &linker)?;
+    let command =
+        wasmtime_wasi::p2::bindings::sync::Command::instantiate(&mut store, &component, &linker)?;
     command.wasi_cli_run().call_run(&mut store)
 }
 
@@ -181,14 +177,11 @@ fn extraer_puente() -> Result<PathBuf, String> {
     if !ruta.exists() {
         let mut f = std::fs::File::create(&ruta)
             .map_err(|e| format!("no se pudo crear '{}': {e}", ruta.display()))?;
-        f.write_all(PUENTE)
-            .map_err(|e| format!("no se pudo escribir el puente: {e}"))?;
+        f.write_all(PUENTE).map_err(|e| format!("no se pudo escribir el puente: {e}"))?;
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
-            let mut perm = std::fs::metadata(&ruta)
-                .map_err(|e| format!("{e}"))?
-                .permissions();
+            let mut perm = std::fs::metadata(&ruta).map_err(|e| format!("{e}"))?.permissions();
             perm.set_mode(0o755);
             std::fs::set_permissions(&ruta, perm).map_err(|e| format!("{e}"))?;
         }
@@ -213,9 +206,12 @@ fn instanciar_wasm(nombre: &str, path: &Path) -> Result<EjecutorWasm, String> {
     // Reservar un puerto efímero de loopback para el puente.
     let listener = TcpListener::bind("127.0.0.1:0")
         .map_err(|e| format!("no se pudo reservar puerto para el ejecutor '{nombre}': {e}"))?;
-    let puerto = listener.local_addr().map_err(|e| {
-        format!("no se pudo leer el puerto reservado para el ejecutor '{nombre}': {e}")
-    })?.port();
+    let puerto = listener
+        .local_addr()
+        .map_err(|e| {
+            format!("no se pudo leer el puerto reservado para el ejecutor '{nombre}': {e}")
+        })?
+        .port();
     drop(listener);
 
     let puente = extraer_puente()?;
@@ -225,7 +221,12 @@ fn instanciar_wasm(nombre: &str, path: &Path) -> Result<EjecutorWasm, String> {
         .spawn()
         .map_err(|e| format!("no se pudo lanzar el puente para '{nombre}': {e}"))?;
 
-    Ok(EjecutorWasm { nombre: nombre.into(), path: path.display().to_string(), puerto, _child: child })
+    Ok(EjecutorWasm {
+        nombre: nombre.into(),
+        path: path.display().to_string(),
+        puerto,
+        _child: child,
+    })
 }
 
 /// Sondeos de 10 ms al esperar a que un ejecutor empiece a escuchar (60 s).
@@ -247,10 +248,7 @@ fn esperar_wasm(exec: &EjecutorWasm) -> Result<(), String> {
         }
         thread::sleep(Duration::from_millis(10));
     }
-    Err(format!(
-        "el ejecutor '{}' ({}) no empezó a escuchar en {addr}",
-        exec.nombre, exec.path
-    ))
+    Err(format!("el ejecutor '{}' ({}) no empezó a escuchar en {addr}", exec.nombre, exec.path))
 }
 
 /// Espera a que el ejecutor escuche en `127.0.0.1:PUERTO` con un `connect`
@@ -289,7 +287,8 @@ fn main() {
             Ok(p) => {
                 ips_no_loopback = ips_no_loopback_declaradas(&p);
                 if solo_loopback && !ips_no_loopback.is_empty() {
-                    let lista: Vec<String> = ips_no_loopback.iter().map(|i| i.to_string()).collect();
+                    let lista: Vec<String> =
+                        ips_no_loopback.iter().map(|i| i.to_string()).collect();
                     eprintln!(
                         "--solo-loopback: la secuencia declara ejecutores en IPs no-loopback ({})",
                         lista.join(", ")
@@ -342,7 +341,12 @@ fn main() {
                         errores.push(e);
                         continue;
                     }
-                    eprintln!("ejecutor '{}' cargado ({} → 127.0.0.1:{})", nombre, ruta.display(), puerto);
+                    eprintln!(
+                        "ejecutor '{}' cargado ({} → 127.0.0.1:{})",
+                        nombre,
+                        ruta.display(),
+                        puerto
+                    );
                     ejecutores_wasm.push(exec);
                     stores_por_path.insert(clave, puerto);
                     puerto

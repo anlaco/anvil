@@ -61,13 +61,7 @@ pub fn medir_voltaje_scpi_en(addr: &str, _intento: i32) -> ResultadoStep {
     let mut buf = [0u8; 64];
     let n = match stream.read(&mut buf) {
         Ok(n) if n > 0 => n,
-        Ok(_) => {
-            return ResultadoStep::nuevo(
-                "medir_voltaje_scpi",
-                "error",
-                "SCPI sin respuesta",
-            )
-        }
+        Ok(_) => return ResultadoStep::nuevo("medir_voltaje_scpi", "error", "SCPI sin respuesta"),
         Err(e) => {
             return ResultadoStep::nuevo(
                 "medir_voltaje_scpi",

@@ -184,10 +184,7 @@ impl ResultadoStep {
         mensaje: impl Into<String>,
         valor: f64,
     ) -> Self {
-        ResultadoStep {
-            valor_medido: Some(valor),
-            ..ResultadoStep::nuevo(nombre, estado, mensaje)
-        }
+        ResultadoStep { valor_medido: Some(valor), ..ResultadoStep::nuevo(nombre, estado, mensaje) }
     }
 
     pub fn paso(&self) -> bool {
@@ -244,7 +241,11 @@ impl ResultadoSecuencia {
     /// los pasos top-level = 2 espacios, como el formato congelado de M0;
     /// 2+ para sub-pasos de un sequence call). Extensión aditiva de RNF-08:
     /// un paso sin `sub_pasos` produce exactamente la misma línea que antes.
-    fn escribe_paso(w: &mut impl std::io::Write, p: &ResultadoStep, nivel: usize) -> std::io::Result<()> {
+    fn escribe_paso(
+        w: &mut impl std::io::Write,
+        p: &ResultadoStep,
+        nivel: usize,
+    ) -> std::io::Result<()> {
         let indent = "  ".repeat(nivel);
         writeln!(w, "{indent}[{}] {}: {}", p.estado, p.nombre, p.mensaje)?;
         if let Some(sub) = &p.sub_pasos {
@@ -441,10 +442,7 @@ impl DefinicionPaso {
     /// Como `nuevo` pero fijando un límite. Lo usa el cargador al traducir el
     /// YAML (límite embebido) y el property loader (sidecar).
     pub fn con_limite(nombre: &str, reintentos: u32, limite: Limite) -> Self {
-        DefinicionPaso {
-            limite: Some(limite),
-            ..DefinicionPaso::nuevo(nombre, reintentos)
-        }
+        DefinicionPaso { limite: Some(limite), ..DefinicionPaso::nuevo(nombre, reintentos) }
     }
 }
 
@@ -530,7 +528,14 @@ mod tests {
     #[test]
     fn reporte_a_congela_el_formato() {
         let mut s = ResultadoSecuencia::nueva("basica");
-        s.registra(ResultadoStep::medido("medir_voltaje", "fallo", "voltaje fuera de rango", 4.2, 4.5, 5.5));
+        s.registra(ResultadoStep::medido(
+            "medir_voltaje",
+            "fallo",
+            "voltaje fuera de rango",
+            4.2,
+            4.5,
+            5.5,
+        ));
         s.registra(ResultadoStep::nuevo("verificar_led", "paso", "led encendido"));
 
         let mut out = Vec::new();
@@ -562,15 +567,25 @@ mod tests {
         assert_eq!(Limite::Comparacion { op: Eq, esperado: 1000.0 }.evalua(999.0), "fallo");
         assert_eq!(Limite::Comparacion { op: Ne, esperado: 1000.0 }.evalua(999.0), "paso");
         assert_eq!(Limite::Comparacion { op: Lt, esperado: 1000.0 }.evalua(999.0), "paso");
-        assert_eq!(Limite::Comparacion { op: Lt, esperado: 1000.0 }.evalua(1000.0), "fallo", "lt excluye el igual");
-        assert_eq!(Limite::Comparacion { op: Le, esperado: 1000.0 }.evalua(1000.0), "paso", "le incluye el igual");
+        assert_eq!(
+            Limite::Comparacion { op: Lt, esperado: 1000.0 }.evalua(1000.0),
+            "fallo",
+            "lt excluye el igual"
+        );
+        assert_eq!(
+            Limite::Comparacion { op: Le, esperado: 1000.0 }.evalua(1000.0),
+            "paso",
+            "le incluye el igual"
+        );
         assert_eq!(Limite::Comparacion { op: Gt, esperado: 1000.0 }.evalua(1001.0), "paso");
         assert_eq!(Limite::Comparacion { op: Ge, esperado: 1000.0 }.evalua(1000.0), "paso");
     }
 
     #[test]
     fn operador_simbolo_y_parseo_ida_y_vuelta() {
-        for op in [Operador::Eq, Operador::Ne, Operador::Lt, Operador::Le, Operador::Gt, Operador::Ge] {
+        for op in
+            [Operador::Eq, Operador::Ne, Operador::Lt, Operador::Le, Operador::Gt, Operador::Ge]
+        {
             let texto = match op {
                 Operador::Eq => "eq",
                 Operador::Ne => "ne",
@@ -590,7 +605,8 @@ mod tests {
 
     #[test]
     fn definicion_paso_con_limite_lo_guarda() {
-        let p = DefinicionPaso::con_limite("medir_voltaje", 1, Limite::Rango { min: 4.5, max: 5.5 });
+        let p =
+            DefinicionPaso::con_limite("medir_voltaje", 1, Limite::Rango { min: 4.5, max: 5.5 });
         assert_eq!(p.limite, Some(Limite::Rango { min: 4.5, max: 5.5 }));
         // Sin límite por defecto: el paso decide (pass/fail, action).
         assert_eq!(DefinicionPaso::nuevo("verificar_led", 1).limite, None);
@@ -689,7 +705,11 @@ mod tests {
     /// sin `sub_pasos` siguen produciendo la misma línea de siempre.
     #[test]
     fn reporte_anida_sub_pasos() {
-        let mut call = ResultadoStep::nuevo("test_fuentes", "fallo", "sequence call './medir_fuentes.yaml' → fallo");
+        let mut call = ResultadoStep::nuevo(
+            "test_fuentes",
+            "fallo",
+            "sequence call './medir_fuentes.yaml' → fallo",
+        );
         call.sub_pasos = Some(vec![
             ResultadoStep::nuevo("medir_canal_1", "paso", "ok"),
             ResultadoStep::nuevo("medir_canal_2", "fallo", "fuera de rango"),
@@ -730,14 +750,23 @@ mod tests {
     fn paso_nuevo_sin_ejecutor_y_programa_sin_ejecutores() {
         let p = DefinicionPaso::nuevo("verificar_led", 1);
         assert_eq!(p.ejecutor, None);
-        assert_eq!(DefinicionPaso::con_limite("m", 1, Limite::Rango { min: 1.0, max: 2.0 }).ejecutor, None);
+        assert_eq!(
+            DefinicionPaso::con_limite("m", 1, Limite::Rango { min: 1.0, max: 2.0 }).ejecutor,
+            None
+        );
     }
 
     /// M5-ext.1: los tres variantes de `TipoEjecutor` se construyen.
     #[test]
     fn tipo_ejecutor_tres_variantes() {
         assert_eq!(TipoEjecutor::Embebido, TipoEjecutor::Embebido);
-        assert_eq!(TipoEjecutor::Wasm { path: "./p.wasm".into() }, TipoEjecutor::Wasm { path: "./p.wasm".into() });
-        assert_eq!(TipoEjecutor::Grpc { host: "127.0.0.1".into(), puerto: 9101 }, TipoEjecutor::Grpc { host: "127.0.0.1".into(), puerto: 9101 });
+        assert_eq!(
+            TipoEjecutor::Wasm { path: "./p.wasm".into() },
+            TipoEjecutor::Wasm { path: "./p.wasm".into() }
+        );
+        assert_eq!(
+            TipoEjecutor::Grpc { host: "127.0.0.1".into(), puerto: 9101 },
+            TipoEjecutor::Grpc { host: "127.0.0.1".into(), puerto: 9101 }
+        );
     }
 }

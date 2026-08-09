@@ -45,10 +45,15 @@ pub fn eval(expr: &Expresion, env: &impl Entorno) -> Result<Value, ErrorExpr> {
                             if let Value::Bool(rb) = r {
                                 Ok(Value::Bool(rb))
                             } else {
-                                Err(ErrorExpr::tipo(0, format!("'and' necesita bool, no {}", r.tipo())))
+                                Err(ErrorExpr::tipo(
+                                    0,
+                                    format!("'and' necesita bool, no {}", r.tipo()),
+                                ))
                             }
                         }
-                        _ => Err(ErrorExpr::tipo(0, format!("'and' necesita bool, no {}", l.tipo()))),
+                        _ => {
+                            Err(ErrorExpr::tipo(0, format!("'and' necesita bool, no {}", l.tipo())))
+                        }
                     }
                 }
                 BinOp::Or => {
@@ -61,10 +66,15 @@ pub fn eval(expr: &Expresion, env: &impl Entorno) -> Result<Value, ErrorExpr> {
                             if let Value::Bool(rb) = r {
                                 Ok(Value::Bool(rb))
                             } else {
-                                Err(ErrorExpr::tipo(0, format!("'or' necesita bool, no {}", r.tipo())))
+                                Err(ErrorExpr::tipo(
+                                    0,
+                                    format!("'or' necesita bool, no {}", r.tipo()),
+                                ))
                             }
                         }
-                        _ => Err(ErrorExpr::tipo(0, format!("'or' necesita bool, no {}", l.tipo()))),
+                        _ => {
+                            Err(ErrorExpr::tipo(0, format!("'or' necesita bool, no {}", l.tipo())))
+                        }
                     }
                 }
                 _ => {
@@ -135,7 +145,9 @@ fn eval_bin(op: &BinOp, l: Value, r: Value) -> Result<Value, ErrorExpr> {
 fn num_num(l: &Value, r: &Value, op: &str) -> Result<(f64, f64), ErrorExpr> {
     match (l, r) {
         (Numero(a), Numero(b)) => Ok((*a, *b)),
-        (Numero(_), _) => Err(ErrorExpr::tipo(0, format!("'{op}' necesita número, no {}", r.tipo()))),
+        (Numero(_), _) => {
+            Err(ErrorExpr::tipo(0, format!("'{op}' necesita número, no {}", r.tipo())))
+        }
         _ => Err(ErrorExpr::tipo(0, format!("'{op}' necesita número, no {}", l.tipo()))),
     }
 }
@@ -143,15 +155,26 @@ fn num_num(l: &Value, r: &Value, op: &str) -> Result<(f64, f64), ErrorExpr> {
 fn aritm<F: Fn(f64, f64) -> f64>(l: &Value, r: &Value, f: F, op: &str) -> Result<Value, ErrorExpr> {
     // Nulo explícito: una medida ausente no debe entrar en aritmética.
     if matches!(l, Value::Nulo) || matches!(r, Value::Nulo) {
-        return Err(ErrorExpr::evaluacion(0, format!("'{}' con un valor nulo (usa '!= nothing' antes)", op)));
+        return Err(ErrorExpr::evaluacion(
+            0,
+            format!("'{}' con un valor nulo (usa '!= nothing' antes)", op),
+        ));
     }
     let (a, b) = num_num(l, r, op)?;
     Ok(Value::Numero(f(a, b)))
 }
 
-fn orden<F: Fn(f64, f64) -> bool>(l: &Value, r: &Value, f: F, op: &str) -> Result<Value, ErrorExpr> {
+fn orden<F: Fn(f64, f64) -> bool>(
+    l: &Value,
+    r: &Value,
+    f: F,
+    op: &str,
+) -> Result<Value, ErrorExpr> {
     if matches!(l, Value::Nulo) || matches!(r, Value::Nulo) {
-        return Err(ErrorExpr::evaluacion(0, format!("'{}' con un valor nulo (usa '!= nothing' antes)", op)));
+        return Err(ErrorExpr::evaluacion(
+            0,
+            format!("'{}' con un valor nulo (usa '!= nothing' antes)", op),
+        ));
     }
     let (a, b) = num_num(l, r, op)?;
     Ok(Value::Bool(f(a, b)))
@@ -192,14 +215,16 @@ mod tests {
     }
     impl Entorno for EntornoMock {
         fn lee(&self, scope: Scope, campo: &str) -> Result<Value, ErrorExpr> {
-            self.datos
-                .get(&(scope, campo.to_string()))
-                .cloned()
-                .ok_or_else(|| ErrorExpr::entorno(0, format!("no existe '{}.{}'", scope.nombre(), campo)))
+            self.datos.get(&(scope, campo.to_string())).cloned().ok_or_else(|| {
+                ErrorExpr::entorno(0, format!("no existe '{}.{}'", scope.nombre(), campo))
+            })
         }
         fn escribe(&mut self, scope: Scope, campo: &str, valor: Value) -> Result<(), ErrorExpr> {
             if scope != Scope::Locals {
-                return Err(ErrorExpr::entorno(0, format!("no se puede escribir en '{}'", scope.nombre())));
+                return Err(ErrorExpr::entorno(
+                    0,
+                    format!("no se puede escribir en '{}'", scope.nombre()),
+                ));
             }
             self.escrituras.push((scope, campo.into(), valor.clone()));
             self.datos.insert((scope, campo.into()), valor);
@@ -233,15 +258,30 @@ mod tests {
     #[test]
     fn igualdad_entre_tipos_distintos_es_false_sin_error() {
         let env = EntornoMock::new();
-        assert_eq!(eval(&bin(BinOp::Eq, num(1.0), Expresion::Lit(Value::Texto("1".into()))), &env).unwrap(), Value::Bool(false));
-        assert_eq!(eval(&bin(BinOp::Ne, num(1.0), Expresion::Lit(Value::Texto("1".into()))), &env).unwrap(), Value::Bool(true));
+        assert_eq!(
+            eval(&bin(BinOp::Eq, num(1.0), Expresion::Lit(Value::Texto("1".into()))), &env)
+                .unwrap(),
+            Value::Bool(false)
+        );
+        assert_eq!(
+            eval(&bin(BinOp::Ne, num(1.0), Expresion::Lit(Value::Texto("1".into()))), &env)
+                .unwrap(),
+            Value::Bool(true)
+        );
     }
 
     #[test]
     fn nulo_igual_nulo_es_true() {
         let env = EntornoMock::new();
-        assert_eq!(eval(&bin(BinOp::Eq, Expresion::Lit(Value::Nulo), Expresion::Lit(Value::Nulo)), &env).unwrap(), Value::Bool(true));
-        assert_eq!(eval(&bin(BinOp::Ne, Expresion::Lit(Value::Nulo), num(5.0)), &env).unwrap(), Value::Bool(true));
+        assert_eq!(
+            eval(&bin(BinOp::Eq, Expresion::Lit(Value::Nulo), Expresion::Lit(Value::Nulo)), &env)
+                .unwrap(),
+            Value::Bool(true)
+        );
+        assert_eq!(
+            eval(&bin(BinOp::Ne, Expresion::Lit(Value::Nulo), num(5.0)), &env).unwrap(),
+            Value::Bool(true)
+        );
     }
 
     #[test]
@@ -260,32 +300,51 @@ mod tests {
 
     #[test]
     fn and_or_not_solo_bool() {
-        let env = EntornoMock::new()
-            .set(Scope::Locals, "a", Value::Bool(true))
-            .set(Scope::Locals, "b", Value::Bool(false));
-        assert_eq!(eval(&bin(BinOp::And, var(Scope::Locals, "a"), var(Scope::Locals, "b")), &env).unwrap(), Value::Bool(false));
-        assert_eq!(eval(&bin(BinOp::Or, var(Scope::Locals, "a"), var(Scope::Locals, "b")), &env).unwrap(), Value::Bool(true));
-        assert_eq!(eval(&Expresion::UnOp { op: UnOp::Not, operando: Box::new(var(Scope::Locals, "b")) }, &env).unwrap(), Value::Bool(true));
+        let env = EntornoMock::new().set(Scope::Locals, "a", Value::Bool(true)).set(
+            Scope::Locals,
+            "b",
+            Value::Bool(false),
+        );
+        assert_eq!(
+            eval(&bin(BinOp::And, var(Scope::Locals, "a"), var(Scope::Locals, "b")), &env).unwrap(),
+            Value::Bool(false)
+        );
+        assert_eq!(
+            eval(&bin(BinOp::Or, var(Scope::Locals, "a"), var(Scope::Locals, "b")), &env).unwrap(),
+            Value::Bool(true)
+        );
+        assert_eq!(
+            eval(
+                &Expresion::UnOp { op: UnOp::Not, operando: Box::new(var(Scope::Locals, "b")) },
+                &env
+            )
+            .unwrap(),
+            Value::Bool(true)
+        );
     }
 
     #[test]
     fn and_or_con_numero_es_error_de_tipo() {
         let env = EntornoMock::new().set(Scope::Locals, "x", Value::Numero(1.0));
-        assert!(eval(&bin(BinOp::And, var(Scope::Locals, "x"), var(Scope::Locals, "x")), &env).is_err());
+        assert!(
+            eval(&bin(BinOp::And, var(Scope::Locals, "x"), var(Scope::Locals, "x")), &env).is_err()
+        );
     }
 
     #[test]
     fn cortocircuito_and_no_evalua_derecho_cuando_izquierdo_es_false() {
         // `false and locals.inexistente` no debe errorar: el derecho no se evalúa.
         let env = EntornoMock::new();
-        let e = bin(BinOp::And, Expresion::Lit(Value::Bool(false)), var(Scope::Locals, "inexistente"));
+        let e =
+            bin(BinOp::And, Expresion::Lit(Value::Bool(false)), var(Scope::Locals, "inexistente"));
         assert_eq!(eval(&e, &env).unwrap(), Value::Bool(false));
     }
 
     #[test]
     fn cortocircuito_or_no_evalua_derecho_cuando_izquierdo_es_true() {
         let env = EntornoMock::new();
-        let e = bin(BinOp::Or, Expresion::Lit(Value::Bool(true)), var(Scope::Locals, "inexistente"));
+        let e =
+            bin(BinOp::Or, Expresion::Lit(Value::Bool(true)), var(Scope::Locals, "inexistente"));
         assert_eq!(eval(&e, &env).unwrap(), Value::Bool(true));
     }
 
@@ -298,7 +357,11 @@ mod tests {
     #[test]
     fn asigna_escribe_en_locals() {
         let mut env = EntornoMock::new().set(Scope::Resultado, "valor_medido", Value::Numero(4.2));
-        let stmts = vec![Sentencia::Assign { scope: Scope::Locals, campo: "x".into(), valor: var(Scope::Resultado, "valor_medido") }];
+        let stmts = vec![Sentencia::Assign {
+            scope: Scope::Locals,
+            campo: "x".into(),
+            valor: var(Scope::Resultado, "valor_medido"),
+        }];
         eval_sentencias(&stmts, &mut env).unwrap();
         assert_eq!(env.lee(Scope::Locals, "x").unwrap(), Value::Numero(4.2));
     }
@@ -306,7 +369,11 @@ mod tests {
     #[test]
     fn asigna_a_parameters_es_error() {
         let mut env = EntornoMock::new();
-        let stmts = vec![Sentencia::Assign { scope: Scope::Parameters, campo: "x".into(), valor: num(1.0) }];
+        let stmts = vec![Sentencia::Assign {
+            scope: Scope::Parameters,
+            campo: "x".into(),
+            valor: num(1.0),
+        }];
         assert!(eval_sentencias(&stmts, &mut env).is_err());
     }
 }

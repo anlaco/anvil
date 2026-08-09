@@ -144,7 +144,10 @@ impl Parser {
                 return Err(ErrorExpr::sintaxis(
                     campo_tok.pos,
                     campo_tok.len.max(1),
-                    format!("se esperaba un nombre de campo tras '.', pero vino '{}'", campo_tok.kind.repr()),
+                    format!(
+                        "se esperaba un nombre de campo tras '.', pero vino '{}'",
+                        campo_tok.kind.repr()
+                    ),
                 ));
             }
         };
@@ -222,10 +225,13 @@ impl Parser {
         let mut resultado: Option<Expresion> = None;
         for op in ops {
             let der = it.next().unwrap();
-            let cmp = Expresion::BinOp { op, izq: Box::new(izq.clone()), der: Box::new(der.clone()) };
+            let cmp =
+                Expresion::BinOp { op, izq: Box::new(izq.clone()), der: Box::new(der.clone()) };
             resultado = Some(match resultado {
                 None => cmp,
-                Some(acc) => Expresion::BinOp { op: BinOp::And, izq: Box::new(acc), der: Box::new(cmp) },
+                Some(acc) => {
+                    Expresion::BinOp { op: BinOp::And, izq: Box::new(acc), der: Box::new(cmp) }
+                }
             });
             izq = der;
         }
@@ -326,16 +332,16 @@ impl Parser {
                 self.expect_tok(TokKind::ParentCierr)?;
                 Ok(e)
             }
-            TokKind::Eof => {
-                Err(ErrorExpr::sintaxis(t.pos, 0, "fin de texto inesperado (se esperaba una expresión)"))
-            }
-            _ => {
-                Err(ErrorExpr::sintaxis(
-                    t.pos,
-                    t.len.max(1),
-                    format!("token inesperado '{}': se esperaba una expresión", t.kind.repr()),
-                ))
-            }
+            TokKind::Eof => Err(ErrorExpr::sintaxis(
+                t.pos,
+                0,
+                "fin de texto inesperado (se esperaba una expresión)",
+            )),
+            _ => Err(ErrorExpr::sintaxis(
+                t.pos,
+                t.len.max(1),
+                format!("token inesperado '{}': se esperaba una expresión", t.kind.repr()),
+            )),
         }
     }
 
@@ -409,10 +415,16 @@ mod tests {
     fn precedencia_aritmetica() {
         // 2 + 3 * 4  →  Add(2, Mul(3,4))
         let e = parse_expresion("2 + 3 * 4").unwrap();
-        assert_eq!(e, binop(BinOp::Add, lit_num(2.0), binop(BinOp::Mul, lit_num(3.0), lit_num(4.0))));
+        assert_eq!(
+            e,
+            binop(BinOp::Add, lit_num(2.0), binop(BinOp::Mul, lit_num(3.0), lit_num(4.0)))
+        );
         // 2 * 3 + 4  →  Add(Mul(2,3), 4)
         let e = parse_expresion("2 * 3 + 4").unwrap();
-        assert_eq!(e, binop(BinOp::Add, binop(BinOp::Mul, lit_num(2.0), lit_num(3.0)), lit_num(4.0)));
+        assert_eq!(
+            e,
+            binop(BinOp::Add, binop(BinOp::Mul, lit_num(2.0), lit_num(3.0)), lit_num(4.0))
+        );
     }
 
     #[test]
@@ -421,7 +433,11 @@ mod tests {
         let e = parse_expresion("locals.a || locals.b && locals.c").unwrap();
         assert_eq!(
             e,
-            binop(BinOp::Or, var(Scope::Locals, "a"), binop(BinOp::And, var(Scope::Locals, "b"), var(Scope::Locals, "c")))
+            binop(
+                BinOp::Or,
+                var(Scope::Locals, "a"),
+                binop(BinOp::And, var(Scope::Locals, "b"), var(Scope::Locals, "c"))
+            )
         );
     }
 
@@ -431,7 +447,11 @@ mod tests {
         let e = parse_expresion("!locals.a && locals.b").unwrap();
         assert_eq!(
             e,
-            binop(BinOp::And, Expresion::UnOp { op: UnOp::Not, operando: Box::new(var(Scope::Locals, "a")) }, var(Scope::Locals, "b"))
+            binop(
+                BinOp::And,
+                Expresion::UnOp { op: UnOp::Not, operando: Box::new(var(Scope::Locals, "a")) },
+                var(Scope::Locals, "b")
+            )
         );
     }
 
@@ -441,14 +461,21 @@ mod tests {
         let e = parse_expresion("1 < locals.x < 10").unwrap();
         assert_eq!(
             e,
-            binop(BinOp::And, binop(BinOp::Lt, lit_num(1.0), var(Scope::Locals, "x")), binop(BinOp::Lt, var(Scope::Locals, "x"), lit_num(10.0)))
+            binop(
+                BinOp::And,
+                binop(BinOp::Lt, lit_num(1.0), var(Scope::Locals, "x")),
+                binop(BinOp::Lt, var(Scope::Locals, "x"), lit_num(10.0))
+            )
         );
     }
 
     #[test]
     fn parentesis_agrupan() {
         let e = parse_expresion("(1 + 2) * 3").unwrap();
-        assert_eq!(e, binop(BinOp::Mul, binop(BinOp::Add, lit_num(1.0), lit_num(2.0)), lit_num(3.0)));
+        assert_eq!(
+            e,
+            binop(BinOp::Mul, binop(BinOp::Add, lit_num(1.0), lit_num(2.0)), lit_num(3.0))
+        );
     }
 
     #[test]
@@ -492,7 +519,9 @@ mod tests {
     fn asignacion_se_parsea() {
         let stmts = parse_sentencias("locals.x = resultado.valor_medido").unwrap();
         assert_eq!(stmts.len(), 1);
-        assert!(matches!(&stmts[0], Sentencia::Assign { scope: Scope::Locals, campo, valor: _ } if campo == "x"));
+        assert!(
+            matches!(&stmts[0], Sentencia::Assign { scope: Scope::Locals, campo, valor: _ } if campo == "x")
+        );
     }
 
     #[test]

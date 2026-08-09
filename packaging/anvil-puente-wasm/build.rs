@@ -8,7 +8,11 @@ fn main() {
     let mut prost = prost_build::Config::new();
     prost.protoc_executable(protoc_bin_vendored::protoc_bin_path().expect("protoc vendido"));
     tonic_build::configure()
-        .compile_protos_with_config(prost, &["../../crates/modelo/paso.proto"], &["../../crates/modelo"])
+        .compile_protos_with_config(
+            prost,
+            &["../../crates/modelo/paso.proto"],
+            &["../../crates/modelo"],
+        )
         .expect("compilar paso.proto con tonic_build");
     println!("cargo:rerun-if-changed=../../crates/modelo/paso.proto");
 }

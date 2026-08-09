@@ -8,7 +8,7 @@
 //! secuencia son pequeños, no merece la pena escribir fila a fila.
 
 use modelo::proto::a_texto;
-use modelo::{ResultadoSecuencia, ResultadoStep, ResultSink};
+use modelo::{ResultSink, ResultadoSecuencia, ResultadoStep};
 use std::io::Write;
 
 use crate::reintento::escribir_con_reintentos;
@@ -93,10 +93,8 @@ fn fila_paso(estado_secuencia: &str, p: &ResultadoStep, nombre: &str) -> Vec<Str
 /// Escapa un campo según RFC-4180 y lo añade a `fila`: si contiene coma,
 /// comilla, CR o LF, lo envuelve en comillas y duplica las comillas internas.
 fn csv_campo(campo: &str, fila: &mut String) {
-    let necesita = campo.contains(',')
-        || campo.contains('"')
-        || campo.contains('\n')
-        || campo.contains('\r');
+    let necesita =
+        campo.contains(',') || campo.contains('"') || campo.contains('\n') || campo.contains('\r');
     if necesita {
         fila.push('"');
         for c in campo.chars() {
@@ -133,7 +131,14 @@ mod tests {
 
     fn secuencia_ejemplo() -> ResultadoSecuencia {
         let mut s = ResultadoSecuencia::nueva("basica");
-        s.registra(ResultadoStep::medido("medir_voltaje", "fallo", "fuera de rango", 4.2, 4.5, 5.5));
+        s.registra(ResultadoStep::medido(
+            "medir_voltaje",
+            "fallo",
+            "fuera de rango",
+            4.2,
+            4.5,
+            5.5,
+        ));
         s.registra(ResultadoStep::nuevo("verificar_led", "paso", "led encendido"));
         s
     }
@@ -158,7 +163,12 @@ mod tests {
     fn comparacion_llena_valor_esperado_y_operador() {
         use modelo::Operador;
         let mut s = ResultadoSecuencia::nueva("s");
-        let mut r = ResultadoStep::medido_valor("verificar_frecuencia", "fallo", "990 >= 1000 no cumplido", 990.0);
+        let mut r = ResultadoStep::medido_valor(
+            "verificar_frecuencia",
+            "fallo",
+            "990 >= 1000 no cumplido",
+            990.0,
+        );
         r.operador = Some(Operador::Ge);
         r.valor_esperado = Some(1000.0);
         s.registra(r);
@@ -180,7 +190,10 @@ mod tests {
 
         let out = String::from_utf8(sink.salida).unwrap();
         let segunda_linea = out.split("\r\n").nth(1).unwrap();
-        assert!(segunda_linea.contains("\"hola, \"\"mundo\"\"\ny tal\""), "comilla doblada y campo entrecomillado: {segunda_linea}");
+        assert!(
+            segunda_linea.contains("\"hola, \"\"mundo\"\"\ny tal\""),
+            "comilla doblada y campo entrecomillado: {segunda_linea}"
+        );
     }
 
     #[test]
@@ -218,7 +231,15 @@ mod tests {
         // Call.
         assert!(lineas[1].contains(",fallo,test_fuentes,fallo,"), "fila del call: {}", lineas[1]);
         // Sub-pasos aplanados con prefijo.
-        assert!(lineas[2].contains(",paso,test_fuentes/medir_canal_1,paso,ok,"), "sub-paso 1: {}", lineas[2]);
-        assert!(lineas[3].contains(",fallo,test_fuentes/medir_canal_2,fallo,fuera de rango,"), "sub-paso 2: {}", lineas[3]);
+        assert!(
+            lineas[2].contains(",paso,test_fuentes/medir_canal_1,paso,ok,"),
+            "sub-paso 1: {}",
+            lineas[2]
+        );
+        assert!(
+            lineas[3].contains(",fallo,test_fuentes/medir_canal_2,fallo,fuera de rango,"),
+            "sub-paso 2: {}",
+            lineas[3]
+        );
     }
 }

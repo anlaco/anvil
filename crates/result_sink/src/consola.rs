@@ -4,7 +4,7 @@
 //! lifecycle. Así quien dependía del formato de consola lo sigue teniendo
 //! sin que el motor sepa que imprime.
 
-use modelo::{ResultadoSecuencia, ResultSink};
+use modelo::{ResultSink, ResultadoSecuencia};
 
 /// Verte el resultado a un `Write` con el formato textual congelado.
 ///
@@ -38,7 +38,14 @@ mod tests {
     #[test]
     fn produce_el_formato_congelado() {
         let mut s = ResultadoSecuencia::nueva("basica");
-        s.registra(ResultadoStep::medido("medir_voltaje", "fallo", "voltaje fuera de rango", 4.2, 4.5, 5.5));
+        s.registra(ResultadoStep::medido(
+            "medir_voltaje",
+            "fallo",
+            "voltaje fuera de rango",
+            4.2,
+            4.5,
+            5.5,
+        ));
         s.registra(ResultadoStep::nuevo("verificar_led", "paso", "led encendido"));
 
         let mut sink = SinkConsola::nuevo(Vec::new());
