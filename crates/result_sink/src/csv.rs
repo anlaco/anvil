@@ -53,7 +53,7 @@ impl<W: Write> ResultSink for SinkCsv<W> {
             // `padre` es el prefijo de ruta para los sub-pasos anidados
             // (M4b): el paso top-level no lleva prefijo; sus sub-pasos se
             // aplanean como `padre/hijo` (recursivo). Sin columnas nuevas.
-            escribe_filas(&mut doc, estado, p, &p.nombre);
+            escribe_filas(&mut doc, &secuencia.nombre, estado, p, &p.nombre);
         }
         if let Err(e) = escribir_con_reintentos(&mut self.salida, REINTENTOS, doc.as_bytes()) {
             eprintln!("sink csv: no se pudo escribir: {e}");
@@ -65,12 +65,21 @@ impl<W: Write> ResultSink for SinkCsv<W> {
 /// `prefijo` es el `nombre_paso` acumulado (`padre/hijo/...`); el paso en
 /// curso se emite con `prefijo` como `nombre_paso` y, si tiene sub-pasos,
 /// éstos se emiten a continuación con `prefijo/sub.nombre`.
-fn escribe_filas(doc: &mut String, estado_secuencia: &str, p: &ResultadoStep, prefijo: &str) {
-    fila(doc, fila_paso(estado_secuencia, p, prefijo));
+fn escribe_filas(
+    doc: &mut String,
+    nombre_secuencia: &str,
+    estado_secuencia: &str,
+    p: &ResultadoStep,
+    prefijo: &str,
+) {
+    fila(
+        doc,
+        fila_paso(nombre_secuencia, estado_secuencia, p, prefijo),
+    );
     if let Some(sub) = &p.sub_pasos {
         for sp in sub {
             let hijo = format!("{prefijo}/{}", sp.nombre);
-            escribe_filas(doc, estado_secuencia, sp, &hijo);
+            escribe_filas(doc, nombre_secuencia, estado_secuencia, sp, &hijo);
         }
     }
 }
@@ -78,10 +87,15 @@ fn escribe_filas(doc: &mut String, estado_secuencia: &str, p: &ResultadoStep, pr
 /// Construye los 10 campos de una fila de paso, ya como `String`. `nombre`
 /// es el `nombre_paso` a emitir (el original o el prefijo `padre/hijo` para
 /// sub-pasos aplanados).
-fn fila_paso(estado_secuencia: &str, p: &ResultadoStep, nombre: &str) -> Vec<String> {
+fn fila_paso(
+    nombre_secuencia: &str,
+    estado_secuencia: &str,
+    p: &ResultadoStep,
+    nombre: &str,
+) -> Vec<String> {
     vec![
+        nombre_secuencia.to_string(),
         estado_secuencia.to_string(),
-        p.estado.clone(),
         nombre.to_string(),
         p.estado.clone(),
         p.mensaje.clone(),
@@ -162,14 +176,15 @@ mod tests {
         let lineas: Vec<&str> = out.split("\r\n").collect();
         assert_eq!(lineas[0], "nombre_secuencia,estado,nombre_paso,estado_paso,mensaje,valor_medido,limite_min,limite_max,valor_esperado,operador");
         // rango: valor_esperado/operador vacíos (no aplican a un rango).
+        // primer campo = nombre de la secuencia (DEF-2), segundo = su estado agregado.
         assert_eq!(
             lineas[1],
-            "fallo,fallo,medir_voltaje,fallo,fuera de rango,4.2,4.5,5.5,,"
+            "basica,fallo,medir_voltaje,fallo,fuera de rango,4.2,4.5,5.5,,"
         );
         // sin medida ni límite: los últimos cinco campos vacíos.
         assert_eq!(
             lineas[2],
-            "fallo,paso,verificar_led,paso,led encendido,,,,,"
+            "basica,fallo,verificar_led,paso,led encendido,,,,,"
         );
         assert!(lineas[3].is_empty(), "termina en CRLF");
     }
@@ -249,20 +264,21 @@ mod tests {
             lineas[0],
             "nombre_secuencia,estado,nombre_paso,estado_paso,mensaje,valor_medido,limite_min,limite_max,valor_esperado,operador"
         );
-        // Call.
+        // Call. Primer campo = nombre de secuencia, segundo = estado agregado
+        // (fallo, el mismo en las tres filas).
         assert!(
-            lineas[1].contains(",fallo,test_fuentes,fallo,"),
+            lineas[1].contains("basica,fallo,test_fuentes,fallo,"),
             "fila del call: {}",
             lineas[1]
         );
         // Sub-pasos aplanados con prefijo.
         assert!(
-            lineas[2].contains(",paso,test_fuentes/medir_canal_1,paso,ok,"),
+            lineas[2].contains("basica,fallo,test_fuentes/medir_canal_1,paso,ok,"),
             "sub-paso 1: {}",
             lineas[2]
         );
         assert!(
-            lineas[3].contains(",fallo,test_fuentes/medir_canal_2,fallo,fuera de rango,"),
+            lineas[3].contains("basica,fallo,test_fuentes/medir_canal_2,fallo,fuera de rango,"),
             "sub-paso 2: {}",
             lineas[3]
         );
