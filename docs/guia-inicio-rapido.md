@@ -162,7 +162,10 @@ anvil <secuencia.yaml> [--process-model <pm.yaml>] [--json <ruta>] [--csv <ruta>
 - `--validate` carga y valida sin ejecutar ni conectar (CI sin hardware).
 - `--port` fija el puerto del ejecutor embebido (default 9100).
 - `--limits` inyecta un sidecar de límites por nombre de paso (RF-30),
-  sobreescribiendo los embebidos (sólo la secuencia raíz hoy).
+  sobreescribiendo los embebidos (sólo la secuencia raíz hoy). Si algún
+  nombre del sidecar no casa con ningún paso, **avisa por stderr y los
+  nombra** —incluso con `--quiet`—: un límite que no se aplica deja en pie el
+  embebido y da un veredicto que no es el que pediste.
 - `--ejecutor nombre=host:puerto` re-apunta un ejecutor declarado en
   `ejecutores:` a otro endpoint sin tocar el YAML (R&D vs. fábrica, RF-36.3);
   puede repetirse. Si el nombre no está declarado, error al cargar.

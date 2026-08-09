@@ -977,6 +977,32 @@ pub fn aplicar_limites(
     aplicados
 }
 
+/// Los nombres del sidecar que **no corresponden a ningún paso** de la
+/// secuencia (RF-30, DIAG-1 del informe de beta). Un sidecar que no afecta a
+/// nada es casi siempre un error del usuario —un nombre mal escrito, o el
+/// sidecar apuntando a la secuencia equivocada— y sin esto falla en silencio:
+/// los límites embebidos siguen en pie y la secuencia da un veredicto que no
+/// es el que se pidió. Ordenados, para que el aviso sea estable.
+pub fn limites_sin_aplicar(
+    secuencia: &DefinicionSecuencia,
+    limites: &HashMap<String, Limite>,
+) -> Vec<String> {
+    let nombres: HashSet<&str> = secuencia
+        .pasos_setup
+        .iter()
+        .chain(&secuencia.pasos_main)
+        .chain(&secuencia.pasos_cleanup)
+        .map(|p| p.nombre.as_str())
+        .collect();
+    let mut sobran: Vec<String> = limites
+        .keys()
+        .filter(|n| !nombres.contains(n.as_str()))
+        .cloned()
+        .collect();
+    sobran.sort();
+    sobran
+}
+
 /// Reglas de negocio que el schema por sí solo no expresa. No revisa el
 /// `nombre` (eso lo hace [`secuencia_yaml_a_definicion`] con su fallback) ni
 /// las `subsecuencias` (las traduce/recorre la propia función llamadora).
@@ -1796,6 +1822,37 @@ main:
             Limite::Rango { min: 0.0, max: 1.0 },
         );
         assert_eq!(aplicar_limites(&mut s, &lim), 0, "ningún paso coincide");
+        assert_eq!(
+            limites_sin_aplicar(&s, &lim),
+            vec!["paso_que_no_existe"],
+            "y se puede decir cuál no casó (DIAG-1)"
+        );
+    }
+
+    #[test]
+    fn limites_sin_aplicar_lista_solo_los_huerfanos_y_ordenados() {
+        let s = cargar_de_texto(basica_yaml()).unwrap();
+        let rango = Limite::Rango { min: 0.0, max: 1.0 };
+        let lim = HashMap::from([
+            ("medir_voltaje".to_string(), rango.clone()), // sí existe en basica
+            ("zeta_inventado".to_string(), rango.clone()),
+            ("alfa_inventado".to_string(), rango),
+        ]);
+        assert_eq!(
+            limites_sin_aplicar(&s, &lim),
+            vec!["alfa_inventado", "zeta_inventado"],
+            "sólo los que no casan, en orden estable"
+        );
+    }
+
+    #[test]
+    fn limites_sin_aplicar_vacio_cuando_todo_casa() {
+        let s = cargar_de_texto(basica_yaml()).unwrap();
+        let lim = HashMap::from([(
+            "medir_voltaje".to_string(),
+            Limite::Rango { min: 0.0, max: 1.0 },
+        )]);
+        assert!(limites_sin_aplicar(&s, &lim).is_empty());
     }
 
     #[test]

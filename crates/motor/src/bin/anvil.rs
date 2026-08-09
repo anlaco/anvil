@@ -24,7 +24,7 @@
 
 use cargador::{
     aplicar_limites, aplicar_override_ejecutores, cargar_limites_de_archivo,
-    cargar_programa_con_pm, cargar_programa_de_archivo,
+    cargar_programa_con_pm, cargar_programa_de_archivo, limites_sin_aplicar,
 };
 use modelo::{Programa, ResultSink};
 use motor::Motor;
@@ -205,9 +205,33 @@ fn main() {
     if let Some(r) = cli.limits.as_deref() {
         match cargar_limites_de_archivo(r) {
             Ok(l) => {
+                let sobran = limites_sin_aplicar(&programa.raiz, &l);
                 let n = aplicar_limites(&mut programa.raiz, &l);
                 if !cli.quiet {
                     eprintln!("sidecar de límites '{r}' aplicado ({n} paso(s) afectado(s))");
+                }
+                // DIAG-1: un límite que no casa con ningún paso no hace nada, y
+                // sin avisar eso es un veredicto equivocado en silencio (el
+                // límite embebido sigue en pie). El aviso sale **aunque haya
+                // `--quiet`**: `--quiet` silencia el reporte, no los avisos.
+                if !sobran.is_empty() {
+                    eprintln!(
+                        "aviso: {} límite(s) del sidecar '{r}' no afectan a ningún paso: {}",
+                        sobran.len(),
+                        sobran.join(", ")
+                    );
+                    if n == 0 {
+                        eprintln!(
+                            "aviso: el sidecar no afectó a ningún paso. Comprueba que los \
+                             nombres coincidan{}",
+                            if cli.process_model.is_some() {
+                                "; con --process-model el sidecar se aplica al process model, \
+                                 no a la secuencia del operador"
+                            } else {
+                                ""
+                            }
+                        );
+                    }
                 }
             }
             Err(e) => {
