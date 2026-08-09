@@ -127,7 +127,10 @@ mod tests {
         let redecodificado = ResultadoPasoProto::decode(&bytes[..]).unwrap();
         assert_eq!(redecodificado, p);
         // nombre + estado + mensaje y nada más.
-        assert!(!bytes.windows(1).any(|w| w[0] == 0x22), "no debe haber tag 4");
+        assert!(
+            !bytes.windows(1).any(|w| w[0] == 0x22),
+            "no debe haber tag 4"
+        );
     }
 
     #[test]

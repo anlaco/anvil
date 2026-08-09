@@ -44,7 +44,11 @@ pub fn parse_sentencias(src: &str) -> Result<Vec<Sentencia>, ErrorExpr> {
     let mut stmts = Vec::new();
     // Permite espacios en blanco (ya ignorados por el lexer) y cadena vacía.
     if p.is_eof() {
-        return Err(ErrorExpr::sintaxis(p.cur().pos, 0, "se esperaba al menos una sentencia"));
+        return Err(ErrorExpr::sintaxis(
+            p.cur().pos,
+            0,
+            "se esperaba al menos una sentencia",
+        ));
     }
     loop {
         stmts.push(p.sentencia()?);
@@ -105,12 +109,19 @@ impl Parser {
             return Err(ErrorExpr::sintaxis(
                 ig.pos,
                 ig.len.max(1),
-                format!("se esperaba '=' en la asignación, pero vino '{}'", ig.kind.repr()),
+                format!(
+                    "se esperaba '=' en la asignación, pero vino '{}'",
+                    ig.kind.repr()
+                ),
             ));
         }
         self.advance();
         let valor = self.expresion()?;
-        Ok(Sentencia::Assign { scope, campo, valor })
+        Ok(Sentencia::Assign {
+            scope,
+            campo,
+            valor,
+        })
     }
 
     /// `scope "." ident` — referencia a variable. Devuelve (scope, campo).
@@ -164,7 +175,11 @@ impl Parser {
             Err(ErrorExpr::sintaxis(
                 t.pos,
                 t.len.max(1),
-                format!("se esperaba '{}', pero vino '{}'", want.repr(), t.kind.repr()),
+                format!(
+                    "se esperaba '{}', pero vino '{}'",
+                    want.repr(),
+                    t.kind.repr()
+                ),
             ))
         }
     }
@@ -179,7 +194,11 @@ impl Parser {
         while matches!(self.cur().kind, TokKind::OrOr) {
             self.advance();
             let der = self.and_expr()?;
-            izq = Expresion::BinOp { op: BinOp::Or, izq: Box::new(izq), der: Box::new(der) };
+            izq = Expresion::BinOp {
+                op: BinOp::Or,
+                izq: Box::new(izq),
+                der: Box::new(der),
+            };
         }
         Ok(izq)
     }
@@ -189,7 +208,11 @@ impl Parser {
         while matches!(self.cur().kind, TokKind::AndAnd) {
             self.advance();
             let der = self.cmp_expr()?;
-            izq = Expresion::BinOp { op: BinOp::And, izq: Box::new(izq), der: Box::new(der) };
+            izq = Expresion::BinOp {
+                op: BinOp::And,
+                izq: Box::new(izq),
+                der: Box::new(der),
+            };
         }
         Ok(izq)
     }
@@ -225,13 +248,18 @@ impl Parser {
         let mut resultado: Option<Expresion> = None;
         for op in ops {
             let der = it.next().unwrap();
-            let cmp =
-                Expresion::BinOp { op, izq: Box::new(izq.clone()), der: Box::new(der.clone()) };
+            let cmp = Expresion::BinOp {
+                op,
+                izq: Box::new(izq.clone()),
+                der: Box::new(der.clone()),
+            };
             resultado = Some(match resultado {
                 None => cmp,
-                Some(acc) => {
-                    Expresion::BinOp { op: BinOp::And, izq: Box::new(acc), der: Box::new(cmp) }
-                }
+                Some(acc) => Expresion::BinOp {
+                    op: BinOp::And,
+                    izq: Box::new(acc),
+                    der: Box::new(cmp),
+                },
             });
             izq = der;
         }
@@ -248,7 +276,11 @@ impl Parser {
             };
             self.advance();
             let der = self.mul_expr()?;
-            izq = Expresion::BinOp { op, izq: Box::new(izq), der: Box::new(der) };
+            izq = Expresion::BinOp {
+                op,
+                izq: Box::new(izq),
+                der: Box::new(der),
+            };
         }
         Ok(izq)
     }
@@ -263,7 +295,11 @@ impl Parser {
             };
             self.advance();
             let der = self.unary()?;
-            izq = Expresion::BinOp { op, izq: Box::new(izq), der: Box::new(der) };
+            izq = Expresion::BinOp {
+                op,
+                izq: Box::new(izq),
+                der: Box::new(der),
+            };
         }
         Ok(izq)
     }
@@ -275,12 +311,18 @@ impl Parser {
             TokKind::Menos => {
                 self.advance();
                 let operando = self.unary()?;
-                Ok(Expresion::UnOp { op: UnOp::Neg, operando: Box::new(operando) })
+                Ok(Expresion::UnOp {
+                    op: UnOp::Neg,
+                    operando: Box::new(operando),
+                })
             }
             TokKind::Not => {
                 self.advance();
                 let operando = self.unary()?;
-                Ok(Expresion::UnOp { op: UnOp::Not, operando: Box::new(operando) })
+                Ok(Expresion::UnOp {
+                    op: UnOp::Not,
+                    operando: Box::new(operando),
+                })
             }
             _ => self.postfix(),
         }
@@ -340,7 +382,10 @@ impl Parser {
             _ => Err(ErrorExpr::sintaxis(
                 t.pos,
                 t.len.max(1),
-                format!("token inesperado '{}': se esperaba una expresión", t.kind.repr()),
+                format!(
+                    "token inesperado '{}': se esperaba una expresión",
+                    t.kind.repr()
+                ),
             )),
         }
     }
@@ -355,7 +400,10 @@ impl Parser {
             _ => Err(ErrorExpr::sintaxis(
                 t.pos,
                 t.len.max(1),
-                format!("se esperaba un nombre de campo, pero vino '{}'", t.kind.repr()),
+                format!(
+                    "se esperaba un nombre de campo, pero vino '{}'",
+                    t.kind.repr()
+                ),
             )),
         }
     }
@@ -402,13 +450,20 @@ mod tests {
     use crate::value::Value;
 
     fn var(scope: Scope, campo: &str) -> Expresion {
-        Expresion::Var { scope, campo: campo.into() }
+        Expresion::Var {
+            scope,
+            campo: campo.into(),
+        }
     }
     fn lit_num(x: f64) -> Expresion {
         Expresion::Lit(Value::Numero(x))
     }
     fn binop(op: BinOp, izq: Expresion, der: Expresion) -> Expresion {
-        Expresion::BinOp { op, izq: Box::new(izq), der: Box::new(der) }
+        Expresion::BinOp {
+            op,
+            izq: Box::new(izq),
+            der: Box::new(der),
+        }
     }
 
     #[test]
@@ -417,13 +472,21 @@ mod tests {
         let e = parse_expresion("2 + 3 * 4").unwrap();
         assert_eq!(
             e,
-            binop(BinOp::Add, lit_num(2.0), binop(BinOp::Mul, lit_num(3.0), lit_num(4.0)))
+            binop(
+                BinOp::Add,
+                lit_num(2.0),
+                binop(BinOp::Mul, lit_num(3.0), lit_num(4.0))
+            )
         );
         // 2 * 3 + 4  →  Add(Mul(2,3), 4)
         let e = parse_expresion("2 * 3 + 4").unwrap();
         assert_eq!(
             e,
-            binop(BinOp::Add, binop(BinOp::Mul, lit_num(2.0), lit_num(3.0)), lit_num(4.0))
+            binop(
+                BinOp::Add,
+                binop(BinOp::Mul, lit_num(2.0), lit_num(3.0)),
+                lit_num(4.0)
+            )
         );
     }
 
@@ -449,7 +512,10 @@ mod tests {
             e,
             binop(
                 BinOp::And,
-                Expresion::UnOp { op: UnOp::Not, operando: Box::new(var(Scope::Locals, "a")) },
+                Expresion::UnOp {
+                    op: UnOp::Not,
+                    operando: Box::new(var(Scope::Locals, "a"))
+                },
                 var(Scope::Locals, "b")
             )
         );
@@ -474,7 +540,11 @@ mod tests {
         let e = parse_expresion("(1 + 2) * 3").unwrap();
         assert_eq!(
             e,
-            binop(BinOp::Mul, binop(BinOp::Add, lit_num(1.0), lit_num(2.0)), lit_num(3.0))
+            binop(
+                BinOp::Mul,
+                binop(BinOp::Add, lit_num(1.0), lit_num(2.0)),
+                lit_num(3.0)
+            )
         );
     }
 
@@ -498,8 +568,14 @@ mod tests {
 
     #[test]
     fn literales_nulo_true_false_texto() {
-        assert!(matches!(parse_expresion("nothing").unwrap(), Expresion::Lit(Value::Nulo)));
-        assert!(matches!(parse_expresion("true").unwrap(), Expresion::Lit(Value::Bool(true))));
+        assert!(matches!(
+            parse_expresion("nothing").unwrap(),
+            Expresion::Lit(Value::Nulo)
+        ));
+        assert!(matches!(
+            parse_expresion("true").unwrap(),
+            Expresion::Lit(Value::Bool(true))
+        ));
         let e = parse_expresion("\"paso\"").unwrap();
         assert_eq!(e, Expresion::Lit(Value::Texto("paso".into())));
     }

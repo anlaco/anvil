@@ -130,7 +130,9 @@ impl Motor {
         let mut motor = Self::conecta(host, puerto)?;
         for (nombre, def) in &programa.ejecutores {
             if let TipoEjecutor::Grpc { host, puerto } = &def.tipo {
-                motor.conexiones.insert(nombre.clone(), Cliente::conectar(host, *puerto)?);
+                motor
+                    .conexiones
+                    .insert(nombre.clone(), Cliente::conectar(host, *puerto)?);
             }
         }
         Ok(motor)
@@ -147,11 +149,18 @@ impl Motor {
         match def.ejecutor.as_deref() {
             None => Ok(EMBEDIDO),
             Some(nombre) => match programa.ejecutores.get(nombre) {
-                Some(DefinicionEjecutor { tipo: TipoEjecutor::Embebido, .. }) => Ok(EMBEDIDO),
-                Some(DefinicionEjecutor { tipo: TipoEjecutor::Grpc { .. }, .. }) => Ok(nombre),
-                Some(DefinicionEjecutor { tipo: TipoEjecutor::Wasm { .. }, .. }) => {
-                    Err(Error::EjecutorWasmSinHost(nombre.to_string()))
-                }
+                Some(DefinicionEjecutor {
+                    tipo: TipoEjecutor::Embebido,
+                    ..
+                }) => Ok(EMBEDIDO),
+                Some(DefinicionEjecutor {
+                    tipo: TipoEjecutor::Grpc { .. },
+                    ..
+                }) => Ok(nombre),
+                Some(DefinicionEjecutor {
+                    tipo: TipoEjecutor::Wasm { .. },
+                    ..
+                }) => Err(Error::EjecutorWasmSinHost(nombre.to_string())),
                 None => Err(Error::EjecutorNoDeclarado(nombre.to_string())),
             },
         }
@@ -167,7 +176,10 @@ impl Motor {
         intento: i32,
     ) -> Result<ResultadoStep, Error> {
         let endpoint = Self::resolver_endpoint(def, programa)?;
-        let peticion = PeticionPaso { nombre: def.nombre.clone(), intento };
+        let peticion = PeticionPaso {
+            nombre: def.nombre.clone(),
+            intento,
+        };
         let cliente = self
             .conexiones
             .get_mut(endpoint)
@@ -468,18 +480,19 @@ fn ejecuta_sequence_call<I: InvocaPasos>(
     if let Some(args) = &p.parametros {
         for a in args {
             let valor = match &a.origen {
-                Expresion::Var { scope: Scope::Locals, campo } => {
-                    match ent.lee(Scope::Locals, campo) {
-                        Ok(v) => v,
-                        Err(e) => {
-                            return Ok(ResultadoStep::nuevo(
+                Expresion::Var {
+                    scope: Scope::Locals,
+                    campo,
+                } => match ent.lee(Scope::Locals, campo) {
+                    Ok(v) => v,
+                    Err(e) => {
+                        return Ok(ResultadoStep::nuevo(
                                 &p.nombre,
                                 "error",
                                 format!("sequence call '{destino}': argumento '{}': locals.{campo} no existe ({e})", a.param),
                             ));
-                        }
                     }
-                }
+                },
                 // La forma ya se validó al cargar; defense in depth.
                 _ => {
                     return Ok(ResultadoStep::nuevo(
@@ -501,15 +514,26 @@ fn ejecuta_sequence_call<I: InvocaPasos>(
     // `on_inicio/on_fin_secuencia` (es_raiz=false): los sinks de formato
     // no duplican reporte; el árbol anidado se reconstruye en el paso (6).
     let sub_entorno = EntornoMotor::desde_definicion_con_argumentos(sub, argumentos, true);
-    let (sub_secuencia, sub_entorno) =
-        ejecuta_secuencia_interna(inv, sub, sub_entorno, sink, programa, profundidad + 1, false)?;
+    let (sub_secuencia, sub_entorno) = ejecuta_secuencia_interna(
+        inv,
+        sub,
+        sub_entorno,
+        sink,
+        programa,
+        profundidad + 1,
+        false,
+    )?;
 
     // (5) Salida by-reference: copia `parameters.P` (final) → `locals.campo`
     // del padre (el mismo lvalue de la entrada).
     let mut errores_salida = Vec::new();
     if let Some(args) = &p.parametros {
         for a in args {
-            if let Expresion::Var { scope: Scope::Locals, campo } = &a.origen {
+            if let Expresion::Var {
+                scope: Scope::Locals,
+                campo,
+            } = &a.origen
+            {
                 if let Some(v_final) = sub_entorno.parameters().get(&a.param) {
                     if let Err(e) = ent.escribe(Scope::Locals, campo, v_final.clone()) {
                         errores_salida.push(format!("salida '{}': {e}", a.param));
@@ -550,17 +574,21 @@ fn evalua_precondicion(pre: &Expresion, ent: &mut EntornoMotor, nombre: &str) ->
     ent.limpia_resultado();
     match eval(pre, ent) {
         Ok(Value::Bool(true)) => VeredictoPre::Continua,
-        Ok(Value::Bool(false)) => {
-            VeredictoPre::Salta(ResultadoStep::nuevo(nombre, "saltado", "precondición falsa"))
-        }
+        Ok(Value::Bool(false)) => VeredictoPre::Salta(ResultadoStep::nuevo(
+            nombre,
+            "saltado",
+            "precondición falsa",
+        )),
         Ok(v) => VeredictoPre::Salta(ResultadoStep::nuevo(
             nombre,
             "error",
             format!("precondición: se esperaba bool, no {}", v.tipo()),
         )),
-        Err(e) => {
-            VeredictoPre::Salta(ResultadoStep::nuevo(nombre, "error", format!("precondición: {e}")))
-        }
+        Err(e) => VeredictoPre::Salta(ResultadoStep::nuevo(
+            nombre,
+            "error",
+            format!("precondición: {e}"),
+        )),
     }
 }
 
@@ -685,7 +713,10 @@ mod tests {
         assert_eq!(r.estado, "paso");
         assert_eq!(r.limite_min, Some(4.5));
         assert_eq!(r.limite_max, Some(5.5));
-        assert_eq!(r.mensaje, "medido", "si pasa, el mensaje del paso se respeta");
+        assert_eq!(
+            r.mensaje, "medido",
+            "si pasa, el mensaje del paso se respeta"
+        );
     }
 
     #[test]
@@ -703,7 +734,10 @@ mod tests {
         let def = DefinicionPaso::con_limite(
             "m",
             1,
-            Limite::Comparacion { op: Operador::Ge, esperado: 1000.0 },
+            Limite::Comparacion {
+                op: Operador::Ge,
+                esperado: 1000.0,
+            },
         );
         let r = aplicar_limite(&def, paso_medido(999.0, "paso"));
         assert_eq!(r.estado, "fallo");
@@ -717,8 +751,15 @@ mod tests {
         // El paso sabe algo que el límite no: su fallo se respeta.
         let def = DefinicionPaso::con_limite("m", 1, Limite::Rango { min: 4.5, max: 5.5 });
         let r = aplicar_limite(&def, paso_medido(5.0, "fallo"));
-        assert_eq!(r.estado, "fallo", "el paso ya falló: el límite no lo mejora");
-        assert_eq!(r.limite_min, Some(4.5), "pero sí rellena el límite para el reporte");
+        assert_eq!(
+            r.estado, "fallo",
+            "el paso ya falló: el límite no lo mejora"
+        );
+        assert_eq!(
+            r.limite_min,
+            Some(4.5),
+            "pero sí rellena el límite para el reporte"
+        );
     }
 
     #[test]
@@ -764,7 +805,10 @@ mod tests {
     fn precondicion_verdadera_continua() {
         let mut env = entorno_con_locals(&[("contador", ValorDefinicion::Numero(5.0))]);
         let pre = expr::parse_expresion("locals.contador > 0").unwrap();
-        assert!(matches!(evalua_precondicion(&pre, &mut env, "p"), VeredictoPre::Continua));
+        assert!(matches!(
+            evalua_precondicion(&pre, &mut env, "p"),
+            VeredictoPre::Continua
+        ));
     }
 
     #[test]
@@ -834,7 +878,10 @@ mod tests {
             expr: expr::parse_expresion("resultado.inventado + 1").unwrap(),
         }];
         let r = aplica_asigna(&asignaciones, res, &mut env);
-        assert_eq!(r.estado, "error", "una asigna que falla es un fallo de definición");
+        assert_eq!(
+            r.estado, "error",
+            "una asigna que falla es un fallo de definición"
+        );
         assert!(r.mensaje.contains("asigna"));
     }
 
@@ -882,9 +929,14 @@ mod tests {
     /// Una subsecuencia inline `nombre` con un `statement` que copia
     /// `parameters.canal` a `parameters.listo` (escribe en parameters: by-ref).
     fn inline_comprueba(nombre: &str) -> DefinicionSecuencia {
-        let mut s = DefinicionSecuencia { nombre: nombre.into(), ..Default::default() };
-        s.parameters.insert("canal".into(), ValorDefinicion::Numero(0.0));
-        s.parameters.insert("listo".into(), ValorDefinicion::Bool(false));
+        let mut s = DefinicionSecuencia {
+            nombre: nombre.into(),
+            ..Default::default()
+        };
+        s.parameters
+            .insert("canal".into(), ValorDefinicion::Numero(0.0));
+        s.parameters
+            .insert("listo".into(), ValorDefinicion::Bool(false));
         s.pasos_main = vec![{
             let mut p = DefinicionPaso::nuevo("comprobar", 1);
             p.tipo = TipoPaso::Statement;
@@ -899,15 +951,30 @@ mod tests {
     #[test]
     fn sequence_call_inline_devuelve_estado_agregado_y_anida() {
         // Padre: locals { canal: 1.0 }, llama a inline `init` by-reference.
-        let mut padre = DefinicionSecuencia { nombre: "padre".into(), ..Default::default() };
-        padre.locals.insert("canal".into(), ValorDefinicion::Numero(1.0));
-        padre.locals.insert("listo".into(), ValorDefinicion::Bool(false));
-        padre.subsecuencias.insert("init".into(), inline_comprueba("init"));
-        padre.pasos_main =
-            vec![call("llamar", "init", vec![arg("canal", "canal"), arg("listo", "listo")])];
+        let mut padre = DefinicionSecuencia {
+            nombre: "padre".into(),
+            ..Default::default()
+        };
+        padre
+            .locals
+            .insert("canal".into(), ValorDefinicion::Numero(1.0));
+        padre
+            .locals
+            .insert("listo".into(), ValorDefinicion::Bool(false));
+        padre
+            .subsecuencias
+            .insert("init".into(), inline_comprueba("init"));
+        padre.pasos_main = vec![call(
+            "llamar",
+            "init",
+            vec![arg("canal", "canal"), arg("listo", "listo")],
+        )];
 
-        let programa =
-            Programa { raiz: padre.clone(), archivos: HashMap::new(), ejecutores: HashMap::new() };
+        let programa = Programa {
+            raiz: padre.clone(),
+            archivos: HashMap::new(),
+            ejecutores: HashMap::new(),
+        };
         let entorno = EntornoMotor::desde_definicion(&programa.raiz);
         let mut inv = InvocadorMock;
         let mut sink = SinkNulo;
@@ -933,15 +1000,30 @@ mod tests {
     fn sequence_call_by_reference_devuelve_la_salida_al_padre() {
         // La subsecuencia escribe `parameters.listo` = true (canal=1.0 >= 0.0);
         // al volver, by-reference copia `parameters.listo` → `locals.listo`.
-        let mut padre = DefinicionSecuencia { nombre: "padre".into(), ..Default::default() };
-        padre.locals.insert("canal".into(), ValorDefinicion::Numero(1.0));
-        padre.locals.insert("listo".into(), ValorDefinicion::Bool(false));
-        padre.subsecuencias.insert("init".into(), inline_comprueba("init"));
-        padre.pasos_main =
-            vec![call("llamar", "init", vec![arg("canal", "canal"), arg("listo", "listo")])];
+        let mut padre = DefinicionSecuencia {
+            nombre: "padre".into(),
+            ..Default::default()
+        };
+        padre
+            .locals
+            .insert("canal".into(), ValorDefinicion::Numero(1.0));
+        padre
+            .locals
+            .insert("listo".into(), ValorDefinicion::Bool(false));
+        padre
+            .subsecuencias
+            .insert("init".into(), inline_comprueba("init"));
+        padre.pasos_main = vec![call(
+            "llamar",
+            "init",
+            vec![arg("canal", "canal"), arg("listo", "listo")],
+        )];
 
-        let programa =
-            Programa { raiz: padre.clone(), archivos: HashMap::new(), ejecutores: HashMap::new() };
+        let programa = Programa {
+            raiz: padre.clone(),
+            archivos: HashMap::new(),
+            ejecutores: HashMap::new(),
+        };
         let entorno = EntornoMotor::desde_definicion(&programa.raiz);
         let mut inv = InvocadorMock;
         let mut sink = SinkNulo;
@@ -976,8 +1058,12 @@ mod tests {
         // statement cuyo `estado` es "paso"; el agregado de la sub es "paso".
         // Verificamos en cambio el caso de error: una subsecuencia cuyo
         // statement tiene error de tipo.
-        let mut sub = DefinicionSecuencia { nombre: "init".into(), ..Default::default() };
-        sub.parameters.insert("canal".into(), ValorDefinicion::Numero(0.0));
+        let mut sub = DefinicionSecuencia {
+            nombre: "init".into(),
+            ..Default::default()
+        };
+        sub.parameters
+            .insert("canal".into(), ValorDefinicion::Numero(0.0));
         sub.pasos_main = vec![{
             let mut p = DefinicionPaso::nuevo("malo", 1);
             p.tipo = TipoPaso::Statement;
@@ -986,13 +1072,21 @@ mod tests {
                 Some(expr::parse_sentencias("parameters.canal = !parameters.canal").unwrap());
             p
         }];
-        let mut padre = DefinicionSecuencia { nombre: "padre".into(), ..Default::default() };
-        padre.locals.insert("canal".into(), ValorDefinicion::Numero(1.0));
+        let mut padre = DefinicionSecuencia {
+            nombre: "padre".into(),
+            ..Default::default()
+        };
+        padre
+            .locals
+            .insert("canal".into(), ValorDefinicion::Numero(1.0));
         padre.subsecuencias.insert("init".into(), sub);
         padre.pasos_main = vec![call("llamar", "init", vec![arg("canal", "canal")])];
 
-        let programa =
-            Programa { raiz: padre.clone(), archivos: HashMap::new(), ejecutores: HashMap::new() };
+        let programa = Programa {
+            raiz: padre.clone(),
+            archivos: HashMap::new(),
+            ejecutores: HashMap::new(),
+        };
         let entorno = EntornoMotor::desde_definicion(&programa.raiz);
         let mut inv = InvocadorMock;
         let mut sink = SinkNulo;
@@ -1009,7 +1103,10 @@ mod tests {
 
         // El call hereda "error" (agregado de la sub: un statement con error).
         let r = &sec.pasos[0];
-        assert_eq!(r.estado, "error", "un fallo en la subsecuencia se propaga al call");
+        assert_eq!(
+            r.estado, "error",
+            "un fallo en la subsecuencia se propaga al call"
+        );
         assert_eq!(r.sub_pasos.as_ref().unwrap()[0].estado, "error");
     }
 
@@ -1017,8 +1114,12 @@ mod tests {
     fn sequence_call_subsecuencia_externa_por_path() {
         // El cargador ya reescribió `secuencia` a la clave canónica y cargó
         // el archivo en `programa.archivos`. Aquí simulamos eso a mano.
-        let mut hija = DefinicionSecuencia { nombre: "hija".into(), ..Default::default() };
-        hija.parameters.insert("canal".into(), ValorDefinicion::Numero(0.0));
+        let mut hija = DefinicionSecuencia {
+            nombre: "hija".into(),
+            ..Default::default()
+        };
+        hija.parameters
+            .insert("canal".into(), ValorDefinicion::Numero(0.0));
         hija.pasos_main = vec![{
             let mut p = DefinicionPaso::nuevo("eco", 1);
             p.tipo = TipoPaso::Statement;
@@ -1026,9 +1127,18 @@ mod tests {
                 Some(expr::parse_sentencias("parameters.canal = parameters.canal + 1.0").unwrap());
             p
         }];
-        let mut padre = DefinicionSecuencia { nombre: "padre".into(), ..Default::default() };
-        padre.locals.insert("canal".into(), ValorDefinicion::Numero(1.0));
-        padre.pasos_main = vec![call("llamar", "ruta/hija.yaml", vec![arg("canal", "canal")])];
+        let mut padre = DefinicionSecuencia {
+            nombre: "padre".into(),
+            ..Default::default()
+        };
+        padre
+            .locals
+            .insert("canal".into(), ValorDefinicion::Numero(1.0));
+        padre.pasos_main = vec![call(
+            "llamar",
+            "ruta/hija.yaml",
+            vec![arg("canal", "canal")],
+        )];
 
         let programa = Programa {
             raiz: padre,
@@ -1056,13 +1166,21 @@ mod tests {
 
     #[test]
     fn sequence_call_argumento_a_local_inexistente_es_error() {
-        let mut padre = DefinicionSecuencia { nombre: "padre".into(), ..Default::default() };
+        let mut padre = DefinicionSecuencia {
+            nombre: "padre".into(),
+            ..Default::default()
+        };
         // No declaramos `locals.canal`: el lvalue no existe en el padre.
-        padre.subsecuencias.insert("init".into(), inline_comprueba("init"));
+        padre
+            .subsecuencias
+            .insert("init".into(), inline_comprueba("init"));
         padre.pasos_main = vec![call("llamar", "init", vec![arg("canal", "canal")])];
 
-        let programa =
-            Programa { raiz: padre.clone(), archivos: HashMap::new(), ejecutores: HashMap::new() };
+        let programa = Programa {
+            raiz: padre.clone(),
+            archivos: HashMap::new(),
+            ejecutores: HashMap::new(),
+        };
         let entorno = EntornoMotor::desde_definicion(&programa.raiz);
         let mut inv = InvocadorMock;
         let mut sink = SinkNulo;
@@ -1087,11 +1205,20 @@ mod tests {
         // Un ciclo por path (A → B → A → …) que el cargador rechazaría al
         // cargar; aquí lo construimos a mano en el `Programa` para probar la
         // red de seguridad del motor (profundidad >64 → "error", no pánico).
-        let mut a = DefinicionSecuencia { nombre: "a".into(), ..Default::default() };
+        let mut a = DefinicionSecuencia {
+            nombre: "a".into(),
+            ..Default::default()
+        };
         a.pasos_main = vec![call("a_b", "b.yaml", vec![])];
-        let mut b = DefinicionSecuencia { nombre: "b".into(), ..Default::default() };
+        let mut b = DefinicionSecuencia {
+            nombre: "b".into(),
+            ..Default::default()
+        };
         b.pasos_main = vec![call("b_a", "a.yaml", vec![])];
-        let mut padre = DefinicionSecuencia { nombre: "padre".into(), ..Default::default() };
+        let mut padre = DefinicionSecuencia {
+            nombre: "padre".into(),
+            ..Default::default()
+        };
         padre.pasos_main = vec![call("p_a", "a.yaml", vec![])];
 
         let programa = Programa {
@@ -1116,7 +1243,9 @@ mod tests {
         // En algún nivel la profundidad >64 produce el error de anidamiento.
         fn busca_prof(p: &ResultadoStep) -> bool {
             p.estado == "error" && p.mensaje.contains("anidamiento demasiado profundo")
-                || p.sub_pasos.as_ref().is_some_and(|sub| sub.iter().any(busca_prof))
+                || p.sub_pasos
+                    .as_ref()
+                    .is_some_and(|sub| sub.iter().any(busca_prof))
         }
         assert!(
             sec.pasos.iter().any(busca_prof),
@@ -1136,15 +1265,30 @@ mod tests {
                 self.0.set(self.0.get() + 1);
             }
         }
-        let mut padre = DefinicionSecuencia { nombre: "padre".into(), ..Default::default() };
-        padre.locals.insert("canal".into(), ValorDefinicion::Numero(1.0));
-        padre.locals.insert("listo".into(), ValorDefinicion::Bool(false));
-        padre.subsecuencias.insert("init".into(), inline_comprueba("init"));
-        padre.pasos_main =
-            vec![call("llamar", "init", vec![arg("canal", "canal"), arg("listo", "listo")])];
+        let mut padre = DefinicionSecuencia {
+            nombre: "padre".into(),
+            ..Default::default()
+        };
+        padre
+            .locals
+            .insert("canal".into(), ValorDefinicion::Numero(1.0));
+        padre
+            .locals
+            .insert("listo".into(), ValorDefinicion::Bool(false));
+        padre
+            .subsecuencias
+            .insert("init".into(), inline_comprueba("init"));
+        padre.pasos_main = vec![call(
+            "llamar",
+            "init",
+            vec![arg("canal", "canal"), arg("listo", "listo")],
+        )];
 
-        let programa =
-            Programa { raiz: padre.clone(), archivos: HashMap::new(), ejecutores: HashMap::new() };
+        let programa = Programa {
+            raiz: padre.clone(),
+            archivos: HashMap::new(),
+            ejecutores: HashMap::new(),
+        };
         let entorno = EntornoMotor::desde_definicion(&programa.raiz);
         let mut inv = InvocadorMock;
         let mut sink = Contador(Cell::new(0));
@@ -1158,7 +1302,11 @@ mod tests {
             true,
         )
         .unwrap();
-        assert_eq!(sink.0.get(), 1, "on_fin_secuencia sólo para la raíz, no por subsecuencia");
+        assert_eq!(
+            sink.0.get(),
+            1,
+            "on_fin_secuencia sólo para la raíz, no por subsecuencia"
+        );
     }
 
     // --- M5-ext.1: routing nombre→endpoint ---
@@ -1185,7 +1333,10 @@ mod tests {
 
     /// Un `Programa` con raíz + un ejecutor `grpc` (python) y un `embebido`.
     fn programa_ruteado() -> Programa {
-        let mut raiz = DefinicionSecuencia { nombre: "s".into(), ..Default::default() };
+        let mut raiz = DefinicionSecuencia {
+            nombre: "s".into(),
+            ..Default::default()
+        };
         let mut p1 = DefinicionPaso::nuevo("a", 1);
         p1.ejecutor = None; // embebido por defecto
         let mut p2 = DefinicionPaso::nuevo("b", 1);
@@ -1199,20 +1350,28 @@ mod tests {
             ejecutores: HashMap::from([
                 (
                     "embebido".to_string(),
-                    DefinicionEjecutor { nombre: "embebido".into(), tipo: TipoEjecutor::Embebido },
+                    DefinicionEjecutor {
+                        nombre: "embebido".into(),
+                        tipo: TipoEjecutor::Embebido,
+                    },
                 ),
                 (
                     "python".to_string(),
                     DefinicionEjecutor {
                         nombre: "python".into(),
-                        tipo: TipoEjecutor::Grpc { host: "127.0.0.1".into(), puerto: 9101 },
+                        tipo: TipoEjecutor::Grpc {
+                            host: "127.0.0.1".into(),
+                            puerto: 9101,
+                        },
                     },
                 ),
                 (
                     "mi_paso".to_string(),
                     DefinicionEjecutor {
                         nombre: "mi_paso".into(),
-                        tipo: TipoEjecutor::Wasm { path: "./p.wasm".into() },
+                        tipo: TipoEjecutor::Wasm {
+                            path: "./p.wasm".into(),
+                        },
                     },
                 ),
             ]),
@@ -1239,7 +1398,10 @@ mod tests {
         p.ejecutor = Some("mi_paso".into());
         let err = Motor::resolver_endpoint(&p, &programa).unwrap_err();
         assert!(matches!(err, Error::EjecutorWasmSinHost(ref n) if n == "mi_paso"));
-        assert!(err.to_string().contains("anvil-host"), "apunta al host: {err}");
+        assert!(
+            err.to_string().contains("anvil-host"),
+            "apunta al host: {err}"
+        );
     }
 
     #[test]
@@ -1269,6 +1431,9 @@ mod tests {
         .unwrap();
         assert_eq!(sec.pasos[0].mensaje, "embebido", "sin ejecutor → embebido");
         assert_eq!(sec.pasos[1].mensaje, "python", "ejecutor: python → python");
-        assert_eq!(sec.pasos[2].mensaje, "embebido", "ejecutor: embebido explícito → embebido");
+        assert_eq!(
+            sec.pasos[2].mensaje, "embebido",
+            "ejecutor: embebido explícito → embebido"
+        );
     }
 }

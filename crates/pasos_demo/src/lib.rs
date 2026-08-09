@@ -106,7 +106,10 @@ mod tests {
         // En M3 el paso mide y devuelve `paso` (medición OK); el motor
         // evalúa el límite del YAML. El paso no trae límites embebidos.
         let r = medir_voltaje(1);
-        assert_eq!(r.estado, "paso", "el paso solo mide: la regla la aplica el motor");
+        assert_eq!(
+            r.estado, "paso",
+            "el paso solo mide: la regla la aplica el motor"
+        );
         assert_eq!(r.valor_medido, Some(4.2));
         assert_eq!(r.limite_min, None, "el umbral vive en el YAML, no aquí");
         assert_eq!(r.limite_max, None);

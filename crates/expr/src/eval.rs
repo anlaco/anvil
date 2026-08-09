@@ -51,9 +51,10 @@ pub fn eval(expr: &Expresion, env: &impl Entorno) -> Result<Value, ErrorExpr> {
                                 ))
                             }
                         }
-                        _ => {
-                            Err(ErrorExpr::tipo(0, format!("'and' necesita bool, no {}", l.tipo())))
-                        }
+                        _ => Err(ErrorExpr::tipo(
+                            0,
+                            format!("'and' necesita bool, no {}", l.tipo()),
+                        )),
                     }
                 }
                 BinOp::Or => {
@@ -72,9 +73,10 @@ pub fn eval(expr: &Expresion, env: &impl Entorno) -> Result<Value, ErrorExpr> {
                                 ))
                             }
                         }
-                        _ => {
-                            Err(ErrorExpr::tipo(0, format!("'or' necesita bool, no {}", l.tipo())))
-                        }
+                        _ => Err(ErrorExpr::tipo(
+                            0,
+                            format!("'or' necesita bool, no {}", l.tipo()),
+                        )),
                     }
                 }
                 _ => {
@@ -96,7 +98,11 @@ pub fn eval(expr: &Expresion, env: &impl Entorno) -> Result<Value, ErrorExpr> {
 pub fn eval_sentencias(stmts: &[Sentencia], env: &mut impl Entorno) -> Result<(), ErrorExpr> {
     for s in stmts {
         match s {
-            Sentencia::Assign { scope, campo, valor } => {
+            Sentencia::Assign {
+                scope,
+                campo,
+                valor,
+            } => {
                 let v = eval(valor, env)?;
                 env.escribe(*scope, campo, v)?;
             }
@@ -108,9 +114,15 @@ pub fn eval_sentencias(stmts: &[Sentencia], env: &mut impl Entorno) -> Result<()
 fn eval_un(op: UnOp, v: Value) -> Result<Value, ErrorExpr> {
     match (op, &v) {
         (UnOp::Neg, Value::Numero(x)) => Ok(Value::Numero(-x)),
-        (UnOp::Neg, _) => Err(ErrorExpr::tipo(0, format!("'- ' necesita número, no {}", v.tipo()))),
+        (UnOp::Neg, _) => Err(ErrorExpr::tipo(
+            0,
+            format!("'- ' necesita número, no {}", v.tipo()),
+        )),
         (UnOp::Not, Value::Bool(b)) => Ok(Value::Bool(!b)),
-        (UnOp::Not, _) => Err(ErrorExpr::tipo(0, format!("'not' necesita bool, no {}", v.tipo()))),
+        (UnOp::Not, _) => Err(ErrorExpr::tipo(
+            0,
+            format!("'not' necesita bool, no {}", v.tipo()),
+        )),
     }
 }
 
@@ -145,10 +157,14 @@ fn eval_bin(op: &BinOp, l: Value, r: Value) -> Result<Value, ErrorExpr> {
 fn num_num(l: &Value, r: &Value, op: &str) -> Result<(f64, f64), ErrorExpr> {
     match (l, r) {
         (Numero(a), Numero(b)) => Ok((*a, *b)),
-        (Numero(_), _) => {
-            Err(ErrorExpr::tipo(0, format!("'{op}' necesita número, no {}", r.tipo())))
-        }
-        _ => Err(ErrorExpr::tipo(0, format!("'{op}' necesita número, no {}", l.tipo()))),
+        (Numero(_), _) => Err(ErrorExpr::tipo(
+            0,
+            format!("'{op}' necesita número, no {}", r.tipo()),
+        )),
+        _ => Err(ErrorExpr::tipo(
+            0,
+            format!("'{op}' necesita número, no {}", l.tipo()),
+        )),
     }
 }
 
@@ -206,7 +222,10 @@ mod tests {
     }
     impl EntornoMock {
         fn new() -> Self {
-            EntornoMock { datos: HashMap::new(), escrituras: Vec::new() }
+            EntornoMock {
+                datos: HashMap::new(),
+                escrituras: Vec::new(),
+            }
         }
         fn set(mut self, scope: Scope, campo: &str, v: Value) -> Self {
             self.datos.insert((scope, campo.into()), v);
@@ -215,9 +234,12 @@ mod tests {
     }
     impl Entorno for EntornoMock {
         fn lee(&self, scope: Scope, campo: &str) -> Result<Value, ErrorExpr> {
-            self.datos.get(&(scope, campo.to_string())).cloned().ok_or_else(|| {
-                ErrorExpr::entorno(0, format!("no existe '{}.{}'", scope.nombre(), campo))
-            })
+            self.datos
+                .get(&(scope, campo.to_string()))
+                .cloned()
+                .ok_or_else(|| {
+                    ErrorExpr::entorno(0, format!("no existe '{}.{}'", scope.nombre(), campo))
+                })
         }
         fn escribe(&mut self, scope: Scope, campo: &str, valor: Value) -> Result<(), ErrorExpr> {
             if scope != Scope::Locals {
@@ -236,17 +258,30 @@ mod tests {
         Expresion::Lit(Value::Numero(x))
     }
     fn var(scope: Scope, campo: &str) -> Expresion {
-        Expresion::Var { scope, campo: campo.into() }
+        Expresion::Var {
+            scope,
+            campo: campo.into(),
+        }
     }
     fn bin(op: BinOp, l: Expresion, r: Expresion) -> Expresion {
-        Expresion::BinOp { op, izq: Box::new(l), der: Box::new(r) }
+        Expresion::BinOp {
+            op,
+            izq: Box::new(l),
+            der: Box::new(r),
+        }
     }
 
     #[test]
     fn aritmetica_basica() {
         let env = EntornoMock::new();
-        assert_eq!(eval(&bin(BinOp::Add, num(2.0), num(3.0)), &env).unwrap(), Value::Numero(5.0));
-        assert_eq!(eval(&bin(BinOp::Mul, num(2.0), num(3.0)), &env).unwrap(), Value::Numero(6.0));
+        assert_eq!(
+            eval(&bin(BinOp::Add, num(2.0), num(3.0)), &env).unwrap(),
+            Value::Numero(5.0)
+        );
+        assert_eq!(
+            eval(&bin(BinOp::Mul, num(2.0), num(3.0)), &env).unwrap(),
+            Value::Numero(6.0)
+        );
     }
 
     #[test]
@@ -259,13 +294,27 @@ mod tests {
     fn igualdad_entre_tipos_distintos_es_false_sin_error() {
         let env = EntornoMock::new();
         assert_eq!(
-            eval(&bin(BinOp::Eq, num(1.0), Expresion::Lit(Value::Texto("1".into()))), &env)
-                .unwrap(),
+            eval(
+                &bin(
+                    BinOp::Eq,
+                    num(1.0),
+                    Expresion::Lit(Value::Texto("1".into()))
+                ),
+                &env
+            )
+            .unwrap(),
             Value::Bool(false)
         );
         assert_eq!(
-            eval(&bin(BinOp::Ne, num(1.0), Expresion::Lit(Value::Texto("1".into()))), &env)
-                .unwrap(),
+            eval(
+                &bin(
+                    BinOp::Ne,
+                    num(1.0),
+                    Expresion::Lit(Value::Texto("1".into()))
+                ),
+                &env
+            )
+            .unwrap(),
             Value::Bool(true)
         );
     }
@@ -274,8 +323,15 @@ mod tests {
     fn nulo_igual_nulo_es_true() {
         let env = EntornoMock::new();
         assert_eq!(
-            eval(&bin(BinOp::Eq, Expresion::Lit(Value::Nulo), Expresion::Lit(Value::Nulo)), &env)
-                .unwrap(),
+            eval(
+                &bin(
+                    BinOp::Eq,
+                    Expresion::Lit(Value::Nulo),
+                    Expresion::Lit(Value::Nulo)
+                ),
+                &env
+            )
+            .unwrap(),
             Value::Bool(true)
         );
         assert_eq!(
@@ -300,22 +356,31 @@ mod tests {
 
     #[test]
     fn and_or_not_solo_bool() {
-        let env = EntornoMock::new().set(Scope::Locals, "a", Value::Bool(true)).set(
-            Scope::Locals,
-            "b",
-            Value::Bool(false),
-        );
+        let env = EntornoMock::new()
+            .set(Scope::Locals, "a", Value::Bool(true))
+            .set(Scope::Locals, "b", Value::Bool(false));
         assert_eq!(
-            eval(&bin(BinOp::And, var(Scope::Locals, "a"), var(Scope::Locals, "b")), &env).unwrap(),
+            eval(
+                &bin(BinOp::And, var(Scope::Locals, "a"), var(Scope::Locals, "b")),
+                &env
+            )
+            .unwrap(),
             Value::Bool(false)
         );
         assert_eq!(
-            eval(&bin(BinOp::Or, var(Scope::Locals, "a"), var(Scope::Locals, "b")), &env).unwrap(),
+            eval(
+                &bin(BinOp::Or, var(Scope::Locals, "a"), var(Scope::Locals, "b")),
+                &env
+            )
+            .unwrap(),
             Value::Bool(true)
         );
         assert_eq!(
             eval(
-                &Expresion::UnOp { op: UnOp::Not, operando: Box::new(var(Scope::Locals, "b")) },
+                &Expresion::UnOp {
+                    op: UnOp::Not,
+                    operando: Box::new(var(Scope::Locals, "b"))
+                },
                 &env
             )
             .unwrap(),
@@ -326,32 +391,43 @@ mod tests {
     #[test]
     fn and_or_con_numero_es_error_de_tipo() {
         let env = EntornoMock::new().set(Scope::Locals, "x", Value::Numero(1.0));
-        assert!(
-            eval(&bin(BinOp::And, var(Scope::Locals, "x"), var(Scope::Locals, "x")), &env).is_err()
-        );
+        assert!(eval(
+            &bin(BinOp::And, var(Scope::Locals, "x"), var(Scope::Locals, "x")),
+            &env
+        )
+        .is_err());
     }
 
     #[test]
     fn cortocircuito_and_no_evalua_derecho_cuando_izquierdo_es_false() {
         // `false and locals.inexistente` no debe errorar: el derecho no se evalúa.
         let env = EntornoMock::new();
-        let e =
-            bin(BinOp::And, Expresion::Lit(Value::Bool(false)), var(Scope::Locals, "inexistente"));
+        let e = bin(
+            BinOp::And,
+            Expresion::Lit(Value::Bool(false)),
+            var(Scope::Locals, "inexistente"),
+        );
         assert_eq!(eval(&e, &env).unwrap(), Value::Bool(false));
     }
 
     #[test]
     fn cortocircuito_or_no_evalua_derecho_cuando_izquierdo_es_true() {
         let env = EntornoMock::new();
-        let e =
-            bin(BinOp::Or, Expresion::Lit(Value::Bool(true)), var(Scope::Locals, "inexistente"));
+        let e = bin(
+            BinOp::Or,
+            Expresion::Lit(Value::Bool(true)),
+            var(Scope::Locals, "inexistente"),
+        );
         assert_eq!(eval(&e, &env).unwrap(), Value::Bool(true));
     }
 
     #[test]
     fn acceso_a_scopes_lee_del_entorno() {
         let env = EntornoMock::new().set(Scope::FileGlobals, "lote", Value::Texto("A".into()));
-        assert_eq!(eval(&var(Scope::FileGlobals, "lote"), &env).unwrap(), Value::Texto("A".into()));
+        assert_eq!(
+            eval(&var(Scope::FileGlobals, "lote"), &env).unwrap(),
+            Value::Texto("A".into())
+        );
     }
 
     #[test]

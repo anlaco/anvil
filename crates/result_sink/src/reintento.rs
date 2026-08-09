@@ -77,7 +77,10 @@ mod tests {
     #[test]
     fn reintenta_hasta_lograrlo() {
         // 2 fallos transitorios; con 3 intentos llega a escribir.
-        let mut w = EscribeTrasFallos { fallos_restantes: 2, escrito: Vec::new() };
+        let mut w = EscribeTrasFallos {
+            fallos_restantes: 2,
+            escrito: Vec::new(),
+        };
         escribir_con_reintentos(&mut w, 3, b"hola").unwrap();
         assert_eq!(w.escrito, b"hola");
     }
@@ -85,7 +88,10 @@ mod tests {
     #[test]
     fn agota_intentos_y_falla() {
         // 2 fallos y solo 2 intentos: el último sigue fallando.
-        let mut w = EscribeTrasFallos { fallos_restantes: 2, escrito: Vec::new() };
+        let mut w = EscribeTrasFallos {
+            fallos_restantes: 2,
+            escrito: Vec::new(),
+        };
         let err = escribir_con_reintentos(&mut w, 2, b"hola").unwrap_err();
         assert_eq!(err.kind(), ErrorKind::WouldBlock);
         assert!(w.escrito.is_empty());

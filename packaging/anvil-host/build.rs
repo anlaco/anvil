@@ -56,9 +56,17 @@ fn main() {
     // El profile con el que cargo está compilando el host ("debug"/"release");
     // se prefiere para los artifacts, y el otro queda de reserva.
     let profile = env::var("PROFILE").unwrap_or_else(|_| "debug".into());
-    let reserva = if profile == "release" { "debug" } else { "release" };
+    let reserva = if profile == "release" {
+        "debug"
+    } else {
+        "release"
+    };
     // Lo más corto que arregla la situación, sea cual sea el profile.
-    let receta = if profile == "release" { "make release" } else { "make build" };
+    let receta = if profile == "release" {
+        "make release"
+    } else {
+        "make build"
+    };
 
     for (nombre, subdir, dir, comando) in &piezas {
         let dst = out_dir.join(nombre);
@@ -82,9 +90,14 @@ fn main() {
         println!("cargo:rerun-if-changed={}", src.display());
     }
     // Rebuild del host si cambian los artifacts.
-    println!("cargo:rerun-if-changed={}", repo_root.join("target/wasm32-wasip2").display());
     println!(
         "cargo:rerun-if-changed={}",
-        repo_root.join("packaging/anvil-puente-wasm/target").display()
+        repo_root.join("target/wasm32-wasip2").display()
+    );
+    println!(
+        "cargo:rerun-if-changed={}",
+        repo_root
+            .join("packaging/anvil-puente-wasm/target")
+            .display()
     );
 }

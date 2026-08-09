@@ -173,6 +173,9 @@ mod tests {
         assert_eq!(a.inicios_paso, 1);
         assert_eq!(a.fines_paso, 1);
         assert_eq!(a.fines_secuencia, 1);
-        assert_eq!(b.inicios_secuencia, 1, "el segundo sink también recibe todo");
+        assert_eq!(
+            b.inicios_secuencia, 1,
+            "el segundo sink también recibe todo"
+        );
     }
 }

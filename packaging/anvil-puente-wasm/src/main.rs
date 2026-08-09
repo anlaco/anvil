@@ -55,7 +55,10 @@ struct State {
 
 impl WasiView for State {
     fn ctx(&mut self) -> WasiCtxView<'_> {
-        WasiCtxView { ctx: &mut self.wasi, table: &mut self.table }
+        WasiCtxView {
+            ctx: &mut self.wasi,
+            table: &mut self.table,
+        }
     }
 }
 
@@ -74,7 +77,10 @@ impl ComponenteCargado {
             .map_err(|e| format!("linker WASI: {e}"))?;
         // Sin preopens ni red: sandbox real. El componente sólo hace su
         // función; no toca el host.
-        let state = State { wasi: WasiCtx::builder().build(), table: ResourceTable::new() };
+        let state = State {
+            wasi: WasiCtx::builder().build(),
+            table: ResourceTable::new(),
+        };
         let mut store = Store::new(engine, state);
         let component = Component::from_binary(engine, bytes)
             .map_err(|e| format!("componente inválido: {e}"))?;
@@ -127,7 +133,10 @@ impl EjecutorPasos for ServicioEjecutor {
         request: Request<PeticionPaso>,
     ) -> Result<Response<ResultadoPasoProto>, Status> {
         let pet = request.into_inner();
-        let mut comp = self.componente.lock().map_err(|_| Status::internal("componente en uso"))?;
+        let mut comp = self
+            .componente
+            .lock()
+            .map_err(|_| Status::internal("componente en uso"))?;
         let respuesta = comp.llamar(&pet.nombre, pet.intento)?;
         Ok(Response::new(respuesta))
     }
@@ -193,7 +202,10 @@ fn main() {
     let componente = match ComponenteCargado::cargar(&engine, &bytes) {
         Ok(c) => c,
         Err(e) => {
-            eprintln!("no se pudo cargar el componente '{}': {e}", ruta_wasm.display());
+            eprintln!(
+                "no se pudo cargar el componente '{}': {e}",
+                ruta_wasm.display()
+            );
             std::process::exit(1);
         }
     };
@@ -210,7 +222,9 @@ fn main() {
         }
     };
 
-    let servidor = Server::builder().add_service(EjecutorPasosServer::new(servicio)).serve(addr);
+    let servidor = Server::builder()
+        .add_service(EjecutorPasosServer::new(servicio))
+        .serve(addr);
 
     eprintln!("anvil-puente-wasm: cargado '{}'", ruta_wasm.display());
     eprintln!("anvil-puente-wasm: escuchando en {addr}");

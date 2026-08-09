@@ -335,7 +335,10 @@ impl EjecutorYaml {
                 )))
             }
         };
-        Ok(DefinicionEjecutor { nombre: self.nombre, tipo })
+        Ok(DefinicionEjecutor {
+            nombre: self.nombre,
+            tipo,
+        })
     }
 }
 
@@ -375,7 +378,10 @@ pub fn aplicar_override_ejecutores(
                 "override de ejecutor: '{nombre}' no está declarado en 'ejecutores:'"
             ))
         })?;
-        ejecutor.tipo = TipoEjecutor::Grpc { host: host.to_string(), puerto };
+        ejecutor.tipo = TipoEjecutor::Grpc {
+            host: host.to_string(),
+            puerto,
+        };
         aplicados += 1;
     }
     Ok(aplicados)
@@ -468,9 +474,21 @@ fn secuencia_yaml_a_definicion(
         pasos_setup: traduce_pasos(y.setup)?,
         pasos_main: traduce_pasos(y.main)?,
         pasos_cleanup: traduce_pasos(y.cleanup)?,
-        locals: y.locals.into_iter().map(|(k, v)| (k, v.a_definicion())).collect(),
-        parameters: y.parameters.into_iter().map(|(k, v)| (k, v.a_definicion())).collect(),
-        file_globals: y.file_globals.into_iter().map(|(k, v)| (k, v.a_definicion())).collect(),
+        locals: y
+            .locals
+            .into_iter()
+            .map(|(k, v)| (k, v.a_definicion()))
+            .collect(),
+        parameters: y
+            .parameters
+            .into_iter()
+            .map(|(k, v)| (k, v.a_definicion()))
+            .collect(),
+        file_globals: y
+            .file_globals
+            .into_iter()
+            .map(|(k, v)| (k, v.a_definicion()))
+            .collect(),
         subsecuencias,
     })
 }
@@ -492,14 +510,21 @@ pub fn es_path(destino: &str) -> bool {
 
 /// Directorio que contiene a `ruta` (su `parent`), o "" si no tiene.
 fn dir_de(ruta: &str) -> PathBuf {
-    Path::new(ruta).parent().unwrap_or_else(|| Path::new("")).to_path_buf()
+    Path::new(ruta)
+        .parent()
+        .unwrap_or_else(|| Path::new(""))
+        .to_path_buf()
 }
 
 /// Normaliza un path relativo a `base` resolviendo `.` y `..` de forma
 /// lógica (sin IO, sin resolver symlinks): la clave canónica estable para
 /// `programa.archivos` y para detectar ciclos.
 pub fn normalizar_path(base: &Path, rel: &Path) -> PathBuf {
-    let mut out = if rel.is_absolute() { PathBuf::new() } else { base.to_path_buf() };
+    let mut out = if rel.is_absolute() {
+        PathBuf::new()
+    } else {
+        base.to_path_buf()
+    };
     for comp in rel.components() {
         match comp {
             std::path::Component::CurDir => {}
@@ -566,7 +591,11 @@ pub fn cargar_programa_de_archivo(ruta: &str) -> Result<Programa, ErrorCarga> {
     let mut ejecutores = HashMap::new();
     leer_ejecutores(ruta, &dir_base, &mut ejecutores)?;
 
-    let mut programa = Programa { raiz, archivos: HashMap::new(), ejecutores };
+    let mut programa = Programa {
+        raiz,
+        archivos: HashMap::new(),
+        ejecutores,
+    };
 
     // Cola de (clave_canónica, dir_contenedor) de archivos externos a cargar.
     let mut cola: Vec<(String, PathBuf)> = Vec::new();
@@ -589,7 +618,9 @@ pub fn cargar_programa_de_archivo(ruta: &str) -> Result<Programa, ErrorCarga> {
     }
 
     // Fase B: validar lvalues, firmas y nombres; detectar ciclos.
-    let id_raiz = normalizar_path(&dir_base, Path::new(ruta)).to_string_lossy().into_owned();
+    let id_raiz = normalizar_path(&dir_base, Path::new(ruta))
+        .to_string_lossy()
+        .into_owned();
     let mut camino: Vec<String> = Vec::new();
     visitar(&programa, &id_raiz, &programa.raiz, &mut camino)?;
 
@@ -660,8 +691,9 @@ pub fn cargar_programa_con_pm(ruta_pm: &str, ruta_usuario: &str) -> Result<Progr
     // (paso 5a), que es como se leen del disco.
     let usuario = cargar_de_archivo(ruta_usuario)?;
     let dir_usuario = dir_de(ruta_usuario);
-    let clave_usuario =
-        normalizar_path(Path::new(""), Path::new(ruta_usuario)).to_string_lossy().into_owned();
+    let clave_usuario = normalizar_path(Path::new(""), Path::new(ruta_usuario))
+        .to_string_lossy()
+        .into_owned();
 
     // Ejecutores (M5-ext.1): los del PM y los de la secuencia del usuario se
     // unen en una sola tabla; un nombre en ambos es error (leer_ejecutores).
@@ -669,7 +701,11 @@ pub fn cargar_programa_con_pm(ruta_pm: &str, ruta_usuario: &str) -> Result<Progr
     leer_ejecutores(ruta_pm, &dir_pm, &mut ejecutores)?;
     leer_ejecutores(ruta_usuario, &dir_usuario, &mut ejecutores)?;
 
-    let mut programa = Programa { raiz: raiz_pm, archivos: HashMap::new(), ejecutores };
+    let mut programa = Programa {
+        raiz: raiz_pm,
+        archivos: HashMap::new(),
+        ejecutores,
+    };
     programa.archivos.insert(clave_usuario.clone(), usuario);
 
     // (5a) Procesar paths externos del PM (relativos a dir_pm) y del usuario
@@ -702,7 +738,9 @@ pub fn cargar_programa_con_pm(ruta_pm: &str, ruta_usuario: &str) -> Result<Progr
 
     // (5b) Visitar el programa entero: ciclos + firma + lvalues. El call al
     // usuario ya es un path normal y se valida como cualquier externa.
-    let id_pm = normalizar_path(&dir_pm, Path::new(ruta_pm)).to_string_lossy().into_owned();
+    let id_pm = normalizar_path(&dir_pm, Path::new(ruta_pm))
+        .to_string_lossy()
+        .into_owned();
     let mut camino: Vec<String> = Vec::new();
     visitar(&programa, &id_pm, &programa.raiz, &mut camino)?;
 
@@ -737,7 +775,11 @@ fn procesar_secuencia(
     dir: &Path,
     cola: &mut Vec<(String, PathBuf)>,
 ) -> Result<(), ErrorCarga> {
-    for paso in def.pasos_setup.iter_mut().chain(&mut def.pasos_main).chain(&mut def.pasos_cleanup)
+    for paso in def
+        .pasos_setup
+        .iter_mut()
+        .chain(&mut def.pasos_main)
+        .chain(&mut def.pasos_cleanup)
     {
         if paso.tipo == TipoPaso::SequenceCall {
             if let Some(sec) = paso.secuencia.as_ref() {
@@ -746,7 +788,10 @@ fn procesar_secuencia(
                     let clave = path_dest.to_string_lossy().into_owned();
                     cola.push((
                         clave.clone(),
-                        path_dest.parent().unwrap_or_else(|| Path::new("")).to_path_buf(),
+                        path_dest
+                            .parent()
+                            .unwrap_or_else(|| Path::new(""))
+                            .to_path_buf(),
                     ));
                     *paso.secuencia.as_mut().unwrap() = clave;
                 }
@@ -772,10 +817,17 @@ fn visitar(
         let mut trail = camino.join(" → ");
         trail.push_str(" → ");
         trail.push_str(id);
-        return Err(ErrorCarga::Validacion(format!("ciclo de subsecuencias: {trail}")));
+        return Err(ErrorCarga::Validacion(format!(
+            "ciclo de subsecuencias: {trail}"
+        )));
     }
     camino.push(id.to_string());
-    for paso in def.pasos_setup.iter().chain(&def.pasos_main).chain(&def.pasos_cleanup) {
+    for paso in def
+        .pasos_setup
+        .iter()
+        .chain(&def.pasos_main)
+        .chain(&def.pasos_cleanup)
+    {
         // M5-ext.1 (RF-36.3): un paso con `ejecutor:` debe referenciar un
         // nombre declarado en `ejecutores:` del YAML de la raíz (fail-fast).
         // `a_definicion` ya garantizó que sólo un paso `grpc` lo trae.
@@ -826,12 +878,19 @@ fn validar_call(
     sub: &DefinicionSecuencia,
     destino: &str,
 ) -> Result<(), ErrorCarga> {
-    let args: Vec<&Argumento> =
-        paso.parametros.as_ref().map(|v| v.iter().collect()).unwrap_or_default();
+    let args: Vec<&Argumento> = paso
+        .parametros
+        .as_ref()
+        .map(|v| v.iter().collect())
+        .unwrap_or_default();
     // Lvalues: la forma `Var{Locals, campo}` ya se validó en `a_definicion`;
     // aquí validamos que `campo` esté declarado en `locals` del padre.
     for a in &args {
-        if let expr::Expresion::Var { scope: expr::Scope::Locals, campo } = &a.origen {
+        if let expr::Expresion::Var {
+            scope: expr::Scope::Locals,
+            campo,
+        } = &a.origen
+        {
             if !padre.locals.contains_key(campo) {
                 return Err(ErrorCarga::Validacion(format!(
                     "el argumento '{}' del sequence call '{}' usa 'locals.{campo}', \
@@ -885,7 +944,9 @@ fn validar_call(
 pub fn cargar_limites_de_archivo(ruta: &str) -> Result<HashMap<String, Limite>, ErrorCarga> {
     let texto = std::fs::read_to_string(ruta)?;
     let mapa: HashMap<String, LimiteYaml> = noyalib::from_str(&texto)?;
-    mapa.into_iter().map(|(nombre, l)| Ok((nombre.clone(), l.a_limite(&nombre)?))).collect()
+    mapa.into_iter()
+        .map(|(nombre, l)| Ok((nombre.clone(), l.a_limite(&nombre)?)))
+        .collect()
 }
 
 /// Inyecta los límites del sidecar en la secuencia, buscando cada paso por
@@ -933,7 +994,9 @@ fn validar(y: &SecuenciaYaml) -> Result<(), ErrorCarga> {
             )));
         }
         if p.nombre.trim().is_empty() {
-            return Err(ErrorCarga::Validacion("un paso tiene el nombre vacío".into()));
+            return Err(ErrorCarga::Validacion(
+                "un paso tiene el nombre vacío".into(),
+            ));
         }
     }
     Ok(())
@@ -1017,7 +1080,10 @@ impl PasoYaml {
                             ))
                         })?;
                         match &origen {
-                            expr::Expresion::Var { scope: expr::Scope::Locals, .. } => {}
+                            expr::Expresion::Var {
+                                scope: expr::Scope::Locals,
+                                ..
+                            } => {}
                             _ => {
                                 return Err(ErrorCarga::Validacion(format!(
                                     "el argumento '{param}' del sequence call '{}' debe ser una \
@@ -1370,7 +1436,10 @@ main:
   - nombre: p
 ";
         let err = cargar_de_texto(yaml).unwrap_err();
-        assert!(matches!(&err, ErrorCarga::Sintaxis(_)), "inline sin main: error de schema: {err}");
+        assert!(
+            matches!(&err, ErrorCarga::Sintaxis(_)),
+            "inline sin main: error de schema: {err}"
+        );
     }
 
     /// Una inline puede omitir `nombre`: toma el de su clave en el mapa.
@@ -1433,7 +1502,13 @@ main:
         assert_eq!(prog.archivos.len(), 1, "una subsecuencia externa cargada");
         let clave = prog.raiz.pasos_main[0].secuencia.as_deref().unwrap();
         assert!(es_path(clave), "reescribe a path canónico: {clave}");
-        assert_eq!(prog.archivos.get(clave).map(|d| d.nombre.as_str()).unwrap_or(""), "hija");
+        assert_eq!(
+            prog.archivos
+                .get(clave)
+                .map(|d| d.nombre.as_str())
+                .unwrap_or(""),
+            "hija"
+        );
     }
 
     /// Ciclo por path (A → B → A) se detecta al cargar el programa.
@@ -1500,7 +1575,10 @@ main:
     /// `init_comun` se enlaza por nombre y la firma/lvalues validan.
     #[test]
     fn ejemplo_subsecuencia_carga_como_programa() {
-        let ruta = format!("{}/../../ejemplos/subsecuencia.yaml", env!("CARGO_MANIFEST_DIR"));
+        let ruta = format!(
+            "{}/../../ejemplos/subsecuencia.yaml",
+            env!("CARGO_MANIFEST_DIR")
+        );
         let prog = cargar_programa_de_archivo(&ruta)
             .unwrap_or_else(|e| panic!("no carga el programa {ruta}: {e}"));
         assert_eq!(prog.raiz.nombre, "basica");
@@ -1509,7 +1587,10 @@ main:
         // El call externo reescribe su `secuencia` a la clave canónica (path).
         let call_ext = &prog.raiz.pasos_main[1];
         assert_eq!(call_ext.tipo, modelo::TipoPaso::SequenceCall);
-        assert!(es_path(call_ext.secuencia.as_deref().unwrap()), "path reescrito");
+        assert!(
+            es_path(call_ext.secuencia.as_deref().unwrap()),
+            "path reescrito"
+        );
     }
 
     #[test]
@@ -1524,7 +1605,10 @@ main:
       max: 5.5
 ";
         let s = cargar_de_texto(yaml).unwrap();
-        assert_eq!(s.pasos_main[0].limite, Some(Limite::Rango { min: 4.5, max: 5.5 }));
+        assert_eq!(
+            s.pasos_main[0].limite,
+            Some(Limite::Rango { min: 4.5, max: 5.5 })
+        );
     }
 
     #[test]
@@ -1541,7 +1625,10 @@ main:
         let s = cargar_de_texto(yaml).unwrap();
         assert_eq!(
             s.pasos_main[0].limite,
-            Some(Limite::Comparacion { op: Operador::Ge, esperado: 1000.0 })
+            Some(Limite::Comparacion {
+                op: Operador::Ge,
+                esperado: 1000.0
+            })
         );
     }
 
@@ -1556,7 +1643,10 @@ main:
       max: 5.5
 ";
         let err = cargar_de_texto(yaml).unwrap_err();
-        assert!(matches!(&err, ErrorCarga::Validacion(ref m) if m.contains("min")), "{err}");
+        assert!(
+            matches!(&err, ErrorCarga::Validacion(ref m) if m.contains("min")),
+            "{err}"
+        );
     }
 
     #[test]
@@ -1571,7 +1661,10 @@ main:
       max: 5.5
 ";
         let err = cargar_de_texto(yaml).unwrap_err();
-        assert!(matches!(&err, ErrorCarga::Validacion(ref m) if m.contains(">")), "{err}");
+        assert!(
+            matches!(&err, ErrorCarga::Validacion(ref m) if m.contains(">")),
+            "{err}"
+        );
     }
 
     #[test]
@@ -1586,7 +1679,10 @@ main:
       esperado: 1000.0
 ";
         let err = cargar_de_texto(yaml).unwrap_err();
-        assert!(matches!(&err, ErrorCarga::Validacion(ref m) if m.contains("op")), "{err}");
+        assert!(
+            matches!(&err, ErrorCarga::Validacion(ref m) if m.contains("op")),
+            "{err}"
+        );
     }
 
     #[test]
@@ -1603,7 +1699,10 @@ main:
       op: ge
 ";
         let err = cargar_de_texto(yaml).unwrap_err();
-        assert!(matches!(&err, ErrorCarga::Validacion(ref m) if m.contains("op")), "{err}");
+        assert!(
+            matches!(&err, ErrorCarga::Validacion(ref m) if m.contains("op")),
+            "{err}"
+        );
     }
 
     #[test]
@@ -1618,7 +1717,10 @@ main:
       max: 5.5
 ";
         let err = cargar_de_texto(yaml).unwrap_err();
-        assert!(matches!(&err, ErrorCarga::Validacion(ref m) if m.contains("tipo")), "{err}");
+        assert!(
+            matches!(&err, ErrorCarga::Validacion(ref m) if m.contains("tipo")),
+            "{err}"
+        );
     }
 
     #[test]
@@ -1642,12 +1744,21 @@ main:
     fn property_loader_aplica_limites_por_nombre() {
         let mut s = cargar_de_texto(basica_yaml()).unwrap();
         let mut lim = HashMap::new();
-        lim.insert("medir_voltaje".to_string(), Limite::Rango { min: 4.5, max: 5.5 });
+        lim.insert(
+            "medir_voltaje".to_string(),
+            Limite::Rango { min: 4.5, max: 5.5 },
+        );
         let n = aplicar_limites(&mut s, &lim);
         assert_eq!(n, 1, "solo medir_voltaje recibió límite");
-        assert_eq!(s.pasos_main[0].limite, Some(Limite::Rango { min: 4.5, max: 5.5 }));
+        assert_eq!(
+            s.pasos_main[0].limite,
+            Some(Limite::Rango { min: 4.5, max: 5.5 })
+        );
         // Los demás pasos siguen sin límite.
-        assert_eq!(s.pasos_main[1].limite, None, "verificar_led no estaba en el sidecar");
+        assert_eq!(
+            s.pasos_main[1].limite, None,
+            "verificar_led no estaba en el sidecar"
+        );
     }
 
     #[test]
@@ -1664,7 +1775,10 @@ main:
 ";
         let mut s = cargar_de_texto(yaml).unwrap();
         let mut lim = HashMap::new();
-        lim.insert("medir_voltaje".to_string(), Limite::Rango { min: 4.0, max: 6.0 });
+        lim.insert(
+            "medir_voltaje".to_string(),
+            Limite::Rango { min: 4.0, max: 6.0 },
+        );
         aplicar_limites(&mut s, &lim);
         assert_eq!(
             s.pasos_main[0].limite,
@@ -1677,7 +1791,10 @@ main:
     fn property_loader_ignora_nombres_que_no_estan_en_la_secuencia() {
         let mut s = cargar_de_texto(basica_yaml()).unwrap();
         let mut lim = HashMap::new();
-        lim.insert("paso_que_no_existe".to_string(), Limite::Rango { min: 0.0, max: 1.0 });
+        lim.insert(
+            "paso_que_no_existe".to_string(),
+            Limite::Rango { min: 0.0, max: 1.0 },
+        );
         assert_eq!(aplicar_limites(&mut s, &lim), 0, "ningún paso coincide");
     }
 
@@ -1700,10 +1817,16 @@ verificar_frecuencia:
             .map(|(n, l)| Ok((n.clone(), l.a_limite(&n)?)))
             .collect::<Result<_, ErrorCarga>>()
             .unwrap();
-        assert_eq!(lim.get("medir_voltaje"), Some(&Limite::Rango { min: 4.5, max: 5.5 }));
+        assert_eq!(
+            lim.get("medir_voltaje"),
+            Some(&Limite::Rango { min: 4.5, max: 5.5 })
+        );
         assert_eq!(
             lim.get("verificar_frecuencia"),
-            Some(&Limite::Comparacion { op: Operador::Ge, esperado: 1000.0 })
+            Some(&Limite::Comparacion {
+                op: Operador::Ge,
+                esperado: 1000.0
+            })
         );
     }
 
@@ -1730,8 +1853,14 @@ main:
   - nombre: un_paso
 ";
         let s = cargar_de_texto(yaml).unwrap();
-        assert_eq!(s.file_globals.get("lote"), Some(&ValorDefinicion::Texto("A-2026-08".into())));
-        assert_eq!(s.file_globals.get("umbral"), Some(&ValorDefinicion::Numero(4.5)));
+        assert_eq!(
+            s.file_globals.get("lote"),
+            Some(&ValorDefinicion::Texto("A-2026-08".into()))
+        );
+        assert_eq!(
+            s.file_globals.get("umbral"),
+            Some(&ValorDefinicion::Numero(4.5))
+        );
         assert_eq!(s.locals.get("voltaje"), Some(&ValorDefinicion::Numero(0.0)));
         assert_eq!(s.locals.get("ok"), Some(&ValorDefinicion::Bool(false)));
         assert!(s.parameters.is_empty());
@@ -1764,7 +1893,10 @@ main:
     precondicion: 'locals.contador > 0 && resultado.valor_medido != nothing'
 ";
         let s = cargar_de_texto(yaml).unwrap();
-        assert!(s.pasos_main[0].precondicion.is_some(), "la precondición debe parsearse a AST");
+        assert!(
+            s.pasos_main[0].precondicion.is_some(),
+            "la precondición debe parsearse a AST"
+        );
     }
 
     #[test]
@@ -1825,7 +1957,10 @@ main:
     tipo: statement
 ";
         let err = cargar_de_texto(yaml).unwrap_err();
-        assert!(matches!(&err, ErrorCarga::Validacion(ref m) if m.contains("statement")), "{err}");
+        assert!(
+            matches!(&err, ErrorCarga::Validacion(ref m) if m.contains("statement")),
+            "{err}"
+        );
     }
 
     #[test]
@@ -1838,7 +1973,10 @@ main:
     statement: 'locals.x = 1'
 ";
         let err = cargar_de_texto(yaml).unwrap_err();
-        assert!(matches!(&err, ErrorCarga::Validacion(ref m) if m.contains("statement")), "{err}");
+        assert!(
+            matches!(&err, ErrorCarga::Validacion(ref m) if m.contains("statement")),
+            "{err}"
+        );
     }
 
     #[test]
@@ -1864,7 +2002,10 @@ main:
     tipo: magia
 ";
         let err = cargar_de_texto(yaml).unwrap_err();
-        assert!(matches!(&err, ErrorCarga::Validacion(ref m) if m.contains("magia")), "{err}");
+        assert!(
+            matches!(&err, ErrorCarga::Validacion(ref m) if m.contains("magia")),
+            "{err}"
+        );
     }
 
     #[test]
@@ -1878,7 +2019,10 @@ main:
     /// pause_on_fail). Valida que el schema admite el ejemplo de referencia.
     #[test]
     fn ejemplo_variables_yaml_carga() {
-        let ruta = format!("{}/../../ejemplos/variables.yaml", env!("CARGO_MANIFEST_DIR"));
+        let ruta = format!(
+            "{}/../../ejemplos/variables.yaml",
+            env!("CARGO_MANIFEST_DIR")
+        );
         let s = cargar_de_archivo(&ruta).unwrap_or_else(|e| panic!("no carga {ruta}: {e}"));
         assert_eq!(s.nombre, "variables_demo");
         assert_eq!(s.file_globals.len(), 2, "lote + umbral_min");
@@ -1926,7 +2070,10 @@ main:
         assert_eq!(prog.ejecutores["embebido"].tipo, TipoEjecutor::Embebido);
         assert_eq!(
             prog.ejecutores["python"].tipo,
-            TipoEjecutor::Grpc { host: "127.0.0.1".into(), puerto: 9101 }
+            TipoEjecutor::Grpc {
+                host: "127.0.0.1".into(),
+                puerto: 9101
+            }
         );
         // Pasos: el primero sin ejecutor (embebido por defecto), el segundo python.
         assert_eq!(prog.raiz.pasos_main[0].ejecutor, None);
@@ -1951,9 +2098,16 @@ main:
         let dir = std::env::temp_dir().join(format!("anvil_m5ext_{}", "indef"));
         std::fs::create_dir_all(&dir).unwrap();
         let y = dir.join("s.yaml");
-        std::fs::write(&y, "nombre: s\nmain:\n  - nombre: a\n    ejecutor: inventado\n").unwrap();
+        std::fs::write(
+            &y,
+            "nombre: s\nmain:\n  - nombre: a\n    ejecutor: inventado\n",
+        )
+        .unwrap();
         let err = cargar_programa_de_archivo(y.to_str().unwrap()).unwrap_err();
-        assert!(matches!(&err, ErrorCarga::Validacion(m) if m.contains("inventado")), "{err}");
+        assert!(
+            matches!(&err, ErrorCarga::Validacion(m) if m.contains("inventado")),
+            "{err}"
+        );
     }
 
     /// `tipo: wasm` sin `path` → error; con `path` inexistente → error.
@@ -1968,11 +2122,17 @@ main:
         )
         .unwrap();
         let err = cargar_programa_de_archivo(y.to_str().unwrap()).unwrap_err();
-        assert!(matches!(&err, ErrorCarga::Validacion(m) if m.contains("'path'")), "{err}");
+        assert!(
+            matches!(&err, ErrorCarga::Validacion(m) if m.contains("'path'")),
+            "{err}"
+        );
 
         std::fs::write(&y, "nombre: s\nejecutores:\n  - { nombre: p, tipo: wasm, path: ./no_existe.wasm }\nmain:\n  - nombre: a\n").unwrap();
         let err = cargar_programa_de_archivo(y.to_str().unwrap()).unwrap_err();
-        assert!(matches!(&err, ErrorCarga::Validacion(m) if m.contains("no existe")), "{err}");
+        assert!(
+            matches!(&err, ErrorCarga::Validacion(m) if m.contains("no existe")),
+            "{err}"
+        );
     }
 
     /// `tipo: wasm` con un path que sí existe (se crea en el dir) → carga OK.
@@ -1984,7 +2144,12 @@ main:
         let y = dir.join("s.yaml");
         std::fs::write(&y, "nombre: s\nejecutores:\n  - { nombre: p, tipo: wasm, path: ./p.wasm }\nmain:\n  - nombre: a\n    ejecutor: p\n").unwrap();
         let prog = cargar_programa_de_archivo(y.to_str().unwrap()).unwrap();
-        assert_eq!(prog.ejecutores["p"].tipo, TipoEjecutor::Wasm { path: "./p.wasm".into() });
+        assert_eq!(
+            prog.ejecutores["p"].tipo,
+            TipoEjecutor::Wasm {
+                path: "./p.wasm".into()
+            }
+        );
     }
 
     /// `grpc` sin `host`/`puerto` → error; `grpc` con `path` → error.
@@ -2002,7 +2167,10 @@ main:
 
         std::fs::write(&y, "nombre: s\nejecutores:\n  - { nombre: p, tipo: grpc, host: 127.0.0.1, puerto: 9101, path: ./p.wasm }\nmain:\n  - nombre: a\n").unwrap();
         let err = cargar_programa_de_archivo(y.to_str().unwrap()).unwrap_err();
-        assert!(matches!(&err, ErrorCarga::Validacion(m) if m.contains("'path'")), "{err}");
+        assert!(
+            matches!(&err, ErrorCarga::Validacion(m) if m.contains("'path'")),
+            "{err}"
+        );
     }
 
     /// `embebido` con campos de más → error; tipo desconocido → error.
@@ -2013,7 +2181,10 @@ main:
         let y = dir.join("s.yaml");
         std::fs::write(&y, "nombre: s\nejecutores:\n  - { nombre: e, tipo: embebido, path: ./p.wasm }\nmain:\n  - nombre: a\n").unwrap();
         let err = cargar_programa_de_archivo(y.to_str().unwrap()).unwrap_err();
-        assert!(matches!(&err, ErrorCarga::Validacion(m) if m.contains("no aplican")), "{err}");
+        assert!(
+            matches!(&err, ErrorCarga::Validacion(m) if m.contains("no aplican")),
+            "{err}"
+        );
 
         std::fs::write(
             &y,
@@ -2021,7 +2192,10 @@ main:
         )
         .unwrap();
         let err = cargar_programa_de_archivo(y.to_str().unwrap()).unwrap_err();
-        assert!(matches!(&err, ErrorCarga::Validacion(m) if m.contains("raro")), "{err}");
+        assert!(
+            matches!(&err, ErrorCarga::Validacion(m) if m.contains("raro")),
+            "{err}"
+        );
     }
 
     /// Dos ejecutores con el mismo nombre → error. Nombre reservado → error.
@@ -2032,11 +2206,17 @@ main:
         let y = dir.join("s.yaml");
         std::fs::write(&y, "nombre: s\nejecutores:\n  - { nombre: a, tipo: embebido }\n  - { nombre: a, tipo: embebido }\nmain:\n  - nombre: p\n").unwrap();
         let err = cargar_programa_de_archivo(y.to_str().unwrap()).unwrap_err();
-        assert!(matches!(&err, ErrorCarga::Validacion(m) if m.contains("más de una vez")), "{err}");
+        assert!(
+            matches!(&err, ErrorCarga::Validacion(m) if m.contains("más de una vez")),
+            "{err}"
+        );
 
         std::fs::write(&y, format!("nombre: s\nejecutores:\n  - {{ nombre: {NOMBRE_EMBEDIDO_RESERVADO}, tipo: embebido }}\nmain:\n  - nombre: p\n")).unwrap();
         let err = cargar_programa_de_archivo(y.to_str().unwrap()).unwrap_err();
-        assert!(matches!(&err, ErrorCarga::Validacion(m) if m.contains("reservado")), "{err}");
+        assert!(
+            matches!(&err, ErrorCarga::Validacion(m) if m.contains("reservado")),
+            "{err}"
+        );
     }
 
     /// `ejecutor` en un paso `statement`/`sequence_call` → error (es gRPC-only).
@@ -2069,16 +2249,25 @@ main:
     /// referencian se enlazan.
     #[test]
     fn ejemplo_demo_ejecutores_carga_como_programa() {
-        let ruta = format!("{}/../../ejemplos/demo_ejecutores.yaml", env!("CARGO_MANIFEST_DIR"));
+        let ruta = format!(
+            "{}/../../ejemplos/demo_ejecutores.yaml",
+            env!("CARGO_MANIFEST_DIR")
+        );
         let prog = cargar_programa_de_archivo(&ruta)
             .unwrap_or_else(|e| panic!("no carga el programa {ruta}: {e}"));
         assert_eq!(prog.raiz.nombre, "demo_ejecutores");
         assert_eq!(prog.ejecutores.len(), 2, "embebido + python");
         assert_eq!(
             prog.ejecutores["python"].tipo,
-            TipoEjecutor::Grpc { host: "127.0.0.1".into(), puerto: 9101 }
+            TipoEjecutor::Grpc {
+                host: "127.0.0.1".into(),
+                puerto: 9101
+            }
         );
-        assert_eq!(prog.raiz.pasos_main[0].ejecutor, None, "verificar_led → embebido");
+        assert_eq!(
+            prog.raiz.pasos_main[0].ejecutor, None,
+            "verificar_led → embebido"
+        );
         assert_eq!(
             prog.raiz.pasos_main[1].ejecutor.as_deref(),
             Some("python"),
@@ -2107,7 +2296,10 @@ main:
         assert_eq!(n, 1);
         assert_eq!(
             prog.ejecutores["py"].tipo,
-            TipoEjecutor::Grpc { host: "192.168.1.50".into(), puerto: 9200 }
+            TipoEjecutor::Grpc {
+                host: "192.168.1.50".into(),
+                puerto: 9200
+            }
         );
 
         // Convertir un embebido en grpc (el usuario fuerza remoto).
@@ -2116,12 +2308,18 @@ main:
         assert_eq!(n, 1);
         assert_eq!(
             prog.ejecutores["e"].tipo,
-            TipoEjecutor::Grpc { host: "192.168.1.60".into(), puerto: 9300 }
+            TipoEjecutor::Grpc {
+                host: "192.168.1.60".into(),
+                puerto: 9300
+            }
         );
 
         // Formato inválido → error; nombre no declarado → error.
         let err = aplicar_override_ejecutores(&mut prog, &["mal_formado".to_string()]).unwrap_err();
-        assert!(matches!(&err, ErrorCarga::Validacion(m) if m.contains("esperado")), "{err}");
+        assert!(
+            matches!(&err, ErrorCarga::Validacion(m) if m.contains("esperado")),
+            "{err}"
+        );
         let err =
             aplicar_override_ejecutores(&mut prog, &["zzz=1.2.3.4:1".to_string()]).unwrap_err();
         assert!(
@@ -2236,12 +2434,18 @@ cleanup:
         let dir = dir_pm("subs");
         std::fs::write(dir.join("pm.yaml"), pm_yaml()).unwrap();
         std::fs::copy(
-            format!("{}/../../ejemplos/subsecuencia.yaml", env!("CARGO_MANIFEST_DIR")),
+            format!(
+                "{}/../../ejemplos/subsecuencia.yaml",
+                env!("CARGO_MANIFEST_DIR")
+            ),
             dir.join("subsecuencia.yaml"),
         )
         .unwrap();
         std::fs::copy(
-            format!("{}/../../ejemplos/medir_fuentes.yaml", env!("CARGO_MANIFEST_DIR")),
+            format!(
+                "{}/../../ejemplos/medir_fuentes.yaml",
+                env!("CARGO_MANIFEST_DIR")
+            ),
             dir.join("medir_fuentes.yaml"),
         )
         .unwrap();
@@ -2251,7 +2455,10 @@ cleanup:
         )
         .unwrap();
         // archivos contiene al usuario + a medir_fuentes.yaml (su externa).
-        assert!(prog.archivos.len() >= 2, "usuario + subsecuencia externa del usuario");
+        assert!(
+            prog.archivos.len() >= 2,
+            "usuario + subsecuencia externa del usuario"
+        );
         let call = &prog.raiz.pasos_main[0];
         assert_ne!(call.secuencia.as_deref().unwrap(), SECUENCIA_USUARIO);
     }
@@ -2310,7 +2517,10 @@ cleanup:
     fn ejemplo_sequential_carga_como_programa() {
         // El PM canónico de `process_models/sequential.yaml` envuelve a
         // `ejemplos/basica.yaml`. Smoke de integración de la convención.
-        let pm = format!("{}/../../process_models/sequential.yaml", env!("CARGO_MANIFEST_DIR"));
+        let pm = format!(
+            "{}/../../process_models/sequential.yaml",
+            env!("CARGO_MANIFEST_DIR")
+        );
         let usuario = format!("{}/../../ejemplos/basica.yaml", env!("CARGO_MANIFEST_DIR"));
         let prog = cargar_programa_con_pm(&pm, &usuario)
             .unwrap_or_else(|e| panic!("no carga el PM {pm} con {usuario}: {e}"));
@@ -2318,7 +2528,9 @@ cleanup:
         let call = &prog.raiz.pasos_main[0];
         assert_ne!(call.secuencia.as_deref().unwrap(), SECUENCIA_USUARIO);
         assert_eq!(
-            prog.archivos.get(call.secuencia.as_deref().unwrap()).map(|d| d.nombre.as_str()),
+            prog.archivos
+                .get(call.secuencia.as_deref().unwrap())
+                .map(|d| d.nombre.as_str()),
             Some("basica")
         );
     }

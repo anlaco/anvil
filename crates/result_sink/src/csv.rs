@@ -44,7 +44,10 @@ impl<W: Write> SinkCsv<W> {
 impl<W: Write> ResultSink for SinkCsv<W> {
     fn on_fin_secuencia(&mut self, secuencia: &ResultadoSecuencia) {
         let mut doc = String::new();
-        fila(&mut doc, CABECERA.iter().map(|s| (*s).to_string()).collect());
+        fila(
+            &mut doc,
+            CABECERA.iter().map(|s| (*s).to_string()).collect(),
+        );
         let estado = secuencia.estado();
         for p in &secuencia.pasos {
             // `padre` es el prefijo de ruta para los sub-pasos anidados
@@ -86,7 +89,9 @@ fn fila_paso(estado_secuencia: &str, p: &ResultadoStep, nombre: &str) -> Vec<Str
         a_texto(p.limite_min),
         a_texto(p.limite_max),
         a_texto(p.valor_esperado),
-        p.operador.map(|op| op.simbolo().to_string()).unwrap_or_default(),
+        p.operador
+            .map(|op| op.simbolo().to_string())
+            .unwrap_or_default(),
     ]
 }
 
@@ -139,7 +144,11 @@ mod tests {
             4.5,
             5.5,
         ));
-        s.registra(ResultadoStep::nuevo("verificar_led", "paso", "led encendido"));
+        s.registra(ResultadoStep::nuevo(
+            "verificar_led",
+            "paso",
+            "led encendido",
+        ));
         s
     }
 
@@ -153,9 +162,15 @@ mod tests {
         let lineas: Vec<&str> = out.split("\r\n").collect();
         assert_eq!(lineas[0], "nombre_secuencia,estado,nombre_paso,estado_paso,mensaje,valor_medido,limite_min,limite_max,valor_esperado,operador");
         // rango: valor_esperado/operador vacíos (no aplican a un rango).
-        assert_eq!(lineas[1], "fallo,fallo,medir_voltaje,fallo,fuera de rango,4.2,4.5,5.5,,");
+        assert_eq!(
+            lineas[1],
+            "fallo,fallo,medir_voltaje,fallo,fuera de rango,4.2,4.5,5.5,,"
+        );
         // sin medida ni límite: los últimos cinco campos vacíos.
-        assert_eq!(lineas[2], "fallo,paso,verificar_led,paso,led encendido,,,,,");
+        assert_eq!(
+            lineas[2],
+            "fallo,paso,verificar_led,paso,led encendido,,,,,"
+        );
         assert!(lineas[3].is_empty(), "termina en CRLF");
     }
 
@@ -178,7 +193,10 @@ mod tests {
         let out = String::from_utf8(sink.salida).unwrap();
         let fila = out.split("\r\n").nth(1).unwrap();
         // valor_medido=990, limite_min/max vacíos, valor_esperado=1000, operador=">=".
-        assert!(fila.contains(",990,,,1000,>="), "fila de comparación: {fila}");
+        assert!(
+            fila.contains(",990,,,1000,>="),
+            "fila de comparación: {fila}"
+        );
     }
 
     #[test]
@@ -204,7 +222,10 @@ mod tests {
         sink.on_fin_secuencia(&s);
         let out = String::from_utf8(sink.salida).unwrap();
         let fila = out.split("\r\n").nth(1).unwrap();
-        assert!(fila.contains(",5,0,10"), "enteros como 5/0/10 sin decimales: {fila}");
+        assert!(
+            fila.contains(",5,0,10"),
+            "enteros como 5/0/10 sin decimales: {fila}"
+        );
     }
 
     #[test]
@@ -229,7 +250,11 @@ mod tests {
             "nombre_secuencia,estado,nombre_paso,estado_paso,mensaje,valor_medido,limite_min,limite_max,valor_esperado,operador"
         );
         // Call.
-        assert!(lineas[1].contains(",fallo,test_fuentes,fallo,"), "fila del call: {}", lineas[1]);
+        assert!(
+            lineas[1].contains(",fallo,test_fuentes,fallo,"),
+            "fila del call: {}",
+            lineas[1]
+        );
         // Sub-pasos aplanados con prefijo.
         assert!(
             lineas[2].contains(",paso,test_fuentes/medir_canal_1,paso,ok,"),
