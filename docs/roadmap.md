@@ -196,6 +196,25 @@ Lo que ya existe en el repo:
 
 **Fin del MVP** ✅ M5. Lo siguiente es post-MVP.
 
+## Cola de la beta (post-MVP, en curso)
+
+Hallazgos de la primera campaña externa
+([`qa/informe-beta-2026-08.md`](qa/informe-beta-2026-08.md)), por orden de
+arreglo. Lo hecho se marca:
+
+- ✅ **DEF-1** — el sidecar de límites llega a la secuencia del operador bajo
+  `--process-model` (#2).
+- ✅ **DIAG-1** — aviso cuando un límite del sidecar no afecta a ningún paso (#6).
+- ✅ **DEF-3** — el cargador rechaza `asigna`/`statement` sobre un destino no
+  declarado, y `asigna` no puede nombrar un `parameter` (#4).
+- ✅ **DIAG-2** — **veredicto compuesto** `tipo: pass_fail` (RF-25): el motor
+  evalúa una condición booleana sobre variables ya pobladas y falla el paso.
+  Cierra el hueco que dejaba 131 de 180 secuencias con un veredicto
+  decorativo. → [adr/0018-pass-fail-por-expresion-lo-evalua-el-motor.md](adr/0018-pass-fail-por-expresion-lo-evalua-el-motor.md)
+- Pendientes: DEF-2 (columna del CSV, #3), DEF-4 (path absoluto de ejecutor
+  wasm, #5), DIAG-3/4/5 y la trazabilidad del reporte (#8, #9, #10), contacto
+  de seguridad (#11).
+
 ## Post-MVP (explícitamente fuera de v1)
 
 - **Paralelismo** (Parallel/Batch) con **cancelación jerárquica**

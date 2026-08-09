@@ -130,7 +130,7 @@ impl ValorYaml {
 ///
 /// Desde M4: `disable`/`pause_on_fail` (RF-34), `precondicion` (RF-33),
 /// `asigna` (RF-31), `tipo`/`statement` (RF-27). Las expresiones (`precondicion`,
-/// `asigna`, `statement`) vienen como texto y se parsean a AST en
+/// `asigna`, `statement`, `condicion`) vienen como texto y se parsean a AST en
 /// [`PasoYaml::a_definicion`] (fail-fast).
 #[derive(Debug, PartialEq, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -154,12 +154,17 @@ struct PasoYaml {
     /// `resultado`/scopes) a la Local. Texto → AST en `a_definicion`.
     #[serde(default)]
     asigna: Option<HashMap<String, String>>,
-    /// RF-27: `"grpc"` (default) o `"statement"`.
+    /// RF-27: `"grpc"` (default), `"statement"`, `"sequence_call"` o
+    /// `"pass_fail"`.
     #[serde(default = "tipo_por_defecto")]
     tipo: String,
     /// RF-27: sentencia(s) a ejecutar si `tipo == "statement"`. Texto → AST.
     #[serde(default)]
     statement: Option<String>,
+    /// RF-25 (ADR-0018): expresión booleana del veredicto si
+    /// `tipo == "pass_fail"`. Texto → AST en `a_definicion`.
+    #[serde(default)]
+    condicion: Option<String>,
     /// M4b (RF-27): destino del sequence call si `tipo == "sequence_call"`.
     /// Un **nombre** (subsecuencia inline del mismo archivo) o un **path
     /// relativo** (archivo externo); se distingue con [`es_path`]. Texto.
@@ -1217,14 +1222,17 @@ impl PasoYaml {
             None => None,
         };
 
-        // RF-27: tipo de paso. `grpc` (default), `statement` o `sequence_call` (M4b).
+        // RF-27: tipo de paso. `grpc` (default), `statement`, `sequence_call`
+        // (M4b) o `pass_fail` (RF-25, ADR-0018).
         let tipo = match self.tipo.as_str() {
             "grpc" => TipoPaso::Grpc,
             "statement" => TipoPaso::Statement,
             "sequence_call" => TipoPaso::SequenceCall,
+            "pass_fail" => TipoPaso::PassFail,
             otro => {
                 return Err(ErrorCarga::Validacion(format!(
-                    "el paso '{}' tiene tipo '{otro}' inválido (grpc|statement|sequence_call)",
+                    "el paso '{}' tiene tipo '{otro}' inválido \
+                     (grpc|statement|sequence_call|pass_fail)",
                     self.nombre
                 )))
             }
@@ -1235,6 +1243,20 @@ impl PasoYaml {
             Some(texto) => Some(expr::parse_sentencias(texto).map_err(|e| {
                 ErrorCarga::Validacion(format!(
                     "statement del paso '{}' inválido: {e}",
+                    self.nombre
+                ))
+            })?),
+            None => None,
+        };
+
+        // RF-25 (ADR-0018): la condición del veredicto se parsea a AST aquí
+        // (fail-fast), igual que la precondición. Bool estricto al evaluar:
+        // que sea booleana no se sabe hasta el runtime (tipos dinámicos), así
+        // que un no-Bool es `error` de ejecución, no de carga.
+        let condicion = match self.condicion.as_deref() {
+            Some(texto) => Some(expr::parse_expresion(extraer_expr(texto)).map_err(|e| {
+                ErrorCarga::Validacion(format!(
+                    "condición del paso '{}' inválida: {e}",
                     self.nombre
                 ))
             })?),
@@ -1283,40 +1305,68 @@ impl PasoYaml {
                 self.nombre
             )));
         }
-        if matches!(tipo, TipoPaso::Grpc) && statement.is_some() {
+        if !matches!(tipo, TipoPaso::Statement) && statement.is_some() {
             return Err(ErrorCarga::Validacion(format!(
-                "el paso '{}' es 'grpc' pero trae 'statement' (reservado para 'statement')",
+                "el paso '{}' es '{}' pero trae 'statement' (reservado para 'statement')",
+                self.nombre, self.tipo
+            )));
+        }
+        // RF-25 (ADR-0018): un `pass_fail` es su condición; sin ella no hay
+        // veredicto que dar.
+        if matches!(tipo, TipoPaso::PassFail) && condicion.is_none() {
+            return Err(ErrorCarga::Validacion(format!(
+                "el paso '{}' es 'pass_fail' pero no trae 'condicion'",
                 self.nombre
             )));
         }
-        if matches!(tipo, TipoPaso::SequenceCall) {
-            if self.secuencia.is_none() {
-                return Err(ErrorCarga::Validacion(format!(
-                    "el paso '{}' es 'sequence_call' pero no trae 'secuencia'",
-                    self.nombre
-                )));
-            }
-            if statement.is_some() {
-                return Err(ErrorCarga::Validacion(format!(
-                    "el paso '{}' es 'sequence_call' pero trae 'statement' (reservado para 'statement')",
-                    self.nombre
-                )));
-            }
-            if limite.is_some() {
-                return Err(ErrorCarga::Validacion(format!(
-                    "el paso '{}' es 'sequence_call' y trae 'limite': un sequence call no mide",
-                    self.nombre
-                )));
-            }
-            if self.reintentos > 1 {
-                return Err(ErrorCarga::Validacion(format!(
-                    "el paso '{}' es 'sequence_call' con reintentos={}: no admite reintentos \
-                     (sus pasos internos declaran los suyos)",
-                    self.nombre, self.reintentos
-                )));
-            }
+        if !matches!(tipo, TipoPaso::PassFail) && condicion.is_some() {
+            return Err(ErrorCarga::Validacion(format!(
+                "el paso '{}' es '{}' pero trae 'condicion' (reservado para 'pass_fail')",
+                self.nombre, self.tipo
+            )));
         }
-        if matches!(tipo, TipoPaso::Grpc | TipoPaso::Statement)
+        if matches!(tipo, TipoPaso::SequenceCall) && self.secuencia.is_none() {
+            return Err(ErrorCarga::Validacion(format!(
+                "el paso '{}' es 'sequence_call' pero no trae 'secuencia'",
+                self.nombre
+            )));
+        }
+        // Ni un sequence call ni un pass_fail miden: el primero agrega los
+        // resultados de sus pasos, el segundo evalúa variables ya pobladas.
+        if matches!(tipo, TipoPaso::SequenceCall | TipoPaso::PassFail) && limite.is_some() {
+            return Err(ErrorCarga::Validacion(format!(
+                "el paso '{}' es '{}' y trae 'limite': no mide",
+                self.nombre, self.tipo
+            )));
+        }
+        if matches!(tipo, TipoPaso::SequenceCall) && self.reintentos > 1 {
+            return Err(ErrorCarga::Validacion(format!(
+                "el paso '{}' es 'sequence_call' con reintentos={}: no admite reintentos \
+                 (sus pasos internos declaran los suyos)",
+                self.nombre, self.reintentos
+            )));
+        }
+        // Un `pass_fail` es puro y determinista (el motor evalúa una
+        // expresión, sin red): reintentarlo daría el mismo veredicto. Se
+        // rechaza en vez de aceptarlo e ignorarlo en silencio.
+        if matches!(tipo, TipoPaso::PassFail) && self.reintentos > 1 {
+            return Err(ErrorCarga::Validacion(format!(
+                "el paso '{}' es 'pass_fail' con reintentos={}: no admite reintentos \
+                 (evalúa una expresión, el resultado no cambia entre intentos)",
+                self.nombre, self.reintentos
+            )));
+        }
+        // Un `pass_fail` no produce `resultado.*`, así que su `asigna` no
+        // volcaría nada. Rechazarlo en vez de ignorarlo: un `asigna` que no se
+        // aplica es la clase de fallo silencioso de DEF-3.
+        if matches!(tipo, TipoPaso::PassFail) && asigna.is_some() {
+            return Err(ErrorCarga::Validacion(format!(
+                "el paso '{}' es 'pass_fail' y trae 'asigna': un pass_fail no produce \
+                 'resultado.*' que volcar (usa un paso 'statement' aparte)",
+                self.nombre
+            )));
+        }
+        if !matches!(tipo, TipoPaso::SequenceCall)
             && (self.secuencia.is_some() || parametros.is_some())
         {
             return Err(ErrorCarga::Validacion(format!(
@@ -1343,6 +1393,7 @@ impl PasoYaml {
             asigna,
             tipo,
             statement,
+            condicion,
             secuencia: self.secuencia,
             parametros,
             ejecutor: self.ejecutor,
@@ -1575,6 +1626,83 @@ main:
             ("nombre: s\nmain:\n  - nombre: c\n    tipo: sequence_call\n    secuencia: x\n    limite: { tipo: rango, min: 1, max: 2 }\n", "no mide"),
             ("nombre: s\nmain:\n  - nombre: c\n    tipo: sequence_call\n    secuencia: x\n    reintentos: 2\n", "no admite reintentos"),
             ("nombre: s\nmain:\n  - nombre: c\n    tipo: sequence_call\n    secuencia: x\n    statement: 'locals.y = 1'\n", "reservado para 'statement'"),
+        ];
+        for (yaml, frag) in casos {
+            let err = cargar_de_texto(yaml).unwrap_err();
+            assert!(
+                matches!(&err, ErrorCarga::Validacion(m) if m.contains(frag)),
+                "esperaba '{frag}' en {err}"
+            );
+        }
+    }
+
+    /// RF-25 (ADR-0018): `pass_fail` parsea su `condicion` a AST al cargar.
+    #[test]
+    fn pass_fail_se_parsea_a_condicion() {
+        let yaml = "\
+nombre: s
+locals:
+  v: 0.0
+main:
+  - nombre: verificar_dut
+    tipo: pass_fail
+    condicion: 'locals.v > 4.9 && locals.v < 5.1'
+";
+        let s = cargar_de_texto(yaml).unwrap();
+        let p = &s.pasos_main[0];
+        assert_eq!(p.tipo, TipoPaso::PassFail);
+        assert!(p.condicion.is_some(), "la condición llega como AST");
+        assert!(p.statement.is_none());
+    }
+
+    /// La condición admite las dos formas de expresión, como `asigna`.
+    #[test]
+    fn pass_fail_admite_la_forma_interpolada() {
+        let yaml = "\
+nombre: s
+locals:
+  v: 0.0
+main:
+  - nombre: verificar_dut
+    tipo: pass_fail
+    condicion: '${locals.v > 4.9}'
+";
+        assert!(cargar_de_texto(yaml).is_ok());
+    }
+
+    /// `pass_fail` sin `condicion` → error; `condicion` fuera de un
+    /// `pass_fail` → error; con `limite`/`reintentos`/`asigna` → error.
+    #[test]
+    fn pass_fail_mal_usado_es_error() {
+        let casos = [
+            (
+                "nombre: s\nmain:\n  - nombre: v\n    tipo: pass_fail\n",
+                "no trae 'condicion'",
+            ),
+            (
+                "nombre: s\nmain:\n  - nombre: v\n    condicion: 'true'\n",
+                "reservado para 'pass_fail'",
+            ),
+            (
+                "nombre: s\nmain:\n  - nombre: v\n    tipo: statement\n    statement: 'locals.x = 1'\n    condicion: 'true'\n",
+                "reservado para 'pass_fail'",
+            ),
+            (
+                "nombre: s\nmain:\n  - nombre: v\n    tipo: pass_fail\n    condicion: 'true'\n    limite: { tipo: rango, min: 1, max: 2 }\n",
+                "no mide",
+            ),
+            (
+                "nombre: s\nmain:\n  - nombre: v\n    tipo: pass_fail\n    condicion: 'true'\n    reintentos: 2\n",
+                "no admite reintentos",
+            ),
+            (
+                "nombre: s\nlocals:\n  x: 0.0\nmain:\n  - nombre: v\n    tipo: pass_fail\n    condicion: 'true'\n    asigna: { x: '1.0' }\n",
+                "no produce 'resultado.*'",
+            ),
+            (
+                "nombre: s\nmain:\n  - nombre: v\n    tipo: pass_fail\n    condicion: 'locals.v >'\n",
+                "condición del paso",
+            ),
         ];
         for (yaml, frag) in casos {
             let err = cargar_de_texto(yaml).unwrap_err();
