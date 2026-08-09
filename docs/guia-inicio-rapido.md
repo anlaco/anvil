@@ -58,16 +58,33 @@ dependencias que instalar.
 
 ### Compilar
 
-El host embebe los dos `.wasm`, así que se construyen primero:
+El host embebe los dos `.wasm` **y el puente**, así que los tres se construyen
+en orden. El `Makefile` de la raíz lo hace:
+
+```sh
+make build      # debug   → packaging/anvil-host/target/debug/anvil
+make release    # release → packaging/anvil-host/target/release/anvil
+```
+
+Lo que hace por dentro, si lo prefieres a mano (añade `--release` a las tres
+para el binario de distribución):
 
 ```sh
 # 1. Guests WASM (motor + ejecutor) — workspace del core
 cargo build --target wasm32-wasip2 -p motor -p ejecutor_pasos
 
-# 2. Host nativo (workspace aparte; wasmtime se compila aquí, no en el core)
-cargo build --manifest-path packaging/anvil-host/Cargo.toml          # → packaging/anvil-host/target/debug/anvil
-cargo build --release --manifest-path packaging/anvil-host/Cargo.toml # → packaging/anvil-host/target/release/anvil
+# 2. Puente gRPC↔componente (M5-ext.2, ADR-0015) — workspace aparte
+cargo build --manifest-path packaging/anvil-puente-wasm/Cargo.toml
+
+# 3. Host nativo (workspace aparte; wasmtime se compila aquí, no en el core)
+cargo build --manifest-path packaging/anvil-host/Cargo.toml
 ```
+
+> **Debug arranca lento, y es normal.** El binario de debug tarda decenas de
+> segundos en levantar el ejecutor porque wasmtime compila los guests sin
+> optimizar en cada arranque (medido: ~26 s en debug, ~1,2 s en release). Por
+> eso el timeout de arranque del host es de 60 s (`SONDEOS_ARRANQUE`). Para
+> cualquier cosa que no sea depurar el propio host, usa `make release`.
 
 > El host vive en `packaging/anvil-host`, **fuera** del workspace del core,
 > para que `cargo build` / `cargo test` del core no arrastren wasmtime
@@ -80,7 +97,8 @@ core) a `OUT_DIR`; si faltan, falla indicando el comando del paso 1.
 ### Tests (sin red)
 
 ```sh
-cargo test                 # modelo, cargador, motor, sinks (155)
+make test                  # 201 del core + 7 del host
+cargo test                 # sólo el core: modelo, cargador, expr, motor, sinks
 cargo test -p motor        # sequence call con mock (sin gRPC)
 ```
 
@@ -220,12 +238,17 @@ Ver [ADR-0015](adr/0015-el-wasm-del-usuario-es-una-funcion-puenteado-a-grpc.md).
 
 ## Solución de problemas
 
-- **`Falta el guest '…'`** al compilar el host → corre primero
-  `cargo build --target wasm32-wasip2 -p motor -p ejecutor_pasos`.
+- **`Falta el artifact '…'`** al compilar el host → `make build` (o `make
+  release`) desde la raíz, que encadena los tres pasos en orden.
 - **`no se pudo cargar la secuencia`** → el path del YAML no existe o no es
-  accesible (el host preopena el directorio actual).
-- **`el ejecutor de pasos no empezó a escuchar`** → el guest ejecutor
-  falló al arrancar; revisa stderr.
+  accesible (el host preopena el directorio actual). Por lo mismo, `--json` y
+  `--csv` sólo pueden escribir **dentro del directorio actual**: una ruta
+  absoluta a otro sitio da `No such file or directory (os error 44)`.
+- **`el ejecutor de pasos no empezó a escuchar`** → el guest ejecutor falló al
+  arrancar; el error concreto va a stderr. Si tarda pero no falla, es el
+  arranque lento de debug (ver arriba): usa `make release`.
+- **`address in use` con dos `anvil` a la vez** → el ejecutor embebido usa el
+  puerto 9100 fijo; dale a uno de los dos `--port <otro>`.
 
 ## Siguiente lectura
 

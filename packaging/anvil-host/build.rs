@@ -12,10 +12,14 @@
 //! cargo build --manifest-path packaging/anvil-host/Cargo.toml        # host
 //! ```
 //!
+//! (`make build` / `make release` en la raíz lo hacen en orden.)
+//!
 //! Si los artifacts no están, falla con un mensaje claro indicando el
-//! comando a correr primero. Busca primero en `debug/` y luego en
-//! `release/` (para que el host se pueda compilar en cualquier profile y
-//! embeber los artifacts disponibles).
+//! comando a correr primero. Busca **primero en el profile con el que se
+//! está compilando el host** (`PROFILE`) y sólo cae al otro como último
+//! recurso, avisando: un `anvil` de release que embebiera guests debug
+//! arrancaría decenas de segundos más lento (wasmtime compila el guest sin
+//! optimizar), que es un fallo difícil de atribuir.
 
 use std::env;
 use std::path::PathBuf;
@@ -49,16 +53,31 @@ fn main() {
         ),
     ];
 
+    // El profile con el que cargo está compilando el host ("debug"/"release");
+    // se prefiere para los artifacts, y el otro queda de reserva.
+    let profile = env::var("PROFILE").unwrap_or_else(|_| "debug".into());
+    let reserva = if profile == "release" { "debug" } else { "release" };
+    // Lo más corto que arregla la situación, sea cual sea el profile.
+    let receta = if profile == "release" { "make release" } else { "make build" };
+
     for (nombre, subdir, dir, comando) in &piezas {
         let dst = out_dir.join(nombre);
-        let src = ["debug", "release"]
-            .iter()
-            .map(|p| repo_root.join(dir).join(subdir).join(p).join(nombre))
-            .find(|p| p.exists())
-            .unwrap_or_else(|| {
-                eprintln!("Falta el artifact '{nombre}'. Corre primero:\n  {comando}");
-                process::exit(1);
-            });
+        let ruta = |p: &str| repo_root.join(dir).join(subdir).join(p).join(nombre);
+        let src = if ruta(&profile).exists() {
+            ruta(&profile)
+        } else if ruta(reserva).exists() {
+            println!(
+                "cargo:warning=el host se compila en '{profile}' pero '{nombre}' sólo está en \
+                 '{reserva}': se embebe ése. Para un binario coherente: {receta}"
+            );
+            ruta(reserva)
+        } else {
+            eprintln!(
+                "Falta el artifact '{nombre}'. Corre primero:\n  {comando}\n\
+                 (o, más simple, `{receta}` desde la raíz del repo)"
+            );
+            process::exit(1);
+        };
         std::fs::copy(&src, &dst).expect("copiar artifact a OUT_DIR");
         println!("cargo:rerun-if-changed={}", src.display());
     }
