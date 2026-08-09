@@ -5,4 +5,10 @@
 # (GitHub lo aplica solo.)
 
 # style: adoptar rustfmt (commit de sólo formato)
+# Primer reformateo, con `use_small_heuristics = "Max"`; sustituido enseguida
+# por el estilo oficial, pero sigue aquí porque tocó las mismas líneas.
 97169b20d6f2eea00deb4c21d881853342e9e7d3
+
+# style: pasar el código por rustfmt (commit de sólo formato)
+# El reformateo bueno: estilo oficial de Rust, sin `rustfmt.toml`.
+560b640ed83b3987e9c823154686b6f2fe23d511
