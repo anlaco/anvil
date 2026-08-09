@@ -87,6 +87,11 @@ impl ComponenteCargado {
     /// contrato. Un error del guest (pánico, trap) se reporta como
     /// `Status::internal`: el motor lo ve como error del paso, no corta la
     /// secuencia por red.
+    // `clippy::result_large_err`: el `Err` es `tonic::Status` (176 bytes), el
+    // tipo de error canónico de tonic. Boxearlo sólo para este método obligaría
+    // a desenvolverlo en cada punto donde tonic lo espera, a cambio de nada:
+    // esto se llama una vez por paso, no en un bucle caliente.
+    #[allow(clippy::result_large_err)]
     fn llamar(&mut self, nombre: &str, intento: i32) -> Result<ResultadoPasoProto, Status> {
         let r = self
             .paso

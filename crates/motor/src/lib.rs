@@ -861,8 +861,7 @@ mod tests {
     /// Una subsecuencia inline `nombre` con un `statement` que copia
     /// `parameters.canal` a `parameters.listo` (escribe en parameters: by-ref).
     fn inline_comprueba(nombre: &str) -> DefinicionSecuencia {
-        let mut s = DefinicionSecuencia::default();
-        s.nombre = nombre.into();
+        let mut s = DefinicionSecuencia { nombre: nombre.into(), ..Default::default() };
         s.parameters.insert("canal".into(), ValorDefinicion::Numero(0.0));
         s.parameters.insert("listo".into(), ValorDefinicion::Bool(false));
         s.pasos_main = vec![{
@@ -878,8 +877,7 @@ mod tests {
     #[test]
     fn sequence_call_inline_devuelve_estado_agregado_y_anida() {
         // Padre: locals { canal: 1.0 }, llama a inline `init` by-reference.
-        let mut padre = DefinicionSecuencia::default();
-        padre.nombre = "padre".into();
+        let mut padre = DefinicionSecuencia { nombre: "padre".into(), ..Default::default() };
         padre.locals.insert("canal".into(), ValorDefinicion::Numero(1.0));
         padre.locals.insert("listo".into(), ValorDefinicion::Bool(false));
         padre.subsecuencias.insert("init".into(), inline_comprueba("init"));
@@ -902,8 +900,7 @@ mod tests {
     fn sequence_call_by_reference_devuelve_la_salida_al_padre() {
         // La subsecuencia escribe `parameters.listo` = true (canal=1.0 >= 0.0);
         // al volver, by-reference copia `parameters.listo` → `locals.listo`.
-        let mut padre = DefinicionSecuencia::default();
-        padre.nombre = "padre".into();
+        let mut padre = DefinicionSecuencia { nombre: "padre".into(), ..Default::default() };
         padre.locals.insert("canal".into(), ValorDefinicion::Numero(1.0));
         padre.locals.insert("listo".into(), ValorDefinicion::Bool(false));
         padre.subsecuencias.insert("init".into(), inline_comprueba("init"));
@@ -931,8 +928,7 @@ mod tests {
         // statement cuyo `estado` es "paso"; el agregado de la sub es "paso".
         // Verificamos en cambio el caso de error: una subsecuencia cuyo
         // statement tiene error de tipo.
-        let mut sub = DefinicionSecuencia::default();
-        sub.nombre = "init".into();
+        let mut sub = DefinicionSecuencia { nombre: "init".into(), ..Default::default() };
         sub.parameters.insert("canal".into(), ValorDefinicion::Numero(0.0));
         sub.pasos_main = vec![{
             let mut p = DefinicionPaso::nuevo("malo", 1);
@@ -941,8 +937,7 @@ mod tests {
             p.statement = Some(expr::parse_sentencias("parameters.canal = !parameters.canal").unwrap());
             p
         }];
-        let mut padre = DefinicionSecuencia::default();
-        padre.nombre = "padre".into();
+        let mut padre = DefinicionSecuencia { nombre: "padre".into(), ..Default::default() };
         padre.locals.insert("canal".into(), ValorDefinicion::Numero(1.0));
         padre.subsecuencias.insert("init".into(), sub);
         padre.pasos_main = vec![call("llamar", "init", vec![arg("canal", "canal")])];
@@ -963,8 +958,7 @@ mod tests {
     fn sequence_call_subsecuencia_externa_por_path() {
         // El cargador ya reescribió `secuencia` a la clave canónica y cargó
         // el archivo en `programa.archivos`. Aquí simulamos eso a mano.
-        let mut hija = DefinicionSecuencia::default();
-        hija.nombre = "hija".into();
+        let mut hija = DefinicionSecuencia { nombre: "hija".into(), ..Default::default() };
         hija.parameters.insert("canal".into(), ValorDefinicion::Numero(0.0));
         hija.pasos_main = vec![{
             let mut p = DefinicionPaso::nuevo("eco", 1);
@@ -972,8 +966,7 @@ mod tests {
             p.statement = Some(expr::parse_sentencias("parameters.canal = parameters.canal + 1.0").unwrap());
             p
         }];
-        let mut padre = DefinicionSecuencia::default();
-        padre.nombre = "padre".into();
+        let mut padre = DefinicionSecuencia { nombre: "padre".into(), ..Default::default() };
         padre.locals.insert("canal".into(), ValorDefinicion::Numero(1.0));
         padre.pasos_main = vec![call("llamar", "ruta/hija.yaml", vec![arg("canal", "canal")])];
 
@@ -994,8 +987,7 @@ mod tests {
 
     #[test]
     fn sequence_call_argumento_a_local_inexistente_es_error() {
-        let mut padre = DefinicionSecuencia::default();
-        padre.nombre = "padre".into();
+        let mut padre = DefinicionSecuencia { nombre: "padre".into(), ..Default::default() };
         // No declaramos `locals.canal`: el lvalue no existe en el padre.
         padre.subsecuencias.insert("init".into(), inline_comprueba("init"));
         padre.pasos_main = vec![call("llamar", "init", vec![arg("canal", "canal")])];
@@ -1016,14 +1008,11 @@ mod tests {
         // Un ciclo por path (A → B → A → …) que el cargador rechazaría al
         // cargar; aquí lo construimos a mano en el `Programa` para probar la
         // red de seguridad del motor (profundidad >64 → "error", no pánico).
-        let mut a = DefinicionSecuencia::default();
-        a.nombre = "a".into();
+        let mut a = DefinicionSecuencia { nombre: "a".into(), ..Default::default() };
         a.pasos_main = vec![call("a_b", "b.yaml", vec![])];
-        let mut b = DefinicionSecuencia::default();
-        b.nombre = "b".into();
+        let mut b = DefinicionSecuencia { nombre: "b".into(), ..Default::default() };
         b.pasos_main = vec![call("b_a", "a.yaml", vec![])];
-        let mut padre = DefinicionSecuencia::default();
-        padre.nombre = "padre".into();
+        let mut padre = DefinicionSecuencia { nombre: "padre".into(), ..Default::default() };
         padre.pasos_main = vec![call("p_a", "a.yaml", vec![])];
 
         let programa = Programa {
@@ -1039,7 +1028,7 @@ mod tests {
         // En algún nivel la profundidad >64 produce el error de anidamiento.
         fn busca_prof(p: &ResultadoStep) -> bool {
             p.estado == "error" && p.mensaje.contains("anidamiento demasiado profundo")
-                || p.sub_pasos.as_ref().map_or(false, |sub| sub.iter().any(busca_prof))
+                || p.sub_pasos.as_ref().is_some_and(|sub| sub.iter().any(busca_prof))
         }
         assert!(sec.pasos.iter().any(busca_prof), "profundidad >64 corta con error: {:?}", sec.pasos);
     }
@@ -1055,8 +1044,7 @@ mod tests {
                 self.0.set(self.0.get() + 1);
             }
         }
-        let mut padre = DefinicionSecuencia::default();
-        padre.nombre = "padre".into();
+        let mut padre = DefinicionSecuencia { nombre: "padre".into(), ..Default::default() };
         padre.locals.insert("canal".into(), ValorDefinicion::Numero(1.0));
         padre.locals.insert("listo".into(), ValorDefinicion::Bool(false));
         padre.subsecuencias.insert("init".into(), inline_comprueba("init"));
@@ -1094,8 +1082,7 @@ mod tests {
 
     /// Un `Programa` con raíz + un ejecutor `grpc` (python) y un `embebido`.
     fn programa_ruteado() -> Programa {
-        let mut raiz = DefinicionSecuencia::default();
-        raiz.nombre = "s".into();
+        let mut raiz = DefinicionSecuencia { nombre: "s".into(), ..Default::default() };
         let mut p1 = DefinicionPaso::nuevo("a", 1);
         p1.ejecutor = None; // embebido por defecto
         let mut p2 = DefinicionPaso::nuevo("b", 1);

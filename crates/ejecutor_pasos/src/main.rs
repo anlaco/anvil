@@ -67,14 +67,9 @@ fn main() {
         };
         eprintln!("motor conectado");
 
-        loop {
-            // Un error aquí es normalmente el motor cerrando la conexión al
-            // acabar la secuencia: se sale del bucle sin ruido.
-            let peticion = match conn.siguiente_peticion() {
-                Ok(p) => p,
-                Err(_) => break,
-            };
-
+        // Un error al leer es normalmente el motor cerrando la conexión al
+        // acabar la secuencia: se sale del bucle sin ruido.
+        while let Ok(peticion) = conn.siguiente_peticion() {
             if peticion.path != RUTA_INVOCA {
                 eprintln!("ruta desconocida: {}", peticion.path);
                 continue;
