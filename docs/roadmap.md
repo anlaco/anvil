@@ -211,9 +211,11 @@ arreglo. Lo hecho se marca:
   evalúa una condición booleana sobre variables ya pobladas y falla el paso.
   Cierra el hueco que dejaba 131 de 180 secuencias con un veredicto
   decorativo. → [adr/0018-pass-fail-por-expresion-lo-evalua-el-motor.md](adr/0018-pass-fail-por-expresion-lo-evalua-el-motor.md)
-- Pendientes: DEF-2 (columna del CSV, #3), DEF-4 (path absoluto de ejecutor
-  wasm, #5), DIAG-3/4/5 y la trazabilidad del reporte (#8, #9, #10), contacto
-  de seguridad (#11).
+- ✅ **DEF-2** — la primera columna del CSV lleva el nombre de la secuencia
+  (antes repetía el estado agregado); la segunda columna (`estado`) pasa a
+  llevar ese estado agregado, que antes duplicaba `estado_paso` (#3).
+- Pendientes: DEF-4 (path absoluto de ejecutor wasm, #5), DIAG-3/4/5 y la
+  trazabilidad del reporte (#8, #9, #10), contacto de seguridad (#11).
 
 ## Post-MVP (explícitamente fuera de v1)
 
