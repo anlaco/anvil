@@ -7,9 +7,11 @@ cada paso se invoca **por gRPC por su nombre** — nunca con una llamada
 directa —, lo que aísla los pasos entre sí y deja la puerta abierta a
 escribirlos en cualquier lenguaje.
 
-> Esta es la documentación **pre-desarrollo**: la fase de planificación que
-> fija *qué* es Anvil, *por qué* y *cómo* antes de construir el producto.
-> Las docs operativas y de usuario vienen después, cuando haya producto.
+> Esta documentación nació **pre-desarrollo** —fijar *qué* es Anvil, *por qué*
+> y *cómo* antes de construirlo— y sigue siendo la especificación viva del
+> producto. Con el MVP cerrado (M0→M5, ver [roadmap.md](roadmap.md)), convive
+> con documentación de uso: [guia-inicio-rapido.md](guia-inicio-rapido.md) y
+> los ADR, que son el registro de lo que ya está construido.
 
 ## Para empezar ya
 
@@ -85,9 +87,13 @@ En la raíz del repo, los archivos de comunidad:
 
 ## Estado del producto hoy
 
-Existe un **prototipo** (motor demo + contrato gRPC en
-`crates/modelo/paso.proto`) y la **especificación viva** (semántica
-Setup→Main→Cleanup, reintentos por paso, estados paso/fallo/error, agregado
-error>fallo, reporte textual congelado). Lo que ya está decidido se
-**formaliza** en estos docs; lo que no, se **propone** como decisión de diseño
-marcada como propuesta.
+**El MVP está cerrado** (M0→M5 + M5-ext.1/2, ver [roadmap.md](roadmap.md)).
+Anvil se distribuye como **un binario** que hospeda wasmtime y los dos guests
+WASM (ADR-0011): secuencias en YAML con límites, variables, expresiones,
+precondiciones y subsecuencias; reporte a consola/JSON/CSV; process model
+Sequential; routing multi-ejecutor; pasos del usuario como componentes WASM
+cargados por path.
+
+Lo posterior al MVP (paralelismo, Operator UI, sinks sectoriales…) sigue el
+mismo criterio de siempre: lo decidido se **formaliza** en estos docs; lo que
+no, se **propone** como decisión de diseño marcada como propuesta.

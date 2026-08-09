@@ -21,11 +21,24 @@ Empieza por [`docs/vision.md`](docs/vision.md).
 sandbox, sin instalar nada:
 
 ```sh
-cargo build --target wasm32-wasip2 -p motor -p ejecutor_pasos              # guests
-cargo build --manifest-path packaging/anvil-host/Cargo.toml               # host (wasmtime embebido)
+make release   # guests WASM → puente → host, en ese orden
 
-./packaging/anvil-host/target/debug/anvil ejemplos/subsecuencia.yaml --json ./out.json --csv ./out.csv
+./packaging/anvil-host/target/release/anvil ejemplos/subsecuencia.yaml --json ./out.json --csv ./out.csv
 ```
+
+Son tres compilaciones encadenadas (el `build.rs` del host copia los
+artifacts, no los construye), y el orden importa; el `Makefile` existe para no
+tener que recordarlo. A mano:
+
+```sh
+cargo build --release --target wasm32-wasip2 -p motor -p ejecutor_pasos      # guests
+cargo build --release --manifest-path packaging/anvil-puente-wasm/Cargo.toml # puente (ADR-0015)
+cargo build --release --manifest-path packaging/anvil-host/Cargo.toml        # host (wasmtime embebido)
+```
+
+`make build` hace lo mismo en debug. Úsalo para desarrollar, pero cuenta con
+que ese binario **arranca en decenas de segundos**: wasmtime compila los
+guests sin optimizar cada vez. El de release arranca en ~1 s.
 
 Para depurar los guests sueltos con el CLI de wasmtime (dos terminales):
 
@@ -48,12 +61,18 @@ inherit-network=y` el guest no puede tocar la red. Más en la
 ```
 crates/
   modelo/          modelo de datos + mensajes de paso.proto (prost)
+  cargador/        YAML → modelo: valida, resuelve paths y detecta ciclos
+  expr/            motor de expresiones (subconjunto de sintaxis Julia)
+  result_sink/     sinks del reporte: consola, JSON, CSV
   pasos_demo/      los pasos de la secuencia de ejemplo
+  pasos_scpi/      paso real por SCPI sobre TCP (ADR-0017)
   ejecutor_pasos/  servidor gRPC: despacha pasos por nombre
   motor/           cliente gRPC: recorre la secuencia (bin `anvil-guest`)
 packaging/
   anvil-host/      host nativo: un binario que hospeda wasmtime + los dos guests
-                   (workspace aparte; el core no arrastraba wasmtime)
+                   (workspace aparte; el core no arrastra wasmtime)
+  anvil-puente-wasm/  puente gRPC ↔ componente WASM del usuario (ADR-0015);
+                   va embebido en `anvil` y se extrae a temp al arrancar
 ```
 
 La pila gRPC vive aparte, en
@@ -81,7 +100,8 @@ tocarlas:
 ## Verificar
 
 ```sh
-cargo test              # tests unitarios
+make test               # 201 tests del core + 7 del host
+make check              # clippy de los tres workspaces
 ```
 
 ## Licencia
