@@ -398,6 +398,7 @@ fn corre_un_paso<I: InvocaPasos>(
     // (c) según tipo de paso (RF-27).
     let mut r = match p.tipo {
         TipoPaso::Statement => ejecuta_statement_puro(p.statement.as_deref(), &p.nombre, ent),
+        TipoPaso::PassFail => evalua_pass_fail(p.condicion.as_ref(), &p.nombre, ent),
         TipoPaso::Grpc => inv.ejecuta_paso_grpc(p, programa)?,
         TipoPaso::SequenceCall => {
             ejecuta_sequence_call(inv, p, def_en_curso, ent, sink, programa, profundidad)?
@@ -405,7 +406,9 @@ fn corre_un_paso<I: InvocaPasos>(
     };
 
     // (d) asigna (RF-31): tras un paso Grpc o SequenceCall, vuelca campos
-    // de `resultado` a Locals. Un statement asigna dentro de su sentencia.
+    // de `resultado` a Locals. Un statement asigna dentro de su sentencia; un
+    // pass_fail no produce `resultado.*` que volcar (el cargador rechaza
+    // `asigna` en un pass_fail, así que aquí no hay nada que ignorar).
     if matches!(p.tipo, TipoPaso::Grpc | TipoPaso::SequenceCall) {
         if let Some(asignaciones) = &p.asigna {
             r = aplica_asigna(asignaciones, r, ent);
@@ -606,6 +609,41 @@ fn ejecuta_statement_puro(
     match eval_sentencias(stmts, ent) {
         Ok(()) => ResultadoStep::nuevo(nombre, "paso", "statement ok"),
         Err(e) => ResultadoStep::nuevo(nombre, "error", format!("statement: {e}")),
+    }
+}
+
+/// Evalúa un paso `pass_fail` (RF-25, ADR-0018): el **veredicto compuesto**
+/// sobre variables ya pobladas. El motor evalúa la expresión declarada en el
+/// YAML y produce el estado; el paso no interviene — mismo patrón que el
+/// límite (ADR-0008) y la precondición (ADR-0009). Pura (sin red).
+///
+/// Bool **estricto**, como la precondición: un no-Bool es un fallo de
+/// definición (`error`), no un `false` por truthiness. La diferencia con la
+/// precondición está en el veredicto: allí un `false` **salta** el paso; aquí
+/// lo **falla**, que es justo lo que faltaba para expresar un criterio de
+/// aceptación que combine varias medidas (DIAG-2 del informe de beta).
+///
+/// `condicion` es `None` sólo si el cargador falló su validación (defense in
+/// depth, como `ejecuta_statement_puro`).
+fn evalua_pass_fail(
+    condicion: Option<&Expresion>,
+    nombre: &str,
+    ent: &mut EntornoMotor,
+) -> ResultadoStep {
+    let Some(cond) = condicion else {
+        return ResultadoStep::nuevo(nombre, "error", "pass_fail sin condición");
+    };
+    // Un `pass_fail` no tiene `resultado.*` propio: lee variables de scopes.
+    ent.limpia_resultado();
+    match eval(cond, ent) {
+        Ok(Value::Bool(true)) => ResultadoStep::nuevo(nombre, "paso", "condición cumplida"),
+        Ok(Value::Bool(false)) => ResultadoStep::nuevo(nombre, "fallo", "condición no cumplida"),
+        Ok(v) => ResultadoStep::nuevo(
+            nombre,
+            "error",
+            format!("condición: se esperaba bool, no {}", v.tipo()),
+        ),
+        Err(e) => ResultadoStep::nuevo(nombre, "error", format!("condición: {e}")),
     }
 }
 
@@ -832,6 +870,45 @@ mod tests {
             VeredictoPre::Salta(r) => r,
             _ => panic!("debe saltar como error"),
         };
+        assert_eq!(r.estado, "error");
+    }
+
+    // --- RF-25 / ADR-0018: veredicto por expresión (pass_fail) ---
+
+    #[test]
+    fn pass_fail_condicion_verdadera_pasa() {
+        let mut env = entorno_con_locals(&[("v", ValorDefinicion::Numero(5.0))]);
+        let cond = expr::parse_expresion("locals.v > 4.9 && locals.v < 5.1").unwrap();
+        let r = evalua_pass_fail(Some(&cond), "verificar_dut", &mut env);
+        assert_eq!(r.estado, "paso");
+        assert_eq!(r.nombre, "verificar_dut");
+    }
+
+    /// Lo que DIAG-2 no permitía expresar: un veredicto compuesto que **falla**.
+    #[test]
+    fn pass_fail_condicion_falsa_falla() {
+        let mut env = entorno_con_locals(&[("v", ValorDefinicion::Numero(4.2))]);
+        let cond = expr::parse_expresion("locals.v > 4.9").unwrap();
+        let r = evalua_pass_fail(Some(&cond), "verificar_dut", &mut env);
+        assert_eq!(r.estado, "fallo", "un veredicto falso falla el paso");
+        assert!(r.mensaje.contains("condición no cumplida"));
+    }
+
+    /// Bool estricto, como la precondición: sin truthiness.
+    #[test]
+    fn pass_fail_no_bool_es_error() {
+        let mut env = entorno_con_locals(&[("x", ValorDefinicion::Numero(3.0))]);
+        let cond = expr::parse_expresion("locals.x + 1").unwrap();
+        let r = evalua_pass_fail(Some(&cond), "v", &mut env);
+        assert_eq!(r.estado, "error");
+        assert!(r.mensaje.contains("se esperaba bool"));
+    }
+
+    #[test]
+    fn pass_fail_variable_inexistente_es_error() {
+        let mut env = entorno_con_locals(&[]);
+        let cond = expr::parse_expresion("locals.no_existe > 1").unwrap();
+        let r = evalua_pass_fail(Some(&cond), "v", &mut env);
         assert_eq!(r.estado, "error");
     }
 
@@ -1435,5 +1512,97 @@ mod tests {
             sec.pasos[2].mensaje, "embebido",
             "ejecutor: embebido explícito → embebido"
         );
+    }
+
+    /// El caso de DIAG-2 end-to-end: un veredicto compuesto falso **corta**
+    /// Main y tiñe el agregado. Antes de ADR-0018 esto era un `statement` que
+    /// asignaba a un local y la secuencia seguía en verde.
+    #[test]
+    fn pass_fail_falso_corta_main_y_tine_el_agregado() {
+        let mut def = DefinicionSecuencia {
+            nombre: "veredicto".into(),
+            ..Default::default()
+        };
+        def.locals.insert("v".into(), ValorDefinicion::Numero(4.2));
+
+        let mut verificar = DefinicionPaso::nuevo("verificar_dut", 1);
+        verificar.tipo = TipoPaso::PassFail;
+        verificar.condicion = Some(expr::parse_expresion("locals.v > 4.9").unwrap());
+
+        let mut posterior = DefinicionPaso::nuevo("no_deberia_correr", 1);
+        posterior.tipo = TipoPaso::Statement;
+        posterior.statement = Some(expr::parse_sentencias("locals.v = 0.0").unwrap());
+
+        def.pasos_main = vec![verificar, posterior];
+
+        let programa = Programa {
+            raiz: def,
+            archivos: HashMap::new(),
+            ejecutores: HashMap::new(),
+        };
+        let entorno = EntornoMotor::desde_definicion(&programa.raiz);
+        let mut inv = InvocadorMock;
+        let mut sink = SinkNulo;
+        let (sec, env) = ejecuta_secuencia_interna(
+            &mut inv,
+            &programa.raiz,
+            entorno,
+            &mut sink,
+            &programa,
+            0,
+            true,
+        )
+        .unwrap();
+
+        assert_eq!(sec.pasos.len(), 1, "Main corta en el pass_fail falso");
+        assert_eq!(sec.pasos[0].estado, "fallo");
+        assert_eq!(sec.estado(), "fallo", "el agregado ya no miente");
+        assert_eq!(
+            env.locals().get("v"),
+            Some(&expr::Value::Numero(4.2)),
+            "el paso posterior no llegó a correr"
+        );
+    }
+
+    /// Y con la condición cumplida, la secuencia sigue.
+    #[test]
+    fn pass_fail_verdadero_deja_seguir_main() {
+        let mut def = DefinicionSecuencia {
+            nombre: "veredicto".into(),
+            ..Default::default()
+        };
+        def.locals.insert("v".into(), ValorDefinicion::Numero(5.0));
+
+        let mut verificar = DefinicionPaso::nuevo("verificar_dut", 1);
+        verificar.tipo = TipoPaso::PassFail;
+        verificar.condicion = Some(expr::parse_expresion("locals.v > 4.9").unwrap());
+
+        let mut posterior = DefinicionPaso::nuevo("siguiente", 1);
+        posterior.tipo = TipoPaso::Statement;
+        posterior.statement = Some(expr::parse_sentencias("locals.v = 0.0").unwrap());
+
+        def.pasos_main = vec![verificar, posterior];
+
+        let programa = Programa {
+            raiz: def,
+            archivos: HashMap::new(),
+            ejecutores: HashMap::new(),
+        };
+        let entorno = EntornoMotor::desde_definicion(&programa.raiz);
+        let mut inv = InvocadorMock;
+        let mut sink = SinkNulo;
+        let (sec, _) = ejecuta_secuencia_interna(
+            &mut inv,
+            &programa.raiz,
+            entorno,
+            &mut sink,
+            &programa,
+            0,
+            true,
+        )
+        .unwrap();
+
+        assert_eq!(sec.pasos.len(), 2);
+        assert_eq!(sec.estado(), "paso");
     }
 }

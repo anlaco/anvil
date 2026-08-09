@@ -70,7 +70,7 @@ Prioridad: **MVP** (Must), **MVP-parcial** (Should), **post-MVP** (Could),
 
 | ID | Requisito | Prioridad | Trazabilidad |
 |---|---|---|---|
-| RF-25 | Built-in **pass/fail** (sin medida, solo `paso`/`fallo`). | MVP | `pasos_demo/src/lib.rs::verificar_led`; [diseno/modelo-de-pasos.md](diseno/modelo-de-pasos.md) |
+| RF-25 | Built-in **pass/fail** (sin medida, solo `paso`/`fallo`), por las dos vías: lo decide el **paso**, o lo decide el **motor** evaluando una expresión declarada (`tipo: pass_fail`, veredicto compuesto). | MVP | paso: `pasos_demo/src/lib.rs::verificar_led`; motor: `motor/src/lib.rs::evalua_pass_fail` (ADR-0018); [diseno/modelo-de-pasos.md](diseno/modelo-de-pasos.md) |
 | RF-26 | Built-in **limit test** (medida contra high/low o comparación). | MVP | `motor/src/lib.rs::aplicar_limite`; `modelo/src/lib.rs::Limite` (ADR-0008) |
 | RF-27 | Built-in **action**, **sequence call**, **statement**. | MVP-parcial | action: `pasos_demo/src/lib.rs::abrir_rele`; statement: `motor/src/lib.rs::ejecuta_statement_puro` (M4-núcleo); sequence call: `motor/src/lib.rs::ejecuta_sequence_call` (M4b, inline + path, by-reference; ADR-0010) |
 | RF-28 | **Custom step types** con substeps encapsulados. | post-MVP | diseno/modelo-de-pasos.md |

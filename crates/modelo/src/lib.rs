@@ -275,6 +275,7 @@ impl ResultadoSecuencia {
 /// del lenguaje de expresiones, **sin** ir por el cable. `SequenceCall`
 /// (M4b, RF-27) invoca otra secuencia como un paso — también motor-side, sin
 /// gRPC — anidando su `ResultadoSecuencia` en el resultado del paso.
+/// `PassFail` (ADR-0018) evalúa una expresión booleana y produce el veredicto.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum TipoPaso {
     /// El motor invoca el paso por gRPC contra el ejecutor, por nombre (M3).
@@ -287,6 +288,12 @@ pub enum TipoPaso {
     /// subsecuencia contra su propio entorno, sin gRPC; `paso.proto` no
     /// cambia (ADR-0010). El resultado se anida en `ResultadoStep.sub_pasos`.
     SequenceCall,
+    /// Veredicto por expresión (RF-25, ADR-0018): el motor evalúa `condicion`
+    /// contra su entorno y produce `paso`/`fallo` — el criterio de aceptación
+    /// **compuesto** sobre medidas ya volcadas a variables. Local, sin gRPC.
+    /// Es el análogo del step type `Pass/Fail Test` de TestStand, cuyo data
+    /// source es una expresión booleana.
+    PassFail,
 }
 
 /// Cómo se invoca un ejecutor de pasos (M5-ext.1, RF-36.3). El motor
@@ -411,6 +418,13 @@ pub struct DefinicionPaso {
     /// RF-27: sentencias a ejecutar si `tipo == Statement` (paso local, sin
     /// gRPC). `None` si `Grpc`. El cargador valida la coherencia con `tipo`.
     pub statement: Option<Vec<expr::Sentencia>>,
+    /// RF-25 (ADR-0018): expresión booleana del veredicto si
+    /// `tipo == PassFail`. La evalúa el **motor** contra su entorno —el paso
+    /// no interviene, igual que con `limite` (ADR-0008) y `precondicion`
+    /// (ADR-0009)—: `true` → `paso`, `false` → `fallo`, no-Bool → `error`.
+    /// AST parseado por el cargador al cargar (fail-fast). `None` salvo en
+    /// `PassFail`; el cargador valida la coherencia con `tipo`.
+    pub condicion: Option<expr::Expresion>,
     /// M4b/RF-27: destino de la subsecuencia si `tipo == SequenceCall`. Es
     /// un **nombre** (subsecuencia inline del mismo archivo) o un **path
     /// relativo** (archivo externo); el cargador distingue por la
@@ -439,6 +453,7 @@ impl DefinicionPaso {
             asigna: None,
             tipo: TipoPaso::Grpc,
             statement: None,
+            condicion: None,
             secuencia: None,
             parametros: None,
             ejecutor: None,

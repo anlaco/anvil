@@ -52,6 +52,7 @@ no tumba el ejecutor (RF-12).
 | **action** | Ejecuta una acción (mover un fixture, abrir un relé); el estado es `paso` si no hubo `error`. | MVP-parcial · hecho (M3) |
 | **sequence call** | Invoca otra secuencia anidada. | MVP-parcial · hecho (M4b) |
 | **statement** | Evalúa una expresión del expression engine (asignación). | MVP-parcial · hecho (M4-núcleo) |
+| **pass_fail (por expresión)** | El **motor** evalúa una `condicion` booleana sobre variables ya pobladas → `paso`/`fallo`. El veredicto **compuesto**. | ✅ hecho (post-MVP, ADR-0018) |
 
 Los built-in son **comportamientos** del lado del ejecutor, no del motor:
 el motor sigue siendo genérico (ADR-0005).
@@ -70,6 +71,30 @@ el motor sigue siendo genérico (ADR-0005).
   de la infraestructura de subsecuencias y del *expression engine* (RF-35).
   **statement** se implementó en M4-núcleo; **sequence call**, en M4b (ver
   abajo).
+
+### El veredicto compuesto (`tipo: pass_fail`, ADR-0018)
+
+Las dos vías anteriores fallan sobre **un** paso y **una** medida: el paso lo
+decide, o el motor evalúa el `limite` de su medida. El criterio de aceptación
+que **combina varias medidas** —el que un ingeniero escribe al final de la
+secuencia— es un paso `pass_fail`:
+
+```yaml
+- nombre: verificar_dut
+  tipo: pass_fail
+  condicion: 'locals.v > 4.9 && locals.v < 5.1 && locals.temp < 50.0'
+```
+
+Lo evalúa el **motor**, no el paso (mismo patrón que `limite` y `precondicion`):
+`true` → `paso`, `false` → `fallo`, no-Bool → `error`. Bool estricto, sin
+truthiness. Es el análogo del step type `Pass/Fail Test` de TestStand, cuyo
+data source es una expresión booleana.
+
+`statement` se queda **sólo con asignación**, a propósito: cada construcción
+hace una cosa, y así olvidar un `=` sigue siendo un error de sintaxis en vez de
+un cambio silencioso de significado. Un `pass_fail` no admite `reintentos > 1`
+(evalúa una expresión pura: el veredicto no cambia entre intentos), ni
+`asigna`, ni `limite`, ni `ejecutor` — todos son error al cargar.
 
 ### Cómo se encarna sequence call en M4b
 

@@ -1,0 +1,70 @@
+# Veredicto compuesto con `tipo: pass_fail` (RF-25, ADR-0018).
+#
+# El criterio de aceptación que combina VARIAS medidas, que es lo que un
+# ingeniero de test escribe al final de una secuencia. Hasta ADR-0018 no había
+# forma de expresarlo: un `statement` sólo asigna, así que el veredicto acababa
+# en un local que nadie volvía a leer y la secuencia salía verde igualmente
+# (DIAG-2 del informe de beta: 131 de 180 secuencias terminaban así).
+#
+# Las tres formas de fallar de Anvil, juntas y en orden:
+#   1. el PASO lo decide          → verificar_led (pass/fail clásico, RF-25)
+#   2. el MOTOR evalúa el LÍMITE  → medir_voltaje (RF-29, ADR-0008)
+#   3. el MOTOR evalúa la CONDICIÓN sobre variables → verificar_dut (ADR-0018)
+#
+# Correr:
+#   ./anvil ejemplos/veredicto.yaml
+#
+# Resultado esperado: medir_voltaje mide 4.2, dentro de su límite laxo
+# (4.0–6.0) → `paso`; pero el criterio real del producto es más estrecho
+# (4.9–5.1), así que `verificar_dut` lo declara `fallo` y Main corta:
+#   === veredicto: fallo ===
+#     [paso]  abrir_rele: relé abierto
+#     [paso]  medir_voltaje: medido: 4.2 V
+#     [paso]  verificar_led: led encendido
+#     [fallo] verificar_dut: condición no cumplida
+# `desconectar_equipo` sí corre: el Cleanup corre siempre.
+#
+# Prueba a relajar la condición a `locals.voltaje > 4.0` y verás que la
+# secuencia entera pasa.
+
+nombre: veredicto
+
+# El veredicto se evalúa sobre variables, así que hay que volcarlas primero
+# con `asigna`. Deben estar declaradas (el cargador lo exige).
+locals:
+  voltaje: 0.0
+  led_ok: false
+
+setup:
+  - nombre: abrir_rele
+    reintentos: 1
+
+main:
+  # (2) Límite laxo: el motor lo evalúa y pasa. Es el "está vivo", no el
+  # criterio de producto.
+  - nombre: medir_voltaje
+    reintentos: 1
+    limite:
+      tipo: rango
+      min: 4.0
+      max: 6.0
+    asigna:
+      voltaje: '${resultado.valor_medido}'
+
+  # (1) Pass/fail clásico: lo decide el paso, sin medida.
+  - nombre: verificar_led
+    reintentos: 1
+    asigna:
+      led_ok: '${resultado.estado == "paso"}'
+
+  # (3) El veredicto compuesto: combina las dos medidas anteriores. Lo evalúa
+  # el motor; el paso no interviene. `false` → fallo, y Main corta aquí.
+  # No admite `reintentos > 1`: evalúa una expresión pura, el resultado no
+  # cambiaría entre intentos.
+  - nombre: verificar_dut
+    tipo: pass_fail
+    condicion: 'locals.voltaje > 4.9 && locals.voltaje < 5.1 && locals.led_ok'
+
+cleanup:
+  - nombre: desconectar_equipo
+    reintentos: 1

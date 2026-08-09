@@ -69,7 +69,10 @@ Reglas:
   inline o path relativo a un archivo externo) y `parametros` (mapa
   `parameter -> "locals.X"`, by-reference). Un `sequence_call` no admite
   `reintentos > 1` ni `limite` (no mide; su estado es el agregado de la
-  subsecuencia).
+  subsecuencia). Desde **ADR-0018**, `tipo: pass_fail` con `condicion` (una
+  expresión booleana que evalúa el motor: `true` → `paso`, `false` → `fallo`)
+  — el veredicto **compuesto** sobre variables ya pobladas. Un `pass_fail` no
+  admite `reintentos > 1`, `asigna`, `limite` ni `ejecutor`.
 - Variables: `locals`, `parameters`, `file_globals` a nivel de secuencia
   (M4, RF-31, ver [variables-y-alcances.md](variables-y-alcances.md)). El tipo
   de cada variable se infiere del escalar YAML (`true`→bool, `4.5`→número,
