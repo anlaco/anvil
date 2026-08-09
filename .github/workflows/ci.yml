@@ -57,6 +57,9 @@ jobs:
             anvil/packaging/anvil-host
             anvil/packaging/anvil-puente-wasm
 
+      # `check` depende de `build`: clippy sobre el host ejecuta su `build.rs`,
+      # que exige los guests y el puente ya compilados. Por eso este paso
+      # construye en debug antes de revisar.
       - name: Formato y lints
         working-directory: anvil
         run: make check
