@@ -1,0 +1,26 @@
+# BUG-3 (padre) — el retorno by-reference devuelve el valor INICIAL del parameter
+# porque `asigna` escribio un Local homonimo en la subsecuencia.
+#
+# Reproduccion:
+#   ./anvil regresion/bug3-padre-asigna-parameter.yaml
+#
+# Comportamiento observado:
+#   [paso]    llama_sub    -> la subsecuencia midio 4.2
+#   [saltado] verificar_led: precondicion falsa
+#             ^ locals.t sigue a 0.0: el valor medido NO volvio al padre
+#
+# Criterio de aceptacion: o el cargador rechaza el `asigna` sobre un parameter
+# (ver bug3-sub-asigna-parameter.yaml), o el retorno by-reference trae 4.2 y
+# verificar_led se ejecuta.
+
+nombre: padre_asigna_parameter
+locals:
+  t: 0.0
+main:
+  - nombre: llama_sub
+    tipo: sequence_call
+    secuencia: ./bug3-sub-asigna-parameter.yaml
+    parametros: { p: locals.t }
+  - nombre: verificar_led
+    reintentos: 1
+    precondicion: 'locals.t > 4.0'

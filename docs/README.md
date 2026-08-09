@@ -53,6 +53,7 @@ docs/
 │  └─ 0006-wasi-grpc-propio.md
 │  (0007-0012 en la misma carpeta; 0013 reemplaza 0012 en el cargador y el routing)
 ├─ planes/                    planes de hito (m4-nucleo, m4b, m5-ext)
+├─ qa/                        informes de campaña + regresión ejecutable
 └─ diseno/                    diseño del dominio, un doc por área funcional
    ├─ motor-de-ejecucion.md
    ├─ limites-y-estados.md
@@ -92,7 +93,9 @@ Anvil se distribuye como **un binario** que hospeda wasmtime y los dos guests
 WASM (ADR-0011): secuencias en YAML con límites, variables, expresiones,
 precondiciones y subsecuencias; reporte a consola/JSON/CSV; process model
 Sequential; routing multi-ejecutor; pasos del usuario como componentes WASM
-cargados por path.
+cargados por path. Sobre esa base hay una primera campaña de beta externa
+—600+ ejecuciones— con sus hallazgos y reproducciones en
+[`qa/informe-beta-2026-08.md`](qa/informe-beta-2026-08.md).
 
 Lo posterior al MVP (paralelismo, Operator UI, sinks sectoriales…) sigue el
 mismo criterio de siempre: lo decidido se **formaliza** en estos docs; lo que
