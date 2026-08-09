@@ -132,9 +132,7 @@ fn parse_cli(args: Vec<String>) -> Result<Cli, AccionEarlyExit> {
                 if cli.ruta.is_empty() {
                     cli.ruta = other.to_string();
                 } else {
-                    return Err(AccionEarlyExit::Uso(format!(
-                        "argumento de más: '{other}'"
-                    )));
+                    return Err(AccionEarlyExit::Uso(format!("argumento de más: '{other}'")));
                 }
             }
         }
@@ -252,11 +250,7 @@ fn main() {
 
     // Sinks: consola salvo --quiet; JSON/CSV si se piden. El composite los
     // agrupa como un único sink para el motor.
-    let mut consola = if cli.quiet {
-        None
-    } else {
-        Some(SinkConsola::nuevo(std::io::stdout()))
-    };
+    let mut consola = if cli.quiet { None } else { Some(SinkConsola::nuevo(std::io::stdout())) };
     let mut sinks: Vec<&mut dyn ResultSink> = Vec::new();
     if let Some(c) = consola.as_mut() {
         sinks.push(c);
@@ -344,7 +338,14 @@ mod tests {
 
     #[test]
     fn parse_ruta_y_flags_de_salida() {
-        let c = parse_cli(vec!["s.yaml".into(), "--json".into(), "o.json".into(), "--csv".into(), "o.csv".into()]).unwrap();
+        let c = parse_cli(vec![
+            "s.yaml".into(),
+            "--json".into(),
+            "o.json".into(),
+            "--csv".into(),
+            "o.csv".into(),
+        ])
+        .unwrap();
         assert_eq!(c.ruta, "s.yaml");
         assert_eq!(c.json.as_deref(), Some("o.json"));
         assert_eq!(c.csv.as_deref(), Some("o.csv"));
@@ -376,7 +377,8 @@ mod tests {
 
     #[test]
     fn parse_process_model() {
-        let c = parse_cli(vec!["s.yaml".into(), "--process-model".into(), "pm.yaml".into()]).unwrap();
+        let c =
+            parse_cli(vec!["s.yaml".into(), "--process-model".into(), "pm.yaml".into()]).unwrap();
         assert_eq!(c.process_model.as_deref(), Some("pm.yaml"));
     }
 

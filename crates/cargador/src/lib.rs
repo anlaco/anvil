@@ -25,7 +25,10 @@
 //! por lote/variante sin tocar la secuencia. Ver
 //! [`aplicar_limites`](aplicar_limites) y ADR-0008.
 
-use modelo::{Argumento, Asignacion, DefinicionEjecutor, DefinicionPaso, DefinicionSecuencia, Limite, Operador, Programa, TipoEjecutor, TipoPaso, ValorDefinicion};
+use modelo::{
+    Argumento, Asignacion, DefinicionEjecutor, DefinicionPaso, DefinicionSecuencia, Limite,
+    Operador, Programa, TipoEjecutor, TipoPaso, ValorDefinicion,
+};
 use serde::Deserialize;
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
@@ -295,7 +298,8 @@ impl EjecutorYaml {
                 }
                 let Some(path) = self.path else {
                     return Err(ErrorCarga::Validacion(format!(
-                        "el ejecutor '{}' es 'wasm' pero no trae 'path'", self.nombre
+                        "el ejecutor '{}' es 'wasm' pero no trae 'path'",
+                        self.nombre
                     )));
                 };
                 // El path debe existir (relativo al directorio del YAML),
@@ -345,7 +349,10 @@ impl EjecutorYaml {
 ///   explícito fuerza remoto, igual que el host re-escribe los `.wasm`).
 ///
 /// Devuelve cuántos ejecutores se sobreescribieron (para el log del CLI).
-pub fn aplicar_override_ejecutores(programa: &mut Programa, overrides: &[String]) -> Result<usize, ErrorCarga> {
+pub fn aplicar_override_ejecutores(
+    programa: &mut Programa,
+    overrides: &[String],
+) -> Result<usize, ErrorCarga> {
     let mut aplicados = 0;
     for override_ in overrides {
         let (nombre, resto) = override_.split_once('=').ok_or_else(|| {
@@ -653,9 +660,8 @@ pub fn cargar_programa_con_pm(ruta_pm: &str, ruta_usuario: &str) -> Result<Progr
     // (paso 5a), que es como se leen del disco.
     let usuario = cargar_de_archivo(ruta_usuario)?;
     let dir_usuario = dir_de(ruta_usuario);
-    let clave_usuario = normalizar_path(Path::new(""), Path::new(ruta_usuario))
-        .to_string_lossy()
-        .into_owned();
+    let clave_usuario =
+        normalizar_path(Path::new(""), Path::new(ruta_usuario)).to_string_lossy().into_owned();
 
     // Ejecutores (M5-ext.1): los del PM y los de la secuencia del usuario se
     // unen en una sola tabla; un nombre en ambos es error (leer_ejecutores).
@@ -663,11 +669,7 @@ pub fn cargar_programa_con_pm(ruta_pm: &str, ruta_usuario: &str) -> Result<Progr
     leer_ejecutores(ruta_pm, &dir_pm, &mut ejecutores)?;
     leer_ejecutores(ruta_usuario, &dir_usuario, &mut ejecutores)?;
 
-    let mut programa = Programa {
-        raiz: raiz_pm,
-        archivos: HashMap::new(),
-        ejecutores,
-    };
+    let mut programa = Programa { raiz: raiz_pm, archivos: HashMap::new(), ejecutores };
     programa.archivos.insert(clave_usuario.clone(), usuario);
 
     // (5a) Procesar paths externos del PM (relativos a dir_pm) y del usuario
@@ -700,9 +702,7 @@ pub fn cargar_programa_con_pm(ruta_pm: &str, ruta_usuario: &str) -> Result<Progr
 
     // (5b) Visitar el programa entero: ciclos + firma + lvalues. El call al
     // usuario ya es un path normal y se valida como cualquier externa.
-    let id_pm = normalizar_path(&dir_pm, Path::new(ruta_pm))
-        .to_string_lossy()
-        .into_owned();
+    let id_pm = normalizar_path(&dir_pm, Path::new(ruta_pm)).to_string_lossy().into_owned();
     let mut camino: Vec<String> = Vec::new();
     visitar(&programa, &id_pm, &programa.raiz, &mut camino)?;
 
@@ -737,7 +737,8 @@ fn procesar_secuencia(
     dir: &Path,
     cola: &mut Vec<(String, PathBuf)>,
 ) -> Result<(), ErrorCarga> {
-    for paso in def.pasos_setup.iter_mut().chain(&mut def.pasos_main).chain(&mut def.pasos_cleanup) {
+    for paso in def.pasos_setup.iter_mut().chain(&mut def.pasos_main).chain(&mut def.pasos_cleanup)
+    {
         if paso.tipo == TipoPaso::SequenceCall {
             if let Some(sec) = paso.secuencia.as_ref() {
                 if es_path(sec) {
@@ -825,7 +826,8 @@ fn validar_call(
     sub: &DefinicionSecuencia,
     destino: &str,
 ) -> Result<(), ErrorCarga> {
-    let args: Vec<&Argumento> = paso.parametros.as_ref().map(|v| v.iter().collect()).unwrap_or_default();
+    let args: Vec<&Argumento> =
+        paso.parametros.as_ref().map(|v| v.iter().collect()).unwrap_or_default();
     // Lvalues: la forma `Var{Locals, campo}` ya se validó en `a_definicion`;
     // aquí validamos que `campo` esté declarado en `locals` del padre.
     for a in &args {
@@ -883,9 +885,7 @@ fn validar_call(
 pub fn cargar_limites_de_archivo(ruta: &str) -> Result<HashMap<String, Limite>, ErrorCarga> {
     let texto = std::fs::read_to_string(ruta)?;
     let mapa: HashMap<String, LimiteYaml> = noyalib::from_str(&texto)?;
-    mapa.into_iter()
-        .map(|(nombre, l)| Ok((nombre.clone(), l.a_limite(&nombre)?)))
-        .collect()
+    mapa.into_iter().map(|(nombre, l)| Ok((nombre.clone(), l.a_limite(&nombre)?))).collect()
 }
 
 /// Inyecta los límites del sidecar en la secuencia, buscando cada paso por
@@ -933,9 +933,7 @@ fn validar(y: &SecuenciaYaml) -> Result<(), ErrorCarga> {
             )));
         }
         if p.nombre.trim().is_empty() {
-            return Err(ErrorCarga::Validacion(
-                "un paso tiene el nombre vacío".into(),
-            ));
+            return Err(ErrorCarga::Validacion("un paso tiene el nombre vacío".into()));
         }
     }
     Ok(())
@@ -951,12 +949,12 @@ impl PasoYaml {
         // RF-33: la precondición se parsea a AST aquí (fail-fast). Un error de
         // sintaxis se reporta con el nombre del paso.
         let precondicion = match self.precondicion.as_deref() {
-            Some(texto) => Some(
-                expr::parse_expresion(extraer_expr(texto))
-                    .map_err(|e| ErrorCarga::Validacion(format!(
-                        "precondición del paso '{}' inválida: {e}", self.nombre
-                    )))?,
-            ),
+            Some(texto) => Some(expr::parse_expresion(extraer_expr(texto)).map_err(|e| {
+                ErrorCarga::Validacion(format!(
+                    "precondición del paso '{}' inválida: {e}",
+                    self.nombre
+                ))
+            })?),
             None => None,
         };
 
@@ -966,10 +964,12 @@ impl PasoYaml {
             Some(mapa) => Some(
                 mapa.into_iter()
                     .map(|(var, texto)| {
-                        let expr = expr::parse_expresion(extraer_expr(&texto))
-                            .map_err(|e| ErrorCarga::Validacion(format!(
-                                "asigna '{}' del paso '{}': {e}", var, self.nombre
-                            )))?;
+                        let expr = expr::parse_expresion(extraer_expr(&texto)).map_err(|e| {
+                            ErrorCarga::Validacion(format!(
+                                "asigna '{}' del paso '{}': {e}",
+                                var, self.nombre
+                            ))
+                        })?;
                         Ok(Asignacion { var, expr })
                     })
                     .collect::<Result<Vec<_>, ErrorCarga>>()?,
@@ -992,11 +992,12 @@ impl PasoYaml {
 
         // RF-27: el statement se parsea a una lista de sentencias.
         let statement = match self.statement.as_deref() {
-            Some(texto) => Some(
-                expr::parse_sentencias(texto).map_err(|e| ErrorCarga::Validacion(format!(
-                    "statement del paso '{}' inválido: {e}", self.nombre
-                )))?,
-            ),
+            Some(texto) => Some(expr::parse_sentencias(texto).map_err(|e| {
+                ErrorCarga::Validacion(format!(
+                    "statement del paso '{}' inválido: {e}",
+                    self.nombre
+                ))
+            })?),
             None => None,
         };
 
@@ -1009,10 +1010,12 @@ impl PasoYaml {
             Some(mapa) if !mapa.is_empty() => Some(
                 mapa.into_iter()
                     .map(|(param, texto)| {
-                        let origen = expr::parse_expresion(extraer_expr(&texto))
-                            .map_err(|e| ErrorCarga::Validacion(format!(
-                                "parámetro '{param}' del sequence call '{}': {e}", self.nombre
-                            )))?;
+                        let origen = expr::parse_expresion(extraer_expr(&texto)).map_err(|e| {
+                            ErrorCarga::Validacion(format!(
+                                "parámetro '{param}' del sequence call '{}': {e}",
+                                self.nombre
+                            ))
+                        })?;
                         match &origen {
                             expr::Expresion::Var { scope: expr::Scope::Locals, .. } => {}
                             _ => {
@@ -1033,7 +1036,8 @@ impl PasoYaml {
         // Coherencia tipo ↔ campos (fail-fast).
         if matches!(tipo, TipoPaso::Statement) && statement.is_none() {
             return Err(ErrorCarga::Validacion(format!(
-                "el paso '{}' es 'statement' pero no trae 'statement'", self.nombre
+                "el paso '{}' es 'statement' pero no trae 'statement'",
+                self.nombre
             )));
         }
         if matches!(tipo, TipoPaso::Grpc) && statement.is_some() {
@@ -1045,7 +1049,8 @@ impl PasoYaml {
         if matches!(tipo, TipoPaso::SequenceCall) {
             if self.secuencia.is_none() {
                 return Err(ErrorCarga::Validacion(format!(
-                    "el paso '{}' es 'sequence_call' pero no trae 'secuencia'", self.nombre
+                    "el paso '{}' es 'sequence_call' pero no trae 'secuencia'",
+                    self.nombre
                 )));
             }
             if statement.is_some() {
@@ -1068,7 +1073,9 @@ impl PasoYaml {
                 )));
             }
         }
-        if matches!(tipo, TipoPaso::Grpc | TipoPaso::Statement) && (self.secuencia.is_some() || parametros.is_some()) {
+        if matches!(tipo, TipoPaso::Grpc | TipoPaso::Statement)
+            && (self.secuencia.is_some() || parametros.is_some())
+        {
             return Err(ErrorCarga::Validacion(format!(
                 "el paso '{}' es '{}' pero trae 'secuencia'/'parametros' (reservado para 'sequence_call')",
                 self.nombre, self.tipo
@@ -1159,7 +1166,11 @@ cleanup:
             nombre: "basica".into(),
             pasos_setup: vec![DefinicionPaso::nuevo("conectar_equipo", 3)],
             pasos_main: vec![
-                DefinicionPaso::con_limite("medir_voltaje", 1, Limite::Rango { min: 4.5, max: 5.5 }),
+                DefinicionPaso::con_limite(
+                    "medir_voltaje",
+                    1,
+                    Limite::Rango { min: 4.5, max: 5.5 },
+                ),
                 DefinicionPaso::nuevo("verificar_led", 1),
             ],
             pasos_cleanup: vec![DefinicionPaso::nuevo("desconectar_equipo", 1)],
@@ -1195,7 +1206,10 @@ main:
     fn main_ausente_es_error() {
         let yaml = "nombre: s\n";
         let err = cargar_de_texto(yaml).unwrap_err();
-        assert!(matches!(&err, ErrorCarga::Sintaxis(_)), "main ausente debe ser error de schema, no de validación: {err}");
+        assert!(
+            matches!(&err, ErrorCarga::Sintaxis(_)),
+            "main ausente debe ser error de schema, no de validación: {err}"
+        );
     }
 
     #[test]
@@ -1242,7 +1256,10 @@ main:
     foo: bar
 ";
         let err = cargar_de_texto(yaml).unwrap_err();
-        assert!(matches!(&err, ErrorCarga::Sintaxis(_)), "campo desconocido debe ser error de schema: {err}");
+        assert!(
+            matches!(&err, ErrorCarga::Sintaxis(_)),
+            "campo desconocido debe ser error de schema: {err}"
+        );
     }
 
     // --- M4b: sequence call, subsecuencias inline y por path ---
@@ -1335,7 +1352,9 @@ main:
     secuencia: ./h.yaml
 ";
         let err = cargar_de_texto(yaml).unwrap_err();
-        assert!(matches!(&err, ErrorCarga::Validacion(m) if m.contains("reservado para 'sequence_call'")));
+        assert!(
+            matches!(&err, ErrorCarga::Validacion(m) if m.contains("reservado para 'sequence_call'"))
+        );
     }
 
     /// Una subsecuencia inline es una secuencia completa: `main` es
@@ -1397,7 +1416,11 @@ main:
         let dir = std::env::temp_dir().join(format!("anvil_m4b_{}", "ext_ok"));
         std::fs::create_dir_all(&dir).unwrap();
         let hija = dir.join("hija.yaml");
-        std::fs::write(&hija, "nombre: hija\nparameters: { canal: 0.0 }\nmain:\n  - nombre: m\n    tipo: grpc\n").unwrap();
+        std::fs::write(
+            &hija,
+            "nombre: hija\nparameters: { canal: 0.0 }\nmain:\n  - nombre: m\n    tipo: grpc\n",
+        )
+        .unwrap();
         let padre = dir.join("padre.yaml");
         std::fs::write(
             &padre,
@@ -1418,8 +1441,16 @@ main:
     fn programa_detecta_ciclo_por_path() {
         let dir = std::env::temp_dir().join(format!("anvil_m4b_{}", "ciclo"));
         std::fs::create_dir_all(&dir).unwrap();
-        std::fs::write(dir.join("a.yaml"), "nombre: a\nmain:\n  - nombre: c\n    tipo: sequence_call\n    secuencia: ./b.yaml\n").unwrap();
-        std::fs::write(dir.join("b.yaml"), "nombre: b\nmain:\n  - nombre: c\n    tipo: sequence_call\n    secuencia: ./a.yaml\n").unwrap();
+        std::fs::write(
+            dir.join("a.yaml"),
+            "nombre: a\nmain:\n  - nombre: c\n    tipo: sequence_call\n    secuencia: ./b.yaml\n",
+        )
+        .unwrap();
+        std::fs::write(
+            dir.join("b.yaml"),
+            "nombre: b\nmain:\n  - nombre: c\n    tipo: sequence_call\n    secuencia: ./a.yaml\n",
+        )
+        .unwrap();
         let err = cargar_programa_de_archivo(dir.join("a.yaml").to_str().unwrap()).unwrap_err();
         assert!(matches!(&err, ErrorCarga::Validacion(m) if m.contains("ciclo")));
     }
@@ -1429,7 +1460,11 @@ main:
     fn programa_firma_no_encaja_es_error() {
         let dir = std::env::temp_dir().join(format!("anvil_m4b_{}", "firma"));
         std::fs::create_dir_all(&dir).unwrap();
-        std::fs::write(dir.join("h.yaml"), "nombre: h\nparameters: { canal: 0.0, extra: 0.0 }\nmain:\n  - nombre: m\n").unwrap();
+        std::fs::write(
+            dir.join("h.yaml"),
+            "nombre: h\nparameters: { canal: 0.0, extra: 0.0 }\nmain:\n  - nombre: m\n",
+        )
+        .unwrap();
         std::fs::write(dir.join("p.yaml"), "nombre: p\nlocals: { canal: 1.0 }\nmain:\n  - nombre: c\n    tipo: sequence_call\n    secuencia: ./h.yaml\n    parametros: { canal: locals.canal }\n").unwrap();
         let err = cargar_programa_de_archivo(dir.join("p.yaml").to_str().unwrap()).unwrap_err();
         assert!(matches!(&err, ErrorCarga::Validacion(m) if m.contains("firma")));
@@ -1440,7 +1475,11 @@ main:
     fn programa_lvalue_no_declarado_es_error() {
         let dir = std::env::temp_dir().join(format!("anvil_m4b_{}", "lvalue"));
         std::fs::create_dir_all(&dir).unwrap();
-        std::fs::write(dir.join("h.yaml"), "nombre: h\nparameters: { canal: 0.0 }\nmain:\n  - nombre: m\n").unwrap();
+        std::fs::write(
+            dir.join("h.yaml"),
+            "nombre: h\nparameters: { canal: 0.0 }\nmain:\n  - nombre: m\n",
+        )
+        .unwrap();
         std::fs::write(dir.join("p.yaml"), "nombre: p\nmain:\n  - nombre: c\n    tipo: sequence_call\n    secuencia: ./h.yaml\n    parametros: { canal: locals.inventado }\n").unwrap();
         let err = cargar_programa_de_archivo(dir.join("p.yaml").to_str().unwrap()).unwrap_err();
         assert!(matches!(&err, ErrorCarga::Validacion(m) if m.contains("locals.inventado")));
@@ -1627,7 +1666,11 @@ main:
         let mut lim = HashMap::new();
         lim.insert("medir_voltaje".to_string(), Limite::Rango { min: 4.0, max: 6.0 });
         aplicar_limites(&mut s, &lim);
-        assert_eq!(s.pasos_main[0].limite, Some(Limite::Rango { min: 4.0, max: 6.0 }), "el sidecar overridea el embebido");
+        assert_eq!(
+            s.pasos_main[0].limite,
+            Some(Limite::Rango { min: 4.0, max: 6.0 }),
+            "el sidecar overridea el embebido"
+        );
     }
 
     #[test]
@@ -1733,8 +1776,10 @@ main:
     precondicion: 'locals.contador >'
 ";
         let err = cargar_de_texto(yaml).unwrap_err();
-        assert!(matches!(&err, ErrorCarga::Validacion(ref m) if m.contains("medir") && m.contains("precondición")),
-            "el error debe mencionar el paso y la sección: {err}");
+        assert!(
+            matches!(&err, ErrorCarga::Validacion(ref m) if m.contains("medir") && m.contains("precondición")),
+            "el error debe mencionar el paso y la sección: {err}"
+        );
     }
 
     #[test]
@@ -1765,8 +1810,10 @@ main:
       x: 'resultado.valor_medido +'
 ";
         let err = cargar_de_texto(yaml).unwrap_err();
-        assert!(matches!(&err, ErrorCarga::Validacion(ref m) if m.contains("'x'") && m.contains("medir")),
-            "el error debe mencionar la var y el paso: {err}");
+        assert!(
+            matches!(&err, ErrorCarga::Validacion(ref m) if m.contains("'x'") && m.contains("medir")),
+            "el error debe mencionar la var y el paso: {err}"
+        );
     }
 
     #[test]
@@ -1860,7 +1907,9 @@ main:
         let dir = std::env::temp_dir().join(format!("anvil_m5ext_{}", "parse"));
         std::fs::create_dir_all(&dir).unwrap();
         let y = dir.join("s.yaml");
-        std::fs::write(&y, "\
+        std::fs::write(
+            &y,
+            "\
 nombre: demo
 ejecutores:
   - { nombre: embebido, tipo: embebido }
@@ -1869,7 +1918,9 @@ main:
   - nombre: a
   - nombre: b
     ejecutor: python
-").unwrap();
+",
+        )
+        .unwrap();
         let prog = cargar_programa_de_archivo(y.to_str().unwrap()).unwrap();
         assert_eq!(prog.ejecutores.len(), 2);
         assert_eq!(prog.ejecutores["embebido"].tipo, TipoEjecutor::Embebido);
@@ -1911,7 +1962,11 @@ main:
         let dir = std::env::temp_dir().join(format!("anvil_m5ext_{}", "wasm"));
         std::fs::create_dir_all(&dir).unwrap();
         let y = dir.join("s.yaml");
-        std::fs::write(&y, "nombre: s\nejecutores:\n  - { nombre: p, tipo: wasm }\nmain:\n  - nombre: a\n").unwrap();
+        std::fs::write(
+            &y,
+            "nombre: s\nejecutores:\n  - { nombre: p, tipo: wasm }\nmain:\n  - nombre: a\n",
+        )
+        .unwrap();
         let err = cargar_programa_de_archivo(y.to_str().unwrap()).unwrap_err();
         assert!(matches!(&err, ErrorCarga::Validacion(m) if m.contains("'path'")), "{err}");
 
@@ -1940,7 +1995,10 @@ main:
         let y = dir.join("s.yaml");
         std::fs::write(&y, "nombre: s\nejecutores:\n  - { nombre: p, tipo: grpc, host: 127.0.0.1 }\nmain:\n  - nombre: a\n").unwrap();
         let err = cargar_programa_de_archivo(y.to_str().unwrap()).unwrap_err();
-        assert!(matches!(&err, ErrorCarga::Validacion(m) if m.contains("'host' y 'puerto'")), "{err}");
+        assert!(
+            matches!(&err, ErrorCarga::Validacion(m) if m.contains("'host' y 'puerto'")),
+            "{err}"
+        );
 
         std::fs::write(&y, "nombre: s\nejecutores:\n  - { nombre: p, tipo: grpc, host: 127.0.0.1, puerto: 9101, path: ./p.wasm }\nmain:\n  - nombre: a\n").unwrap();
         let err = cargar_programa_de_archivo(y.to_str().unwrap()).unwrap_err();
@@ -1957,7 +2015,11 @@ main:
         let err = cargar_programa_de_archivo(y.to_str().unwrap()).unwrap_err();
         assert!(matches!(&err, ErrorCarga::Validacion(m) if m.contains("no aplican")), "{err}");
 
-        std::fs::write(&y, "nombre: s\nejecutores:\n  - { nombre: e, tipo: raro }\nmain:\n  - nombre: a\n").unwrap();
+        std::fs::write(
+            &y,
+            "nombre: s\nejecutores:\n  - { nombre: e, tipo: raro }\nmain:\n  - nombre: a\n",
+        )
+        .unwrap();
         let err = cargar_programa_de_archivo(y.to_str().unwrap()).unwrap_err();
         assert!(matches!(&err, ErrorCarga::Validacion(m) if m.contains("raro")), "{err}");
     }
@@ -1985,7 +2047,10 @@ main:
         let y = dir.join("s.yaml");
         std::fs::write(&y, "nombre: s\nejecutores:\n  - { nombre: e, tipo: embebido }\nmain:\n  - nombre: a\n    tipo: statement\n    statement: 'locals.x = 1'\n    ejecutor: e\n").unwrap();
         let err = cargar_programa_de_archivo(y.to_str().unwrap()).unwrap_err();
-        assert!(matches!(&err, ErrorCarga::Validacion(m) if m.contains("reservado para 'grpc'")), "{err}");
+        assert!(
+            matches!(&err, ErrorCarga::Validacion(m) if m.contains("reservado para 'grpc'")),
+            "{err}"
+        );
     }
 
     /// `deny_unknown_fields` sigue rechazando campos raros en un ejecutor.
@@ -2037,20 +2102,32 @@ main:
         let mut prog = cargar_programa_de_archivo(y.to_str().unwrap()).unwrap();
 
         // Re-apuntar un grpc a remoto.
-        let n = aplicar_override_ejecutores(&mut prog, &["py=192.168.1.50:9200".to_string()]).unwrap();
+        let n =
+            aplicar_override_ejecutores(&mut prog, &["py=192.168.1.50:9200".to_string()]).unwrap();
         assert_eq!(n, 1);
-        assert_eq!(prog.ejecutores["py"].tipo, TipoEjecutor::Grpc { host: "192.168.1.50".into(), puerto: 9200 });
+        assert_eq!(
+            prog.ejecutores["py"].tipo,
+            TipoEjecutor::Grpc { host: "192.168.1.50".into(), puerto: 9200 }
+        );
 
         // Convertir un embebido en grpc (el usuario fuerza remoto).
-        let n = aplicar_override_ejecutores(&mut prog, &["e=192.168.1.60:9300".to_string()]).unwrap();
+        let n =
+            aplicar_override_ejecutores(&mut prog, &["e=192.168.1.60:9300".to_string()]).unwrap();
         assert_eq!(n, 1);
-        assert_eq!(prog.ejecutores["e"].tipo, TipoEjecutor::Grpc { host: "192.168.1.60".into(), puerto: 9300 });
+        assert_eq!(
+            prog.ejecutores["e"].tipo,
+            TipoEjecutor::Grpc { host: "192.168.1.60".into(), puerto: 9300 }
+        );
 
         // Formato inválido → error; nombre no declarado → error.
         let err = aplicar_override_ejecutores(&mut prog, &["mal_formado".to_string()]).unwrap_err();
         assert!(matches!(&err, ErrorCarga::Validacion(m) if m.contains("esperado")), "{err}");
-        let err = aplicar_override_ejecutores(&mut prog, &["zzz=1.2.3.4:1".to_string()]).unwrap_err();
-        assert!(matches!(&err, ErrorCarga::Validacion(m) if m.contains("no está declarado")), "{err}");
+        let err =
+            aplicar_override_ejecutores(&mut prog, &["zzz=1.2.3.4:1".to_string()]).unwrap_err();
+        assert!(
+            matches!(&err, ErrorCarga::Validacion(m) if m.contains("no está declarado")),
+            "{err}"
+        );
     }
 
     // ---- M5: process model Sequential (RF-38) ----

@@ -127,10 +127,7 @@ impl EjecutorPasos for ServicioEjecutor {
         request: Request<PeticionPaso>,
     ) -> Result<Response<ResultadoPasoProto>, Status> {
         let pet = request.into_inner();
-        let mut comp = self
-            .componente
-            .lock()
-            .map_err(|_| Status::internal("componente en uso"))?;
+        let mut comp = self.componente.lock().map_err(|_| Status::internal("componente en uso"))?;
         let respuesta = comp.llamar(&pet.nombre, pet.intento)?;
         Ok(Response::new(respuesta))
     }
@@ -213,9 +210,7 @@ fn main() {
         }
     };
 
-    let servidor = Server::builder()
-        .add_service(EjecutorPasosServer::new(servicio))
-        .serve(addr);
+    let servidor = Server::builder().add_service(EjecutorPasosServer::new(servicio)).serve(addr);
 
     eprintln!("anvil-puente-wasm: cargado '{}'", ruta_wasm.display());
     eprintln!("anvil-puente-wasm: escuchando en {addr}");

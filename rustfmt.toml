@@ -1,0 +1,9 @@
+# El ancho estándar de la comunidad Rust.
+max_width = 100
+
+# El código de Anvil es compacto a propósito: `if cond { a } else { b }` en una
+# línea, structs y llamadas cortas sin desplegar. Los "small heuristics" por
+# defecto rompen todo eso a ~50-60 columnas y duplicarían el tamaño de varios
+# ficheros sin ganar nada. Con "Max", rustfmt sólo parte lo que de verdad no
+# cabe en `max_width`, que es lo que ya hacía el estilo a mano.
+use_small_heuristics = "Max"

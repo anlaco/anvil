@@ -8,7 +8,7 @@
 //! núcleo del motor se queda ligero) y se escribe de un tiro con
 //! reintento.
 
-use modelo::{ResultadoSecuencia, ResultadoStep, ResultSink};
+use modelo::{ResultSink, ResultadoSecuencia, ResultadoStep};
 use serde_json::{json, Value};
 use std::io::Write;
 
@@ -83,7 +83,14 @@ mod tests {
 
     fn secuencia_ejemplo() -> ResultadoSecuencia {
         let mut s = ResultadoSecuencia::nueva("basica");
-        s.registra(ResultadoStep::medido("medir_voltaje", "fallo", "fuera de rango", 4.2, 4.5, 5.5));
+        s.registra(ResultadoStep::medido(
+            "medir_voltaje",
+            "fallo",
+            "fuera de rango",
+            4.2,
+            4.5,
+            5.5,
+        ));
         s.registra(ResultadoStep::nuevo("verificar_led", "paso", "led encendido"));
         s
     }
@@ -125,7 +132,12 @@ mod tests {
         // operador tras evaluar el límite del YAML (ADR-0008).
         use modelo::Operador;
         let mut s = ResultadoSecuencia::nueva("s");
-        let mut r = ResultadoStep::medido_valor("verificar_frecuencia", "fallo", "990 >= 1000 no cumplido", 990.0);
+        let mut r = ResultadoStep::medido_valor(
+            "verificar_frecuencia",
+            "fallo",
+            "990 >= 1000 no cumplido",
+            990.0,
+        );
         r.operador = Some(Operador::Ge);
         r.valor_esperado = Some(1000.0);
         s.registra(r);

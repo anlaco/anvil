@@ -85,7 +85,8 @@ pub fn lex(src: &str) -> Result<Vec<Tok>, ErrorExpr> {
 
         // Números: dígitos, con parte decimal opcional. Sin notación científica
         // en el MVP (post-MVP si hace falta).
-        if c.is_ascii_digit() || (c == b'.' && i + 1 < bytes.len() && bytes[i + 1].is_ascii_digit()) {
+        if c.is_ascii_digit() || (c == b'.' && i + 1 < bytes.len() && bytes[i + 1].is_ascii_digit())
+        {
             let mut j = i;
             while j < bytes.len() && bytes[j].is_ascii_digit() {
                 j += 1;
@@ -181,7 +182,10 @@ pub fn lex(src: &str) -> Result<Vec<Tok>, ErrorExpr> {
                 return Err(ErrorExpr::lexico(
                     start,
                     1,
-                    format!("carácter inesperado '{}'", src[i..i + 1].chars().next().unwrap_or(' ')),
+                    format!(
+                        "carácter inesperado '{}'",
+                        src[i..i + 1].chars().next().unwrap_or(' ')
+                    ),
                 ));
             }
         };
@@ -212,9 +216,16 @@ mod tests {
         // `true`/`false`/`nothing` son palabras clave; `and`/`or`/`not` ya NO
         // lo son (sintaxis Julia: `&&`/`||`/`!`) — son identificadores normales.
         let k = kinds("true false nothing and");
-        assert!(matches!(k.as_slice(),
-            [TokKind::Bool(true), TokKind::Bool(false), TokKind::Nothing,
-             TokKind::Ident(_), TokKind::Eof]));
+        assert!(matches!(
+            k.as_slice(),
+            [
+                TokKind::Bool(true),
+                TokKind::Bool(false),
+                TokKind::Nothing,
+                TokKind::Ident(_),
+                TokKind::Eof
+            ]
+        ));
     }
 
     #[test]
