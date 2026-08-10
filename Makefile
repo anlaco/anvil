@@ -24,7 +24,7 @@ TARGET  := wasm32-wasip2
 ANVIL_DEBUG   := packaging/anvil-host/target/debug/anvil
 ANVIL_RELEASE := packaging/anvil-host/target/release/anvil
 
-.PHONY: all build release test test-core test-host check fmt run clean help
+.PHONY: all build release test test-core test-host test-puente check fmt run clean help
 
 all: build
 
@@ -43,11 +43,16 @@ release:
 	cargo build --release --manifest-path $(HOST)
 	@echo "listo → $(ANVIL_RELEASE)"
 
-test: test-core test-host
+test: test-core test-puente test-host
 
 ## Tests del workspace core (no necesitan red ni los guests compilados).
 test-core:
 	cargo test
+
+## Tests del puente (workspace aparte, como el host, pero sin build.rs que
+## exija artifacts: son unitarios y puros).
+test-puente:
+	cargo test --manifest-path $(PUENTE)
 
 ## Tests del host (workspace aparte). Su `build.rs` exige los artifacts, así
 ## que compilamos antes.
