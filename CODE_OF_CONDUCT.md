@@ -52,8 +52,8 @@ reales.
 
 Los casos de comportamiento abusivo, acosador o inaceptable pueden
 reportarse a los mantenedores responsables del cumplimiento en
-**[AÑADIR EMAIL DE CONTACTO PARA CONDUCTA]**. Todas las quejas serán
-revisadas e investigadas de forma puntual y justa.
+**anlaco@proton.me**. Todas las quejas serán revisadas e investigadas de
+forma puntual y justa.
 
 Los mantenedores tienen obligación de mantener la confidencialidad y
 privacidad de quien reporta un incidente.
