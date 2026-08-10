@@ -105,6 +105,33 @@ impl Limite {
     }
 }
 
+/// La fase de la secuencia en la que corrió un paso: Setup → Main → Cleanup.
+///
+/// No viaja en `paso.proto` — la sella el **motor**, que es quien conoce la
+/// fase en curso, antes de entregar el `ResultadoStep` a los sinks (misma
+/// pauta que `valor_esperado`/`operador` bajo ADR-0008). Distinguirla importa
+/// al post-procesar: un fallo de Setup (no se pudo ni conectar el DUT), uno de
+/// Main (el DUT falló el test) y uno de Cleanup (el equipo pudo quedar en un
+/// estado no seguro) tienen respuestas operativas distintas.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Fase {
+    Setup,
+    #[default]
+    Main,
+    Cleanup,
+}
+
+impl Fase {
+    /// La fase como la emiten los sinks: `"setup"`, `"main"`, `"cleanup"`.
+    pub fn como_texto(&self) -> &'static str {
+        match self {
+            Fase::Setup => "setup",
+            Fase::Main => "main",
+            Fase::Cleanup => "cleanup",
+        }
+    }
+}
+
 /// Lo que un paso YA corrido devolvió.
 ///
 /// `estado` es uno de `"paso"`, `"fallo"` o `"error"` — se mantiene como
@@ -135,6 +162,12 @@ pub struct ResultadoStep {
     /// subsecuencia. `None` para cualquier otro tipo de paso. No viaja en
     /// `paso.proto` (sequence call es motor-side, ADR-0010).
     pub sub_pasos: Option<Vec<ResultadoStep>>,
+    /// Fase de la secuencia en la que corrió el paso. La sella el motor antes
+    /// de emitir el resultado al sink; por defecto `Main`, que es lo que vale
+    /// para un resultado construido fuera del motor (tests, pasos demo). En un
+    /// **sequence call**, el paso de la llamada lleva la fase del padre y cada
+    /// sub-paso la suya dentro de la subsecuencia. No viaja en `paso.proto`.
+    pub fase: Fase,
 }
 
 impl ResultadoStep {
@@ -150,6 +183,7 @@ impl ResultadoStep {
             valor_esperado: None,
             operador: None,
             sub_pasos: None,
+            fase: Fase::Main,
         }
     }
 

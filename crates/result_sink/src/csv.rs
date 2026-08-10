@@ -16,7 +16,8 @@ use crate::reintento::escribir_con_reintentos;
 /// Número de intentos de escritura ante fallos transitorios (RF-23).
 const REINTENTOS: u32 = 3;
 
-/// Columnas del CSV, en orden.
+/// Columnas del CSV, en orden. `fase` se añadió al **final** a propósito:
+/// así quien lea por índice las diez originales no se rompe.
 const CABECERA: &[&str] = &[
     "nombre_secuencia",
     "estado",
@@ -28,6 +29,7 @@ const CABECERA: &[&str] = &[
     "limite_max",
     "valor_esperado",
     "operador",
+    "fase",
 ];
 
 /// Verte el resultado a un `Write` como CSV (una fila por paso).
@@ -84,7 +86,7 @@ fn escribe_filas(
     }
 }
 
-/// Construye los 10 campos de una fila de paso, ya como `String`. `nombre`
+/// Construye los campos de una fila de paso, ya como `String`. `nombre`
 /// es el `nombre_paso` a emitir (el original o el prefijo `padre/hijo` para
 /// sub-pasos aplanados).
 fn fila_paso(
@@ -106,6 +108,7 @@ fn fila_paso(
         p.operador
             .map(|op| op.simbolo().to_string())
             .unwrap_or_default(),
+        p.fase.como_texto().to_string(),
     ]
 }
 
@@ -174,17 +177,17 @@ mod tests {
 
         let out = String::from_utf8(sink.salida).unwrap();
         let lineas: Vec<&str> = out.split("\r\n").collect();
-        assert_eq!(lineas[0], "nombre_secuencia,estado,nombre_paso,estado_paso,mensaje,valor_medido,limite_min,limite_max,valor_esperado,operador");
+        assert_eq!(lineas[0], "nombre_secuencia,estado,nombre_paso,estado_paso,mensaje,valor_medido,limite_min,limite_max,valor_esperado,operador,fase");
         // rango: valor_esperado/operador vacíos (no aplican a un rango).
         // primer campo = nombre de la secuencia (DEF-2), segundo = su estado agregado.
         assert_eq!(
             lineas[1],
-            "basica,fallo,medir_voltaje,fallo,fuera de rango,4.2,4.5,5.5,,"
+            "basica,fallo,medir_voltaje,fallo,fuera de rango,4.2,4.5,5.5,,,main"
         );
-        // sin medida ni límite: los últimos cinco campos vacíos.
+        // sin medida ni límite: valor_medido..operador vacíos, y la fase al final.
         assert_eq!(
             lineas[2],
-            "basica,fallo,verificar_led,paso,led encendido,,,,,"
+            "basica,fallo,verificar_led,paso,led encendido,,,,,,main"
         );
         assert!(lineas[3].is_empty(), "termina en CRLF");
     }
@@ -246,8 +249,8 @@ mod tests {
     #[test]
     fn sequence_call_aplanea_sub_pasos_con_prefijo() {
         // Un sequence call (M4b): el call se emite con su nombre, y cada
-        // sub-paso como fila extra con `nombre_paso = call/hijo`. La
-        // cabecera no cambia (sin columnas nuevas).
+        // sub-paso como fila extra con `nombre_paso = call/hijo`. El
+        // aplanado no añade columnas propias.
         let mut call = ResultadoStep::nuevo("test_fuentes", "fallo", "sequence call → fallo");
         call.sub_pasos = Some(vec![
             ResultadoStep::nuevo("medir_canal_1", "paso", "ok"),
@@ -259,10 +262,9 @@ mod tests {
         sink.on_fin_secuencia(&s);
         let out = String::from_utf8(sink.salida).unwrap();
         let lineas: Vec<&str> = out.split("\r\n").collect();
-        // Cabecera sin cambios.
         assert_eq!(
             lineas[0],
-            "nombre_secuencia,estado,nombre_paso,estado_paso,mensaje,valor_medido,limite_min,limite_max,valor_esperado,operador"
+            "nombre_secuencia,estado,nombre_paso,estado_paso,mensaje,valor_medido,limite_min,limite_max,valor_esperado,operador,fase"
         );
         // Call. Primer campo = nombre de secuencia, segundo = estado agregado
         // (fallo, el mismo en las tres filas).
@@ -282,5 +284,29 @@ mod tests {
             "sub-paso 2: {}",
             lineas[3]
         );
+    }
+
+    #[test]
+    fn la_ultima_columna_lleva_la_fase_de_cada_paso() {
+        use modelo::Fase;
+        // Un fallo de Setup, uno de Main y uno de Cleanup: al post-procesar
+        // hay que poder distinguirlos (DIAG-3, #8).
+        let mut s = ResultadoSecuencia::nueva("basica");
+        for (nombre, fase) in [
+            ("conectar_dut", Fase::Setup),
+            ("medir_voltaje", Fase::Main),
+            ("apagar_fuente", Fase::Cleanup),
+        ] {
+            let mut r = ResultadoStep::nuevo(nombre, "paso", "ok");
+            r.fase = fase;
+            s.registra(r);
+        }
+        let mut sink = SinkCsv::nuevo(Vec::new());
+        sink.on_fin_secuencia(&s);
+        let out = String::from_utf8(sink.salida).unwrap();
+        let lineas: Vec<&str> = out.split("\r\n").collect();
+        assert!(lineas[1].ends_with(",setup"), "setup: {}", lineas[1]);
+        assert!(lineas[2].ends_with(",main"), "main: {}", lineas[2]);
+        assert!(lineas[3].ends_with(",cleanup"), "cleanup: {}", lineas[3]);
     }
 }

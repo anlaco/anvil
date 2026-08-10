@@ -83,6 +83,26 @@ $A ejemplos/limites.yaml --limits "$TMP/huerfano.limits.yaml" 2>&1 |
   grep -qiE 'aviso.*sidecar|sidecar.*no afect|ningún paso'
 check DIAG-1 "aviso cuando el sidecar afecta a 0 pasos" $?
 
+# ---- DIAG-3: el reporte debe decir en qué fase corrió cada paso ----
+# Sin esto, al post-procesar no se distingue un fallo de Setup (el DUT no se
+# pudo ni conectar) de uno de Main o de Cleanup.
+$A ejemplos/basica.yaml --json "$TMP/d3.json" --csv "$TMP/d3.csv" >/dev/null 2>&1
+res=0
+for f in setup main cleanup; do
+  grep -q "\"fase\": \"$f\"" "$TMP/d3.json" || res=1
+done
+# El CSV va en CRLF (RFC-4180): hay que quitar el \r antes de anclar a fin.
+head -1 "$TMP/d3.csv" 2>/dev/null | tr -d '\r' | grep -q ',fase$' || res=1
+check DIAG-3 "fase (setup/main/cleanup) en el JSON y en el CSV" $res
+
+# ---- DIAG-4: bajo un PM, qué secuencia de operador se corrió ----
+# `secuencia` es el nombre del PM, así que el test debe viajar como campo
+# propio: sin él, el resultado archivado no registra qué se corrió.
+$A --process-model process_models/sequential.yaml \
+   ejemplos/limites.yaml --json "$TMP/d4.json" >/dev/null 2>&1
+grep -q '"secuencia_usuario": "ejemplos/limites.yaml"' "$TMP/d4.json"
+check DIAG-4 "la secuencia del operador es un campo del JSON" $?
+
 # ---- DIAG-5a: un sidecar envuelto debe señalar el envoltorio ----
 # El error genérico acusaba al nombre del paso, que está bien; de ahí salió el
 # bug fantasma «el sidecar no funciona con process model».

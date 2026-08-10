@@ -17,7 +17,7 @@ mod entorno;
 
 use modelo::proto::{PeticionPaso, ResultadoPasoProto, RUTA_INVOCA};
 use modelo::{
-    Asignacion, DefinicionEjecutor, DefinicionPaso, DefinicionSecuencia, Limite, Programa,
+    Asignacion, DefinicionEjecutor, DefinicionPaso, DefinicionSecuencia, Fase, Limite, Programa,
     ResultSink, ResultadoSecuencia, ResultadoStep, TipoEjecutor, TipoPaso,
 };
 use prost::Message;
@@ -320,11 +320,18 @@ fn ejecuta_secuencia_interna<I: InvocaPasos>(
         sink.on_inicio_secuencia(def);
     }
     let mut secuencia = ResultadoSecuencia::nueva(&def.nombre);
+    // El contexto sólo cambia de fase entre secciones.
+    let ctx = |fase| Contexto {
+        def_en_curso: def,
+        programa,
+        profundidad,
+        fase,
+    };
 
     // --- Setup: corren todos. Un saltado no estropea el setup. ---
     let mut setup_ok = true;
     for p in &def.pasos_setup {
-        let r = corre_un_paso(inv, p, def, &mut entorno, sink, programa, profundidad)?;
+        let r = corre_un_paso(inv, p, &mut entorno, sink, &ctx(Fase::Setup))?;
         let fallo = !r.paso() && r.estado != "saltado";
         secuencia.registra(r.clone());
         if fallo {
@@ -338,7 +345,7 @@ fn ejecuta_secuencia_interna<I: InvocaPasos>(
     // --- Main: solo si el Setup fue bien; corta en el primer fallo. ---
     if setup_ok {
         for p in &def.pasos_main {
-            let r = corre_un_paso(inv, p, def, &mut entorno, sink, programa, profundidad)?;
+            let r = corre_un_paso(inv, p, &mut entorno, sink, &ctx(Fase::Main))?;
             let fallo = !r.paso() && r.estado != "saltado";
             secuencia.registra(r.clone());
             if fallo {
@@ -349,7 +356,7 @@ fn ejecuta_secuencia_interna<I: InvocaPasos>(
 
     // --- Cleanup siempre. pause_on_fail NO corta el Cleanup. ---
     for p in &def.pasos_cleanup {
-        let r = corre_un_paso(inv, p, def, &mut entorno, sink, programa, profundidad)?;
+        let r = corre_un_paso(inv, p, &mut entorno, sink, &ctx(Fase::Cleanup))?;
         secuencia.registra(r.clone());
     }
 
@@ -359,23 +366,40 @@ fn ejecuta_secuencia_interna<I: InvocaPasos>(
     Ok((secuencia, entorno))
 }
 
+/// Lo que un paso necesita saber de la corrida que lo envuelve: la secuencia
+/// en curso (para resolver un `sequence_call` inline), el programa (para los
+/// ejecutores y las subsecuencias externas), la profundidad de anidamiento y
+/// la fase de la que viene.
+struct Contexto<'a> {
+    def_en_curso: &'a DefinicionSecuencia,
+    programa: &'a Programa,
+    profundidad: usize,
+    fase: Fase,
+}
+
 /// Corre un solo paso (Setup/Main/Cleanup comparten esta lógica): disable,
 /// precondición, invocación (Grpc, statement local o sequence call),
 /// asigna y lifecycle del sink. Devuelve el `ResultadoStep` a registrar.
+///
+/// La fase del contexto se sella en el resultado **antes** de
+/// `on_resultado`, para que un sink de streaming la vea ya puesta y no sólo
+/// en el agregado final.
 fn corre_un_paso<I: InvocaPasos>(
     inv: &mut I,
     p: &DefinicionPaso,
-    def_en_curso: &DefinicionSecuencia,
     ent: &mut EntornoMotor,
     sink: &mut impl ResultSink,
-    programa: &Programa,
-    profundidad: usize,
+    ctx: &Contexto,
 ) -> Result<ResultadoStep, Error> {
     sink.on_inicio_paso(p);
+    let sella = |mut r: ResultadoStep| {
+        r.fase = ctx.fase;
+        r
+    };
 
     // (a) disable: se salta sin invocar ni evaluar nada.
     if p.disable {
-        let r = ResultadoStep::nuevo(&p.nombre, "saltado", "disable");
+        let r = sella(ResultadoStep::nuevo(&p.nombre, "saltado", "disable"));
         sink.on_resultado(&r);
         sink.on_fin_paso(p);
         return Ok(r);
@@ -388,6 +412,7 @@ fn corre_un_paso<I: InvocaPasos>(
         match evalua_precondicion(pre, ent, &p.nombre) {
             VeredictoPre::Continua => {}
             VeredictoPre::Salta(r) => {
+                let r = sella(r);
                 sink.on_resultado(&r);
                 sink.on_fin_paso(p);
                 return Ok(r);
@@ -399,10 +424,8 @@ fn corre_un_paso<I: InvocaPasos>(
     let mut r = match p.tipo {
         TipoPaso::Statement => ejecuta_statement_puro(p.statement.as_deref(), &p.nombre, ent),
         TipoPaso::PassFail => evalua_pass_fail(p.condicion.as_ref(), &p.nombre, ent),
-        TipoPaso::Grpc => inv.ejecuta_paso_grpc(p, programa)?,
-        TipoPaso::SequenceCall => {
-            ejecuta_sequence_call(inv, p, def_en_curso, ent, sink, programa, profundidad)?
-        }
+        TipoPaso::Grpc => inv.ejecuta_paso_grpc(p, ctx.programa)?,
+        TipoPaso::SequenceCall => ejecuta_sequence_call(inv, p, ent, sink, ctx)?,
     };
 
     // (d) asigna (RF-31): tras un paso Grpc o SequenceCall, vuelca campos
@@ -415,6 +438,9 @@ fn corre_un_paso<I: InvocaPasos>(
         }
     }
 
+    // El `sequence_call` lleva la fase del padre; sus `sub_pasos` ya vienen
+    // sellados con la suya por la ejecución de la subsecuencia.
+    let r = sella(r);
     sink.on_resultado(&r);
     sink.on_fin_paso(p);
     Ok(r)
@@ -428,17 +454,15 @@ fn corre_un_paso<I: InvocaPasos>(
 fn ejecuta_sequence_call<I: InvocaPasos>(
     inv: &mut I,
     p: &DefinicionPaso,
-    def_en_curso: &DefinicionSecuencia,
     ent: &mut EntornoMotor,
     sink: &mut impl ResultSink,
-    programa: &Programa,
-    profundidad: usize,
+    ctx: &Contexto,
 ) -> Result<ResultadoStep, Error> {
     let destino = p.secuencia.as_deref().expect("validado en a_definicion");
 
     // (1) Profundidad: red de seguridad ante un ciclo que escapara al
     // cargador (no debería; el cargador los detecta al cargar).
-    if profundidad + 1 > PROFUNDIDAD_MAX {
+    if ctx.profundidad + 1 > PROFUNDIDAD_MAX {
         return Ok(ResultadoStep::nuevo(
             &p.nombre,
             "error",
@@ -454,7 +478,7 @@ fn ejecuta_sequence_call<I: InvocaPasos>(
     // defense in depth: se registra como `"error"` del paso (no pánico,
     // no propaga `Error` de red).
     let sub = if cargador::es_path(destino) {
-        match programa.archivos.get(destino) {
+        match ctx.programa.archivos.get(destino) {
             Some(s) => s,
             None => {
                 return Ok(ResultadoStep::nuevo(
@@ -465,7 +489,7 @@ fn ejecuta_sequence_call<I: InvocaPasos>(
             }
         }
     } else {
-        match def_en_curso.subsecuencias.get(destino) {
+        match ctx.def_en_curso.subsecuencias.get(destino) {
             Some(s) => s,
             None => {
                 return Ok(ResultadoStep::nuevo(
@@ -522,8 +546,8 @@ fn ejecuta_sequence_call<I: InvocaPasos>(
         sub,
         sub_entorno,
         sink,
-        programa,
-        profundidad + 1,
+        ctx.programa,
+        ctx.profundidad + 1,
         false,
     )?;
 
@@ -1604,5 +1628,138 @@ mod tests {
 
         assert_eq!(sec.pasos.len(), 2);
         assert_eq!(sec.estado(), "paso");
+    }
+
+    // --- Fase del paso en el resultado (DIAG-3, #8) ---
+
+    /// Un sink que anota `(nombre, fase)` de cada resultado que recibe: así
+    /// el test comprueba que la fase está sellada **al emitir**, no sólo en
+    /// el agregado final (un sink de streaming ve lo mismo).
+    #[derive(Default)]
+    struct SinkEspia {
+        vistos: Vec<(String, Fase)>,
+    }
+    impl modelo::ResultSink for SinkEspia {
+        fn on_resultado(&mut self, r: &ResultadoStep) {
+            self.vistos.push((r.nombre.clone(), r.fase));
+        }
+    }
+
+    /// Un `statement` inocuo con el nombre dado.
+    fn stmt(nombre: &str) -> DefinicionPaso {
+        let mut p = DefinicionPaso::nuevo(nombre, 1);
+        p.tipo = TipoPaso::Statement;
+        p.statement = Some(expr::parse_sentencias("locals.v = 1.0").unwrap());
+        p
+    }
+
+    #[test]
+    fn cada_paso_se_sella_con_la_fase_en_que_corrio() {
+        let mut def = DefinicionSecuencia {
+            nombre: "s".into(),
+            ..Default::default()
+        };
+        def.locals.insert("v".into(), ValorDefinicion::Numero(0.0));
+        def.pasos_setup = vec![stmt("conectar")];
+        def.pasos_main = vec![stmt("medir"), {
+            // Un `disable` también sale sellado: se emite sin invocar nada.
+            let mut p = stmt("saltado");
+            p.disable = true;
+            p
+        }];
+        def.pasos_cleanup = vec![stmt("apagar")];
+
+        let programa = Programa {
+            raiz: def,
+            archivos: HashMap::new(),
+            ejecutores: HashMap::new(),
+        };
+        let entorno = EntornoMotor::desde_definicion(&programa.raiz);
+        let mut inv = InvocadorMock;
+        let mut sink = SinkEspia::default();
+        let (sec, _) = ejecuta_secuencia_interna(
+            &mut inv,
+            &programa.raiz,
+            entorno,
+            &mut sink,
+            &programa,
+            0,
+            true,
+        )
+        .unwrap();
+
+        let fases: Vec<(&str, Fase)> = sec
+            .pasos
+            .iter()
+            .map(|p| (p.nombre.as_str(), p.fase))
+            .collect();
+        assert_eq!(
+            fases,
+            vec![
+                ("conectar", Fase::Setup),
+                ("medir", Fase::Main),
+                ("saltado", Fase::Main),
+                ("apagar", Fase::Cleanup),
+            ]
+        );
+        // El sink las vio ya selladas, en el mismo orden.
+        assert_eq!(sink.vistos, fases_esperadas());
+    }
+
+    fn fases_esperadas() -> Vec<(String, Fase)> {
+        vec![
+            ("conectar".into(), Fase::Setup),
+            ("medir".into(), Fase::Main),
+            ("saltado".into(), Fase::Main),
+            ("apagar".into(), Fase::Cleanup),
+        ]
+    }
+
+    #[test]
+    fn el_sequence_call_lleva_la_fase_del_padre_y_los_sub_pasos_la_suya() {
+        // El call corre en el Setup del padre; dentro, la subsecuencia tiene
+        // su propio Main. Cada nivel lleva la fase que le toca.
+        let mut padre = DefinicionSecuencia {
+            nombre: "padre".into(),
+            ..Default::default()
+        };
+        padre
+            .locals
+            .insert("canal".into(), ValorDefinicion::Numero(1.0));
+        padre
+            .locals
+            .insert("listo".into(), ValorDefinicion::Bool(false));
+        padre
+            .subsecuencias
+            .insert("init".into(), inline_comprueba("init"));
+        padre.pasos_setup = vec![call(
+            "llamar",
+            "init",
+            vec![arg("canal", "canal"), arg("listo", "listo")],
+        )];
+
+        let programa = Programa {
+            raiz: padre,
+            archivos: HashMap::new(),
+            ejecutores: HashMap::new(),
+        };
+        let entorno = EntornoMotor::desde_definicion(&programa.raiz);
+        let mut inv = InvocadorMock;
+        let mut sink = SinkNulo;
+        let (sec, _) = ejecuta_secuencia_interna(
+            &mut inv,
+            &programa.raiz,
+            entorno,
+            &mut sink,
+            &programa,
+            0,
+            true,
+        )
+        .unwrap();
+
+        let call = &sec.pasos[0];
+        assert_eq!(call.fase, Fase::Setup, "el call, con la fase del padre");
+        let sub = call.sub_pasos.as_ref().unwrap();
+        assert_eq!(sub[0].fase, Fase::Main, "el sub-paso, con la suya");
     }
 }

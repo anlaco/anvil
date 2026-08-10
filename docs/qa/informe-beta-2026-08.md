@@ -235,6 +235,12 @@ no se distingue un fallo de Setup de uno de Main o Cleanup — una distinción d
 primer orden para un `ResultSink` y para triar en fábrica. Ver
 `docs/diseno/reportes.md`.
 
+> **Cerrado (#8):** cada paso lleva `fase` (`setup`/`main`/`cleanup`) en el
+> JSON —también en los `sub_pasos` de un `sequence_call`— y como última
+> columna del CSV. La sella el motor antes de emitir el resultado, así que un
+> sink de streaming la ve igual. La consola no cambia: el formato textual
+> sigue congelado (RNF-08). Regresión: caso `DIAG-3` de `regresion/run.sh`.
+
 ### DIAG-4 — con `--process-model` se pierde qué secuencia se ejecutó
 
 > **Nota de reanclaje (agosto 2026):** la campaña corrió contra una
@@ -255,6 +261,11 @@ primer orden para un `ResultSink` y para triar en fábrica. Ver
 > viaja dentro de una frase, no como campo propio (`secuencia` del JSON es el
 > nombre del PM, `sequential`, no el de la secuencia del operador). Para
 > post-procesar en fábrica conviene un campo aparte.
+
+> **Cerrado (#9):** ese campo aparte existe — `secuencia_usuario` en la raíz
+> del JSON, con la ruta de la secuencia del operador. Sin `--process-model` la
+> clave se omite (la raíz ya es la secuencia del usuario). Regresión: caso
+> `DIAG-4` de `regresion/run.sh`.
 
 ### DIAG-5 — mensajes que apunten al campo correcto
 

@@ -225,11 +225,17 @@ arreglo. Lo hecho se marca:
   «failed to parse WebAssembly module»; y `-h`/`-V` existen. De paso, un YAML
   inválido deja de reportarse dos veces (el host callaba mal: avisaba de «no
   se pudo leer … para los ejecutores» cuando el fichero se leía bien).
-- Pendientes: DIAG-3/4 y la trazabilidad del reporte (#8, #9), contacto de
-  seguridad (#11).
+- ✅ **DIAG-3** — la **fase** (`setup`/`main`/`cleanup`) por paso en el JSON y
+  en el CSV (#8): la sella el motor antes de emitirla al sink; en un
+  `sequence_call`, el call lleva la del padre y cada sub-paso la suya. La
+  consola no cambia (RNF-08). Era la carencia más citada por los betatesters.
+- ✅ **DIAG-4** — bajo `--process-model`, la secuencia del operador viaja como
+  campo propio del JSON (`secuencia_usuario`, #9), no sólo dentro de una frase
+  del reporte; sin PM la clave se omite.
+- Pendientes: contacto de seguridad (#11).
 
-Con DIAG-5 cerrado, `docs/qa/regresion/run.sh` sale **entero en verde** (10
-casos, 0 fallos) por primera vez desde que se escribió.
+Con la trazabilidad cerrada, `docs/qa/regresion/run.sh` sale **entero en
+verde** (13 casos, 0 fallos).
 
 ## Post-MVP (explícitamente fuera de v1)
 

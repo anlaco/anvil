@@ -256,7 +256,14 @@ fn main() {
 
     // Abrir los ficheros de salida antes de conectar el motor: si una ruta
     // no se puede crear, fallamos sin haber tocado el ejecutor.
-    let mut json = abrir_sink(&cli.json, "JSON", SinkJson::nuevo);
+    let operador = secuencia_de_operador(&cli);
+    let mut json = abrir_sink(&cli.json, "JSON", |f| {
+        let sink = SinkJson::nuevo(f);
+        match operador {
+            Some(s) => sink.con_secuencia_usuario(s),
+            None => sink,
+        }
+    });
     let mut csv = abrir_sink(&cli.csv, "CSV", SinkCsv::nuevo);
 
     // Conexión con reintento (RF-40) al ejecutor embebido + una conexión por
@@ -337,7 +344,18 @@ fn conecta_con_reintento(
 }
 
 /// Abre un fichero de sink si se pidió; sale (exit 1) si no se puede crear.
-fn abrir_sink<T>(ruta: &Option<String>, kind: &str, ctor: fn(File) -> T) -> Option<T> {
+/// La secuencia del **operador** que hay que anotar en el reporte, o `None`
+/// si se corre sin process model.
+///
+/// Bajo `--process-model`, la secuencia raíz —y por tanto el campo
+/// `secuencia` del JSON— es el PM (`sequential`), no el test: sin este dato
+/// el resultado archivado no registra qué se corrió (#9). Es `cli.ruta`, la
+/// misma que el cargador inyecta en el placeholder del PM.
+fn secuencia_de_operador(cli: &Cli) -> Option<String> {
+    cli.process_model.as_ref().map(|_| cli.ruta.clone())
+}
+
+fn abrir_sink<T>(ruta: &Option<String>, kind: &str, ctor: impl FnOnce(File) -> T) -> Option<T> {
     ruta.as_deref().map(|r| match File::create(r) {
         Ok(f) => ctor(f),
         Err(e) => {
@@ -423,6 +441,24 @@ mod tests {
         ])
         .unwrap();
         assert_eq!(c.process_model.as_deref(), Some("pm.yaml"));
+    }
+
+    #[test]
+    fn la_secuencia_de_operador_es_la_del_cli_solo_con_process_model() {
+        let con_pm = parse_cli(vec![
+            "ejemplos/basica.yaml".into(),
+            "--process-model".into(),
+            "pm.yaml".into(),
+        ])
+        .unwrap();
+        assert_eq!(
+            secuencia_de_operador(&con_pm).as_deref(),
+            Some("ejemplos/basica.yaml")
+        );
+
+        // Sin PM, la raíz ya es la secuencia del usuario: el campo sobra.
+        let sin_pm = parse_cli(vec!["ejemplos/basica.yaml".into()]).unwrap();
+        assert!(secuencia_de_operador(&sin_pm).is_none());
     }
 
     #[test]

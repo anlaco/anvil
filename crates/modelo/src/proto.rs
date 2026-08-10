@@ -90,6 +90,9 @@ impl From<ResultadoPasoProto> for crate::ResultadoStep {
             // (ADR-0010). Llega `None` y el motor lo rellena al anidar la
             // subsecuencia.
             sub_pasos: None,
+            // La fase tampoco viaja: el paso no sabe en cuál corre. La sella
+            // el motor al recibir el resultado, antes de emitirlo al sink.
+            fase: crate::Fase::default(),
         }
     }
 }
