@@ -83,6 +83,20 @@ $A ejemplos/limites.yaml --limits "$TMP/huerfano.limits.yaml" 2>&1 |
   grep -qiE 'aviso.*sidecar|sidecar.*no afect|ningún paso'
 check DIAG-1 "aviso cuando el sidecar afecta a 0 pasos" $?
 
+# ---- DIAG-5a: un sidecar envuelto debe señalar el envoltorio ----
+# El error genérico acusaba al nombre del paso, que está bien; de ahí salió el
+# bug fantasma «el sidecar no funciona con process model».
+cat >"$TMP/envoltorio.limits.yaml" <<'YAML'
+limites:
+  medir_voltaje:
+    tipo: comparacion
+    op: ge
+    esperado: 4.0
+YAML
+$A ejemplos/limites.yaml --limits "$TMP/envoltorio.limits.yaml" 2>&1 |
+  grep -qiE 'mapa plano|envoltorio'
+check DIAG-5a "un sidecar envuelto señala el envoltorio, no el paso" $?
+
 # ---- DIAG-5c: mensaje de flag desconocido ----
 $A "$R/bug2-csv-nombre.yaml" --inventado 2>&1 |
   grep -qiE "flag .*--inventado.* (desconocido|no reconocido)"
