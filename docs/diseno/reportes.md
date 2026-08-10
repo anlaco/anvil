@@ -80,6 +80,32 @@ on_fin_secuencia(resultado)   # el ResultadoSecuencia agregado
 > congelada no cambia). Los pasos sin sub-pasos producen la misma línea de
 > siempre. Sin cambios en `paso.proto` (ADR-0010).
 
+### Visibilidad de los pasos saltados (#13)
+
+`saltado` es **neutral** en el agregado `error > fallo > paso`, y debe seguir
+siéndolo: un paso saltado por `disable` o por una precondición falsa no es un
+fallo (RF-33/34). Pero esa neutralidad escondía cuánto dejó de correrse — en la
+primera campaña de beta, **9 secuencias daban verde saltándose ≥30% de sus
+pasos**, y no se detectó hasta auditar los ficheros a mano.
+
+El resultado lleva ahora el recuento, contando el **árbol entero** (los
+`sub_pasos` de un sequence call incluidos), porque lo que importa al triar es
+cuántos pasos no corrieron, en el nivel que sea:
+
+- **JSON**: `pasos_saltados` y `pasos_totales` en la raíz. Van los dos porque
+  el dato útil es el ratio, no el absoluto.
+- **Consola**: una línea de cierre, `  (3 de 21 pasos saltados)`, **sólo si
+  hubo saltos**. Es una extensión aditiva de RNF-08 en la misma línea que el
+  `"saltado"` de M4 y el anidamiento de M4b: las líneas de paso no cambian, y
+  una corrida sin saltos produce exactamente los bytes de siempre.
+- **CSV**: sin columna nueva. Es un dato de secuencia, no de paso, y se deriva
+  contando las filas con `estado_paso = saltado`.
+
+Un `--strict` que trate un salto inesperado como fallo se valoró aparte: exige
+decidir qué cuenta como *inesperado* (un `disable` explícito en el YAML lo es;
+una precondición falsa, probablemente no), y esa decisión no debía retrasar la
+visibilidad. Sigue abierto en #13.
+
 ### Trazabilidad: fase y secuencia de operador (#8, #9)
 
 Dos datos que la primera beta externa echó en falta al **post-procesar** los

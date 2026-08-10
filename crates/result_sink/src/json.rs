@@ -44,9 +44,15 @@ impl<W: Write> SinkJson<W> {
 
 impl<W: Write> ResultSink for SinkJson<W> {
     fn on_fin_secuencia(&mut self, secuencia: &ResultadoSecuencia) {
+        // `pasos_saltados`/`pasos_totales` cuentan el árbol entero (sub_pasos
+        // incluidos): un `saltado` no degrada el agregado, así que sin este
+        // par un verde no distingue «el DUT pasó» de «el test no corrió».
+        let (saltados, total) = secuencia.saltados();
         let mut doc = json!({
             "secuencia": secuencia.nombre,
             "estado": secuencia.estado(),
+            "pasos_saltados": saltados,
+            "pasos_totales": total,
             "pasos": secuencia.pasos.iter().map(paso_a_json).collect::<Vec<_>>(),
         });
         // Sin process model no hay secuencia de operador: la clave se omite
@@ -209,6 +215,30 @@ mod tests {
         assert_eq!(sub[1]["estado"], "fallo");
         // Un paso sin sub_pasos no lleva la clave (un paso común del test).
         assert!(doc["pasos"].as_array().unwrap().len() == 1 || true);
+    }
+
+    #[test]
+    fn el_documento_lleva_el_recuento_de_saltados() {
+        use modelo::Fase;
+        // Un verde que no corrió la mitad de la secuencia debe poder
+        // distinguirse al post-procesar (#13).
+        let mut call = ResultadoStep::nuevo("test_uut", "paso", "sequence call → paso");
+        call.fase = Fase::Main;
+        call.sub_pasos = Some(vec![ResultadoStep::nuevo(
+            "medir",
+            "saltado",
+            "precondición falsa",
+        )]);
+        let mut s = ResultadoSecuencia::nueva("basica");
+        s.registra(ResultadoStep::nuevo("preparar", "saltado", "disable"));
+        s.registra(call);
+
+        let mut sink = SinkJson::nuevo(Vec::new());
+        sink.on_fin_secuencia(&s);
+        let doc: Value = serde_json::from_slice(&sink.salida).unwrap();
+        assert_eq!(doc["estado"], "paso", "el agregado no cambia (RF-33/34)");
+        assert_eq!(doc["pasos_saltados"], 2, "cuenta también los anidados");
+        assert_eq!(doc["pasos_totales"], 3);
     }
 
     #[test]
