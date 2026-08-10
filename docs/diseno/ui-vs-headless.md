@@ -32,9 +32,12 @@ anvil <secuencia.yaml> [--process-model <pm.yaml>] [--json <ruta>] \
   (RF-38, ADR-0016). Sin él, la secuencia corre tal cual.
 - `--validate` carga y valida el programa (schema, lvalues, firmas,
   ciclos) sin ejecutar ni conectar al ejecutor — útil en CI sin hardware.
-- `--port <n>` apunta el motor a un ejecutor en otro puerto (default 9100)
-  y reintenta la conexión si el ejecutor no está listo (5 s máx). En el
-  binario único el host ya espera al ejecutor.
+- `--port <n>` fija el puerto del ejecutor embebido: el que bindea el ejecutor
+  y el que busca el motor, que reintenta la conexión si no está listo (5 s
+  máx). En el binario único el host ya espera al ejecutor. **Sin el flag**, el
+  host reserva un puerto efímero por proceso, para que varios `anvil` puedan
+  correr en paralelo (#15); el guest ejecutor suelto sigue usando 9100 por
+  defecto, que es lo que asume el flujo de dos terminales.
 - `--quiet` silencia el reporte de consola y los logs informativos de
   stderr; los errores y los exit codes se preservan (RNF-08: el formato
   congelado se omite, no se cambia). JSON/CSV siguen emitiéndose.
