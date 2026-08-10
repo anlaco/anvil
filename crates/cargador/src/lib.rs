@@ -449,12 +449,159 @@ impl From<noyalib::Error> for ErrorCarga {
     }
 }
 
+/// Todos los campos del schema, para poder sugerir el correcto ante una
+/// errata. Es una ayuda de diagnóstico, no una fuente de verdad: el schema lo
+/// imponen los `struct` con `deny_unknown_fields`, y si esta lista se queda
+/// corta lo único que se pierde es una sugerencia.
+const CAMPOS_DEL_SCHEMA: [&str; 27] = [
+    // SecuenciaYaml
+    "nombre",
+    "setup",
+    "main",
+    "cleanup",
+    "locals",
+    "parameters",
+    "file_globals",
+    "subsecuencias",
+    "ejecutores",
+    // PasoYaml
+    "reintentos",
+    "limite",
+    "disable",
+    "pause_on_fail",
+    "precondicion",
+    "asigna",
+    "tipo",
+    "statement",
+    "condicion",
+    "secuencia",
+    "parametros",
+    "ejecutor",
+    // EjecutorYaml
+    "path",
+    "host",
+    "puerto",
+    // LimiteYaml
+    "min",
+    "max",
+    "op",
+];
+
+/// Lo que la gente escribe de verdad cuando se equivoca: el inglés del campo
+/// (Anvil es un schema en español) y los nombres que traen de otras
+/// herramientas. Sale de los ficheros de la beta.
+const ALIAS_DE_CAMPO: [(&str, &str); 12] = [
+    ("steps", "main"),
+    ("pasos", "main"),
+    ("sequence", "secuencia"),
+    ("subsequences", "subsecuencias"),
+    ("name", "nombre"),
+    ("precondition", "precondicion"),
+    ("assign", "asigna"),
+    ("retries", "reintentos"),
+    ("limits", "limite"),
+    ("limites", "limite"),
+    ("executor", "ejecutor"),
+    ("variables", "locals"),
+];
+
+/// Distancia de edición (Levenshtein) en caracteres, no en bytes: el schema
+/// lleva acentos (`precondicion` no, pero `límites` sí en los alias).
+fn distancia_edicion(a: &str, b: &str) -> usize {
+    let a: Vec<char> = a.chars().collect();
+    let b: Vec<char> = b.chars().collect();
+    let mut fila: Vec<usize> = (0..=b.len()).collect();
+    for (i, ca) in a.iter().enumerate() {
+        let mut anterior = fila[0];
+        fila[0] = i + 1;
+        for (j, cb) in b.iter().enumerate() {
+            let sustituir = anterior + usize::from(ca != cb);
+            anterior = fila[j + 1];
+            fila[j + 1] = sustituir.min(fila[j] + 1).min(fila[j + 1] + 1);
+        }
+    }
+    fila[b.len()]
+}
+
+/// Qué quiso escribir el usuario: primero los alias conocidos, y si no, el
+/// campo del schema más parecido. El umbral es estrecho a propósito — una
+/// sugerencia equivocada desorienta más que ninguna.
+fn sugerencia_de_campo(campo: &str) -> Option<&'static str> {
+    if let Some((_, bueno)) = ALIAS_DE_CAMPO.iter().find(|(malo, _)| *malo == campo) {
+        return Some(bueno);
+    }
+    let umbral = if campo.chars().count() <= 4 { 1 } else { 2 };
+    CAMPOS_DEL_SCHEMA
+        .iter()
+        .map(|c| (*c, distancia_edicion(campo, c)))
+        .filter(|(_, d)| *d <= umbral)
+        .min_by_key(|(_, d)| *d)
+        .map(|(c, _)| c)
+}
+
+/// Dónde aparece `clave` dentro del YAML, en notación de ruta
+/// (`subsecuencias.init`, `main[2].limite`). Es lo que le falta al error de
+/// serde, que solo da el nombre del campo: en un fichero con subsecuencias, un
+/// `unknown field: steps` no dice en cuál de ellas está.
+fn rutas_de_clave(valor: &noyalib::Value, clave: &str, prefijo: &str, out: &mut Vec<String>) {
+    match valor {
+        noyalib::Value::Mapping(m) => {
+            for (k, v) in m {
+                if k == clave {
+                    out.push(if prefijo.is_empty() {
+                        "la raíz".to_string()
+                    } else {
+                        prefijo.to_string()
+                    });
+                }
+                let sub = if prefijo.is_empty() {
+                    k.to_string()
+                } else {
+                    format!("{prefijo}.{k}")
+                };
+                rutas_de_clave(v, clave, &sub, out);
+            }
+        }
+        noyalib::Value::Sequence(s) => {
+            for (i, v) in s.iter().enumerate() {
+                rutas_de_clave(v, clave, &format!("{prefijo}[{i}]"), out);
+            }
+        }
+        _ => {}
+    }
+}
+
+/// Convierte el `unknown field: steps` de serde en algo accionable: dónde está
+/// y qué se quiso escribir (DIAG-5). Solo corre en el camino de error, y si no
+/// consigue ubicar el campo devuelve el error original intacto.
+fn diagnostica_campo_desconocido(texto: &str, original: noyalib::Error) -> ErrorCarga {
+    let noyalib::Error::UnknownField(campo) = &original else {
+        return ErrorCarga::Sintaxis(original);
+    };
+    let Ok(raiz) = noyalib::from_str::<noyalib::Value>(texto) else {
+        return ErrorCarga::Sintaxis(original);
+    };
+    let mut rutas = Vec::new();
+    rutas_de_clave(&raiz, campo, "", &mut rutas);
+    if rutas.is_empty() {
+        return ErrorCarga::Sintaxis(original);
+    }
+    let mut msg = format!("campo desconocido '{campo}' en {}", rutas.join(", "));
+    if let Some(bueno) = sugerencia_de_campo(campo) {
+        msg.push_str(&format!(" (¿querías '{bueno}'?)"));
+    }
+    ErrorCarga::Diagnostico(msg)
+}
+
 /// Carga una secuencia desde texto YAML. Es el punto testeable sin tocar
 /// el disco; `cargar_de_archivo` lo envuelve. No resuelve sequence calls (ni
 /// valida lvalues contra la secuencia padre): para eso, usar
 /// [`cargar_programa_de_archivo`].
 pub fn cargar_de_texto(texto: &str) -> Result<DefinicionSecuencia, ErrorCarga> {
-    let yaml: SecuenciaYaml = noyalib::from_str(texto)?;
+    let yaml: SecuenciaYaml = match noyalib::from_str(texto) {
+        Ok(y) => y,
+        Err(e) => return Err(diagnostica_campo_desconocido(texto, e)),
+    };
     secuencia_yaml_a_definicion(yaml, None)
 }
 
@@ -652,7 +799,10 @@ fn leer_ejecutores(
     acc: &mut HashMap<String, DefinicionEjecutor>,
 ) -> Result<(), ErrorCarga> {
     let texto = std::fs::read_to_string(ruta)?;
-    let yaml: SecuenciaYaml = noyalib::from_str(&texto)?;
+    let yaml: SecuenciaYaml = match noyalib::from_str(&texto) {
+        Ok(y) => y,
+        Err(e) => return Err(diagnostica_campo_desconocido(&texto, e)),
+    };
     for y in yaml.ejecutores {
         let def = y.a_definicion(dir_base)?;
         if acc.contains_key(&def.nombre) {
@@ -1609,9 +1759,10 @@ main:
     foo: bar
 ";
         let err = cargar_de_texto(yaml).unwrap_err();
+        // DIAG-5: sigue siendo fail-fast, y además ubica el campo.
         assert!(
-            matches!(&err, ErrorCarga::Sintaxis(_)),
-            "campo desconocido debe ser error de schema: {err}"
+            matches!(&err, ErrorCarga::Diagnostico(m) if m.contains("'foo'") && m.contains("main[0]")),
+            "campo desconocido debe ser error de schema, ubicado: {err}"
         );
     }
 
@@ -1838,7 +1989,12 @@ main:
   - nombre: p
 ";
         let err = cargar_de_texto(yaml).unwrap_err();
-        assert!(matches!(&err, ErrorCarga::Sintaxis(_)));
+        // DIAG-5: en un fichero con varias inline, saber en cuál está es la
+        // diferencia entre arreglarlo y buscarlo a ojo.
+        assert!(
+            matches!(&err, ErrorCarga::Diagnostico(m) if m.contains("subsecuencias.init")),
+            "{err}"
+        );
     }
 
     /// `cargar_programa_de_archivo` resuelve un archivo externo por path,
@@ -2101,7 +2257,10 @@ main:
       tolerancia: 0.1
 ";
         let err = cargar_de_texto(yaml).unwrap_err();
-        assert!(matches!(&err, ErrorCarga::Sintaxis(_)), "{err}");
+        assert!(
+            matches!(&err, ErrorCarga::Diagnostico(m) if m.contains("main[0].limite")),
+            "{err}"
+        );
     }
 
     #[test]
@@ -2297,6 +2456,78 @@ main:
             vec!["alfa_inventado", "zeta_inventado"],
             "sólo los que no casan en ninguna secuencia, en orden estable"
         );
+    }
+
+    /// DIAG-5: `steps:` es el error más común de quien viene de otra
+    /// herramienta, y el campo correcto está a una palabra de distancia.
+    #[test]
+    fn steps_sugiere_main() {
+        let err = cargar_de_texto("nombre: s\nsteps:\n  - nombre: p\n").unwrap_err();
+        let msg = err.to_string();
+        assert!(msg.contains("campo desconocido 'steps'"), "{msg}");
+        assert!(msg.contains("la raíz"), "{msg}");
+        assert!(msg.contains("¿querías 'main'?"), "{msg}");
+    }
+
+    #[test]
+    fn steps_en_una_inline_ubica_la_inline_y_sugiere() {
+        let yaml = "\
+nombre: s
+subsecuencias:
+  interna:
+    steps:
+      - nombre: p
+main:
+  - nombre: p
+";
+        let msg = cargar_de_texto(yaml).unwrap_err().to_string();
+        assert!(msg.contains("subsecuencias.interna"), "{msg}");
+        assert!(msg.contains("¿querías 'main'?"), "{msg}");
+    }
+
+    /// Una errata sin alias se resuelve por parecido.
+    #[test]
+    fn errata_sugiere_el_campo_parecido() {
+        let msg = cargar_de_texto("nombre: s\nmain:\n  - nombre: p\n    reintento: 2\n")
+            .unwrap_err()
+            .to_string();
+        assert!(msg.contains("¿querías 'reintentos'?"), "{msg}");
+    }
+
+    /// Y un campo que no se parece a nada no recibe una sugerencia inventada:
+    /// desorienta más que callarse.
+    #[test]
+    fn campo_sin_parecido_no_sugiere_nada() {
+        let msg = cargar_de_texto("nombre: s\nmain:\n  - nombre: p\n    zumbido: 2\n")
+            .unwrap_err()
+            .to_string();
+        assert!(msg.contains("campo desconocido 'zumbido'"), "{msg}");
+        assert!(!msg.contains("¿querías"), "{msg}");
+    }
+
+    /// El mismo campo mal escrito en dos sitios se reporta con ambos.
+    #[test]
+    fn campo_repetido_lista_todas_las_ubicaciones() {
+        let yaml = "\
+nombre: s
+subsecuencias:
+  a:
+    steps: []
+  b:
+    steps: []
+main:
+  - nombre: p
+";
+        let msg = cargar_de_texto(yaml).unwrap_err().to_string();
+        assert!(msg.contains("subsecuencias.a"), "{msg}");
+        assert!(msg.contains("subsecuencias.b"), "{msg}");
+    }
+
+    #[test]
+    fn distancia_de_edicion_cuenta_caracteres_no_bytes() {
+        assert_eq!(distancia_edicion("limite", "límite"), 1);
+        assert_eq!(distancia_edicion("main", "main"), 0);
+        assert_eq!(distancia_edicion("mian", "main"), 2);
     }
 
     /// DIAG-5: el sidecar envuelto en `limites:` acusaba al nombre del paso
@@ -2950,7 +3181,10 @@ main:
         let y = dir.join("s.yaml");
         std::fs::write(&y, "nombre: s\nejecutores:\n  - { nombre: e, tipo: embebido, foo: bar }\nmain:\n  - nombre: a\n").unwrap();
         let err = cargar_programa_de_archivo(y.to_str().unwrap()).unwrap_err();
-        assert!(matches!(&err, ErrorCarga::Sintaxis(_)), "{err}");
+        assert!(
+            matches!(&err, ErrorCarga::Diagnostico(m) if m.contains("ejecutores[0]")),
+            "{err}"
+        );
     }
 
     /// M5-ext.1: el ejemplo `ejemplos/demo_ejecutores.yaml` carga como
