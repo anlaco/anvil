@@ -71,7 +71,8 @@ En la raíz del repo, los archivos de comunidad:
 [`CONTRIBUTING.md`](../CONTRIBUTING.md),
 [`GOVERNANCE.md`](../GOVERNANCE.md),
 [`CODE_OF_CONDUCT.md`](../CODE_OF_CONDUCT.md),
-[`SECURITY.md`](../SECURITY.md).
+[`SECURITY.md`](../SECURITY.md); y el historial de cambios por versión en
+[`CHANGELOG.md`](../CHANGELOG.md).
 
 ## Convenciones
 
