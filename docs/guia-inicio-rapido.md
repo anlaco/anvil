@@ -172,7 +172,9 @@ anvil <secuencia.yaml> [--process-model <pm.yaml>] [--json <ruta>] [--csv <ruta>
 - Consola salvo `--quiet`; `--json`/`--csv` opcionales (fichero).
 - `--process-model` envuelve la secuencia en un PM Sequential (RF-38).
 - `--validate` carga y valida sin ejecutar ni conectar (CI sin hardware).
-- `--port` fija el puerto del ejecutor embebido (default 9100).
+- `--port` fija el puerto del ejecutor embebido — el del ejecutor **y** el que
+  el motor busca. Sin él, el host toma un puerto **efímero** por proceso, así
+  que varios `anvil` pueden correr a la vez (#15).
 - `--limits` inyecta un sidecar de límites por nombre de paso (RF-30),
   sobreescribiendo los embebidos. Casa en **cualquier** secuencia del programa
   —la raíz, las subsecuencias externas e inline, y la secuencia del operador
@@ -302,8 +304,11 @@ versión y todo esto sobra.
 - **`el ejecutor de pasos no empezó a escuchar`** → el guest ejecutor falló al
   arrancar; el error concreto va a stderr. Si tarda pero no falla, es el
   arranque lento de debug (ver arriba): usa `make release`.
-- **`address in use` con dos `anvil` a la vez** → el ejecutor embebido usa el
-  puerto 9100 fijo; dale a uno de los dos `--port <otro>`.
+- **`address in use` con dos `anvil` a la vez** → ya no debería pasar: desde
+  #15 el ejecutor embebido toma un puerto **efímero** por proceso, así que
+  puedes lanzar N `anvil` en paralelo. Si fijas `--port`, ese puerto vale para
+  el ejecutor **y** para el motor, así que dos procesos con el mismo `--port`
+  sí chocan — es lo que pediste.
 
 ## Siguiente lectura
 

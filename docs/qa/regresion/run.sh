@@ -210,6 +210,27 @@ grep -q '"pasos_totales": 3' "$TMP/lec2.json" || res=1
 grep -q ': paso ===' "$TMP/lec2.out" || res=1
 check LEC-2 "un verde con pasos saltados lo declara (consola y JSON)" $res
 
+# ---- NOTA-1: dos `anvil` simultáneos no deben chocar de puerto ----
+# El ejecutor embebido bindeaba 9100 fijo: el segundo proceso moría con
+# `address in use`, lo que impedía paralelizar una campaña lanzando N procesos.
+# El `--port` que la guía recomendaba como remedio sólo movía la punta del
+# motor, así que daba `connection refused`.
+$A ejemplos/basica.yaml >"$TMP/n1a.out" 2>&1 &
+p1=$!
+$A ejemplos/basica.yaml >"$TMP/n1b.out" 2>&1 &
+p2=$!
+wait $p1; wait $p2
+res=0
+for f in "$TMP/n1a.out" "$TMP/n1b.out"; do
+  grep -qi 'address in use\|refused' "$f" && res=1
+  grep -q '=== basica:' "$f" || res=1
+done
+check NOTA-1 "dos anvil simultáneos corren sin chocar de puerto" $res
+
+# ---- NOTA-1b: --port explícito fija ejecutor y motor, no sólo el motor ----
+$A ejemplos/basica.yaml --port 9300 2>&1 | grep -qE 'escuchando en 9300'
+check NOTA-1b "--port fija también el puerto del ejecutor embebido" $?
+
 echo "===================================================================="
 echo "  OK: $ok    FALLA: $falla"
 [ "$falla" -eq 0 ]

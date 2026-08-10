@@ -83,8 +83,9 @@ Reglas:
   `ejecutores:` a nivel de secuencia declara la **tabla de ejecutores** y un
   paso `grpc` puede declarar `ejecutor: <nombre>` (si se omite, va al
   embebido). Cada ejecutor tiene `nombre` y `tipo`:
-  - `tipo: embebido` — el ejecutor WASM de serie (`127.0.0.1:9100`). Default.
-    Sin campos adicionales.
+  - `tipo: embebido` — el ejecutor WASM de serie, en loopback. Default. Sin
+    campos adicionales. El puerto lo elige el host (efímero por proceso, o el
+    de `--port`); 9100 es el default del guest ejecutor suelto.
   - `tipo: wasm` — componente `.wasm` propio cargado por el **host** por
     path (M5-ext.2, ADR-0014/0015; implementado). Campo `path` (relativo
     al YAML, debe existir). El host spawnea el puente `anvil-puente-wasm`,

@@ -52,7 +52,13 @@ const ANVIL_GUEST: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/anvil-guest
 const EJECUTOR: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/ejecutor_pasos.wasm"));
 const PUENTE: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/anvil-puente-wasm"));
 
-const PUERTO: u16 = 9100;
+/// Puerto del ejecutor embebido cuando el usuario lo fija con `--port`. Sin
+/// ese flag se usa uno **efímero** por proceso (ver [`reservar_puerto`]): con
+/// un puerto fijo, dos `anvil` no podían coexistir — el segundo moría con
+/// `address in use`, que es lo que impedía paralelizar una campaña lanzando N
+/// procesos (#15). El 9100 sigue siendo el default del guest ejecutor suelto,
+/// para el flujo de dos terminales del README.
+const PUERTO_COMPAT: u16 = 9100;
 
 /// Estado de cada guest: el contexto WASI (sockets/preopen/args) + la tabla
 /// de recursos que `wasmtime-wasi` necesita.
@@ -105,6 +111,39 @@ const FLAGS_CON_VALOR: [&str; 6] = [
     "--ejecutor",
     "--port",
 ];
+
+/// El puerto que el usuario fijó con `--port`, si lo hizo.
+///
+/// Antes el flag sólo le decía al **motor** a dónde conectarse, mientras el
+/// host bindeaba 9100 pase lo que pase: `anvil x.yaml --port 9200` levantaba
+/// el ejecutor en 9100, el motor buscaba en 9200 y salía `connection refused`.
+/// La guía llegó a recomendarlo como remedio para el choque de puertos, y no
+/// funcionaba. Ahora fija **las dos puntas**.
+fn puerto_pedido(args: &[String]) -> Option<u16> {
+    let mut it = args.iter();
+    while let Some(a) = it.next() {
+        if a == "--port" {
+            return it.next().and_then(|v| v.parse().ok());
+        }
+    }
+    None
+}
+
+/// Reserva un puerto efímero de loopback y lo devuelve. Mismo mecanismo que
+/// ya usaba el host para los puentes `.wasm` (`instanciar_wasm`): bindear el
+/// puerto 0 deja que el SO elija uno libre, se lee y se suelta para que lo
+/// tome el guest. La ventana entre el `drop` y el `bind` del guest es la
+/// misma que la del puente, y no ha dado problemas.
+fn reservar_puerto() -> Result<u16, String> {
+    let listener = TcpListener::bind("127.0.0.1:0")
+        .map_err(|e| format!("no se pudo reservar puerto para el ejecutor embebido: {e}"))?;
+    let puerto = listener
+        .local_addr()
+        .map_err(|e| format!("no se pudo leer el puerto reservado: {e}"))?
+        .port();
+    drop(listener);
+    Ok(puerto)
+}
 
 /// Si el motor va a salir sin invocar un paso, el ejecutor embebido no pinta
 /// nada: abrirlo anuncia `escuchando en 9100` por delante de la ayuda o del
@@ -301,10 +340,10 @@ fn esperar_wasm(exec: &EjecutorWasm) -> Result<(), String> {
     ))
 }
 
-/// Espera a que el ejecutor escuche en `127.0.0.1:PUERTO` con un `connect`
+/// Espera a que el ejecutor escuche en `127.0.0.1:puerto` con un `connect`
 /// de prueba. El ejecutor (loop de aceptar) descarta esa conexión.
-fn esperar_ejecutor() {
-    let addr = format!("127.0.0.1:{PUERTO}");
+fn esperar_ejecutor(puerto: u16) {
+    let addr = format!("127.0.0.1:{puerto}");
     for _ in 0..SONDEOS_ARRANQUE {
         if let Ok(c) = TcpStream::connect(&addr) {
             drop(c); // conexión de prueba: se cierra; el ejecutor la descarta.
@@ -437,14 +476,40 @@ fn main() {
         args_motor_final.push(o.clone());
     }
 
-    // --- Thread ejecutor: bind 127.0.0.1:9100 en su sandbox. ---
-    // El ejecutor embebido sigue loopback-only (no atiende IPs externas).
-    // No se arranca si el motor no va a llegar a invocar un paso (ayuda,
-    // versión, `--validate`, falta de secuencia).
-    let exec_handle = if necesita_ejecutor_embebido(&args_motor_final) && !yaml_invalido {
+    // --- Thread ejecutor: bind en su sandbox, loopback-only (no atiende IPs
+    // --- externas). No se arranca si el motor no va a llegar a invocar un
+    // --- paso (ayuda, versión, `--validate`, falta de secuencia).
+    //
+    // El puerto es **efímero por proceso** salvo que el usuario lo fije con
+    // `--port`: así dos `anvil` simultáneos no chocan (#15). Se le pasa al
+    // ejecutor por `ANVIL_PORT` —la vía que ya usaba para los `.wasm` cargados
+    // por path (ADR-0014)— y al motor como `--port`, que es como localiza al
+    // ejecutor embebido.
+    let arranca_ejecutor = necesita_ejecutor_embebido(&args_motor_final) && !yaml_invalido;
+    let puerto_ejecutor = match puerto_pedido(&args_motor_final) {
+        Some(p) => p,
+        // Sin ejecutor embebido no hay a quién asignarle puerto (y reservarlo
+        // sería tocar la red para nada: ver DIAG-5f).
+        None if !arranca_ejecutor => PUERTO_COMPAT,
+        None => match reservar_puerto() {
+            Ok(p) => {
+                args_motor_final.push("--port".into());
+                args_motor_final.push(p.to_string());
+                p
+            }
+            // Sin puerto efímero, el 9100 de siempre: peor es no arrancar.
+            Err(e) => {
+                eprintln!("aviso: {e}; se usa el puerto {PUERTO_COMPAT}");
+                PUERTO_COMPAT
+            }
+        },
+    };
+    let exec_handle = if arranca_ejecutor {
         let exec_engine = engine.clone();
         let h = thread::spawn(move || {
-            let wasi = wasi_loopback().build();
+            let mut b = wasi_loopback();
+            b.env("ANVIL_PORT", puerto_ejecutor.to_string());
+            let wasi = b.build();
             // El ejecutor es un loop infinito de aceptar: si termina, es un
             // fallo. El error va a stderr — si no, el usuario sólo ve el
             // timeout de `esperar_ejecutor()` sin la causa.
@@ -453,7 +518,7 @@ fn main() {
             }
         });
         // --- Esperar a que escuche antes de lanzar el motor (no reintenta).
-        esperar_ejecutor();
+        esperar_ejecutor(puerto_ejecutor);
         Some(h)
     } else {
         None
