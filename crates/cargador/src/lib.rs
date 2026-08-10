@@ -417,6 +417,11 @@ pub enum ErrorCarga {
     /// El YAML parsea, pero viola una regla de negocio (nombre vacío,
     /// `reintentos` 0, `main` vacío).
     Validacion(String),
+    /// Un error de esquema ya **redactado por completo**: el mensaje trae su
+    /// propio contexto y `Display` no le antepone nada. Es lo que produce el
+    /// diagnóstico de DIAG-5 cuando sabe qué quiso escribir el usuario y el
+    /// prefijo genérico («YAML inválido», «secuencia inválida») estorbaría.
+    Diagnostico(String),
 }
 
 impl std::fmt::Display for ErrorCarga {
@@ -425,6 +430,7 @@ impl std::fmt::Display for ErrorCarga {
             ErrorCarga::Lectura(e) => write!(f, "no se pudo leer el fichero: {e}"),
             ErrorCarga::Sintaxis(e) => write!(f, "YAML inválido: {e}"),
             ErrorCarga::Validacion(m) => write!(f, "secuencia inválida: {m}"),
+            ErrorCarga::Diagnostico(m) => write!(f, "{m}"),
         }
     }
 }
@@ -1040,10 +1046,51 @@ fn validar_call(
 /// límite embebido). Lo inyecta [`aplicar_limites`].
 pub fn cargar_limites_de_archivo(ruta: &str) -> Result<HashMap<String, Limite>, ErrorCarga> {
     let texto = std::fs::read_to_string(ruta)?;
-    let mapa: HashMap<String, LimiteYaml> = noyalib::from_str(&texto)?;
+    let mapa: HashMap<String, LimiteYaml> = match noyalib::from_str(&texto) {
+        Ok(m) => m,
+        // El sidecar es la entrada más fácil de escribir mal, y su error
+        // genérico es el que más despistó en la beta (DIAG-5): antes de
+        // rendirse, mirar si el fallo tiene una explicación concreta.
+        Err(e) => return Err(diagnostica_sidecar(&texto, e)),
+    };
     mapa.into_iter()
         .map(|(nombre, l)| Ok((nombre.clone(), l.a_limite(&nombre)?)))
         .collect()
+}
+
+/// Claves con las que un usuario envuelve el sidecar por costumbre de otros
+/// formatos. Ninguna es válida: el sidecar es un mapa plano paso→límite.
+const ENVOLTORIOS_DE_SIDECAR: [&str; 5] = ["limites", "límites", "limite", "limits", "pasos"];
+
+/// Explica el fallo de un sidecar cuando se puede, en vez de dejar salir el
+/// `unknown field: <nombre_del_paso>` de serde, que acusa al nombre del paso
+/// —que está bien— en lugar de al envoltorio que lo esconde.
+///
+/// Solo corre en el camino de error, así que el segundo parseo (permisivo, a
+/// `Value`) no cuesta nada en el camino feliz. Si no encuentra una explicación
+/// concreta, devuelve el error original intacto.
+///
+/// El caso que motiva esto es real: en la beta, un sidecar envuelto en
+/// `limites:` produjo el diagnóstico «el sidecar no funciona con process
+/// model», que era falso, y de ahí salió un bug fantasma que costó días.
+fn diagnostica_sidecar(texto: &str, original: noyalib::Error) -> ErrorCarga {
+    let raiz: HashMap<String, noyalib::Value> = match noyalib::from_str(texto) {
+        Ok(v) => v,
+        Err(_) => return ErrorCarga::Sintaxis(original),
+    };
+    // Una sola clave de nivel superior, que es una palabra de envoltorio y
+    // contiene un mapa: el usuario indentó todo el sidecar bajo ella.
+    if raiz.len() == 1 {
+        if let Some((clave, valor)) = raiz.iter().next() {
+            if ENVOLTORIOS_DE_SIDECAR.contains(&clave.as_str()) && valor.is_mapping() {
+                return ErrorCarga::Diagnostico(format!(
+                    "el sidecar de límites es un mapa plano paso→límite; '{clave}:' en la raíz \
+                     es un envoltorio que Anvil no admite (quita esa línea y desindenta el resto)"
+                ));
+            }
+        }
+    }
+    ErrorCarga::Sintaxis(original)
 }
 
 /// Inyecta los límites del sidecar en la secuencia, buscando cada paso por
@@ -2250,6 +2297,63 @@ main:
             vec!["alfa_inventado", "zeta_inventado"],
             "sólo los que no casan en ninguna secuencia, en orden estable"
         );
+    }
+
+    /// DIAG-5: el sidecar envuelto en `limites:` acusaba al nombre del paso
+    /// (`unknown field: medir_voltaje`), que está bien. Ahora señala el
+    /// envoltorio, que es lo que sobra.
+    #[test]
+    fn sidecar_con_envoltorio_señala_el_envoltorio() {
+        let dir = std::env::temp_dir().join("anvil_diag5_envoltorio");
+        std::fs::create_dir_all(&dir).unwrap();
+        let ruta = dir.join("envoltorio.limits.yaml");
+        std::fs::write(
+            &ruta,
+            "limites:\n  medir_voltaje:\n    tipo: rango\n    min: 4.0\n    max: 5.0\n",
+        )
+        .unwrap();
+        let err = cargar_limites_de_archivo(ruta.to_str().unwrap()).unwrap_err();
+        let msg = err.to_string();
+        assert!(matches!(&err, ErrorCarga::Diagnostico(_)), "{msg}");
+        assert!(msg.contains("mapa plano"), "{msg}");
+        assert!(msg.contains("'limites:'"), "{msg}");
+        // Y no acusa al paso, que no tiene culpa.
+        assert!(!msg.contains("unknown field"), "{msg}");
+    }
+
+    /// Las demás palabras con las que se envuelve por costumbre.
+    #[test]
+    fn sidecar_reconoce_los_envoltorios_habituales() {
+        for clave in ["límites", "limite", "limits", "pasos"] {
+            let texto = format!("{clave}:\n  medir_voltaje:\n    tipo: comparacion\n    op: ge\n    esperado: 4.0\n");
+            let original = noyalib::from_str::<HashMap<String, LimiteYaml>>(&texto).unwrap_err();
+            let err = diagnostica_sidecar(&texto, original);
+            assert!(
+                matches!(&err, ErrorCarga::Diagnostico(m) if m.contains(clave)),
+                "{clave}: {err}"
+            );
+        }
+    }
+
+    /// Un sidecar roto por otro motivo conserva el error de serde: el
+    /// diagnóstico no debe inventarse explicaciones que no tiene.
+    #[test]
+    fn sidecar_roto_por_otra_causa_conserva_el_error_original() {
+        let texto = "medir_voltaje:\n  tipo: rango\n  min: 4.5\n  tolerancia: 0.1\n";
+        let original = noyalib::from_str::<HashMap<String, LimiteYaml>>(texto).unwrap_err();
+        let err = diagnostica_sidecar(texto, original);
+        assert!(matches!(&err, ErrorCarga::Sintaxis(_)), "{err}");
+    }
+
+    /// Un envoltorio con más claves al lado no es el caso del envoltorio: ahí
+    /// no sabemos qué quiso escribir el usuario.
+    #[test]
+    fn sidecar_con_varias_claves_raiz_no_se_diagnostica_como_envoltorio() {
+        let texto =
+            "limites:\n  a:\n    tipo: rango\nmedir:\n  tipo: rango\n  min: 1.0\n  max: 2.0\n";
+        let original = noyalib::from_str::<HashMap<String, LimiteYaml>>(texto).unwrap_err();
+        let err = diagnostica_sidecar(texto, original);
+        assert!(matches!(&err, ErrorCarga::Sintaxis(_)), "{err}");
     }
 
     #[test]
