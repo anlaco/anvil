@@ -97,6 +97,20 @@ $A ejemplos/limites.yaml --limits "$TMP/envoltorio.limits.yaml" 2>&1 |
   grep -qiE 'mapa plano|envoltorio'
 check DIAG-5a "un sidecar envuelto señala el envoltorio, no el paso" $?
 
+# ---- DIAG-5b: un campo desconocido debe ubicarse y sugerir el correcto ----
+cat >"$TMP/steps.yaml" <<'YAML'
+nombre: regresion_steps
+subsecuencias:
+  interna:
+    steps:
+      - nombre: p
+main:
+  - nombre: p
+YAML
+$A "$TMP/steps.yaml" --validate 2>&1 |
+  grep -qE "subsecuencias.interna.*querías 'main'"
+check DIAG-5b "campo desconocido: ubicación + sugerencia" $?
+
 # ---- DIAG-5c: mensaje de flag desconocido ----
 $A "$R/bug2-csv-nombre.yaml" --inventado 2>&1 |
   grep -qiE "flag .*--inventado.* (desconocido|no reconocido)"
