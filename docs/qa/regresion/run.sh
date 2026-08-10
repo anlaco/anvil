@@ -169,6 +169,22 @@ YAML
 $A "$TMP/coremod.yaml" 2>&1 | grep -qiE 'módulo core|modulo core'
 check DIAG-5d "un .wasm módulo core se diagnostica como tal" $?
 
+# ---- LEC-1: `resultado.*` fuera de `asigna` debe ser error de carga ----
+# La lección de producto (§5): este YAML cargaba, la precondición era un `false`
+# constante, el paso se saltaba y la secuencia salía VERDE. La campaña propagó
+# el patrón a 19 secuencias y 51 precondiciones.
+cat >"$TMP/lec1.yaml" <<'YAML'
+nombre: regresion_resultado_fuera_de_asigna
+locals:
+  v_real: 5.0
+main:
+  - nombre: medir_voltaje
+    precondicion: 'locals.v_real > 4.9 && resultado.valor_medido != nothing'
+YAML
+$A "$TMP/lec1.yaml" --validate 2>&1 |
+  grep -qE "medir_voltaje.*resultado.valor_medido|resultado.valor_medido.*precondicion"
+check LEC-1 "resultado.* en una precondición es error de carga" $?
+
 echo "===================================================================="
 echo "  OK: $ok    FALLA: $falla"
 [ "$falla" -eq 0 ]

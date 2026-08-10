@@ -662,7 +662,105 @@ fn secuencia_yaml_a_definicion(
         subsecuencias,
     };
     validar_lvalues(&def)?;
+    validar_alcance_resultado(&def)?;
     Ok(def)
+}
+
+/// §5 del informe de beta: `resultado.*` **sólo** está ligado durante el
+/// `asigna` del propio paso — el motor hace `set_resultado` justo antes y
+/// `limpia_resultado` después (`motor/src/entorno.rs`). Fuera de esa ventana
+/// no fallaba: valía `nothing`.
+///
+/// Eso convertía un error de definición en tres capas de silencio
+/// encadenadas. `precondicion: 'resultado.valor_medido != nothing'` es un
+/// `false` constante → el paso se salta → y como `saltado` es neutral en el
+/// agregado, **la secuencia termina en verde**. En la campaña ese patrón se
+/// propagó a 19 secuencias y 51 precondiciones, y produjo dos «bugs críticos»
+/// que no lo eran.
+///
+/// Regla, fail-fast al cargar: `resultado.*` en `precondicion`, en la
+/// `condicion` de un `pass_fail` o en un `statement` → error. En `asigna`,
+/// que es su sitio, se permite.
+fn validar_alcance_resultado(def: &DefinicionSecuencia) -> Result<(), ErrorCarga> {
+    for p in def
+        .pasos_setup
+        .iter()
+        .chain(&def.pasos_main)
+        .chain(&def.pasos_cleanup)
+    {
+        // (nombre del campo YAML, campo con la expresión) — el mensaje cita
+        // el campo tal y como el usuario lo escribió.
+        let mut donde: Vec<(&str, &expr::Expresion)> = Vec::new();
+        if let Some(pre) = &p.precondicion {
+            donde.push(("precondicion", pre));
+        }
+        if let Some(cond) = &p.condicion {
+            donde.push(("condicion", cond));
+        }
+        for (campo_yaml, e) in donde {
+            if let Some(campo) = primer_uso_de_resultado(e) {
+                return Err(error_resultado_fuera_de_asigna(
+                    &p.nombre, campo_yaml, &campo,
+                ));
+            }
+        }
+        if let Some(stmts) = &p.statement {
+            for s in stmts {
+                let expr::Sentencia::Assign {
+                    scope,
+                    campo,
+                    valor,
+                } = s;
+                // Como lvalue (`resultado.x = …`) y como lectura en el lado
+                // derecho: los dos son el mismo malentendido.
+                if *scope == expr::Scope::Resultado {
+                    return Err(error_resultado_fuera_de_asigna(
+                        &p.nombre,
+                        "statement",
+                        campo,
+                    ));
+                }
+                if let Some(campo) = primer_uso_de_resultado(valor) {
+                    return Err(error_resultado_fuera_de_asigna(
+                        &p.nombre,
+                        "statement",
+                        &campo,
+                    ));
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+/// El primer `resultado.X` que aparece en la expresión, o `None`. Recorre el
+/// AST entero: el caso de la campaña era una conjunción
+/// (`locals.v > 4.9 && resultado.valor_medido != nothing`), así que mirar
+/// sólo la raíz no habría bastado.
+fn primer_uso_de_resultado(e: &expr::Expresion) -> Option<String> {
+    match e {
+        expr::Expresion::Var {
+            scope: expr::Scope::Resultado,
+            campo,
+        } => Some(campo.clone()),
+        expr::Expresion::Var { .. } | expr::Expresion::Lit(_) => None,
+        expr::Expresion::BinOp { izq, der, .. } => {
+            primer_uso_de_resultado(izq).or_else(|| primer_uso_de_resultado(der))
+        }
+        expr::Expresion::UnOp { operando, .. } => primer_uso_de_resultado(operando),
+    }
+}
+
+/// El mensaje dice **dónde** está el uso indebido y **dónde sí** vale, que es
+/// lo que faltó en la campaña: el diagnóstico llegaba como un `false` mudo.
+fn error_resultado_fuera_de_asigna(paso: &str, campo_yaml: &str, campo: &str) -> ErrorCarga {
+    ErrorCarga::Validacion(format!(
+        "el paso '{paso}' usa 'resultado.{campo}' en '{campo_yaml}', donde no \
+         está disponible: 'resultado.*' sólo es visible dentro del 'asigna' del \
+         propio paso, porque es el resultado que ese paso acaba de devolver. \
+         Fuera de ahí valdría siempre 'nothing'. Vuelca lo que necesites a un \
+         local con 'asigna' y léelo desde '{campo_yaml}'"
+    ))
 }
 
 /// DEF-3 del informe de beta: `asigna` escribe siempre en Locals (ADR-0009).
@@ -2675,17 +2773,130 @@ main:
 
     #[test]
     fn precondicion_se_parsea_a_ast() {
+        // Este test llevaba de ejemplo `... && resultado.valor_medido !=
+        // nothing`, que es justo el patrón que la campaña propagó a 51
+        // precondiciones y que hoy es error de carga (§5 del informe).
         let yaml = "\
 nombre: s
+locals:
+  contador: 0
+  listo: false
 main:
   - nombre: medir
-    precondicion: 'locals.contador > 0 && resultado.valor_medido != nothing'
+    precondicion: 'locals.contador > 0 && locals.listo'
 ";
         let s = cargar_de_texto(yaml).unwrap();
         assert!(
             s.pasos_main[0].precondicion.is_some(),
             "la precondición debe parsearse a AST"
         );
+    }
+
+    // --- §5 del informe de beta: `resultado.*` fuera de `asigna` ---
+
+    /// El mensaje tiene que decir dónde está el uso y dónde sí vale: el
+    /// diagnóstico que faltó en la campaña.
+    fn error_de(yaml: &str) -> String {
+        match cargar_de_texto(yaml) {
+            Err(ErrorCarga::Validacion(m)) => m,
+            otro => panic!("se esperaba error de validación, no {otro:?}"),
+        }
+    }
+
+    #[test]
+    fn resultado_en_precondicion_es_error_de_carga() {
+        // El caso literal de la campaña: una conjunción cuyo segundo término
+        // es un `false` constante. Antes cargaba, saltaba el paso y salía verde.
+        let m = error_de(
+            "\
+nombre: s
+locals:
+  v_real: 0.0
+main:
+  - nombre: medir
+    precondicion: 'locals.v_real > 4.9 && resultado.valor_medido != nothing'
+",
+        );
+        assert!(m.contains("medir"), "nombra el paso: {m}");
+        assert!(m.contains("resultado.valor_medido"), "nombra el campo: {m}");
+        assert!(m.contains("precondicion"), "ubica el campo YAML: {m}");
+        assert!(m.contains("asigna"), "dice dónde sí vale: {m}");
+    }
+
+    #[test]
+    fn resultado_en_condicion_de_pass_fail_es_error_de_carga() {
+        let m = error_de(
+            "\
+nombre: s
+main:
+  - nombre: veredicto
+    tipo: pass_fail
+    condicion: 'resultado.valor_medido > 4.5'
+",
+        );
+        assert!(m.contains("veredicto") && m.contains("condicion"), "{m}");
+    }
+
+    #[test]
+    fn resultado_en_statement_es_error_de_carga_leyendo_y_escribiendo() {
+        // Como lectura en el lado derecho...
+        let m = error_de(
+            "\
+nombre: s
+locals:
+  v: 0.0
+main:
+  - nombre: copiar
+    tipo: statement
+    statement: 'locals.v = resultado.valor_medido'
+",
+        );
+        assert!(m.contains("copiar") && m.contains("statement"), "{m}");
+
+        // ...y como lvalue, que es el mismo malentendido al revés.
+        let m = error_de(
+            "\
+nombre: s
+main:
+  - nombre: escribir
+    tipo: statement
+    statement: 'resultado.valor_medido = 1.0'
+",
+        );
+        assert!(m.contains("resultado.valor_medido"), "{m}");
+    }
+
+    #[test]
+    fn resultado_en_asigna_sigue_siendo_valido() {
+        // `asigna` es su sitio: ahí el motor sí lo tiene ligado.
+        let yaml = "\
+nombre: s
+locals:
+  v: 0.0
+main:
+  - nombre: medir
+    asigna:
+      v: 'resultado.valor_medido'
+";
+        let s = cargar_de_texto(yaml).unwrap();
+        assert!(s.pasos_main[0].asigna.is_some());
+    }
+
+    #[test]
+    fn resultado_anidado_en_la_expresion_tambien_se_detecta() {
+        // Mirar sólo la raíz del AST no habría bastado: el caso real estaba
+        // dentro de un `&&`, y aquí va aún más hondo.
+        let m = error_de(
+            "\
+nombre: s
+locals:
+  v: 0.0
+main:
+  - nombre: medir
+    precondicion: '!(locals.v > 1.0 && (resultado.valor_medido < 2.0 || false))'
+",
+        );
+        assert!(m.contains("resultado.valor_medido"), "{m}");
     }
 
     #[test]
