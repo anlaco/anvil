@@ -74,15 +74,15 @@ fn usage() {
 --port <n>              puerto del ejecutor embebido (default {PUERTO_DEFAULT})\n  \
 --validate              carga y valida sin ejecutar ni conectar\n  \
 --quiet                 silencia el reporte de consola y logs stderr\n  \
---help                  muestra esta ayuda\n  \
---version               muestra la versión"
+-h, --help              muestra esta ayuda\n  \
+-V, --version           muestra la versión"
     );
 }
 
-/// Parser puro de la línea de comandos. `--help`/`--version` pueden aparecer
-/// en cualquier posición y se atajan con `Err(AccionEarlyExit::...)`. La
-/// secuencia es el primer argumento posicional (no-flag); los flags que
-/// toman valor se consumen en el orden dado.
+/// Parser puro de la línea de comandos. `--help`/`-h` y `--version`/`-V`
+/// pueden aparecer en cualquier posición y se atajan con
+/// `Err(AccionEarlyExit::...)`. La secuencia es el primer argumento posicional
+/// (no-flag); los flags que toman valor se consumen en el orden dado.
 fn parse_cli(args: Vec<String>) -> Result<Cli, AccionEarlyExit> {
     let mut cli = Cli {
         ruta: String::new(),
@@ -98,8 +98,8 @@ fn parse_cli(args: Vec<String>) -> Result<Cli, AccionEarlyExit> {
     let mut args = args.into_iter();
     while let Some(arg) = args.next() {
         match arg.as_str() {
-            "--help" => return Err(AccionEarlyExit::Help),
-            "--version" => return Err(AccionEarlyExit::Version),
+            "--help" | "-h" => return Err(AccionEarlyExit::Help),
+            "--version" | "-V" => return Err(AccionEarlyExit::Version),
             "--validate" => cli.validate = true,
             "--quiet" => cli.quiet = true,
             "--process-model" | "--json" | "--csv" | "--limits" | "--ejecutor" | "--port" => {
@@ -125,7 +125,10 @@ fn parse_cli(args: Vec<String>) -> Result<Cli, AccionEarlyExit> {
                     _ => unreachable!(),
                 }
             }
-            other if other.starts_with("--") => {
+            // Cualquier cosa que empiece por `-` es un flag: si llegara aquí
+            // como posicional, se intentaría abrir un fichero llamado `-x` y
+            // el error hablaría del disco en vez del flag (DIAG-5).
+            other if other.starts_with('-') => {
                 return Err(AccionEarlyExit::Uso(format!("flag desconocido: '{other}'")));
             }
             other => {
@@ -435,6 +438,34 @@ mod tests {
         assert!(matches!(
             parse_cli(vec!["s.yaml".into(), "--inventado".into()]),
             Err(AccionEarlyExit::Uso(_))
+        ));
+    }
+
+    /// DIAG-5: sin las formas cortas, `anvil -h` intentaba abrir un fichero
+    /// llamado `-h` y el error hablaba del disco.
+    #[test]
+    fn parse_formas_cortas_de_ayuda_y_version() {
+        assert!(matches!(
+            parse_cli(vec!["-h".into()]),
+            Err(AccionEarlyExit::Help)
+        ));
+        assert!(matches!(
+            parse_cli(vec!["-V".into()]),
+            Err(AccionEarlyExit::Version)
+        ));
+        // Y siguen valiendo con una secuencia delante, como los largos.
+        assert!(matches!(
+            parse_cli(vec!["s.yaml".into(), "-h".into()]),
+            Err(AccionEarlyExit::Help)
+        ));
+    }
+
+    /// Un flag corto que no existe es un flag, no la ruta de la secuencia.
+    #[test]
+    fn parse_flag_corto_desconocido_es_uso() {
+        assert!(matches!(
+            parse_cli(vec!["-x".into()]),
+            Err(AccionEarlyExit::Uso(ref m)) if m.contains("flag desconocido")
         ));
     }
 

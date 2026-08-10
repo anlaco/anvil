@@ -112,9 +112,16 @@ $A "$TMP/steps.yaml" --validate 2>&1 |
 check DIAG-5b "campo desconocido: ubicación + sugerencia" $?
 
 # ---- DIAG-5c: mensaje de flag desconocido ----
+# El patrón original exigía el adjetivo DESPUÉS del nombre del flag y nunca
+# casó con el mensaje real ("flag desconocido: '--x'"), así que este caso salía
+# rojo mucho después de estar arreglado. Ahora acepta ambos órdenes.
 $A "$R/bug2-csv-nombre.yaml" --inventado 2>&1 |
-  grep -qiE "flag .*--inventado.* (desconocido|no reconocido)"
+  grep -qiE "flag (desconocido|no reconocido).*--inventado|flag .*--inventado.* (desconocido|no reconocido)"
 check DIAG-5c "flag desconocido se reporta como desconocido" $?
+
+# ---- DIAG-5e: -h y -V existen (la beta no los usó ni una vez) ----
+$A -h 2>&1 | grep -qE '^uso: anvil' && $A -V 2>&1 | grep -qE '^anvil [0-9]'
+check DIAG-5e "-h y -V responden como --help y --version" $?
 
 # ---- DIAG-5d: un .wasm que es módulo core, no componente ----
 # Los 8 bytes de cabecera son un módulo core válido y vacío: basta para que el

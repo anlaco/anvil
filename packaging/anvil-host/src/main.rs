@@ -113,12 +113,12 @@ const FLAGS_CON_VALOR: [&str; 6] = [
 fn ruta_de_secuencia(args: &[String]) -> Option<String> {
     let mut it = args.iter();
     while let Some(a) = it.next() {
-        if a == "--help" || a == "--version" {
+        if a == "--help" || a == "-h" || a == "--version" || a == "-V" {
             return None;
         }
         if FLAGS_CON_VALOR.contains(&a.as_str()) {
             it.next();
-        } else if !a.starts_with("--") {
+        } else if !a.starts_with('-') {
             return Some(a.clone());
         }
     }
@@ -327,9 +327,17 @@ fn main() {
                 }
                 programa = Some(p);
             }
-            Err(e) => {
+            // El guest motor re-parsea el mismo YAML un instante después y
+            // reporta el error con su redacción buena. Repetirlo aquí, y
+            // encima como "no se pudo leer ... para los ejecutores" —cuando el
+            // fichero se leyó perfectamente y el fallo es de esquema— es el
+            // patrón que DIAG-5 persigue. Sólo se avisa de lo que el guest no
+            // va a ver igual: un fallo de lectura, donde host y guest difieren
+            // porque el guest mira dentro de su sandbox.
+            Err(e @ cargador::ErrorCarga::Lectura(_)) => {
                 eprintln!("aviso: no se pudo leer '{ruta}' para los ejecutores: {e}");
             }
+            Err(_) => {}
         }
     }
 
@@ -485,6 +493,19 @@ mod tests {
     fn flags_despues_de_la_ruta() {
         let a = args(&["s.yaml", "--json", "o.json", "--csv", "o.csv"]);
         assert_eq!(ruta_de_secuencia(&a), Some("s.yaml".into()));
+    }
+
+    /// DIAG-5: `-h` no es la ruta de una secuencia llamada `-h`, ni `-x` la de
+    /// un fichero llamado `-x`; ambos son asunto del parser del guest.
+    #[test]
+    fn los_flags_cortos_no_son_la_ruta() {
+        assert_eq!(ruta_de_secuencia(&args(&["-h"])), None);
+        assert_eq!(ruta_de_secuencia(&args(&["-V"])), None);
+        assert_eq!(ruta_de_secuencia(&args(&["-x"])), None);
+        assert_eq!(
+            ruta_de_secuencia(&args(&["-x", "s.yaml"])),
+            Some("s.yaml".into())
+        );
     }
 
     #[test]

@@ -217,8 +217,19 @@ arreglo. Lo hecho se marca:
 - ✅ **DEF-4** — un `path` absoluto de ejecutor `wasm` da un error que explica
   el sandbox del cargador (solo ve el directorio del YAML), en vez de
   afirmar que el fichero "no existe" cuando sí existe en el host (#5).
-- Pendientes: DIAG-3/4/5 y la trazabilidad del reporte (#8, #9, #10),
-  contacto de seguridad (#11).
+- ✅ **DIAG-5** — mensajes que apuntan al campo correcto (#10), en cuatro
+  frentes: un sidecar envuelto en `limites:` señala el envoltorio y no el
+  nombre del paso; un campo desconocido dice **dónde** está
+  (`subsecuencias.interna`, `main[0].limite`) y **qué** se quiso escribir
+  (`¿querías 'main'?`); un `.wasm` que es módulo core lo dice en vez de
+  «failed to parse WebAssembly module»; y `-h`/`-V` existen. De paso, un YAML
+  inválido deja de reportarse dos veces (el host callaba mal: avisaba de «no
+  se pudo leer … para los ejecutores» cuando el fichero se leía bien).
+- Pendientes: DIAG-3/4 y la trazabilidad del reporte (#8, #9), contacto de
+  seguridad (#11).
+
+Con DIAG-5 cerrado, `docs/qa/regresion/run.sh` sale **entero en verde** (10
+casos, 0 fallos) por primera vez desde que se escribió.
 
 ## Post-MVP (explícitamente fuera de v1)
 
