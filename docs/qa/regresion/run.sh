@@ -123,6 +123,14 @@ check DIAG-5c "flag desconocido se reporta como desconocido" $?
 $A -h 2>&1 | grep -qE '^uso: anvil' && $A -V 2>&1 | grep -qE '^anvil [0-9]'
 check DIAG-5e "-h y -V responden como --help y --version" $?
 
+# ---- DIAG-5f: nada de ejecutor si el motor no va a correr un paso ----
+# Anunciar 'escuchando en 9100' por delante de la ayuda o del error ensucia la
+# salida, y con el puerto fijo del MVP bloquea a otro anvil que sí fuera a
+# correr (dos `--validate` en paralelo chocaban).
+! $A -h 2>&1 | grep -qi 'escuchando' &&
+  ! $A ejemplos/limites.yaml --validate 2>&1 | grep -qi 'escuchando'
+check DIAG-5f "sin ejecutor embebido para -h/--validate" $?
+
 # ---- DIAG-5d: un .wasm que es módulo core, no componente ----
 # Los 8 bytes de cabecera son un módulo core válido y vacío: basta para que el
 # puente lo rechace, y el mensaje debe decir POR QUÉ (antes decía sólo

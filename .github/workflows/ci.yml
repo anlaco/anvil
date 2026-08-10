@@ -79,10 +79,11 @@ jobs:
         working-directory: anvil
         run: cargo test --manifest-path packaging/anvil-host/Cargo.toml
 
-      # Los casos del informe de beta afirman el comportamiento CORRECTO, así
-      # que hoy fallan a propósito (5 de 6 defectos abiertos). Se ejecutan para
-      # ver el marcador en cada commit, sin cortar el build; cuando estén todos
-      # arreglados, se quita el `|| true` y pasa a ser una regresión de verdad.
-      - name: Regresión de la beta (informativo)
+      # Los casos del informe de beta afirman el comportamiento CORRECTO. Nació
+      # informativo (`|| true`) porque los defectos estaban abiertos y fallaba a
+      # propósito; desde que se cerró DIAG-5 sale entero en verde, así que corta
+      # el build: volver a romper uno de estos diez casos es una regresión de
+      # algo que ya costó una campaña de betatesting encontrar.
+      - name: Regresión de la beta
         working-directory: anvil
-        run: ./docs/qa/regresion/run.sh || true
+        run: ./docs/qa/regresion/run.sh

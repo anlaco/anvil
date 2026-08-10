@@ -106,6 +106,29 @@ const FLAGS_CON_VALOR: [&str; 6] = [
     "--port",
 ];
 
+/// Si el motor va a salir sin invocar un paso, el ejecutor embebido no pinta
+/// nada: abrirlo anuncia `escuchando en 9100` por delante de la ayuda o del
+/// error, y con el puerto fijo del MVP bloquea a otro `anvil` que sí fuera a
+/// correr. Cubre lo que se decide **sólo con los argumentos** —`-h`, `-V`,
+/// `--validate` (que carga sin conectar) y la falta de secuencia—; un flag
+/// desconocido no, porque el host no parsea la línea de comandos (eso es del
+/// guest) y duplicar aquí el flag set completo sería peor negocio.
+fn necesita_ejecutor_embebido(args: &[String]) -> bool {
+    let mut it = args.iter();
+    let mut hay_ruta = false;
+    while let Some(a) = it.next() {
+        match a.as_str() {
+            "--help" | "-h" | "--version" | "-V" | "--validate" => return false,
+            f if FLAGS_CON_VALOR.contains(&f) => {
+                it.next();
+            }
+            f if !f.starts_with('-') => hay_ruta = true,
+            _ => {}
+        }
+    }
+    hay_ruta
+}
+
 /// La ruta de la secuencia: el primer argumento **posicional**, saltando los
 /// flags y sus valores. `None` si no hay ninguno, o si se pidió
 /// `--help`/`--version` (ahí no hay YAML que pre-escanear y avisar de que
@@ -311,6 +334,9 @@ fn main() {
     // nada que pre-escanear y el guest motor se encarga.
     let mut ips_no_loopback: HashSet<IpAddr> = HashSet::new();
     let mut programa: Option<modelo::Programa> = None;
+    // El YAML no pasa el esquema, así que el guest tampoco va a poder
+    // cargarlo: no hace falta abrirle el ejecutor embebido.
+    let mut yaml_invalido = false;
     let ruta_secuencia = ruta_de_secuencia(&args_motor);
     if let Some(ruta) = ruta_secuencia.as_ref() {
         match cargador::cargar_programa_de_archivo(ruta) {
@@ -337,7 +363,11 @@ fn main() {
             Err(e @ cargador::ErrorCarga::Lectura(_)) => {
                 eprintln!("aviso: no se pudo leer '{ruta}' para los ejecutores: {e}");
             }
-            Err(_) => {}
+            // Sintaxis/validación dependen sólo del contenido del fichero, que
+            // es el mismo para los dos, así que el veredicto no puede diferir.
+            // Un fallo de *lectura* sí (sandboxes distintos), y por eso queda
+            // arriba sin marcar nada.
+            Err(_) => yaml_invalido = true,
         }
     }
 
@@ -409,19 +439,25 @@ fn main() {
 
     // --- Thread ejecutor: bind 127.0.0.1:9100 en su sandbox. ---
     // El ejecutor embebido sigue loopback-only (no atiende IPs externas).
-    let exec_engine = engine.clone();
-    let exec_handle = thread::spawn(move || {
-        let wasi = wasi_loopback().build();
-        // El ejecutor es un loop infinito de aceptar: si termina, es un fallo.
-        // El error va a stderr — si no, el usuario sólo ve el timeout de
-        // `esperar_ejecutor()` sin la causa.
-        if let Err(e) = correr_guest(&exec_engine, wasi, EJECUTOR) {
-            eprintln!("el ejecutor de pasos terminó con error: {e:?}");
-        }
-    });
-
-    // --- Esperar a que escuche antes de lanzar el motor (que no reintenta). ---
-    esperar_ejecutor();
+    // No se arranca si el motor no va a llegar a invocar un paso (ayuda,
+    // versión, `--validate`, falta de secuencia).
+    let exec_handle = if necesita_ejecutor_embebido(&args_motor_final) && !yaml_invalido {
+        let exec_engine = engine.clone();
+        let h = thread::spawn(move || {
+            let wasi = wasi_loopback().build();
+            // El ejecutor es un loop infinito de aceptar: si termina, es un
+            // fallo. El error va a stderr — si no, el usuario sólo ve el
+            // timeout de `esperar_ejecutor()` sin la causa.
+            if let Err(e) = correr_guest(&exec_engine, wasi, EJECUTOR) {
+                eprintln!("el ejecutor de pasos terminó con error: {e:?}");
+            }
+        });
+        // --- Esperar a que escuche antes de lanzar el motor (no reintenta).
+        esperar_ejecutor();
+        Some(h)
+    } else {
+        None
+    };
 
     // --- Motor: hereda los args del host (secuencia + flags), preopen cwd.
     // --- Su sandbox permite loopback + las IPs no-loopback declaradas.
@@ -493,6 +529,27 @@ mod tests {
     fn flags_despues_de_la_ruta() {
         let a = args(&["s.yaml", "--json", "o.json", "--csv", "o.csv"]);
         assert_eq!(ruta_de_secuencia(&a), Some("s.yaml".into()));
+    }
+
+    /// El ejecutor embebido abre un puerto fijo y lo anuncia por stderr: no
+    /// debe arrancar cuando el motor va a salir sin invocar ningún paso.
+    #[test]
+    fn el_ejecutor_embebido_solo_arranca_si_hay_pasos_que_correr() {
+        use super::necesita_ejecutor_embebido as necesita;
+        assert!(necesita(&args(&["s.yaml"])));
+        assert!(necesita(&args(&["--process-model", "pm.yaml", "s.yaml"])));
+        // Ayuda y versión: el motor imprime y sale.
+        assert!(!necesita(&args(&["-h"])));
+        assert!(!necesita(&args(&["--help"])));
+        assert!(!necesita(&args(&["-V"])));
+        assert!(!necesita(&args(&["s.yaml", "--version"])));
+        // `--validate` carga y valida sin conectar con nadie.
+        assert!(!necesita(&args(&["s.yaml", "--validate"])));
+        // Sin secuencia no hay nada que correr.
+        assert!(!necesita(&args(&[])));
+        assert!(!necesita(&args(&["--quiet"])));
+        // Y el valor de un flag no cuenta como secuencia.
+        assert!(!necesita(&args(&["--json", "o.json"])));
     }
 
     /// DIAG-5: `-h` no es la ruta de una secuencia llamada `-h`, ni `-x` la de
