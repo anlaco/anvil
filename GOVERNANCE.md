@@ -46,6 +46,17 @@ RFC. Ver [`docs/contrato-grpc.md`](docs/contrato-grpc.md).
 
 Toda participación se rige por el [`CODE_OF_CONDUCT.md`](CODE_OF_CONDUCT.md).
 
+## Canales privados
+
+Ninguno de los dos pasa por un issue público, y ambos publican su contacto en
+su propio fichero — este documento no lo duplica para que no puedan
+contradecirse:
+
+| Para | Dónde |
+|---|---|
+| Vulnerabilidades de seguridad | [`SECURITY.md`](SECURITY.md) |
+| Conducta (acoso, abuso) | [`CODE_OF_CONDUCT.md`](CODE_OF_CONDUCT.md) |
+
 ## Abandono
 
 Si el BDFL deja el proyecto sin sucesor designado, el equipo mantenedor

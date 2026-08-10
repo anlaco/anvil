@@ -232,7 +232,14 @@ arreglo. Lo hecho se marca:
 - ✅ **DIAG-4** — bajo `--process-model`, la secuencia del operador viaja como
   campo propio del JSON (`secuencia_usuario`, #9), no sólo dentro de una frase
   del reporte; sin PM la clave se omite.
-- Pendientes: contacto de seguridad (#11).
+- ✅ **Contacto de seguridad** (#11) — `SECURITY.md` ordenaba no abrir un issue
+  público y remitía a un contacto que no existía, así que un reportero externo
+  se habría quedado sin ruta legítima. Ahora apunta a *private vulnerability
+  reporting* de GitHub, con un correo de respaldo. El mismo hueco estaba en
+  `CODE_OF_CONDUCT.md` (ahí PVR no sirve: un caso de acoso no es una
+  vulnerabilidad) y `GOVERNANCE.md` enlaza ambos canales.
+
+La cola de la beta queda **vacía**.
 
 Con la trazabilidad cerrada, `docs/qa/regresion/run.sh` sale **entero en
 verde** (13 casos, 0 fallos).
@@ -273,6 +280,12 @@ verde** (13 casos, 0 fallos).
   `paso.proto` o de la semántica. Se activa cuando haga falta.
 - `MAINTAINERS.md`, `.github/CODEOWNERS`, `CHANGELOG.md`: hasta primer release
   / >1 mantenedor.
+- **Activar *private vulnerability reporting*** (Settings → Code security):
+  sólo existe en repos **públicos**, así que no puede activarse mientras Anvil
+  sea privado. `SECURITY.md` ya lo da como vía preferente (#11), así que esto
+  hay que pulsarlo **al hacer público el repo** y comprobar que la pestaña
+  *Security* ofrece «Report a vulnerability». Hasta entonces queda el correo
+  de respaldo.
 
 ## Cómo se gestiona el alcance
 

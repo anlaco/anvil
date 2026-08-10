@@ -49,7 +49,14 @@ releases, esta sección listará las versiones soportadas.
 
 **No abras un issue público** para vulnerabilidades de seguridad.
 
-Reporta en privado a **[AÑADIR EMAIL DE CONTACTO PARA SEGURIDAD]**. Incluye:
+Repórtala en privado, por cualquiera de estas dos vías:
+
+1. **Private vulnerability reporting** (preferida): pestaña **Security** del
+   repositorio → **Report a vulnerability**. Abre un hilo privado con el
+   mantenedor; no hace falta conocer ninguna dirección de correo.
+2. **Correo**: **anlaco@proton.me**, si no puedes usar la vía anterior.
+
+Incluye:
 
 - Descripción del problema y su impacto (incluye riesgo **físico** si lo
   hay).
@@ -58,12 +65,10 @@ Reporta en privado a **[AÑADIR EMAIL DE CONTACTO PARA SEGURIDAD]**. Incluye:
 
 ## Proceso
 
-1. **Acuse de recibo** en 48 h.
+1. **Acuse de recibo** en pocos días. Anvil lo mantiene hoy una sola persona
+   (ver [`GOVERNANCE.md`](GOVERNANCE.md)): se responde en cuanto se lee, sin
+   prometer un plazo que unas vacaciones incumplirían.
 2. **Evaluación** y plan de arreglo comunicado al reportero.
 3. Una vez publicado el arreglo, **crédito** al reportero si lo desea.
 4. Coordinación de divulgación si el problema afecta a integradores en
   producción.
-
-> Mientras existan huecos en este `SECURITY.md` (`[AÑADIR ...]`), el contacto
-> de seguridad se acuerda por el canal que el BDFL publique en el momento
-> (ver [`GOVERNANCE.md`](GOVERNANCE.md)).
