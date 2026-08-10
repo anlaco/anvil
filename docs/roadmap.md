@@ -239,7 +239,22 @@ arreglo. Lo hecho se marca:
   `CODE_OF_CONDUCT.md` (ahí PVR no sirve: un caso de acoso no es una
   vulnerabilidad) y `GOVERNANCE.md` enlaza ambos canales.
 
-La cola de la beta queda **vacía**.
+La cola de defectos y diagnósticos queda **vacía**.
+
+### La lección de producto (§5 del informe)
+
+Aparte de los `DEF-*`/`DIAG-*`, la §5 del informe dejó tres requisitos que no
+eran defectos reportados sino la causa de que 6 de los 8 «bugs» de la campaña
+no lo fueran. Se cerraron antes de la segunda ronda de beta, porque
+contaminaban los datos de la propia campaña:
+
+- ✅ `resultado.*` fuera de `asigna` es **error de carga** (#12), en vez de un
+  `nothing` silencioso que dejaba la secuencia en verde sin correr el paso.
+- ✅ El reporte declara **cuántos pasos se saltaron** (#13). Queda abierto el
+  `--strict`, que exige decidir qué salto es «inesperado».
+- ✅ El alcance de `resultado.*` está donde lo lee un usuario (#14).
+- ✅ Y la nota suelta de §3: el ejecutor embebido toma un **puerto efímero**,
+  así que una campaña puede paralelizarse lanzando N procesos (#15).
 
 Con la trazabilidad cerrada, `docs/qa/regresion/run.sh` sale **entero en
 verde** (13 casos, 0 fallos).
@@ -278,8 +293,8 @@ verde** (13 casos, 0 fallos).
 
 - `docs/rfcs/` y `docs/proceso-rfc.md`: proceso para cambios del contrato
   `paso.proto` o de la semántica. Se activa cuando haga falta.
-- `MAINTAINERS.md`, `.github/CODEOWNERS`, `CHANGELOG.md`: hasta primer release
-  / >1 mantenedor.
+- `MAINTAINERS.md`, `.github/CODEOWNERS`: hasta >1 mantenedor.
+  (`CHANGELOG.md` ya existe desde v0.1.0.)
 - **Activar *private vulnerability reporting*** (Settings → Code security):
   sólo existe en repos **públicos**, así que no puede activarse mientras Anvil
   sea privado. `SECURITY.md` ya lo da como vía preferente (#11), así que esto
