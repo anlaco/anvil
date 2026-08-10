@@ -249,6 +249,32 @@ impl ResultadoSecuencia {
         self.pasos.push(paso);
     }
 
+    /// Cuántos pasos se saltaron y cuántos hay en total, contando el árbol
+    /// entero (los `sub_pasos` de un sequence call incluidos).
+    ///
+    /// `saltado` es **neutral** en el agregado por diseño (RF-33/34: un paso
+    /// saltado por `disable` o por precondición falsa no es un fallo), pero
+    /// esa neutralidad esconde cuánto dejó de correrse: en la primera campaña
+    /// de beta, 9 secuencias daban verde saltándose ≥30% de sus pasos y no se
+    /// vio hasta auditar los ficheros a mano. El ratio necesita los dos
+    /// números, así que se devuelven juntos.
+    pub fn saltados(&self) -> (usize, usize) {
+        fn cuenta(pasos: &[ResultadoStep], saltados: &mut usize, total: &mut usize) {
+            for p in pasos {
+                *total += 1;
+                if p.estado == "saltado" {
+                    *saltados += 1;
+                }
+                if let Some(sub) = &p.sub_pasos {
+                    cuenta(sub, saltados, total);
+                }
+            }
+        }
+        let (mut saltados, mut total) = (0, 0);
+        cuenta(&self.pasos, &mut saltados, &mut total);
+        (saltados, total)
+    }
+
     /// Estado agregado de la secuencia. Un `error` en cualquier paso manda
     /// sobre un `fallo`; sin ninguno de los dos, la secuencia pasa.
     pub fn estado(&self) -> &'static str {
@@ -268,10 +294,20 @@ impl ResultadoSecuencia {
     /// los tests) no se acoplen a stdout. `reporte()` (la API pública
     /// congelada) delega aquí con `stdout` y produce los mismos bytes que
     /// el `println!` original.
+    /// Extensión aditiva de RNF-08 (como el `"saltado"` de M4 y el anidamiento
+    /// de M4b): si algún paso se saltó, se cierra con una línea de recuento.
+    /// Una corrida sin saltos produce exactamente los bytes de siempre, y las
+    /// líneas de paso no cambian; lo que se añade es una línea que antes no
+    /// existía, para que un verde con la mitad de la secuencia sin correr no
+    /// pase inadvertido en consola.
     pub fn reporte_a(&self, w: &mut impl std::io::Write) -> std::io::Result<()> {
         writeln!(w, "=== {}: {} ===", self.nombre, self.estado())?;
         for p in &self.pasos {
             Self::escribe_paso(w, p, 1)?;
+        }
+        let (saltados, total) = self.saltados();
+        if saltados > 0 {
+            writeln!(w, "  ({saltados} de {total} pasos saltados)")?;
         }
         Ok(())
     }
@@ -770,12 +806,49 @@ mod tests {
         let mut out = Vec::new();
         s.reporte_a(&mut out).unwrap();
 
+        // La línea de recuento la añade #13: un verde que se salta la mitad
+        // de la secuencia tiene que decirlo en consola.
         let esperado = "\
 === variables: paso ===
   [paso] init_log: statement ok
   [saltado] paso_obsoleto: disable
+  (1 de 2 pasos saltados)
 ";
         assert_eq!(String::from_utf8(out).unwrap(), esperado);
+    }
+
+    /// Sin saltos, el reporte produce exactamente los bytes de siempre: la
+    /// línea de recuento no aparece (RNF-08, extensión aditiva).
+    #[test]
+    fn reporte_sin_saltados_no_lleva_linea_de_recuento() {
+        let mut s = ResultadoSecuencia::nueva("basica");
+        s.registra(ResultadoStep::nuevo("medir", "paso", "ok"));
+
+        let mut out = Vec::new();
+        s.reporte_a(&mut out).unwrap();
+        assert_eq!(
+            String::from_utf8(out).unwrap(),
+            "=== basica: paso ===\n  [paso] medir: ok\n"
+        );
+    }
+
+    #[test]
+    fn saltados_cuenta_el_arbol_entero() {
+        // Un sequence call cuyos hijos se saltan: lo que importa al triar es
+        // cuántos pasos no corrieron, en cualquier nivel.
+        let mut call = ResultadoStep::nuevo("test_uut", "paso", "sequence call → paso");
+        call.sub_pasos = Some(vec![
+            ResultadoStep::nuevo("medir_1", "saltado", "precondición falsa"),
+            ResultadoStep::nuevo("medir_2", "paso", "ok"),
+        ]);
+        let mut s = ResultadoSecuencia::nueva("raiz");
+        s.registra(ResultadoStep::nuevo("preparar", "saltado", "disable"));
+        s.registra(call);
+
+        // 4 pasos en el árbol (preparar, el call y sus dos hijos), 2 saltados.
+        assert_eq!(s.saltados(), (2, 4));
+        // Y el agregado sigue siendo `paso`: la neutralidad no cambia (RF-33/34).
+        assert_eq!(s.estado(), "paso");
     }
 
     /// Los defaults de `DefinicionPaso::nuevo` preservan el comportamiento de

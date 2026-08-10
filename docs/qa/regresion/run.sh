@@ -185,6 +185,31 @@ $A "$TMP/lec1.yaml" --validate 2>&1 |
   grep -qE "medir_voltaje.*resultado.valor_medido|resultado.valor_medido.*precondicion"
 check LEC-1 "resultado.* en una precondición es error de carga" $?
 
+# ---- LEC-2: un verde que se saltó pasos tiene que decirlo ----
+# `saltado` es neutral en el agregado y debe seguir siéndolo, pero 9 secuencias
+# de la campaña daban verde saltándose ≥30% de sus pasos sin que se notara.
+cat >"$TMP/lec2.yaml" <<'YAML'
+nombre: regresion_saltos_visibles
+locals:
+  activo: false
+main:
+  - nombre: preparar
+    tipo: statement
+    statement: 'locals.activo = false'
+  - nombre: medir_voltaje
+    precondicion: 'locals.activo'
+  - nombre: verificar_led
+    disable: true
+YAML
+$A "$TMP/lec2.yaml" --json "$TMP/lec2.json" >"$TMP/lec2.out" 2>/dev/null
+res=0
+grep -qE '\(2 de 3 pasos saltados\)' "$TMP/lec2.out" || res=1
+grep -q '"pasos_saltados": 2' "$TMP/lec2.json" || res=1
+grep -q '"pasos_totales": 3' "$TMP/lec2.json" || res=1
+# Y el agregado sigue siendo verde: la neutralidad no cambia (RF-33/34).
+grep -q ': paso ===' "$TMP/lec2.out" || res=1
+check LEC-2 "un verde con pasos saltados lo declara (consola y JSON)" $res
+
 echo "===================================================================="
 echo "  OK: $ok    FALLA: $falla"
 [ "$falla" -eq 0 ]
