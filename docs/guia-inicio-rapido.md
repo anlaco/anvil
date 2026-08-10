@@ -139,8 +139,9 @@ Mismo reporte anidado/JSON/CSV que el smoke. Los logs del ejecutor
 **`out.json`**: `sub_pasos` anidados; `medir_voltaje` con `valor_medido: 4.2`
 y `limite_min/max`.
 
-**`out.csv`**: filas aplanadas `test_fuentes/medir_voltaje` (cabecera sin
-columnas nuevas).
+**`out.csv`**: filas aplanadas `test_fuentes/medir_voltaje`; el aplanado no
+añade columnas propias, y la última de la cabecera es `fase`
+(`setup`/`main`/`cleanup`).
 
 ## Variaciones de M4b (subsecuencias)
 
@@ -293,6 +294,11 @@ versión y todo esto sobra.
   accesible (el host preopena el directorio actual). Por lo mismo, `--json` y
   `--csv` sólo pueden escribir **dentro del directorio actual**: una ruta
   absoluta a otro sitio da `No such file or directory (os error 44)`.
+- **`usa 'resultado.valor_medido' en 'precondicion', donde no está
+  disponible`** → `resultado.*` sólo vive dentro del `asigna` del propio paso:
+  una precondición se evalúa *antes* de invocarlo, así que no hay resultado
+  que leer. Vuelca la medida a un local con `asigna` y léela desde ahí (ver
+  [variables-y-alcances.md](diseno/variables-y-alcances.md)).
 - **`el ejecutor de pasos no empezó a escuchar`** → el guest ejecutor falló al
   arrancar; el error concreto va a stderr. Si tarda pero no falla, es el
   arranque lento de debug (ver arriba): usa `make release`.

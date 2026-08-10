@@ -21,6 +21,11 @@ TestStand.
 | **Parameters** | Secuencia llamada (entrada/salida by-reference) | Al invocar via sequence call (M4b) | MVP-parcial |
 | **FileGlobals** | Todas las secuencias de un archivo | Al cargar el archivo | MVP-parcial |
 | **StationGlobals** | Todas las secuencias de la estación | Persistente en la estación | post-MVP |
+| **resultado** | **Sólo el `asigna` del propio paso** | Al volver el paso, con lo que devolvió | MVP-parcial |
+
+`resultado` no es un scope de variables como los otros cuatro: es la ventana
+—brevísima— por la que se lee lo que el paso acaba de devolver. Ver la regla
+de alcance más abajo.
 
 ## En el formato de secuencia (YAML)
 
@@ -60,6 +65,30 @@ main:
   crea una `Local` nueva en silencio en vez de fallar: el resto de la
   secuencia sigue leyendo la variable original, sin tocar, y el veredicto es
   el que no se pidió. Ver [informe-beta-2026-08.md](../qa/informe-beta-2026-08.md#def-3).
+- **`resultado.*` sólo es visible dentro del `asigna` del propio paso.** No
+  está disponible en `precondicion`, ni en la `condicion` de un `pass_fail`,
+  ni en un `statement`. La razón es de secuencia temporal: `resultado` es lo
+  que el paso **acaba de devolver**, y una precondición se evalúa *antes* de
+  invocarlo — no hay nada que leer todavía. El motor lo liga justo antes del
+  `asigna` y lo suelta justo después.
+
+  Si necesitas una medida más allá de ese punto, vuélcala a un local y léela
+  desde ahí:
+
+  ```yaml
+  main:
+    - nombre: medir_voltaje
+      asigna: { v: '${resultado.valor_medido}' }   # aquí sí
+    - nombre: verificar
+      precondicion: 'locals.v > 4.5'               # y aquí se lee el local
+  ```
+
+  Usarlo fuera de `asigna` es **error de carga** desde #12. Antes no fallaba:
+  valía `nothing`, así que `precondicion: 'resultado.valor_medido != nothing'`
+  era un `false` constante, el paso se saltaba, y como `saltado` no degrada el
+  agregado la secuencia **terminaba en verde**. En la primera campaña de beta
+  ese patrón se propagó a 19 secuencias y 51 precondiciones. Ver
+  [§5 del informe](../qa/informe-beta-2026-08.md#leccion).
 
 ## Por qué este recorte
 
