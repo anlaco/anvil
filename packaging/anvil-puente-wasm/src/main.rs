@@ -70,8 +70,39 @@ struct ComponenteCargado {
     paso: AnvilPaso,
 }
 
+/// Distingue, mirando los 8 bytes de cabecera, los dos fallos que wasmtime
+/// reporta con el **mismo** texto («failed to parse WebAssembly module»): un
+/// fichero que no es WASM, y un módulo *core* compilado como tal en vez de
+/// como componente. El segundo es el tropiezo nº1 de quien escribe su primer
+/// paso, y el mensaje de wasmtime le hace culpar al toolchain (DIAG-5).
+///
+/// La cabecera es `\0asm` + versión: los módulos core llevan `01 00 00 00` y
+/// los componentes `0d 00 01 00` (layer 1). Mirar los bytes, y no el texto del
+/// error, deja el diagnóstico a salvo de que wasmtime lo reescriba.
+fn diagnostica_no_componente(bytes: &[u8]) -> Option<String> {
+    if bytes.len() < 8 || &bytes[0..4] != b"\0asm" {
+        return Some(
+            "no es un fichero WebAssembly: no empieza por la cabecera '\\0asm'".to_string(),
+        );
+    }
+    if bytes[4..8] == [0x01, 0x00, 0x00, 0x00] {
+        return Some(
+            "es un módulo core de WebAssembly, no un componente: compílalo con \
+             'cargo component build' y comprueba que el crate llama a \
+             'bindings::export!' (ver docs/guia-inicio-rapido.md)"
+                .to_string(),
+        );
+    }
+    None
+}
+
 impl ComponenteCargado {
     fn cargar(engine: &Engine, bytes: &[u8]) -> Result<Self, String> {
+        // Antes de instanciar nada: si el `.wasm` no es un componente, decirlo
+        // con el motivo real en vez del genérico de wasmtime.
+        if let Some(diag) = diagnostica_no_componente(bytes) {
+            return Err(diag);
+        }
         let mut linker = Linker::new(engine);
         wasmtime_wasi::p2::add_to_linker_sync(&mut linker)
             .map_err(|e| format!("linker WASI: {e}"))?;
@@ -245,4 +276,48 @@ fn main() {
     // El servidor no termina solo (loop de atender peticiones). El host
     // mata el proceso al acabar la secuencia; en uso manual, Ctrl-C.
     let _ = rt.block_on(servidor);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Cabecera de un módulo core: `\0asm` + versión 1.
+    const CABECERA_MODULO_CORE: [u8; 8] = [0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00];
+    /// Cabecera de un componente: `\0asm` + versión 13, layer 1.
+    const CABECERA_COMPONENTE: [u8; 8] = [0x00, 0x61, 0x73, 0x6d, 0x0d, 0x00, 0x01, 0x00];
+
+    #[test]
+    fn modulo_core_se_diagnostica_como_tal() {
+        let diag = diagnostica_no_componente(&CABECERA_MODULO_CORE).expect("debe diagnosticar");
+        assert!(diag.contains("módulo core"), "{diag}");
+        assert!(diag.contains("cargo component build"), "{diag}");
+    }
+
+    #[test]
+    fn componente_no_dispara_el_diagnostico() {
+        assert_eq!(diagnostica_no_componente(&CABECERA_COMPONENTE), None);
+    }
+
+    /// Un componente roto **más allá** de la cabecera no es asunto de este
+    /// diagnóstico: ahí el mensaje de wasmtime sí es el bueno.
+    #[test]
+    fn componente_con_cuerpo_basura_lo_diagnostica_wasmtime() {
+        let mut bytes = CABECERA_COMPONENTE.to_vec();
+        bytes.extend_from_slice(&[0xff; 16]);
+        assert_eq!(diagnostica_no_componente(&bytes), None);
+    }
+
+    #[test]
+    fn fichero_que_no_es_wasm_se_diagnostica() {
+        let diag =
+            diagnostica_no_componente(b"nombre: no soy un wasm\n").expect("debe diagnosticar");
+        assert!(diag.contains("no es un fichero WebAssembly"), "{diag}");
+    }
+
+    #[test]
+    fn fichero_mas_corto_que_la_cabecera_se_diagnostica() {
+        let diag = diagnostica_no_componente(&CABECERA_COMPONENTE[..4]).expect("debe diagnosticar");
+        assert!(diag.contains("no es un fichero WebAssembly"), "{diag}");
+    }
 }

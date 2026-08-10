@@ -83,10 +83,28 @@ $A ejemplos/limites.yaml --limits "$TMP/huerfano.limits.yaml" 2>&1 |
   grep -qiE 'aviso.*sidecar|sidecar.*no afect|ningún paso'
 check DIAG-1 "aviso cuando el sidecar afecta a 0 pasos" $?
 
-# ---- DIAG-5: mensaje de flag desconocido ----
+# ---- DIAG-5c: mensaje de flag desconocido ----
 $A "$R/bug2-csv-nombre.yaml" --inventado 2>&1 |
   grep -qiE "flag .*--inventado.* (desconocido|no reconocido)"
-check DIAG-5 "flag desconocido se reporta como desconocido" $?
+check DIAG-5c "flag desconocido se reporta como desconocido" $?
+
+# ---- DIAG-5d: un .wasm que es módulo core, no componente ----
+# Los 8 bytes de cabecera son un módulo core válido y vacío: basta para que el
+# puente lo rechace, y el mensaje debe decir POR QUÉ (antes decía sólo
+# "failed to parse WebAssembly module", que hizo culpar al toolchain).
+printf '\x00asm\x01\x00\x00\x00' >"$TMP/core.wasm"
+cat >"$TMP/coremod.yaml" <<'YAML'
+nombre: regresion_modulo_core
+ejecutores:
+  - nombre: dmm
+    tipo: wasm
+    path: ./core.wasm
+main:
+  - nombre: medir
+    ejecutor: dmm
+YAML
+$A "$TMP/coremod.yaml" 2>&1 | grep -qiE 'módulo core|modulo core'
+check DIAG-5d "un .wasm módulo core se diagnostica como tal" $?
 
 echo "===================================================================="
 echo "  OK: $ok    FALLA: $falla"
