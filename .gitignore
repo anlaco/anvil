@@ -6,3 +6,6 @@ Cargo.lock
 # Salidas de smoke del CLI (./anvil ... --json ./out.json):
 out.json
 out.csv
+
+# Salidas de las corridas del betatester (la herramienta vive en Anvil-Test).
+betatester/
