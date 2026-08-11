@@ -1,0 +1,4 @@
+medir_voltaje:
+  tipo: comparacion
+  op: eq
+  esperado: 4.6

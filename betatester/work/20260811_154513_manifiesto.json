@@ -1,0 +1,98 @@
+{
+  "generado": "2026-08-11T15:45:13.171697",
+  "n_secuencias": 10,
+  "secuencias": [
+    {
+      "timestamp": "20260811_154513",
+      "secuencia": "beta_sub_154513_mewh",
+      "yaml_path": "/media/alaforga/ssd/01-PRODUCTOS/Anvil/betatester/work/20260811_154513_beta_sub_154513_mewh.yaml",
+      "sidecar_path": null,
+      "flags_extra": [
+        "--csv"
+      ]
+    },
+    {
+      "timestamp": "20260811_154513",
+      "secuencia": "beta_154513_ptnk",
+      "yaml_path": "/media/alaforga/ssd/01-PRODUCTOS/Anvil/betatester/work/20260811_154513_beta_154513_ptnk.yaml",
+      "sidecar_path": "/media/alaforga/ssd/01-PRODUCTOS/Anvil/betatester/work/20260811_154513_beta_154513_ptnk.limits.yaml",
+      "flags_extra": [
+        "--json",
+        "--validate"
+      ]
+    },
+    {
+      "timestamp": "20260811_154513",
+      "secuencia": "beta_edge_min_154513",
+      "yaml_path": "/media/alaforga/ssd/01-PRODUCTOS/Anvil/betatester/work/20260811_154513_beta_edge_min_154513.yaml",
+      "sidecar_path": null,
+      "flags_extra": [
+        "--json"
+      ]
+    },
+    {
+      "timestamp": "20260811_154513",
+      "secuencia": "beta_sub_154513_swzw",
+      "yaml_path": "/media/alaforga/ssd/01-PRODUCTOS/Anvil/betatester/work/20260811_154513_beta_sub_154513_swzw.yaml",
+      "sidecar_path": null,
+      "flags_extra": [
+        "--json"
+      ]
+    },
+    {
+      "timestamp": "20260811_154513",
+      "secuencia": "beta_edge_lim_154513",
+      "yaml_path": "/media/alaforga/ssd/01-PRODUCTOS/Anvil/betatester/work/20260811_154513_beta_edge_lim_154513.yaml",
+      "sidecar_path": null,
+      "flags_extra": [
+        "--json",
+        "--csv"
+      ]
+    },
+    {
+      "timestamp": "20260811_154513",
+      "secuencia": "beta_154513_kfqp",
+      "yaml_path": "/media/alaforga/ssd/01-PRODUCTOS/Anvil/betatester/work/20260811_154513_beta_154513_kfqp.yaml",
+      "sidecar_path": null,
+      "flags_extra": [
+        "--json"
+      ]
+    },
+    {
+      "timestamp": "20260811_154513",
+      "secuencia": "beta_edge_lim_154513",
+      "yaml_path": "/media/alaforga/ssd/01-PRODUCTOS/Anvil/betatester/work/20260811_154513_beta_edge_lim_154513.yaml",
+      "sidecar_path": null,
+      "flags_extra": []
+    },
+    {
+      "timestamp": "20260811_154513",
+      "secuencia": "beta_154513_xpun",
+      "yaml_path": "/media/alaforga/ssd/01-PRODUCTOS/Anvil/betatester/work/20260811_154513_beta_154513_xpun.yaml",
+      "sidecar_path": null,
+      "flags_extra": [
+        "--json",
+        "--csv"
+      ]
+    },
+    {
+      "timestamp": "20260811_154513",
+      "secuencia": "beta_sub_154513_zonm",
+      "yaml_path": "/media/alaforga/ssd/01-PRODUCTOS/Anvil/betatester/work/20260811_154513_beta_sub_154513_zonm.yaml",
+      "sidecar_path": null,
+      "flags_extra": [
+        "--json"
+      ]
+    },
+    {
+      "timestamp": "20260811_154513",
+      "secuencia": "beta_154513_ukll",
+      "yaml_path": "/media/alaforga/ssd/01-PRODUCTOS/Anvil/betatester/work/20260811_154513_beta_154513_ukll.yaml",
+      "sidecar_path": "/media/alaforga/ssd/01-PRODUCTOS/Anvil/betatester/work/20260811_154513_beta_154513_ukll.limits.yaml",
+      "flags_extra": [
+        "--json",
+        "--validate"
+      ]
+    }
+  ]
+}
