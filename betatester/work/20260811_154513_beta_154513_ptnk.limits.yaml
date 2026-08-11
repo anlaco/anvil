@@ -1,4 +1,0 @@
-medir_voltaje:
-  tipo: comparacion
-  op: ge
-  esperado: 5.48
