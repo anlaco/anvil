@@ -1,0 +1,27 @@
+nombre: beta_154513_xpun
+file_globals:
+  fg_0sig: batch-938
+setup:
+- nombre: conectar_equipo
+  reintentos: 2
+main:
+- nombre: abrir_rele
+  reintentos: 3
+  limite:
+    tipo: rango
+    min: 4.05
+    max: 4.99
+- nombre: conectar_equipo
+  reintentos: 1
+- nombre: verificar_led
+  reintentos: 1
+  limite:
+    tipo: comparacion
+    op: gt
+    esperado: 5.16
+- nombre: abrir_rele
+  reintentos: 3
+- nombre: medir_voltaje
+  reintentos: 1
+- nombre: abrir_rele
+  reintentos: 1

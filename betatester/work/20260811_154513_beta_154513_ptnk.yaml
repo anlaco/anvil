@@ -1,0 +1,25 @@
+nombre: beta_154513_ptnk
+setup:
+- nombre: abrir_rele
+  reintentos: 2
+- nombre: conectar_equipo
+  reintentos: 2
+main:
+- nombre: conectar_equipo
+  reintentos: 3
+- nombre: medir_voltaje
+  reintentos: 3
+  limite:
+    tipo: rango
+    min: 3.5
+    max: 4.23
+- nombre: abrir_rele
+  reintentos: 2
+- nombre: conectar_equipo
+  reintentos: 2
+  pause_on_fail: true
+- nombre: conectar_equipo
+  reintentos: 3
+cleanup:
+- nombre: notificar_resultado
+  reintentos: 2

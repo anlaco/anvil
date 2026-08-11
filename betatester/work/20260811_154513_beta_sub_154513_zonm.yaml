@@ -1,0 +1,34 @@
+nombre: beta_sub_154513_zonm
+locals:
+  canal_in: 0.43
+  ok_init: false
+subsecuencias:
+  init_comun:
+    parameters:
+      canal: 0.0
+      listo: false
+    main:
+    - nombre: preparar_canal
+      tipo: statement
+      statement: parameters.listo = (parameters.canal >= 0.0)
+main:
+- nombre: preparar
+  tipo: sequence_call
+  secuencia: init_comun
+  parametros:
+    canal: locals.canal_in
+    listo: locals.ok_init
+- nombre: conectar_equipo
+  reintentos: 3
+- nombre: stmt_6u0y
+  tipo: statement
+  statement: locals.ok_init = true
+- nombre: verificar_led
+  reintentos: 2
+  limite:
+    tipo: rango
+    min: 4.11
+    max: 5.97
+cleanup:
+- nombre: desconectar_equipo
+  reintentos: 1
