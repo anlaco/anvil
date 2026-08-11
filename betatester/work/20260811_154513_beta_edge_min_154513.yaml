@@ -1,4 +1,0 @@
-nombre: beta_edge_min_154513
-main:
-- nombre: verificar_led
-  reintentos: 1
