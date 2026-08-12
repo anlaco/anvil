@@ -209,6 +209,40 @@ El ejecutor en este modo **no termina solo** (loop de aceptar); Ctrl-C al
 acabar. Es sólo para depurar guests por separado; para uso normal, el
 binario `anvil` (host) es lo recomendado.
 
+## Medir contra un instrumento que no existe
+
+`ejemplos/scpi.yaml` no necesita un Keithley en la mesa. El paso
+`medir_voltaje_scpi` abre un socket a `ANVIL_SCPI_ADDR` (por defecto
+`127.0.0.1:5025`) y manda `MEASURE:VOLTAGE?`; lo que responda al otro lado le da
+igual mientras hable SCPI. [Crucible](https://github.com/anlaco/Crucible) sirve
+justo eso a partir de un YAML.
+
+Con el repo de Crucible clonado al lado y `cargo build` hecho allí, una terminal
+más:
+
+```sh
+# Terminal 3 — el gemelo digital, en 5025
+./target/debug/crucible perfiles/keithley_2400_demo.yaml
+```
+
+Y el motor contra la secuencia SCPI en vez de la de subsecuencias:
+
+```sh
+wasmtime -S cli -S tcp=y -S inherit-network=y --dir=. \
+  target/wasm32-wasip2/debug/anvil-guest.wasm ejemplos/scpi.yaml
+```
+
+```
+=== scpi_demo: paso ===
+  [paso] medir_voltaje_scpi: SCPI medido: 4.501385029307777 V
+```
+
+Verificado el 2026-08-12. Usa el perfil `_demo`, no el de referencia: el de
+referencia arranca en reposo —`output: false`, como un instrumento recién
+encendido— y como este paso mide sin configurar nada antes, la respuesta sería
+`0.0` y el límite 4,0–5,0 lo suspendería. El decimal varía en cada corrida: el
+modelo de medida de Crucible añade ruido gaussiano.
+
 ## Escribir un paso propio en Rust (M5-ext.2, ADR-0015)
 
 El "hola mundo" completo: escribe un paso en Rust, compílalo a `.wasm` y
