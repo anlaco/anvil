@@ -1,0 +1,27 @@
+# Fixture de `tests/exit_codes.rs`: un `error` de EJECUCIÓN, no de carga.
+#
+# Ningún fichero de `ejemplos/` producía un `error` determinista y sin red
+# (`scpi.yaml` sólo falla porque no hay nada escuchando en 5025, y
+# `medir_fuentes.yaml` sólo da error corrido en solitario, que es incidental:
+# está pensado para invocarse como subsecuencia). Hacía falta uno explícito.
+#
+# La división por cero sobrevive a la validación del cargador —que comprueba
+# sintaxis y alcance de `resultado.*`, no aritmética— y revienta al evaluar el
+# `statement`, que el motor registra como `error` (RF-27):
+#
+#   === exit_error: error ===
+#   [error] division_por_cero: statement: en offset 0: división por cero
+#
+# Si algún día `expr` hiciera constant-folding en carga, esto pasaría a ser un
+# error de carga: seguiría saliendo 1, pero por otro camino. Por eso el test
+# comprueba además que el error NO es de carga.
+
+nombre: exit_error
+
+locals:
+  x: 0.0
+
+main:
+  - nombre: division_por_cero
+    tipo: statement
+    statement: 'locals.x = 1 / 0'

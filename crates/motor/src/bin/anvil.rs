@@ -161,6 +161,14 @@ fn main() {
         Err(AccionEarlyExit::Uso(m)) => {
             eprintln!("{m}");
             usage();
+            // 2 es la convención Unix para «mal uso», distinta del 1 de
+            // «corrió y falló». Pero bajo el host embebido (ADR-0011) no se
+            // ve: el std de `wasm32-wasip2` aplana cualquier
+            // `process::exit(n≠0)` a `I32Exit(1)` al cruzar `wasi:cli/run`
+            // (comprobado: `anvil --flag-inventado` sale 1, no 2). Por eso el
+            // contrato publicado del binario es binario — 0 = paso, 1 = todo
+            // lo demás. Se conserva el 2 porque sí llega si el guest se corre
+            // suelto o se compila nativo.
             std::process::exit(2);
         }
     };
@@ -303,8 +311,28 @@ fn main() {
     }
     let mut composite = modelo::SinkCompuesto::nuevo(sinks);
 
-    if let Err(e) = motor.ejecuta_programa(&programa, &mut composite) {
-        eprintln!("la secuencia se interrumpió: {e}");
+    let resultado = match motor.ejecuta_programa(&programa, &mut composite) {
+        Ok(r) => r,
+        Err(e) => {
+            eprintln!("la secuencia se interrumpió: {e}");
+            std::process::exit(1);
+        }
+    };
+
+    // El veredicto agregado es el exit code (issue #16). Antes se descartaba
+    // el `Ok` y sólo se miraba el `Err` —que es «se rompió la comunicación»,
+    // no «el veredicto es negativo»—, así que una secuencia en rojo salía 0 y
+    // `anvil secuencia.yaml && desplegar` desplegaba con el DUT suspendido.
+    //
+    // Se niega `"paso"` en vez de enumerar `"fallo"|"error"` para que un
+    // estado nuevo no se cuele como éxito. `"saltado"` no aparece porque
+    // `ResultadoSecuencia::estado()` lo trata como neutral (RF-33/34), igual
+    // que el bucle de fases en `motor::ejecuta_secuencia_interna`.
+    //
+    // Los sinks ya escribieron: `on_fin_secuencia` se dispara dentro de
+    // `ejecuta_programa`, y JSON/CSV van a un `File` sin bufferear, así que
+    // este `exit` (que no corre destructores) no pierde nada.
+    if resultado.estado() != "paso" {
         std::process::exit(1);
     }
 }
