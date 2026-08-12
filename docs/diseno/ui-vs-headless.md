@@ -43,6 +43,33 @@ anvil <secuencia.yaml> [--process-model <pm.yaml>] [--json <ruta>] \
   congelado se omite, no se cambia). JSON/CSV siguen emitiéndose.
 - `--help`/`--version` salen antes de cargar/conectar.
 
+### Exit codes (#16)
+
+El contrato del binario es **binario**:
+
+| Código | Significa |
+|---|---|
+| `0` | la secuencia corrió y el veredicto agregado es `paso` |
+| `1` | cualquier otra cosa: veredicto `fallo` o `error`, error de carga, error de uso, ejecución interrumpida |
+
+El veredicto sale de `ResultadoSecuencia::estado()`, donde un `error` en
+cualquier paso manda sobre un `fallo` y `saltado` es neutral (RF-33/34: un paso
+saltado por `disable` o por precondición falsa no es un fallo). `--quiet` no lo
+altera: silencia el reporte, no el veredicto.
+
+Es lo que un pipeline necesita —distinguir «pasó» de «no pasó»— y es todo lo
+que la plataforma permite. **No hay códigos granulares, y no pueden haberlos
+hoy**: el std de Rust en `wasm32-wasip2` aplana cualquier
+`process::exit(n≠0)` a `I32Exit(1)` al cruzar `wasi:cli/run`, y esa interfaz
+devuelve `result<_, _>`, sin código. El propio `exit(2)` que el guest usa para
+el error de uso se ve como `1` a través del host (`anvil --flag-inventado` → 1);
+sólo llega intacto corriendo el guest suelto o compilado nativo. Un esquema
+0/1/2/3 exigiría un canal nuevo entre guest y host, y eso sería un ADR.
+
+El contrato está fijado por `packaging/anvil-host/tests/exit_codes.rs`, que
+lanza el binario real: es la única forma de observar el aplanamiento — un test
+contra el motor nativo pasaría en verde sin probar nada de esto.
+
 Parseo manual, sin `clap`/`getopts`: el flag set es pequeño y se evita
 peso en el `.wasm` (ADR-0001). Si el flag set crece > ~10 o aparecen
 subcomandos, se reconsidera con un ADR (post-MVP). El host embebido

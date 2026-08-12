@@ -75,9 +75,12 @@ jobs:
         working-directory: anvil
         run: make release
 
+      # `--release` no es cosmético: `tests/exit_codes.rs` lanza el binario
+      # cuatro veces, y sin él cargo compilaría un `anvil` de debug aparte del
+      # que acaba de dejar `make release` (~23 s por invocación en vez de ~1 s).
       - name: Tests del host
         working-directory: anvil
-        run: cargo test --manifest-path packaging/anvil-host/Cargo.toml
+        run: cargo test --release --manifest-path packaging/anvil-host/Cargo.toml
 
       # Los casos del informe de beta afirman el comportamiento CORRECTO. Nació
       # informativo (`|| true`) porque los defectos estaban abiertos y fallaba a

@@ -1,0 +1,20 @@
+# Fixture de `tests/exit_codes.rs`: la secuencia más corta que acaba en `paso`.
+#
+# No va en `ejemplos/` a propósito: allí cada fichero es material didáctico con
+# cabecera narrativa, y éste sólo existe para fijar el exit code 0.
+#
+# Un único `statement` (RF-27) que se evalúa sin error: no toca gRPC, así que
+# no depende del ejecutor ni de la red y el veredicto es determinista.
+#
+#   === exit_paso: paso ===
+#   [paso] asignacion_trivial: statement ok
+
+nombre: exit_paso
+
+locals:
+  x: 0.0
+
+main:
+  - nombre: asignacion_trivial
+    tipo: statement
+    statement: 'locals.x = 1 + 1'

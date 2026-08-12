@@ -231,6 +231,21 @@ check NOTA-1 "dos anvil simultáneos corren sin chocar de puerto" $res
 $A ejemplos/basica.yaml --port 9300 2>&1 | grep -qE 'escuchando en 9300'
 check NOTA-1b "--port fija también el puerto del ejecutor embebido" $?
 
+# ---- EXIT-1: el exit code debe reflejar el veredicto agregado (#16) ----
+# `main` descartaba el `Ok` de `ejecuta_programa` y sólo miraba el `Err` (que
+# es «se rompió la comunicación», no «el veredicto es negativo»), así que una
+# secuencia en rojo salía 0 y `anvil secuencia.yaml && desplegar` desplegaba
+# con el DUT suspendido. Contrato: 0 sólo si el agregado es `paso`, 1 en todo
+# lo demás. El fixture de `error` es el de los tests del host: ningún ejemplo
+# produce un error de ejecución determinista y sin red.
+F=packaging/anvil-host/tests/fixtures
+res=0
+$A "$F/paso.yaml"          --quiet >/dev/null 2>&1; [ $? -eq 0 ] || res=1
+$A ejemplos/veredicto.yaml --quiet >/dev/null 2>&1; [ $? -eq 1 ] || res=1
+$A "$F/error_runtime.yaml" --quiet >/dev/null 2>&1; [ $? -eq 1 ] || res=1
+$A no-existe-de-verdad.yaml        >/dev/null 2>&1; [ $? -eq 1 ] || res=1
+check EXIT-1 "exit 0 sólo con veredicto paso; fallo/error/carga salen 1" $res
+
 echo "===================================================================="
 echo "  OK: $ok    FALLA: $falla"
 [ "$falla" -eq 0 ]
