@@ -17,6 +17,18 @@ Empieza por [`docs/vision.md`](docs/vision.md).
 
 ## Correr el ejemplo
 
+> **Antes de compilar: clona `wasi-grpc` al lado de este repo.** La pila gRPC
+> se referencia por ruta relativa y todavía no está publicada en crates.io, así
+> que sin ella `cargo` **no llega ni a leer el manifiesto**.
+>
+> ```sh
+> git clone https://github.com/anlaco/anvil
+> git clone https://github.com/anlaco/wasi-grpc   # hermano, no dentro
+> cd anvil
+> ```
+>
+> Es un apaño y está reconocido como tal: [#25](https://github.com/anlaco/anvil/issues/25).
+
 **Un binario** (`anvil`, ADR-0011) hospeda wasmtime y los dos guests WASM en
 sandbox, sin instalar nada:
 
