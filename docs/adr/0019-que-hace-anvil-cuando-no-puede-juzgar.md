@@ -1,8 +1,12 @@
 # ADR-0019: Qué hace Anvil cuando no puede juzgar
 
-- **Estado:** Propuesta *(escrita desde dirección el 2026-08-13; decide el
-  responsable del repo)*
+- **Estado:** Aceptada
 - **Fecha:** 2026-08-13
+- **Cómo se decidió:** redactada desde dirección sobre seis issues verificados
+  ejecutando el binario, y aceptada tras contrastar las afirmaciones sobre la
+  competencia con fuentes primarias. Ese contraste **refutó** una de ellas —ver
+  la nota de método en «NI TestStand»— y corrigió dos citas más. Lo que
+  sobrevivió está enlazado a documentación oficial o a código fuente.
 - **Relaciona:** ADR-0002, ADR-0005, ADR-0008, ADR-0009, ADR-0018,
   RNF-08 ([requisitos.md](../requisitos.md)),
   issues #22, #23, #26, #27, #28, #31
