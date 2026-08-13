@@ -46,11 +46,16 @@ la afirmación que queda escrita. Un secuenciador que no distingue «cumple» de
 «no lo he comprobado» no tiene un bug de usabilidad: no sirve para lo que se
 usa.
 
-Y aquí hay una oportunidad que la investigación de este ADR destapó, así que
-conviene decirla en el contexto y no sólo al final: **NI TestStand tiene este
-mismo agujero después de veinte años**, y taparlo es trabajo del usuario. No es
-un terreno donde haya que alcanzar al líder; es uno donde el líder deja algo sin
-resolver que a sus usuarios les cuesta unidades mal aprobadas.
+Conviene añadir dónde nos deja eso frente a la competencia, porque contrastarlo
+con fuentes primarias cambió la respuesta: **no estamos igual que los demás,
+estamos por detrás de todos.** OpenTAP distingue seis veredictos con severidad
+ordenada; NI TestStand propaga los errores hasta la raíz y muestra cuatro
+resultados de ejecución; Anvil agrega efectivamente a dos, `paso` o no `paso`.
+
+Lo único que el líder deja sin resolver es la mitad de los saltos —un paso
+`Skipped` no hace fallar a la unidad, y sus usuarios lo sufren—, que es
+justamente nuestro #31. Ahí sí hay terreno; en el resto lo que hay es distancia
+que recortar.
 
 ## Decisión
 
@@ -200,100 +205,200 @@ ADR lo escribió de memoria y se equivocaba en lo esencial.
 
 ### OpenTAP — lo resuelve bien, y es el modelo que se copia
 
-`Verdict` es un tipo de primera clase con seis valores **en orden creciente de
-severidad**, y esta es la definición literal de la documentación:
+`Verdict` es un tipo de primera clase con seis valores. La severidad **no es una
+convención de la documentación: es el valor entero del enum**, verificado en el
+código fuente (`Engine/Verdict.cs`):
 
-| | Definición oficial |
-|---|---|
-| `NotSet` | «No verdict was set (the initial value)» |
-| `Pass` | «Step or plan passed» |
-| **`Inconclusive`** | **«More information is needed to make a verdict or the results were close to the limits»** |
-| `Fail` | «Results fail the limits» |
-| `Aborted` | «Test plan is aborted by the user» |
-| `Error` | «An error occurred; this could be instrument, DUT, software errors, etc.» |
+```csharp
+public enum Verdict : int
+{
+    NotSet = 0,       // "No verdict has been set. This is the default value."
+    Pass = 10,        // "Test passed."
+    Inconclusive = 20,// "Test had an inconclusive result."
+    Fail = 30,        // "Test failed."
+    Aborted = 40,     // "Test was aborted."
+    Error = 50,       // "Test failed due to an exception or another procedural
+                      //  error. Such as no instrument/DUT connection."
+}
+```
 
-Y la agregación: *«The test step verdict is set to the most severe verdict of
-its direct child steps»*.
+Y la agregación es comparación de enteros pura (`Engine/TestStep.cs`):
 
-Dos cosas que decantan la Regla 1. Primera: **`Inconclusive` está por encima de
-`Pass`**, así que un hijo sin resultado impide que el padre pase — que es
-exactamente lo que Anvil no hace hoy. Segunda: **`Error` es el más severo de los
-seis y está separado de `Fail`**, que es la Regla 2 ya resuelta por alguien más.
+```csharp
+protected void UpgradeVerdict(Verdict verdict)
+{
+    if ((int)verdict > (int)this.Verdict)
+        this.Verdict = verdict;
+}
+```
 
-Fuente: [Test Step — OpenTAP Developer Guide](https://doc.opentap.io/Developer%20Guide/Test%20Step/Readme.html).
+Tres cosas decantan la Regla 1:
 
-### NI TestStand — tiene el mismo defecto que Anvil, y sus usuarios lo sufren
+1. **`Inconclusive` (20) está por encima de `Pass` (10)**, así que un hijo sin
+   resultado impide que el padre pase. Es exactamente lo que Anvil no hace hoy.
+2. **`Error` (50) es el más severo y está separado de `Fail` (30)**: la Regla 2,
+   ya resuelta por alguien más.
+3. **El veredicto sólo sube, nunca baja.** El método se llama `UpgradeVerdict`
+   y no existe el inverso. Un `inconcluso` ya establecido no puede volver a
+   `paso` por lo que haga un paso posterior — propiedad que Anvil debe copiar
+   explícitamente, porque es la que impide reintroducir el verde falso por la
+   puerta de atrás.
 
-Este es el hallazgo que cambió el ADR. TestStand **sí** separa las dos
-afirmaciones, y las define igual que la Regla 2: *«A Failure reflects the fact
-that the system is working properly, but the UUT did not match the expected
-specification. An Error indicates that the system encountered a state where the
-UUT cannot be tested due to an internal issue of the system.»*
+El veredicto se propaga **nivel a nivel**: cada padre toma el peor de sus hijos
+directos, pero como el de cada hijo ya incorpora recursivamente el de los suyos,
+la severidad de un descendiente profundo **sí llega a la raíz**. Importa para
+nosotros porque `sequence_call` anida igual.
 
-Pero esa distinción **no llega al veredicto de la unidad**:
+Fuentes: [`Engine/Verdict.cs`](https://github.com/opentap/opentap/blob/main/Engine/Verdict.cs) ·
+[`Engine/TestStep.cs`](https://github.com/opentap/opentap/blob/main/Engine/TestStep.cs) ·
+[Test Step — Developer Guide](https://doc.opentap.io/Developer%20Guide/Test%20Step/Readme.html).
 
-> «TestStand looks for a specific step result status "Failed" to fail the UUT.
-> If the whole sequence has step status as "Passed" or "Skip" or "Done" or
-> **"error"** the UUT status will always show as passed only.»
+### NI TestStand — resuelve la Regla 2, no resuelve la Regla 1
 
-Es decir: en TestStand, por defecto, **ni un paso saltado ni un paso en error
-hacen fallar a la unidad**. Es el mismo agujero que #31 y #28, en el líder del
-mercado con veinte años de recorrido. Y no es una lectura nuestra: el hilo del
-que sale esa cita se titula literalmente *«If steps are skipped teststand still
-passes»*, y lo abre un ingeniero de reparaciones al que le aprueban unidades a
-medio probar.
+> **Nota de método.** Una versión anterior de este ADR afirmaba, citando un hilo
+> de foro, que en TestStand un paso en `Error` acaba como `Passed`. **Es falso**,
+> y la documentación oficial lo desmiente. Queda escrito porque el error es
+> instructivo: se sostenía sobre una fuente secundaria y habría sido refutado
+> por el primer ingeniero de TestStand que leyera esto.
 
-Para taparlo hay que **programarlo**. Para los errores, la propia base de
-conocimiento de NI indica implementar un callback: seleccionar
-`SequenceFilePostStepRuntimeError` e insertar
-`#NoValidation(RunState.Caller.RunState.SequenceFailed = True)`. Para los saltos,
-las respuestas del foro proponen iterar `locals.resultlist` al final de la
-secuencia, o modificar el process model. Y un integrador cuenta que en una
-instalación grande de reparación acabó marcando esos casos con un estado
-inventado a mano: *«the test was marked as **Incomplete**»*.
+**Lo que TestStand hace bien, y nosotros no.** La distinción de la Regla 2 es
+suya y está en su manual:
 
-Fuentes: [If steps are skipped teststand still passes](https://forums.ni.com/t5/NI-TestStand/If-steps-are-skipped-teststand-still-passes/td-p/3067070) ·
-[Producing a Fail Result for a Sequence when Step has Runtime Errors](https://knowledge.ni.com/KnowledgeArticleDetails?id=kA00Z000000PAUlSAO).
+> «TestStand does not use run-time errors to indicate UUT test failures. Instead,
+> a run-time error indicates a problem exists with the testing process itself and
+> testing cannot continue.»
 
-**La lectura para Anvil es de posicionamiento, no sólo técnica.** El defecto que
-tenemos abierto es el mismo que el del líder, y allí la garantía es *opt-in*: hay
-que saber que existe el problema, y escribir código para taparlo. Copiar ese
-comportamiento sería copiar el punto que sus propios usuarios documentan como
-trampa. Hacerlo bien por defecto es una diferencia que se explica en una frase a
-alguien que viene de TestStand — y ese alguien es exactamente nuestro
-destinatario.
+Y —esto es lo que desmontó nuestra afirmación— **la propaga hasta la raíz**:
+
+> «When a subsequence with a run-time error returns to a calling sequence,
+> TestStand sets the calling sequence step status to Error, and the calling
+> sequence continues to propagate the run-time error up the call stack […] If
+> TestStand returns the run-time error to the root sequence invocation, **the
+> result status for the execution is Error**.»
+
+Es exactamente lo que la Regla 2 propone y Anvil hoy no hace: en Anvil un
+`estado` no reconocido acaba en `fallo` mudo (#28), y una `asigna` rota acaba en
+`paso` (#27). En TestStand eso sería `Error`, y se vería.
+
+**Lo que TestStand no resuelve, y es nuestro #31.** De los ocho valores de Step
+Status —`Passed`, `Failed`, `Error`, `Done`, `Terminated`, `Skipped`, `Running`,
+`Looping`—, **sólo `Failed` está descrito como causante del fallo de la
+secuencia**, vía la opción *Step Failure Causes Sequence Failure*, «enabled […]
+for most step types» por defecto. Un paso `Skipped` no hace fallar a la unidad.
+
+Ahí sigue viva la queja: el hilo *«If steps are skipped teststand still
+passes»* lo abre un ingeniero de reparaciones al que le aprueban unidades a
+medio probar, y las respuestas proponen iterar `locals.resultlist` o modificar
+el process model. Un integrador cuenta que en una instalación grande acabó
+marcando esos casos con un estado inventado: *«the test was marked as
+**Incomplete**»* — es decir, reinventando a mano el `inconcluso` que este ADR
+añade al motor.
+
+**Y el dato que más apoya la Regla 1, que no esperábamos encontrar aquí.** El
+resultado de una ejecución en TestStand **no es binario**: el process model
+estándar muestra un banner de cuatro estados —`Passed`, `Failed`, `Error`,
+`Terminated`—. El líder del mercado lleva años sin conformarse con dos
+categorías de veredicto.
+
+Puesto así, el argumento de este ADR deja de ser «TestStand está roto» —no lo
+está— y pasa a ser el correcto: **Anvil es hoy el que menos distingue de los
+tres.** OpenTAP tiene seis verdicts, TestStand cuatro resultados de ejecución, y
+Anvil agrega efectivamente a dos: `paso` o no `paso`.
+
+**Un matiz que un evaluador de TestStand conocerá, y conviene no esconder.**
+Existe la opción de estación *On Run-Time Error → Ignore*, y con ella
+*«the execution will produce a "Pass" result for the sequence when all other
+steps in the sequence have passed»*. Es decir: TestStand **permite** degradar
+errores a `Pass`, pero hay que activarlo a conciencia. Eso no es lo mismo que
+hacerlo por defecto, y la propia KB de NI documenta el camino contrario —un
+callback `SequenceFilePostStepRuntimeError` con
+`#NoValidation(RunState.Caller.RunState.SequenceFailed = True)`— para quien
+quiera que un error falle la unidad.
+
+La lectura honesta de ese artículo es que **NI conoce el problema y lo
+documenta**. Se puede leer como «está resuelto» o como «hace falta trabajo extra
+para lo que debería ser el comportamiento por defecto». Este ADR hace la segunda
+lectura, y sólo para el caso de los saltos: ahí no hay ni siquiera una página
+oficial que explique cómo fallar por un paso `Skipped`.
+
+Fuentes: [Run-Time Errors](https://www.ni.com/docs/en-US/bundle/teststand/page/run-time-errors.html) ·
+[Step Status](https://www.ni.com/docs/en-US/bundle/teststand/page/step-status.html) ·
+[Producing a Fail Result for a Sequence when Step has Runtime Errors](https://knowledge.ni.com/KnowledgeArticleDetails?id=kA00Z000000PAUlSAO) ·
+[If steps are skipped teststand still passes](https://forums.ni.com/t5/NI-TestStand/If-steps-are-skipped-teststand-still-passes/td-p/3067070) (foro, sólo como indicio del uso real).
 
 ### pytest — la ausencia de resultado tiene código de salida propio
 
 Siete códigos, y el que importa: **`5` = «No tests were collected»**, distinto de
-`1` («some of the tests failed»), de `3` («internal error») y de `4` («usage
-error»). No hubo fallo; es que no hubo evaluación, y eso no es éxito.
+`1` («Tests were collected and run but some of the tests failed»), de `3`
+(«Internal error») y de `4` («usage error»). No hubo fallo; es que no hubo
+evaluación, y eso no es éxito.
 
 Es el análogo exacto de #31 y la prueba de que la distinción no es teórica: la
 herramienta de test más usada del mundo gasta un código de salida en ella.
 
 Fuente: [pytest — Exit codes](https://docs.pytest.org/en/stable/reference/exit-codes.html).
 
-### Robot Framework — `SKIP` es un estado propio y visible
+### Robot Framework — el precedente más parecido a la Regla 1, y su límite
 
-Añadió `SKIP` como estado de primera clase (issue #2087/#3622). Los tests
-saltados **no** hacen fallar la suite —igual que en Anvil, y está bien— pero se
-reportan aparte y no se pierden. Confirma el otro lado de la Regla 1: un salto
-intermedio es neutral; lo que no puede ser neutral es que se salte *todo*.
+Añadió `SKIP` como estado de primera clase en **RF 4.0** (marzo de 2021, issue
+#3622), sustituyendo al viejo mecanismo de *criticality*. Y su regla de
+agregación de suite es, literalmente, la que este ADR propone:
 
-Fuente: [New `SKIP` status — robotframework#3622](https://github.com/robotframework/robotframework/issues/3622).
+> «If any test has failed, suite status is FAIL. If there are no failures but at
+> least one test has passed, suite status is PASS. **If all tests have been
+> skipped or there are no tests at all, suite status is SKIP.**»
 
-### Resumen
+Un salto individual es neutral; que se salte *todo* no lo es. Es la Regla 1 con
+otro nombre, en una herramienta con quince años de uso.
 
-| | Separa «no cumple» de «no se pudo determinar» | Lo aplica al veredicto por defecto |
+**Y aquí está su límite, que conviene no ocultar**: eso no llega al código de
+salida. *«The return code to the system is the number of failed tests, skipped
+tests do not affect it»* — una suite 100 % saltada devuelve **0**, igual que una
+que pasó entera. Un CI que sólo mire `$?` no las distingue.
+
+Fuentes: [Test Execution — User Guide](https://github.com/robotframework/robotframework/blob/master/doc/userguide/src/ExecutingTestCases/TestExecution.rst) ·
+[Release notes RF 4.0](https://github.com/robotframework/robotframework/blob/master/doc/releasenotes/rf-4.0.rst).
+
+### Dónde llega la distinción en cada uno
+
+Que un sistema separe «no evaluado» de «correcto» no significa que lo lleve
+hasta el final. Verificado, llega hasta aquí:
+
+| | En el estado / veredicto | En el código de salida |
 |---|---|---|
-| OpenTAP | Sí, `Inconclusive` con severidad propia | **Sí** |
-| pytest | Sí, exit code 5 | **Sí** |
-| Robot Framework | Sí, `SKIP` visible | Parcial (por diseño) |
-| NI TestStand | Sí, en la definición | **No** — hay que programarlo |
-| **Anvil hoy** | **No** | **No** |
+| OpenTAP | Sí, `Inconclusive` (20) | **Sí** — `tap run` devuelve 20 |
+| pytest | — | **Sí** — exit 5 |
+| Robot Framework | Sí, suite `SKIP` | **No** — devuelve 0 |
+| **Anvil (esta decisión)** | **Sí, `inconcluso`** | **Sí, pero sólo como ≠ 0** |
 
-Anvil es el único de la lista que no hace ni lo uno ni lo otro.
+Ninguno de los tres activa por defecto un modo «saltar = fallar», y esta
+decisión tampoco lo hace: un paso saltado a mitad de secuencia sigue siendo
+neutral. Lo que deja de ser neutral es que se salte **el veredicto**.
+
+### Resumen, tras contrastar
+
+Ninguno de los cuatro es un modelo a copiar entero, y ninguno está roto. Lo que
+la comparación deja claro es más incómodo que un «los demás lo hacen mal»:
+
+| | «No cumple» ≠ «no se pudo juzgar» | El veredicto ausente afecta al agregado | Llega al código de salida |
+|---|---|---|---|
+| OpenTAP | Sí — `Error` (50) ≠ `Fail` (30) | Sí — `Inconclusive` (20) > `Pass` (10) | Sí — exit 20 |
+| NI TestStand | **Sí** — `Error` se propaga hasta la raíz | **No** — sólo `Failed` falla la unidad | 4 categorías de resultado |
+| pytest | Sí — exit 3 ≠ exit 1 | Sí — exit 5 «no tests collected» | Sí |
+| Robot Framework | Parcial | Sí — suite `SKIP` si todo se saltó | **No** — devuelve 0 |
+| **Anvil hoy** | **No** — #27, #28 | **No** — #31 | No |
+| **Anvil con este ADR** | Sí — Regla 2 | Sí — Regla 1 | Sólo como ≠ 0 |
+
+**Anvil es hoy el único de la lista que no hace ninguna de las dos cosas**, y
+eso —no un defecto ajeno— es lo que justifica este ADR.
+
+El argumento hacia fuera que sí se sostiene, dicho con precisión: TestStand
+resuelve bien la mitad de errores y deja la de los saltos al usuario; OpenTAP
+resuelve las dos y es la referencia. Anvil debería salir a competir haciendo las
+dos por defecto, que es la posición de OpenTAP, no la de TestStand. Cualquier
+afirmación más fuerte que esta es refutable por un ingeniero con la
+documentación de NI delante — y ya nos pasó al escribir la primera versión de
+esta sección.
 
 ## Recortes
 
