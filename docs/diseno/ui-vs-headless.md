@@ -50,16 +50,27 @@ El contrato del binario es **binario**:
 | Código | Significa |
 |---|---|
 | `0` | la secuencia corrió y el veredicto agregado es `paso` |
-| `1` | cualquier otra cosa: veredicto `fallo` o `error`, error de carga, error de uso, ejecución interrumpida |
+| `1` | cualquier otra cosa: veredicto `fallo`, `error` o `inconcluso`, error de carga, error de uso, ejecución interrumpida |
 
-El veredicto sale de `ResultadoSecuencia::estado()`, donde un `error` en
-cualquier paso manda sobre un `fallo` y `saltado` es neutral (RF-33/34: un paso
-saltado por `disable` o por precondición falsa no es un fallo). `--quiet` no lo
-altera: silencia el reporte, no el veredicto.
+El veredicto sale de `ResultadoSecuencia::estado()`, que agrega **al paso más
+severo** en la escala `paso < inconcluso < fallo < error` (ADR-0019, Regla 1).
+`saltado` queda fuera de la escala y es neutral (RF-33/34: un paso saltado por
+`disable` o por precondición falsa no es un fallo). `--quiet` no lo altera:
+silencia el reporte, no el veredicto.
+
+`inconcluso` es el estado que produce el motor cuando la secuencia declara un
+veredicto (`tipo: pass_fail` en `main`) y ninguno llega a evaluarse — issue #31,
+donde una unidad salía aprobada sin que nadie la midiera. **Sale 1**, como todo
+lo que no es `paso`. El `if` que lo decide niega `"paso"` en vez de enumerar los
+estados malos, precisamente para que un estado nuevo no se cuele como éxito: por
+eso este cambio de semántica no tocó una línea del cálculo del exit code.
 
 Es lo que un pipeline necesita —distinguir «pasó» de «no pasó»— y es todo lo
-que la plataforma permite. **No hay códigos granulares, y no pueden haberlos
-hoy**: el std de Rust en `wasm32-wasip2` aplana cualquier
+que la plataforma permite. Es también donde nos quedamos cortos frente a
+OpenTAP (`tap run` devuelve 20 para `Inconclusive`) y a pytest (exit 5 para «no
+se recogió ningún test»): la distinción entre «no cumple» y «no se pudo juzgar»
+vive en el estado y en el informe, no en el código de salida. **No hay códigos
+granulares, y no pueden haberlos hoy**: el std de Rust en `wasm32-wasip2` aplana cualquier
 `process::exit(n≠0)` a `I32Exit(1)` al cruzar `wasi:cli/run`, y esa interfaz
 devuelve `result<_, _>`, sin código. El propio `exit(2)` que el guest usa para
 el error de uso se ve como `1` a través del host (`anvil --flag-inventado` → 1);

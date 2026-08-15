@@ -3,7 +3,7 @@
 //! | Código | Significa |
 //! |---|---|
 //! | `0` | la secuencia corrió y el veredicto agregado es `paso` |
-//! | `1` | cualquier otra cosa: `fallo`, `error`, error de carga, error de uso |
+//! | `1` | cualquier otra cosa: `fallo`, `error`, `inconcluso` (ADR-0019), error de carga, error de uso |
 //!
 //! **Por qué estos tests lanzan el binario y no llaman a una función.** El
 //! veredicto lo decide el guest (`crates/motor/src/bin/anvil.rs`), que corre
@@ -50,6 +50,17 @@ fn corre(secuencia: &str) -> Output {
         // Sin `--port`: cada proceso reserva uno efímero (issue #15), así que
         // los tests conviven en paralelo. Fijarlo los haría chocar entre sí.
         .args([secuencia, "--quiet"])
+        .output()
+        .expect("lanzar anvil")
+}
+
+/// Ídem, pero **sin `--quiet`**: para los casos en que el exit code por sí solo
+/// no distingue el veredicto de un error de carga (los dos salen 1), y hay que
+/// leer el reporte para saber que se midió lo que se creía medir.
+fn corre_con_reporte(secuencia: &str) -> Output {
+    Command::new(env!("CARGO_BIN_EXE_anvil"))
+        .current_dir(raiz_repo())
+        .arg(secuencia)
         .output()
         .expect("lanzar anvil")
 }
@@ -102,6 +113,34 @@ fn una_secuencia_con_error_de_ejecucion_sale_con_uno() {
     assert!(
         !stderr.contains("no se pudo cargar la secuencia"),
         "el fixture debe fallar al ejecutar, no al cargar. stderr:\n{stderr}"
+    );
+}
+
+#[test]
+fn una_secuencia_cuyo_veredicto_no_se_evalua_sale_con_uno() {
+    // Issue #31 / ADR-0019, Regla 1. Es el caso más traicionero de la tabla:
+    // ningún paso en rojo, el `pass_fail` que hace de veredicto saltado por
+    // precondición, y antes la secuencia salía `paso` con exit 0 — un pipeline
+    // aprobando una unidad que nadie midió.
+    //
+    // Sin `--quiet` a propósito: un exit 1 a secas no distingue `inconcluso`
+    // de «el fichero no existe», que también sale 1. Sin la aserción sobre el
+    // reporte, este test daría verde midiendo el camino equivocado.
+    let s = corre_con_reporte("packaging/anvil-host/tests/fixtures/inconcluso.yaml");
+    let stdout = String::from_utf8_lossy(&s.stdout);
+    assert_eq!(
+        codigo(&s),
+        1,
+        "un veredicto sin evaluar no puede salir 0. stdout:\n{stdout}\nstderr:\n{}",
+        String::from_utf8_lossy(&s.stderr)
+    );
+    assert!(
+        stdout.contains("=== exit_inconcluso: inconcluso ==="),
+        "el 1 tiene que venir del veredicto, no de un error de carga. stdout:\n{stdout}"
+    );
+    assert!(
+        stdout.contains("[saltado] verdict"),
+        "el paso se sigue reportando como lo que fue. stdout:\n{stdout}"
     );
 }
 

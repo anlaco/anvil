@@ -329,6 +329,13 @@ fn main() {
     // `ResultadoSecuencia::estado()` lo trata como neutral (RF-33/34), igual
     // que el bucle de fases en `motor::ejecuta_secuencia_interna`.
     //
+    // Esa precaución es la que hizo que el `inconcluso` del ADR-0019 (Regla 1,
+    // issue #31) saliera 1 sin tocar una línea de aquí. El contrato sigue
+    // siendo binario, y no por comodidad: el std de `wasm32-wasip2` aplana
+    // cualquier `exit(n≠0)` a `I32Exit(1)` al cruzar `wasi:cli/run`
+    // (`docs/diseno/ui-vs-headless.md`). La distinción vive en el estado y en
+    // el informe, no en el código de salida.
+    //
     // Los sinks ya escribieron: `on_fin_secuencia` se dispara dentro de
     // `ejecuta_programa`, y JSON/CSV van a un `File` sin bufferear, así que
     // este `exit` (que no corre destructores) no pierde nada.

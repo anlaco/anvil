@@ -192,6 +192,28 @@ mod tests {
         assert!(lineas[3].is_empty(), "termina en CRLF");
     }
 
+    /// ADR-0019, Regla 1: la columna `estado` (la de la secuencia) puede traer
+    /// `inconcluso`. La columna `estado_paso` no: `inconcluso` lo produce el
+    /// motor al agregar, y sólo él.
+    #[test]
+    fn el_estado_agregado_puede_ser_inconcluso() {
+        let mut s = ResultadoSecuencia::nueva("b31");
+        s.registra(ResultadoStep::nuevo(
+            "verdict",
+            "saltado",
+            "precondición falsa",
+        ));
+        s.veredicto_sin_evaluar = true;
+
+        let mut sink = SinkCsv::nuevo(Vec::new());
+        sink.on_fin_secuencia(&s);
+        let out = String::from_utf8(sink.salida).unwrap();
+        assert_eq!(
+            out.split("\r\n").nth(1).unwrap(),
+            "b31,inconcluso,verdict,saltado,precondición falsa,,,,,,main"
+        );
+    }
+
     #[test]
     fn comparacion_llena_valor_esperado_y_operador() {
         use modelo::Operador;

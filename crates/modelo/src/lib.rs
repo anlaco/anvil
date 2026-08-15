@@ -105,6 +105,62 @@ impl Limite {
     }
 }
 
+/// La severidad de un estado, para agregar el veredicto de una secuencia
+/// (ADR-0019, Regla 1).
+///
+/// **El orden de declaración *es* la severidad**: `paso < inconcluso < fallo <
+/// error`. Es el modelo de OpenTAP, donde la severidad tampoco es una
+/// convención de la documentación sino el valor entero del enum `Verdict`, y
+/// la agregación es una comparación pura.
+///
+/// `saltado` **no está en la escala**: es neutral (RF-33/34) y por eso mapea a
+/// `Paso`, que es el mínimo. No significa que un paso saltado haya pasado —
+/// significa que no mueve el veredicto.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Default)]
+pub enum Severidad {
+    #[default]
+    Paso,
+    /// Anvil no pudo juzgar. **Lo produce el motor al agregar, y sólo él**: no
+    /// se puede escribir en una secuencia ni devolver desde un ejecutor
+    /// (ADR-0019, «Recortes»).
+    Inconcluso,
+    /// El DUT no cumple el criterio. Información sobre el mundo físico.
+    Fallo,
+    /// Anvil no pudo juzgar porque algo se rompió. Información sobre el banco.
+    Error,
+}
+
+impl Severidad {
+    /// La severidad de un estado de paso.
+    ///
+    /// Un estado **no reconocido** cae en `Paso`, es decir, es neutral. Eso es
+    /// deliberado y **no** es lo que debería ser: es el comportamiento de hoy
+    /// (issue #28, un ejecutor que devuelve `"Paso"` con mayúscula), congelado
+    /// tal cual mientras el issue siga abierto. Cambiarlo es la Regla 2 del
+    /// ADR-0019, que se hace aparte — aquí sólo se traslada intacto para no
+    /// mezclar dos cambios de semántica en el mismo commit.
+    pub fn de(estado: &str) -> Severidad {
+        match estado {
+            "error" => Severidad::Error,
+            "fallo" => Severidad::Fallo,
+            "inconcluso" => Severidad::Inconcluso,
+            // "paso", "saltado" y cualquier otra cosa (#28).
+            _ => Severidad::Paso,
+        }
+    }
+
+    /// La severidad como estado agregado: `"paso"`, `"inconcluso"`, `"fallo"`,
+    /// `"error"`. Nunca `"saltado"`: una secuencia no se salta.
+    pub fn como_texto(&self) -> &'static str {
+        match self {
+            Severidad::Paso => "paso",
+            Severidad::Inconcluso => "inconcluso",
+            Severidad::Fallo => "fallo",
+            Severidad::Error => "error",
+        }
+    }
+}
+
 /// La fase de la secuencia en la que corrió un paso: Setup → Main → Cleanup.
 ///
 /// No viaja en `paso.proto` — la sella el **motor**, que es quien conoce la
@@ -134,9 +190,12 @@ impl Fase {
 
 /// Lo que un paso YA corrido devolvió.
 ///
-/// `estado` es uno de `"paso"`, `"fallo"` o `"error"` — se mantiene como
-/// texto (y no como enum) porque viaja así en `paso.proto` y porque el
-/// contrato admite pasos escritos en cualquier lenguaje.
+/// `estado` es uno de `"paso"`, `"fallo"`, `"error"` o `"saltado"` (este
+/// último lo pone el motor, no el ejecutor) — se mantiene como texto (y no
+/// como enum) porque viaja así en `paso.proto` y porque el contrato admite
+/// pasos escritos en cualquier lenguaje. **Nunca `"inconcluso"`**: ése sólo
+/// existe como agregado de una secuencia (ADR-0019). Ver `Severidad` para lo
+/// que cada uno pesa en el veredicto.
 ///
 /// `valor_esperado` y `operador` describen un `Limite::Comparacion` aplicado
 /// por el motor. **No** viajan en `paso.proto`: los rellena el motor tras la
@@ -234,6 +293,14 @@ impl ResultadoStep {
 pub struct ResultadoSecuencia {
     pub nombre: String,
     pub pasos: Vec<ResultadoStep>,
+    /// La secuencia declaraba un veredicto (al menos un paso `pass_fail` en
+    /// `main`) y **ninguno llegó a evaluarse** (ADR-0019, Regla 1, issue #31).
+    ///
+    /// Lo sella **el motor**, que es el único que lo sabe: un `ResultadoStep`
+    /// no lleva el tipo del paso que lo produjo, así que `estado()` no puede
+    /// deducirlo de `pasos`. Un consumidor que construya un `ResultadoSecuencia`
+    /// a mano (tests, sinks) lo deja en `false`, que es el `Default`.
+    pub veredicto_sin_evaluar: bool,
 }
 
 impl ResultadoSecuencia {
@@ -241,6 +308,7 @@ impl ResultadoSecuencia {
         ResultadoSecuencia {
             nombre: nombre.to_string(),
             pasos: Vec::new(),
+            veredicto_sin_evaluar: false,
         }
     }
 
@@ -275,16 +343,33 @@ impl ResultadoSecuencia {
         (saltados, total)
     }
 
-    /// Estado agregado de la secuencia. Un `error` en cualquier paso manda
-    /// sobre un `fallo`; sin ninguno de los dos, la secuencia pasa.
+    /// Estado agregado de la secuencia: **el más severo de sus pasos**
+    /// (ADR-0019, Regla 1), en la escala `paso < inconcluso < fallo < error`.
+    /// `saltado` es neutral y no la mueve.
+    ///
+    /// Antes esto era una cascada `error > fallo > paso` cuyo `else` devolvía
+    /// `paso`. Ese `else` era el issue #31: una secuencia cuyo veredicto no se
+    /// llegó a evaluar no había fallado, luego «pasaba». `paso` es una
+    /// afirmación sobre lo comprobado, no lo que queda cuando no hay nada malo
+    /// que decir; de ahí `veredicto_sin_evaluar`, que eleva el agregado a
+    /// `inconcluso` sin tapar un `fallo` ni un `error` que también estén.
+    ///
+    /// No desciende a `sub_pasos`: el `ResultadoStep` de un `sequence_call` ya
+    /// trae el agregado de su subsecuencia, calculado aquí mismo, así que la
+    /// severidad de un descendiente profundo llega a la raíz nivel a nivel.
     pub fn estado(&self) -> &'static str {
-        if self.pasos.iter().any(|p| p.estado == "error") {
-            "error"
-        } else if self.pasos.iter().any(|p| p.estado == "fallo") {
-            "fallo"
+        let peor = self
+            .pasos
+            .iter()
+            .map(|p| Severidad::de(&p.estado))
+            .max()
+            .unwrap_or_default();
+        let peor = if self.veredicto_sin_evaluar {
+            peor.max(Severidad::Inconcluso)
         } else {
-            "paso"
-        }
+            peor
+        };
+        peor.como_texto()
     }
 
     /// Reporte de la secuencia en texto. El formato es parte de la spec
@@ -614,6 +699,123 @@ mod tests {
         s.registra(ResultadoStep::nuevo("a", "error", "peor"));
         s.registra(ResultadoStep::nuevo("b", "fallo", "mal"));
         assert_eq!(s.estado(), "error");
+    }
+
+    /// ADR-0019, Regla 1: la escala es el orden de declaración del enum, como
+    /// el entero del `Verdict` de OpenTAP. Si alguien reordena las variantes,
+    /// la agregación cambia de significado en silencio; esto lo impide.
+    #[test]
+    fn la_severidad_esta_ordenada() {
+        assert!(Severidad::Paso < Severidad::Inconcluso);
+        assert!(Severidad::Inconcluso < Severidad::Fallo);
+        assert!(Severidad::Fallo < Severidad::Error);
+    }
+
+    /// `saltado` es neutral (RF-33/34) y no entra en la escala. Un estado que
+    /// nadie reconoce también cae en neutral: eso **no** es correcto, es el
+    /// issue #28 congelado tal cual hasta que lo arregle la Regla 2 — si un
+    /// día deja de estar aquí, que sea porque alguien lo decidió.
+    #[test]
+    fn saltado_y_lo_desconocido_son_neutrales_en_la_escala() {
+        assert_eq!(Severidad::de("saltado"), Severidad::Paso);
+        assert_eq!(Severidad::de("Paso"), Severidad::Paso, "#28, sin arreglar");
+        assert_eq!(Severidad::de("cualquier cosa"), Severidad::Paso);
+    }
+
+    /// El issue #31: la secuencia declaraba un veredicto y no llegó a
+    /// evaluarse. No hay ningún paso en rojo —el `pass_fail` está `saltado`—
+    /// y aun así la secuencia no puede decir `paso`.
+    #[test]
+    fn un_veredicto_sin_evaluar_deja_la_secuencia_inconclusa() {
+        let mut s = ResultadoSecuencia::nueva("s");
+        s.registra(ResultadoStep::nuevo("init", "paso", "ok"));
+        s.registra(ResultadoStep::nuevo(
+            "verdict",
+            "saltado",
+            "precondición falsa",
+        ));
+        assert_eq!(s.estado(), "paso", "sin el sello del motor, nada cambia");
+
+        s.veredicto_sin_evaluar = true;
+        assert_eq!(
+            s.estado(),
+            "inconcluso",
+            "una unidad que nadie midió no puede salir aprobada"
+        );
+    }
+
+    /// `inconcluso` **eleva** la severidad, nunca la baja. Es la propiedad del
+    /// `UpgradeVerdict` de OpenTAP: si además hay un fallo o un error, esos
+    /// mandan — perder un `fallo` detrás de un `inconcluso` sería reintroducir
+    /// el verde falso por el otro lado.
+    #[test]
+    fn inconcluso_no_tapa_un_fallo() {
+        let mut s = ResultadoSecuencia::nueva("s");
+        s.registra(ResultadoStep::nuevo("a", "fallo", "fuera de rango"));
+        s.registra(ResultadoStep::nuevo(
+            "verdict",
+            "saltado",
+            "precondición falsa",
+        ));
+        s.veredicto_sin_evaluar = true;
+        assert_eq!(s.estado(), "fallo");
+    }
+
+    #[test]
+    fn inconcluso_no_tapa_un_error() {
+        let mut s = ResultadoSecuencia::nueva("s");
+        s.registra(ResultadoStep::nuevo("a", "error", "el banco no responde"));
+        s.registra(ResultadoStep::nuevo(
+            "verdict",
+            "saltado",
+            "precondición falsa",
+        ));
+        s.veredicto_sin_evaluar = true;
+        assert_eq!(s.estado(), "error");
+    }
+
+    /// Un `sequence_call` cuya subsecuencia quedó inconclusa trae el estado ya
+    /// agregado en su propio `ResultadoStep`; el padre lo recoge por la escala,
+    /// igual que un `fallo`. Es la propagación nivel a nivel que el ADR pide no
+    /// dejar divergir entre los dos caminos de agregación.
+    #[test]
+    fn el_inconcluso_de_una_subsecuencia_sube_al_padre() {
+        let mut s = ResultadoSecuencia::nueva("padre");
+        s.registra(ResultadoStep::nuevo("a", "paso", "ok"));
+        let mut call = ResultadoStep::nuevo("sub", "inconcluso", "sequence call → inconcluso");
+        call.sub_pasos = Some(vec![ResultadoStep::nuevo(
+            "verdict",
+            "saltado",
+            "precondición falsa",
+        )]);
+        s.registra(call);
+        assert_eq!(s.estado(), "inconcluso");
+    }
+
+    /// RNF-08 es «el formato textual no se cambia sin querer», no «no se añaden
+    /// estados» (M4 ya añadió `saltado` como extensión aditiva). Lo único que
+    /// cambia en el texto es la cabecera; el paso se sigue reportando
+    /// `[saltado]`, que es lo que ocurrió.
+    #[test]
+    fn el_reporte_de_una_secuencia_inconclusa() {
+        let mut s = ResultadoSecuencia::nueva("b31");
+        s.registra(ResultadoStep::nuevo("init", "paso", "statement ok"));
+        s.registra(ResultadoStep::nuevo(
+            "verdict",
+            "saltado",
+            "precondición falsa",
+        ));
+        s.veredicto_sin_evaluar = true;
+
+        let mut buf = Vec::new();
+        s.reporte_a(&mut buf).unwrap();
+        assert_eq!(
+            String::from_utf8(buf).unwrap(),
+            "=== b31: inconcluso ===\n  \
+             [paso] init: statement ok\n  \
+             [saltado] verdict: precondición falsa\n  \
+             (1 de 2 pasos saltados)\n"
+        );
     }
 
     /// RNF-08: el formato textual de `reporte_a` es spec congelada.
