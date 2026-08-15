@@ -343,10 +343,17 @@ fn ejecuta_secuencia_interna<I: InvocaPasos>(
     }
 
     // --- Main: solo si el Setup fue bien; corta en el primer fallo. ---
+    // Se anota por el camino si algún `pass_fail` llegó a evaluarse: es lo que
+    // decide el `inconcluso` de abajo, y aquí se sabe sin tener que emparejar
+    // resultados con definiciones a posteriori.
+    let mut veredicto_evaluado = false;
     if setup_ok {
         for p in &def.pasos_main {
             let r = corre_un_paso(inv, p, &mut entorno, sink, &ctx(Fase::Main))?;
             let fallo = !r.paso() && r.estado != "saltado";
+            if p.tipo == TipoPaso::PassFail && r.estado != "saltado" {
+                veredicto_evaluado = true;
+            }
             secuencia.registra(r.clone());
             if fallo {
                 break;
@@ -359,6 +366,24 @@ fn ejecuta_secuencia_interna<I: InvocaPasos>(
         let r = corre_un_paso(inv, p, &mut entorno, sink, &ctx(Fase::Cleanup))?;
         secuencia.registra(r.clone());
     }
+
+    // El veredicto declarado y no evaluado (ADR-0019, Regla 1, issue #31): la
+    // secuencia declara al menos un `pass_fail` en Main y ninguno se evaluó —
+    // porque se saltó, o porque el Main ni llegó a él. Se sella **antes** de
+    // `on_fin_secuencia` para que consola, JSON y CSV vean ya el agregado
+    // correcto; y sólo eleva la severidad, así que un `fallo` de Setup o un
+    // `error` que también estén presentes siguen mandando.
+    //
+    // Una secuencia cuyo criterio son los `limite` de sus pasos no declara
+    // ningún `pass_fail` y no cambia de comportamiento.
+    //
+    // Un `pass_fail` con `disable: true` cuenta como declarado: la unidad
+    // tampoco se ha medido. Eximirlo convertiría el `disable` en una puerta
+    // trasera al verde falso, que es justo lo que la Regla 1 cierra; si algún
+    // día un salto intencionado debe tratarse distinto, eso es criterio del
+    // usuario y vive en `--strict` (#13, #23), no aquí.
+    secuencia.veredicto_sin_evaluar =
+        !veredicto_evaluado && def.pasos_main.iter().any(|p| p.tipo == TipoPaso::PassFail);
 
     if es_raiz {
         sink.on_fin_secuencia(&secuencia);
@@ -1628,6 +1653,194 @@ mod tests {
 
         assert_eq!(sec.pasos.len(), 2);
         assert_eq!(sec.estado(), "paso");
+        assert!(
+            !sec.veredicto_sin_evaluar,
+            "el veredicto se evaluó: nada que declarar"
+        );
+    }
+
+    /// El issue #31 end-to-end, con el motor de verdad: el único `pass_fail`
+    /// de Main se salta por precondición falsa. No hay ningún paso en rojo, y
+    /// aun así la unidad no se ha medido.
+    #[test]
+    fn un_pass_fail_saltado_deja_la_secuencia_inconclusa() {
+        let mut def = DefinicionSecuencia {
+            nombre: "b31".into(),
+            ..Default::default()
+        };
+        def.locals
+            .insert("flag".into(), ValorDefinicion::Bool(false));
+
+        let mut init = DefinicionPaso::nuevo("init", 1);
+        init.tipo = TipoPaso::Statement;
+        init.statement = Some(expr::parse_sentencias("locals.flag = false").unwrap());
+
+        let mut verdict = DefinicionPaso::nuevo("verdict", 1);
+        verdict.tipo = TipoPaso::PassFail;
+        verdict.precondicion = Some(expr::parse_expresion("locals.flag").unwrap());
+        verdict.condicion = Some(expr::parse_expresion("locals.flag == true").unwrap());
+
+        def.pasos_main = vec![init, verdict];
+
+        let programa = Programa {
+            raiz: def,
+            archivos: HashMap::new(),
+            ejecutores: HashMap::new(),
+        };
+        let entorno = EntornoMotor::desde_definicion(&programa.raiz);
+        let mut inv = InvocadorMock;
+        let mut sink = SinkNulo;
+        let (sec, _) = ejecuta_secuencia_interna(
+            &mut inv,
+            &programa.raiz,
+            entorno,
+            &mut sink,
+            &programa,
+            0,
+            true,
+        )
+        .unwrap();
+
+        assert_eq!(
+            sec.pasos[1].estado, "saltado",
+            "el paso se sigue reportando como lo que fue"
+        );
+        assert!(sec.veredicto_sin_evaluar);
+        assert_eq!(
+            sec.estado(),
+            "inconcluso",
+            "el veredicto no se evaluó: la secuencia no puede afirmar `paso`"
+        );
+    }
+
+    /// Un `pass_fail` deshabilitado tampoco mide nada. Eximir a `disable`
+    /// convertiría el flag en una puerta trasera al verde falso; si un salto
+    /// intencionado debe tratarse distinto, eso es `--strict` (#13, #23).
+    #[test]
+    fn un_pass_fail_con_disable_tambien_deja_inconcluso() {
+        let mut def = DefinicionSecuencia {
+            nombre: "d".into(),
+            ..Default::default()
+        };
+        let mut verdict = DefinicionPaso::nuevo("verdict", 1);
+        verdict.tipo = TipoPaso::PassFail;
+        verdict.disable = true;
+        verdict.condicion = Some(expr::parse_expresion("true").unwrap());
+        def.pasos_main = vec![verdict];
+
+        let programa = Programa {
+            raiz: def,
+            archivos: HashMap::new(),
+            ejecutores: HashMap::new(),
+        };
+        let entorno = EntornoMotor::desde_definicion(&programa.raiz);
+        let mut inv = InvocadorMock;
+        let mut sink = SinkNulo;
+        let (sec, _) = ejecuta_secuencia_interna(
+            &mut inv,
+            &programa.raiz,
+            entorno,
+            &mut sink,
+            &programa,
+            0,
+            true,
+        )
+        .unwrap();
+
+        assert_eq!(sec.estado(), "inconcluso");
+    }
+
+    /// La otra mitad de la Regla 1, y la que evita una regresión masiva: una
+    /// secuencia cuyo criterio son los `limite` de sus pasos **no cambia de
+    /// comportamiento**, aunque tenga pasos saltados. No declara ningún
+    /// `pass_fail`, así que ahí el veredicto sí se evaluó, paso a paso.
+    #[test]
+    fn sin_pass_fail_declarado_un_salto_sigue_siendo_neutral() {
+        let mut def = DefinicionSecuencia {
+            nombre: "limites".into(),
+            ..Default::default()
+        };
+        def.locals
+            .insert("flag".into(), ValorDefinicion::Bool(false));
+
+        let mut medir = DefinicionPaso::nuevo("medir", 1);
+        medir.tipo = TipoPaso::Statement;
+        medir.statement = Some(expr::parse_sentencias("locals.flag = false").unwrap());
+
+        let mut opcional = DefinicionPaso::nuevo("verificar_led", 1);
+        opcional.tipo = TipoPaso::Statement;
+        opcional.statement = Some(expr::parse_sentencias("locals.flag = true").unwrap());
+        opcional.precondicion = Some(expr::parse_expresion("locals.flag").unwrap());
+
+        def.pasos_main = vec![medir, opcional];
+
+        let programa = Programa {
+            raiz: def,
+            archivos: HashMap::new(),
+            ejecutores: HashMap::new(),
+        };
+        let entorno = EntornoMotor::desde_definicion(&programa.raiz);
+        let mut inv = InvocadorMock;
+        let mut sink = SinkNulo;
+        let (sec, _) = ejecuta_secuencia_interna(
+            &mut inv,
+            &programa.raiz,
+            entorno,
+            &mut sink,
+            &programa,
+            0,
+            true,
+        )
+        .unwrap();
+
+        assert_eq!(sec.pasos[1].estado, "saltado");
+        assert!(!sec.veredicto_sin_evaluar);
+        assert_eq!(sec.estado(), "paso", "el criterio eran los límites");
+    }
+
+    /// Un `fallo` presente manda sobre el `inconcluso`: si el Setup se rompe,
+    /// el Main ni corre —así que el veredicto tampoco se evalúa— y aun así lo
+    /// que hay que reportar es el fallo, no la ausencia de medida.
+    #[test]
+    fn un_fallo_de_setup_manda_sobre_el_veredicto_sin_evaluar() {
+        let mut def = DefinicionSecuencia {
+            nombre: "s".into(),
+            ..Default::default()
+        };
+        let mut setup = DefinicionPaso::nuevo("comprobar_banco", 1);
+        setup.tipo = TipoPaso::PassFail;
+        setup.condicion = Some(expr::parse_expresion("false").unwrap());
+        def.pasos_setup = vec![setup];
+
+        let mut verdict = DefinicionPaso::nuevo("verdict", 1);
+        verdict.tipo = TipoPaso::PassFail;
+        verdict.condicion = Some(expr::parse_expresion("true").unwrap());
+        def.pasos_main = vec![verdict];
+
+        let programa = Programa {
+            raiz: def,
+            archivos: HashMap::new(),
+            ejecutores: HashMap::new(),
+        };
+        let entorno = EntornoMotor::desde_definicion(&programa.raiz);
+        let mut inv = InvocadorMock;
+        let mut sink = SinkNulo;
+        let (sec, _) = ejecuta_secuencia_interna(
+            &mut inv,
+            &programa.raiz,
+            entorno,
+            &mut sink,
+            &programa,
+            0,
+            true,
+        )
+        .unwrap();
+
+        assert!(
+            sec.veredicto_sin_evaluar,
+            "el Main no corrió: el veredicto no se evaluó"
+        );
+        assert_eq!(sec.estado(), "fallo", "pero el fallo del Setup manda");
     }
 
     // --- Fase del paso en el resultado (DIAG-3, #8) ---

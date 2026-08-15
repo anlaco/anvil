@@ -67,6 +67,15 @@ Tres reglas. Todo lo demás se deriva de ellas.
 
 ### Regla 1 — `paso` es una afirmación, no un valor por defecto
 
+> **Implementada** el 2026-08-15 (issue #31 cerrado). El estado vive en
+> `Severidad` (`crates/modelo/src/lib.rs`), cuyo orden de declaración *es* la
+> escala; agregar es un `max()` en `ResultadoSecuencia::estado()`. El hecho «la
+> secuencia declaró un veredicto y no se evaluó» lo sella el motor en
+> `ejecuta_secuencia_interna`, antes de `on_fin_secuencia`, porque un
+> `ResultadoStep` no lleva el tipo del paso que lo produjo. El exit code no hizo
+> falta tocarlo: `anvil.rs` ya negaba `"paso"` en vez de enumerar los estados
+> malos. Reglas 2 y 3 y la regla de detección estática, pendientes.
+
 Anvil sólo puede decir `paso` de lo que ha comprobado. Para poder decirlo hacen
 falta dos cosas que hoy no existen: **un estado para «no lo sé» y una
 agregación por severidad.**

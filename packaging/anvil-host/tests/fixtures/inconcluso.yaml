@@ -1,0 +1,30 @@
+# Fixture de `tests/exit_codes.rs`: el issue #31 — la secuencia declara un
+# veredicto y ninguno llega a evaluarse.
+#
+# Es la reproducción mínima del defecto que motivó el ADR-0019: el único paso
+# `pass_fail` de `main` se salta por precondición falsa, así que no hay ningún
+# paso en rojo y antes la secuencia agregaba a `paso` y salía 0 — una unidad
+# aprobada sin que nadie la midiera.
+#
+# Como `paso.yaml`, no toca gRPC: `statement` y `pass_fail` los evalúa el
+# motor, así que el veredicto es determinista y no depende de la red.
+#
+#   === exit_inconcluso: inconcluso ===
+#   [paso] init: statement ok
+#   [saltado] verdict: precondición falsa
+#   (1 de 2 pasos saltados)
+
+nombre: exit_inconcluso
+
+locals:
+  flag: false
+
+main:
+  - nombre: init
+    tipo: statement
+    statement: 'locals.flag = false'
+
+  - nombre: verdict
+    tipo: pass_fail
+    precondicion: 'locals.flag'
+    condicion: 'locals.flag == true'

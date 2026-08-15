@@ -143,6 +143,30 @@ mod tests {
         assert_eq!(doc["pasos"].as_array().unwrap().len(), 2);
     }
 
+    /// ADR-0019, Regla 1: quien consuma el JSON tiene que contar con un estado
+    /// más. El sink no lo sabe —delega en `estado()`—, y este test lo fija:
+    /// el vocabulario del fichero es superficie pública, no un detalle interno.
+    #[test]
+    fn el_estado_agregado_puede_ser_inconcluso() {
+        let mut s = ResultadoSecuencia::nueva("b31");
+        s.registra(ResultadoStep::nuevo(
+            "verdict",
+            "saltado",
+            "precondición falsa",
+        ));
+        s.veredicto_sin_evaluar = true;
+
+        let mut sink = SinkJson::nuevo(Vec::new());
+        sink.on_fin_secuencia(&s);
+
+        let doc: Value = serde_json::from_slice(&sink.salida).unwrap();
+        assert_eq!(doc["estado"], "inconcluso");
+        assert_eq!(
+            doc["pasos"][0]["estado"], "saltado",
+            "el paso conserva lo que fue; lo que cambia es el agregado"
+        );
+    }
+
     #[test]
     fn valor_medido_es_numero_y_los_sin_medida_son_null() {
         let s = secuencia_ejemplo();

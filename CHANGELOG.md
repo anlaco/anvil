@@ -8,6 +8,40 @@ Anvil está en 0.x: la superficie pública —el formato de secuencia YAML, el
 contrato `paso.proto` y el reporte textual (RNF-08)— puede cambiar entre
 minors, con el cambio anotado aquí.
 
+## [No publicado]
+
+### Cambiado
+
+- **BREAKING — el veredicto de una secuencia se agrega por severidad, y hay un
+  quinto estado, `inconcluso`** (ADR-0019 Regla 1, issue #31). La escala es
+  `paso < inconcluso < fallo < error`; `saltado` sigue siendo neutral y fuera
+  de ella. La secuencia agrega **al más severo de sus pasos**, en vez de a
+  «`paso` si nadie falló».
+
+  Esto cambia la **superficie pública** en dos sitios, y por eso se anota como
+  incompatible:
+
+  - **El vocabulario de estados**: quien consuma el JSON o el CSV tiene que
+    contar con `inconcluso` en el estado de la secuencia. No aparece nunca como
+    estado de un paso: lo produce el motor al agregar, y sólo él — un ejecutor
+    no puede devolverlo ni una secuencia escribirlo.
+  - **El reporte textual** (RNF-08), como extensión aditiva igual que el
+    `saltado` de M4: la línea de cabecera puede decir ahora
+    `=== secuencia: inconcluso ===`. Las líneas de paso no cambian, y una
+    corrida sin el caso nuevo produce exactamente los mismos bytes de siempre.
+
+  **Hay secuencias que hoy salen en `paso` y pasarán a `inconcluso`, con exit 1
+  en vez de 0.** Es el objetivo, no un efecto colateral: cada una de ellas es
+  una unidad que se aprobó sin comprobar. Concretamente, las que declaran al
+  menos un paso `tipo: pass_fail` en `main` y no evalúan ninguno —porque se
+  saltó por precondición, por `disable`, o porque el Main no llegó a él—. Una
+  secuencia cuyo criterio son los `limite` de sus pasos **no cambia de
+  comportamiento**: ahí el veredicto sí se evaluó, paso a paso.
+
+  El código de salida sigue siendo binario (0 = `paso`, 1 = todo lo demás): el
+  std de `wasm32-wasip2` aplana cualquier `exit(n≠0)` a `I32Exit(1)` al cruzar
+  `wasi:cli/run`. La distinción vive en el estado y en el informe.
+
 ## [0.1.0] — 2026-08-10
 
 Primer release. Cierra el MVP completo (M0 → M5-ext.2) y los hallazgos de la

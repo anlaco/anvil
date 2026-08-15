@@ -68,9 +68,20 @@ on_fin_secuencia(resultado)   # el ResultadoSecuencia agregado
 > `"saltado"` para los pasos saltados por `disable` o precondición falsa
 > (RF-33/34). Es un nuevo **valor** de `estado`, no un cambio de formato: la
 > línea sigue siendo `  [estado] nombre: mensaje`. `"saltado"` es **neutral**
-> en el agregado `error > fallo > paso` (no cuenta como fallo ni error). Los
+> en el agregado (queda fuera de la escala de severidad, ADR-0019). Los
 > sinks JSON/CSV lo muestran como string en `estado_paso`/`estado`. Sin
 > campos nuevos en `ResultadoStep` ni en `paso.proto` (ADR-0009).
+
+> **Extensión aditiva de ADR-0019 (RNF-08):** el **agregado** de una secuencia
+> puede ser `"inconcluso"` — Anvil declaraba un veredicto y no llegó a
+> evaluarlo (issue #31). En consola sólo cambia la cabecera
+> (`=== nombre: inconcluso ===`); las líneas de paso no cambian, y el paso que
+> no se evaluó se sigue reportando `[saltado]`, que es lo que ocurrió. En JSON
+> es la clave `estado` de la raíz; en CSV, la columna `estado`. **Nunca aparece
+> como `estado_paso` ni en `sub_pasos`**: lo produce el motor al agregar, y sólo
+> él. El agregado deja de ser la cascada `error > fallo > paso` y pasa a ser el
+> máximo en la escala `paso < inconcluso < fallo < error`, con `saltado` fuera
+> de ella.
 
 > **Anidamiento de M4b (RNF-08):** un paso `sequence_call` produce un
 > `ResultadoStep` cuyo `estado` es el agregado de la subsecuencia y que lleva
@@ -82,11 +93,17 @@ on_fin_secuencia(resultado)   # el ResultadoSecuencia agregado
 
 ### Visibilidad de los pasos saltados (#13)
 
-`saltado` es **neutral** en el agregado `error > fallo > paso`, y debe seguir
-siéndolo: un paso saltado por `disable` o por una precondición falsa no es un
-fallo (RF-33/34). Pero esa neutralidad escondía cuánto dejó de correrse — en la
-primera campaña de beta, **9 secuencias daban verde saltándose ≥30% de sus
-pasos**, y no se detectó hasta auditar los ficheros a mano.
+`saltado` es **neutral** en el agregado, y debe seguir siéndolo: un paso saltado
+por `disable` o por una precondición falsa no es un fallo (RF-33/34). Pero esa
+neutralidad escondía cuánto dejó de correrse — en la primera campaña de beta,
+**9 secuencias daban verde saltándose ≥30% de sus pasos**, y no se detectó hasta
+auditar los ficheros a mano.
+
+De ahí salió el caso extremo, que ya no es neutral: si lo saltado es **el
+veredicto** —la secuencia declara un `pass_fail` en `main` y ninguno se
+evalúa—, el agregado es `inconcluso` y no `paso` (ADR-0019, Regla 1). El paso
+sigue contando como saltado; lo que deja de ser neutral es quedarse sin
+veredicto.
 
 El resultado lleva ahora el recuento, contando el **árbol entero** (los
 `sub_pasos` de un sequence call incluidos), porque lo que importa al triar es

@@ -7,30 +7,72 @@
 Trazable a `ResultadoStep` (`crates/modelo/src/lib.rs`), al contrato
 `crates/modelo/paso.proto` y al `Limite`/`aplicar_limite` del motor
 (ver [contrato-grpc.md](../contrato-grpc.md) y [ADR-0008](../adr/0008-limites-evaluados-por-el-motor.md)).
+La escala de severidad y el estado `inconcluso` los fija
+[ADR-0019](../adr/0019-que-hace-anvil-cuando-no-puede-juzgar.md).
 
-## Los tres estados
+## Los estados
 
 Cada paso devuelve un `estado` (texto, no enum — RF-10):
 
 | Estado | Significado | Corta el Main | Cuenta para el agregado |
 |---|---|---|---|
-| `paso` | El paso cumplió su criterio. | No | Solo si no hay error/fallo |
+| `paso` | El paso cumplió su criterio. | No | Es el mínimo de la escala |
 | `fallo` | No cumplió un **criterio de aceptación** (p. ej. medida fuera de rango). Resultado **válido**. | Sí | Sí |
 | `error` | No pudo ejecutarse (comunicación, nombre desconocido, excepción). | Sí | Sí (manda sobre fallo) |
+| `saltado` | No se ejecutó (`disable` o precondición falsa, RF-33/34). | No | No: es **neutral** |
 
-### Agregado `error > fallo`
+Y un quinto que **ningún paso devuelve**:
 
-`ResultadoSecuencia::estado`:
+| Estado | Significado |
+|---|---|
+| `inconcluso` | Anvil no pudo juzgar. Sólo existe como **agregado de una secuencia**: lo produce el motor, y sólo él (ADR-0019). Un ejecutor que devolviera la cadena `"inconcluso"` no lo estaría declarando — sería un estado no reconocido más. |
 
-```rust
-if any(p.estado == "error") { "error" }
-else if any(p.estado == "fallo") { "fallo" }
-else { "paso" }
+### Agregado por severidad (ADR-0019, Regla 1)
+
+`ResultadoSecuencia::estado()` devuelve **el más severo de sus pasos**, en esta
+escala:
+
+```
+paso  <  inconcluso  <  fallo  <  error
 ```
 
-Razonamiento: un `error` significa que **no sabemos** el estado real del
-UUT (algo impidió medir); es peor que un `fallo`, que significa "medimos y
-no cumple". Un `error` manda aunque llegue antes que un `fallo` (testeado).
+con `saltado` fuera de ella. En el código, el orden de declaración del enum
+`Severidad` **es** la escala, y agregar es un `max()` — el mismo modelo que el
+`Verdict` de OpenTAP, donde la severidad tampoco es una convención de la
+documentación sino el valor entero del enum.
+
+Razonamiento de cada peldaño:
+
+- Un `error` significa que **no sabemos** el estado real del UUT (algo impidió
+  medir); es peor que un `fallo`, que significa «medimos y no cumple». Un
+  `error` manda aunque llegue antes que un `fallo` (testeado).
+- `inconcluso` va **por encima de `paso`** porque una ausencia de información no
+  puede convertirse en una afirmación, y **por debajo de `fallo`** porque no
+  afirma nada del UUT: sólo dice que no se juzgó. Por eso no tapa un `fallo` ni
+  un `error` que también estén presentes (testeado).
+
+Antes de ADR-0019 esto era una cascada `error > fallo > paso` cuyo `else`
+devolvía `paso`. Ese `else` era el issue #31: una secuencia cuyo veredicto no se
+llegaba a evaluar no había fallado, luego «pasaba», y salía con código 0.
+
+### Cuándo sale `inconcluso`
+
+Un solo caso, de momento: **la secuencia declara al menos un paso
+`tipo: pass_fail` en `main` y ninguno llegó a evaluarse** — se saltó por
+precondición, está `disable`, o el Main cortó antes de llegar. El paso se sigue
+reportando `[saltado]` (es lo que ocurrió); lo que cambia es el agregado.
+
+Una secuencia cuyo criterio son los `limite` de sus pasos **no cambia de
+comportamiento**: ahí el veredicto sí se evaluó, paso a paso.
+
+Un `pass_fail` con `disable: true` cuenta como declarado y no evaluado: la
+unidad tampoco se ha medido, y eximirlo convertiría el flag en una puerta
+trasera al verde falso. Si un salto intencionado debe tratarse distinto, eso es
+criterio del usuario y vive en `--strict` (#13, #23).
+
+La propagación anidada es **nivel a nivel**: el `ResultadoStep` de un
+`sequence_call` lleva el agregado de su subsecuencia, así que la severidad de un
+descendiente profundo llega a la raíz por el mismo camino que un `fallo`.
 
 ## Límites como medida (MVP, ya en el contrato)
 
