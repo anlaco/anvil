@@ -12,7 +12,24 @@ La escala de severidad y el estado `inconcluso` los fija
 
 ## Los estados
 
-Cada paso devuelve un `estado` (texto, no enum — RF-10):
+Cada paso devuelve un `estado` (texto, no enum — RF-10), y son **cuatro,
+cerrados**: `paso`, `fallo`, `error`, `saltado`. Que el tipo sea texto es por el
+contrato (`paso.proto` viaja así, y un paso puede estar escrito en cualquier
+lenguaje); el vocabulario no por eso es abierto. Cualquier otra cadena —`"Paso"`
+con mayúscula, `"PASS"`, `"ok"`— **la convierte el motor en `error`**, con un
+mensaje que nombra el valor recibido y enumera los válidos
+(ADR-0019 Regla 2, issue #28):
+
+```
+[error] verificar_led: el ejecutor devolvió el estado 'Paso', que no es ninguno
+de 'paso', 'fallo', 'error', 'saltado': Anvil no juzga la unidad con un estado
+que no entiende (el paso decía: 'led encendido')
+```
+
+No es purismo: un estado que Anvil no entiende **no dice nada sobre la unidad**,
+así que tratarlo como veredicto —en cualquier dirección— es inventarse una
+afirmación. Antes esto acababa en `fallo` mudo; al introducir la escala de
+severidad pasó a `paso` mudo, que dejaba pasar unidades sin medir.
 
 | Estado | Significado | Corta el Main | Cuenta para el agregado |
 |---|---|---|---|

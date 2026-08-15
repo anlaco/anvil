@@ -111,25 +111,44 @@ impl Entorno for EntornoMotor {
                     ErrorExpr::entorno(0, format!("no existe 'file_globals.{campo}'"))
                 })
             }
-            Scope::Resultado => Ok(match campo {
-                // Laxa: si no hay resultado en curso, todo es Nulo.
-                "estado" => self
+            Scope::Resultado => match campo {
+                // Laxa en el *valor*: si no hay resultado en curso, o si el
+                // paso no midió, es Nulo — `valor_medido` puede faltar
+                // legítimamente.
+                "estado" => Ok(self
                     .resultado
                     .as_ref()
                     .map(|r| Value::Texto(r.estado.clone()))
-                    .unwrap_or(Value::Nulo),
-                "valor_medido" => self
+                    .unwrap_or(Value::Nulo)),
+                "valor_medido" => Ok(self
                     .resultado
                     .as_ref()
                     .and_then(|r| r.valor_medido.map(Value::Numero))
-                    .unwrap_or(Value::Nulo),
-                "mensaje" => self
+                    .unwrap_or(Value::Nulo)),
+                "mensaje" => Ok(self
                     .resultado
                     .as_ref()
                     .map(|r| Value::Texto(r.mensaje.clone()))
-                    .unwrap_or(Value::Nulo),
-                _ => Value::Nulo,
-            }),
+                    .unwrap_or(Value::Nulo)),
+                // Estricta en el *nombre*: los campos son tres y conocidos
+                // (`modelo::CAMPOS_RESULTADO`), así que `resultado.valor_meddio`
+                // no es un dato ausente, es un typo. Devolvía `Nulo`, y ese
+                // `Nulo` se volcaba a una local y la secuencia salía verde
+                // (ADR-0019, Regla 2, issue #27). Ahora falla la asigna, y una
+                // asigna que falla convierte el paso en `error`.
+                //
+                // El cargador lo caza antes, al validar (`--validate`); esto es
+                // la red de debajo, para el camino que no pase por él.
+                _ => Err(ErrorExpr::entorno(
+                    0,
+                    format!(
+                        "no existe 'resultado.{campo}': los campos de 'resultado' son {}",
+                        modelo::CAMPOS_RESULTADO
+                            .map(|c| format!("'{c}'"))
+                            .join(", ")
+                    ),
+                )),
+            },
         }
     }
 
@@ -236,6 +255,39 @@ mod tests {
             .unwrap(),
             Value::Numero(4.2)
         );
+    }
+
+    /// ADR-0019, Regla 2 (issue #27): el nombre del campo es **estricto**. Un
+    /// `resultado.valor_meddio` valía `nothing`, y ese `nothing` se volcaba a
+    /// la local que decidía el veredicto.
+    #[test]
+    fn leer_un_campo_inexistente_de_resultado_es_error() {
+        let def = secuencia_con(&[]);
+        let mut env = EntornoMotor::desde_definicion(&def);
+        env.set_resultado(ResultadoStep::medido_valor("m", "paso", "ok", 4.2));
+        let e = expr::parse_expresion("resultado.valor_meddio").unwrap();
+        let err = eval(&e, &env).expect_err("un typo no es un dato ausente");
+        let msg = err.to_string();
+        assert!(msg.contains("valor_meddio"), "nombra el campo: {msg}");
+        assert!(msg.contains("'valor_medido'"), "y los válidos: {msg}");
+    }
+
+    /// Lo estricto es el **nombre**, no el valor: los tres campos conocidos se
+    /// leen sin error aunque el paso no haya medido (`valor_medido` puede
+    /// faltar legítimamente, y entonces vale `nothing`).
+    #[test]
+    fn los_tres_campos_de_resultado_se_leen_siempre() {
+        let def = secuencia_con(&[]);
+        let mut env = EntornoMotor::desde_definicion(&def);
+        env.set_resultado(ResultadoStep::nuevo("m", "paso", "sin medida"));
+        for campo in modelo::CAMPOS_RESULTADO {
+            let e = expr::parse_expresion(&format!("resultado.{campo}")).unwrap();
+            eval(&e, &env).unwrap_or_else(|_| panic!("'resultado.{campo}' debe ser legible"));
+        }
+        // Y sin resultado en curso, tampoco fallan: valen `nothing`.
+        env.limpia_resultado();
+        let e = expr::parse_expresion("resultado.valor_medido").unwrap();
+        assert_eq!(eval(&e, &env).unwrap(), Value::Nulo);
     }
 
     #[test]

@@ -663,6 +663,7 @@ fn secuencia_yaml_a_definicion(
     };
     validar_lvalues(&def)?;
     validar_alcance_resultado(&def)?;
+    validar_campos_de_resultado(&def)?;
     Ok(def)
 }
 
@@ -738,17 +739,62 @@ fn validar_alcance_resultado(def: &DefinicionSecuencia) -> Result<(), ErrorCarga
 /// (`locals.v > 4.9 && resultado.valor_medido != nothing`), así que mirar
 /// sólo la raíz no habría bastado.
 fn primer_uso_de_resultado(e: &expr::Expresion) -> Option<String> {
+    primer_uso_de_resultado_si(e, &|_| true)
+}
+
+/// Como `primer_uso_de_resultado`, pero sólo cuenta los `resultado.X` cuyo
+/// campo cumple `pred`. Con `|_| true` es «cualquier uso» (dónde se puede
+/// escribir `resultado.*`); con «campo desconocido» es el typo del issue #27.
+fn primer_uso_de_resultado_si(e: &expr::Expresion, pred: &impl Fn(&str) -> bool) -> Option<String> {
     match e {
         expr::Expresion::Var {
             scope: expr::Scope::Resultado,
             campo,
-        } => Some(campo.clone()),
+        } if pred(campo) => Some(campo.clone()),
         expr::Expresion::Var { .. } | expr::Expresion::Lit(_) => None,
         expr::Expresion::BinOp { izq, der, .. } => {
-            primer_uso_de_resultado(izq).or_else(|| primer_uso_de_resultado(der))
+            primer_uso_de_resultado_si(izq, pred).or_else(|| primer_uso_de_resultado_si(der, pred))
         }
-        expr::Expresion::UnOp { operando, .. } => primer_uso_de_resultado(operando),
+        expr::Expresion::UnOp { operando, .. } => primer_uso_de_resultado_si(operando, pred),
     }
+}
+
+/// ADR-0019, regla de detección (issue #27): los campos de `resultado` son
+/// tres y conocidos (`modelo::CAMPOS_RESULTADO`), así que un
+/// `resultado.valor_meddio` es **comprobable sin ejecutar**. Y hay que
+/// comprobarlo ahí: en runtime valía `nothing`, ese `nothing` se volcaba a la
+/// local que iba a decidir el veredicto, y la secuencia salía en `paso` con la
+/// variable destruida. Un typo no puede costar una campaña entera.
+///
+/// Se mira sólo `asigna` porque es el único sitio donde `resultado.*` es
+/// legal; en `precondicion`, `condicion` y `statement` lo rechaza entero
+/// `validar_alcance_resultado`, que corre justo antes.
+fn validar_campos_de_resultado(def: &DefinicionSecuencia) -> Result<(), ErrorCarga> {
+    let desconocido = |campo: &str| !modelo::CAMPOS_RESULTADO.contains(&campo);
+    for p in def
+        .pasos_setup
+        .iter()
+        .chain(&def.pasos_main)
+        .chain(&def.pasos_cleanup)
+    {
+        let Some(asignaciones) = &p.asigna else {
+            continue;
+        };
+        for a in asignaciones {
+            if let Some(campo) = primer_uso_de_resultado_si(&a.expr, &desconocido) {
+                return Err(ErrorCarga::Validacion(format!(
+                    "el paso '{}' asigna a '{}' desde 'resultado.{campo}', que no existe: \
+                     los campos de 'resultado' son {} (los tres, y no hay más)",
+                    p.nombre,
+                    a.var,
+                    modelo::CAMPOS_RESULTADO
+                        .map(|c| format!("'{c}'"))
+                        .join(", ")
+                )));
+            }
+        }
+    }
+    Ok(())
 }
 
 /// El mensaje dice **dónde** está el uso indebido y **dónde sí** vale, que es
@@ -1670,6 +1716,18 @@ impl PasoYaml {
             return Err(ErrorCarga::Validacion(format!(
                 "el paso '{}' es 'pass_fail' y trae 'asigna': un pass_fail no produce \
                  'resultado.*' que volcar (usa un paso 'statement' aparte)",
+                self.nombre
+            )));
+        }
+        // Lo mismo para un `statement`, por el mismo motivo (ADR-0019, regla de
+        // detección, issue #27): tampoco produce `resultado.*`, así que su
+        // `asigna` era un no-op que `--validate` aprobaba. El caso hermano
+        // (`pass_fail`) llevaba resuelto desde ADR-0018; éste se quedó fuera.
+        if matches!(tipo, TipoPaso::Statement) && asigna.is_some() {
+            return Err(ErrorCarga::Validacion(format!(
+                "el paso '{}' es 'statement' y trae 'asigna': un statement no produce \
+                 'resultado.*' que volcar (asigna dentro del propio 'statement': \
+                 'locals.x = …')",
                 self.nombre
             )));
         }
@@ -2864,6 +2922,94 @@ main:
 ",
         );
         assert!(m.contains("resultado.valor_medido"), "{m}");
+    }
+
+    // --- ADR-0019, regla de detección: lo comprobable sin ejecutar, al cargar ---
+
+    /// Issue #27, caso 1: el typo que destruía una variable y dejaba la
+    /// secuencia en verde. Los campos de `resultado` son tres y conocidos, así
+    /// que esto se ve en el escritorio, no con la unidad en el banco.
+    #[test]
+    fn asigna_desde_un_campo_inexistente_de_resultado_es_error_de_carga() {
+        let m = error_de(
+            "\
+nombre: r27c
+locals:
+  val: 0.0
+main:
+  - nombre: medir_voltaje
+    asigna:
+      val: '${resultado.valor_meddio}'
+",
+        );
+        assert!(m.contains("medir_voltaje"), "nombra el paso: {m}");
+        assert!(m.contains("valor_meddio"), "nombra el campo escrito: {m}");
+        for campo in modelo::CAMPOS_RESULTADO {
+            assert!(m.contains(&format!("'{campo}'")), "enumera '{campo}': {m}");
+        }
+    }
+
+    /// El typo dentro de una expresión compuesta también se caza: el recorrido
+    /// es del AST entero, no de la raíz.
+    #[test]
+    fn el_campo_inexistente_se_caza_dentro_de_una_expresion() {
+        let m = error_de(
+            "\
+nombre: s
+locals:
+  ok: false
+main:
+  - nombre: medir
+    asigna:
+      ok: '${resultado.valor_medido > 1.0 && resultado.estdo == \"paso\"}'
+",
+        );
+        assert!(m.contains("estdo"), "{m}");
+    }
+
+    /// Y los tres campos buenos siguen cargando, claro.
+    #[test]
+    fn asigna_desde_los_campos_buenos_carga() {
+        let s = cargar_de_texto(
+            "\
+nombre: s
+locals:
+  v: 0.0
+  e: ''
+  msg: ''
+main:
+  - nombre: medir
+    asigna:
+      v: '${resultado.valor_medido}'
+      e: '${resultado.estado}'
+      msg: '${resultado.mensaje}'
+",
+        )
+        .expect("los tres campos son válidos");
+        assert_eq!(s.pasos_main[0].asigna.as_ref().unwrap().len(), 3);
+    }
+
+    /// Issue #27, caso 3: `asigna` sobre un `statement` era un no-op que
+    /// `--validate` aprobaba. El caso hermano (`pass_fail`) ya se rechazaba;
+    /// el mensaje sigue su tono, y dice qué hacer en su lugar.
+    #[test]
+    fn asigna_sobre_un_statement_es_error_de_carga() {
+        let m = error_de(
+            "\
+nombre: r27e
+locals:
+  val: 0.0
+main:
+  - nombre: stmt
+    tipo: statement
+    statement: 'locals.val = 99.0'
+    asigna:
+      val: '${resultado.valor_medido}'
+",
+        );
+        assert!(m.contains("stmt"), "nombra el paso: {m}");
+        assert!(m.contains("no produce 'resultado.*'"), "el motivo: {m}");
+        assert!(m.contains("locals.x = …"), "qué hacer en su lugar: {m}");
     }
 
     #[test]

@@ -445,19 +445,31 @@ fn corre_un_paso<I: InvocaPasos>(
         }
     }
 
-    // (c) según tipo de paso (RF-27).
+    // (c) según tipo de paso (RF-27). Lo que viene de un ejecutor se normaliza
+    // aquí mismo (ADR-0019, Regla 2): es el único punto por el que pasa todo
+    // resultado gRPC, mock de test incluido. Los otros tres tipos los produce
+    // el motor, que no se equivoca de vocabulario — y el `sequence_call`
+    // devuelve además `"inconcluso"`, que es agregado legítimo y no estado de
+    // ejecutor.
     let mut r = match p.tipo {
         TipoPaso::Statement => ejecuta_statement_puro(p.statement.as_deref(), &p.nombre, ent),
         TipoPaso::PassFail => evalua_pass_fail(p.condicion.as_ref(), &p.nombre, ent),
-        TipoPaso::Grpc => inv.ejecuta_paso_grpc(p, ctx.programa)?,
+        TipoPaso::Grpc => normaliza_estado_de_ejecutor(inv.ejecuta_paso_grpc(p, ctx.programa)?),
         TipoPaso::SequenceCall => ejecuta_sequence_call(inv, p, ent, sink, ctx)?,
     };
 
     // (d) asigna (RF-31): tras un paso Grpc o SequenceCall, vuelca campos
     // de `resultado` a Locals. Un statement asigna dentro de su sentencia; un
     // pass_fail no produce `resultado.*` que volcar (el cargador rechaza
-    // `asigna` en un pass_fail, así que aquí no hay nada que ignorar).
-    if matches!(p.tipo, TipoPaso::Grpc | TipoPaso::SequenceCall) {
+    // `asigna` en un pass_fail y en un statement, así que aquí no hay nada que
+    // ignorar).
+    //
+    // **No se asigna si el paso dio `error`** (ADR-0019, Regla 2): no hay
+    // resultado del que volcar nada, y lo que hacía antes era escribir el
+    // `nothing` de un `resultado.*` vacío encima de una variable con valor
+    // bueno. Que la variable la lea después un `cleanup` para decidir si apaga
+    // una fuente es todo el argumento: el destino no se toca.
+    if matches!(p.tipo, TipoPaso::Grpc | TipoPaso::SequenceCall) && r.estado != "error" {
         if let Some(asignaciones) = &p.asigna {
             r = aplica_asigna(asignaciones, r, ent);
         }
@@ -694,6 +706,35 @@ fn evalua_pass_fail(
         ),
         Err(e) => ResultadoStep::nuevo(nombre, "error", format!("condición: {e}")),
     }
+}
+
+/// Convierte en `"error"` un `ResultadoStep` cuyo `estado` no es ninguno de
+/// los cuatro que un ejecutor puede devolver (ADR-0019, Regla 2, issue #28).
+///
+/// `fallo` es del DUT; `error` es de Anvil. Que un ejecutor escriba `"Paso"` o
+/// `"PASS"` no dice nada sobre la unidad: dice que el ejecutor no habla el
+/// contrato. Antes esto acababa en `fallo` mudo; al introducir la escala de
+/// severidad pasó a `paso` mudo, que es peor. Aquí deja de ser mudo.
+///
+/// El mensaje nombra el valor recibido y enumera los válidos porque quien tiene
+/// que arreglarlo es el autor de un ejecutor de terceros, que no va a leer el
+/// código de Anvil para averiguar cuáles son.
+fn normaliza_estado_de_ejecutor(mut r: ResultadoStep) -> ResultadoStep {
+    if modelo::ESTADOS_DE_EJECUTOR.contains(&r.estado.as_str()) {
+        return r;
+    }
+    r.mensaje = format!(
+        "el ejecutor devolvió el estado '{}', que no es ninguno de {}: \
+         Anvil no juzga la unidad con un estado que no entiende \
+         (el paso decía: '{}')",
+        r.estado,
+        modelo::ESTADOS_DE_EJECUTOR
+            .map(|e| format!("'{e}'"))
+            .join(", "),
+        r.mensaje
+    );
+    r.estado = "error".into();
+    r
 }
 
 /// Aplica las `asignaciones` (RF-31): vuelca cada `expr` (sobre `resultado`/
@@ -997,11 +1038,11 @@ mod tests {
     fn asigna_que_falla_convierte_el_paso_en_error() {
         let mut env = entorno_con_locals(&[("x", ValorDefinicion::Numero(0.0))]);
         let res = ResultadoStep::medido_valor("m", "paso", "ok", 4.2);
-        // `resultado.valor_medido + nulo` → error (nulo en aritmética).
-        // Forzamos un nulo leyendo un campo de resultado inexistente.
+        // Leer un local no declarado es error de evaluación (lectura estricta
+        // de `locals`), así que la asigna falla.
         let asignaciones = vec![modelo::Asignacion {
             var: "x".into(),
-            expr: expr::parse_expresion("resultado.inventado + 1").unwrap(),
+            expr: expr::parse_expresion("locals.no_declarado + 1").unwrap(),
         }];
         let r = aplica_asigna(&asignaciones, res, &mut env);
         assert_eq!(
@@ -1009,6 +1050,77 @@ mod tests {
             "una asigna que falla es un fallo de definición"
         );
         assert!(r.mensaje.contains("asigna"));
+    }
+
+    /// ADR-0019, Regla 2 (issue #27): un campo inexistente de `resultado` toma
+    /// el camino que ya existía —una asigna que falla convierte el paso en
+    /// `error`— en vez de volcar un `nothing` mudo. El cargador lo caza antes
+    /// de ejecutar; esto prueba la red de debajo.
+    #[test]
+    fn asigna_desde_un_campo_inexistente_de_resultado_es_error() {
+        let mut env = entorno_con_locals(&[("x", ValorDefinicion::Numero(0.0))]);
+        let res = ResultadoStep::medido_valor("m", "paso", "ok", 4.2);
+        let asignaciones = vec![modelo::Asignacion {
+            var: "x".into(),
+            expr: expr::parse_expresion("resultado.valor_meddio").unwrap(),
+        }];
+        let r = aplica_asigna(&asignaciones, res, &mut env);
+        assert_eq!(r.estado, "error", "un typo no puede pasar por dato ausente");
+        assert!(
+            r.mensaje.contains("valor_meddio") && r.mensaje.contains("'valor_medido'"),
+            "nombra el campo escrito y los válidos: {}",
+            r.mensaje
+        );
+        assert_eq!(
+            env.locals().get("x"),
+            Some(&expr::Value::Numero(0.0)),
+            "y no toca el destino"
+        );
+    }
+
+    // --- ADR-0019, Regla 2: `fallo` es del DUT, `error` es de Anvil ---
+
+    /// Issue #28. El mensaje tiene que servirle al autor de un ejecutor de
+    /// terceros sin que lea el código de Anvil: nombra el valor recibido y
+    /// enumera los cuatro válidos.
+    #[test]
+    fn un_estado_no_reconocido_se_convierte_en_error() {
+        let r = normaliza_estado_de_ejecutor(ResultadoStep::nuevo(
+            "verificar_led",
+            "Paso",
+            "led encendido",
+        ));
+        assert_eq!(r.estado, "error");
+        assert!(r.mensaje.contains("'Paso'"), "el valor: {}", r.mensaje);
+        for e in modelo::ESTADOS_DE_EJECUTOR {
+            assert!(
+                r.mensaje.contains(&format!("'{e}'")),
+                "enumera '{e}': {}",
+                r.mensaje
+            );
+        }
+        assert!(
+            r.mensaje.contains("led encendido"),
+            "conserva lo que el paso decía: {}",
+            r.mensaje
+        );
+    }
+
+    /// Los cuatro válidos pasan intactos, mensaje incluido. `inconcluso` no
+    /// está entre ellos a propósito: lo produce el motor al agregar, y un
+    /// ejecutor que lo devuelva cae bajo la misma regla (ADR-0019, «Recortes»).
+    #[test]
+    fn los_estados_validos_pasan_intactos_y_inconcluso_no_es_uno() {
+        for e in modelo::ESTADOS_DE_EJECUTOR {
+            let r = normaliza_estado_de_ejecutor(ResultadoStep::nuevo("p", e, "tal cual"));
+            assert_eq!(r.estado, e);
+            assert_eq!(r.mensaje, "tal cual");
+        }
+        let r = normaliza_estado_de_ejecutor(ResultadoStep::nuevo("p", "inconcluso", "m"));
+        assert_eq!(
+            r.estado, "error",
+            "un ejecutor no puede declararse a sí mismo no concluyente"
+        );
     }
 
     // --- M4b: sequence call (sin gRPC, con InvocadorMock) ---
@@ -1032,6 +1144,159 @@ mod tests {
     /// Un sink que no hace nada (sólo nos interesa el `ResultadoSecuencia`).
     struct SinkNulo;
     impl modelo::ResultSink for SinkNulo {}
+
+    /// Un invocador que devuelve siempre el mismo estado y mensaje: sirve para
+    /// probar qué hace el motor con lo que le entrega un ejecutor, sin red.
+    struct InvocadorFijo {
+        estado: &'static str,
+        mensaje: &'static str,
+    }
+    impl InvocaPasos for InvocadorFijo {
+        fn ejecuta_paso_grpc(
+            &mut self,
+            def: &DefinicionPaso,
+            _programa: &Programa,
+        ) -> Result<ResultadoStep, Error> {
+            Ok(ResultadoStep::nuevo(&def.nombre, self.estado, self.mensaje))
+        }
+    }
+
+    /// Corre `def` con el invocador dado y devuelve secuencia y entorno final.
+    fn corre_con(
+        inv: &mut impl InvocaPasos,
+        def: &DefinicionSecuencia,
+    ) -> (ResultadoSecuencia, EntornoMotor) {
+        let programa = Programa {
+            raiz: def.clone(),
+            ..Default::default()
+        };
+        let entorno = EntornoMotor::desde_definicion(def);
+        ejecuta_secuencia_interna(inv, def, entorno, &mut SinkNulo, &programa, 0, true).unwrap()
+    }
+
+    /// Un paso `Grpc` con `asigna` sobre `valor_medido`.
+    fn paso_grpc_que_asigna(nombre: &str, destino: &str) -> DefinicionPaso {
+        let mut p = DefinicionPaso::nuevo(nombre, 1);
+        p.asigna = Some(vec![modelo::Asignacion {
+            var: destino.into(),
+            expr: expr::parse_expresion("resultado.valor_medido").unwrap(),
+        }]);
+        p
+    }
+
+    /// ADR-0019, Regla 2 (issue #28), extremo a extremo: el ejecutor devuelve
+    /// `"Paso"` con mayúscula, el paso queda en `error` y la secuencia **no**
+    /// sale verde. Antes de la Regla 1 esto era un `fallo` mudo; después, un
+    /// `paso` mudo, que es peor.
+    #[test]
+    fn un_estado_no_reconocido_no_deja_verde_la_secuencia() {
+        let def = DefinicionSecuencia {
+            nombre: "r28".into(),
+            pasos_main: vec![DefinicionPaso::nuevo("verificar_led", 1)],
+            ..Default::default()
+        };
+        let mut inv = InvocadorFijo {
+            estado: "Paso",
+            mensaje: "led encendido",
+        };
+        let (s, _) = corre_con(&mut inv, &def);
+        assert_eq!(s.estado(), "error");
+        assert_eq!(s.pasos[0].estado, "error");
+        assert!(s.pasos[0].mensaje.contains("'Paso'"));
+    }
+
+    /// ADR-0019, Regla 2 (issue #27, caso 2): si el paso dio `error` no hay
+    /// resultado del que volcar nada, así que `asigna` no escribe. Antes
+    /// borraba con un `nothing` la variable que el `cleanup` iba a usar para
+    /// decidir si apagaba una fuente.
+    #[test]
+    fn asigna_no_toca_el_destino_si_el_paso_dio_error() {
+        let mut def = DefinicionSecuencia {
+            nombre: "r27d".into(),
+            pasos_main: vec![paso_grpc_que_asigna("paso_inexistente", "valor")],
+            ..Default::default()
+        };
+        def.locals
+            .insert("valor".into(), ValorDefinicion::Numero(99.0));
+
+        let mut inv = InvocadorFijo {
+            estado: "error",
+            mensaje: "paso no reconocido",
+        };
+        let (s, env) = corre_con(&mut inv, &def);
+        assert_eq!(s.estado(), "error");
+        assert_eq!(
+            env.locals().get("valor"),
+            Some(&expr::Value::Numero(99.0)),
+            "el valor bueno sigue ahí"
+        );
+    }
+
+    /// La otra mitad de la regla: si el paso **no** dio error, `asigna` sigue
+    /// funcionando exactamente como antes. Lo que se acota es el caso sin
+    /// resultado, no la funcionalidad.
+    #[test]
+    fn asigna_sigue_escribiendo_cuando_el_paso_no_da_error() {
+        let mut def = DefinicionSecuencia {
+            nombre: "ok".into(),
+            pasos_main: vec![paso_grpc_que_asigna("medir", "valor")],
+            ..Default::default()
+        };
+        def.locals
+            .insert("valor".into(), ValorDefinicion::Numero(0.0));
+
+        struct InvocadorQueMide;
+        impl InvocaPasos for InvocadorQueMide {
+            fn ejecuta_paso_grpc(
+                &mut self,
+                def: &DefinicionPaso,
+                _programa: &Programa,
+            ) -> Result<ResultadoStep, Error> {
+                Ok(ResultadoStep::medido_valor(
+                    &def.nombre,
+                    "paso",
+                    "medido: 4.2 V",
+                    4.2,
+                ))
+            }
+        }
+        let (s, env) = corre_con(&mut InvocadorQueMide, &def);
+        assert_eq!(s.estado(), "paso");
+        assert_eq!(env.locals().get("valor"), Some(&expr::Value::Numero(4.2)));
+    }
+
+    /// Un `fallo` del DUT no es un error de Anvil: su `asigna` sí corre, porque
+    /// hay resultado — la medida que falló el límite es justo lo que un
+    /// `cleanup` o un informe quieren leer.
+    #[test]
+    fn asigna_corre_cuando_el_paso_falla() {
+        let mut def = DefinicionSecuencia {
+            nombre: "f".into(),
+            pasos_main: vec![paso_grpc_que_asigna("medir", "valor")],
+            ..Default::default()
+        };
+        def.locals
+            .insert("valor".into(), ValorDefinicion::Numero(0.0));
+
+        struct InvocadorQueFalla;
+        impl InvocaPasos for InvocadorQueFalla {
+            fn ejecuta_paso_grpc(
+                &mut self,
+                def: &DefinicionPaso,
+                _programa: &Programa,
+            ) -> Result<ResultadoStep, Error> {
+                Ok(ResultadoStep::medido_valor(
+                    &def.nombre,
+                    "fallo",
+                    "fuera de rango",
+                    6.1,
+                ))
+            }
+        }
+        let (s, env) = corre_con(&mut InvocadorQueFalla, &def);
+        assert_eq!(s.estado(), "fallo");
+        assert_eq!(env.locals().get("valor"), Some(&expr::Value::Numero(6.1)));
+    }
 
     /// Un `Argumento` by-reference: `param` ↔ `locals.campo`.
     fn arg(param: &str, campo: &str) -> modelo::Argumento {

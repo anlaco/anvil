@@ -90,6 +90,44 @@ main:
   ese patrón se propagó a 19 secuencias y 51 precondiciones. Ver
   [§5 del informe](../qa/informe-beta-2026-08.md#leccion).
 
+- **Los campos de `resultado` son tres y cerrados**: `estado`, `mensaje` y
+  `valor_medido`. Cualquier otro nombre es **error de carga** —lo ve
+  `--validate`, sin ejecutar nada—, porque un `resultado.valor_meddio` no es un
+  dato ausente: es un typo (ADR-0019, regla de detección, issue #27). Antes
+  valía `nothing`, ese `nothing` se volcaba encima de la variable que decidía el
+  veredicto, y la secuencia salía **en verde con la variable destruida**.
+
+  Lo laxo sigue siendo el **valor**, no el nombre: `resultado.valor_medido` vale
+  `nothing` si el paso no midió, que es legítimo. Lo que ya no vale es
+  preguntar por un campo que no existe.
+
+- **`asigna` no escribe si el paso dio `error`.** Sin resultado no hay nada que
+  volcar, así que el destino **no se toca** y conserva su valor (ADR-0019,
+  Regla 2). Que corriera era defendible; que machacara en silencio con un
+  `nothing` la variable con valor bueno que el `cleanup` iba a leer para decidir
+  si apagaba una fuente, no.
+
+  Con `fallo` sí corre: ahí hay medida —la que incumplió el criterio—, y es
+  justo la que interesa volcar. La distinción es la de la Regla 2 entera:
+  `fallo` es del DUT, `error` es de Anvil.
+
+  ```yaml
+  locals:
+    valor: 99.0
+  main:
+    - nombre: medir            # si este paso da `error`…
+      asigna: { valor: '${resultado.valor_medido}' }
+  cleanup:
+    - nombre: comprobar        # …aquí `locals.valor` sigue siendo 99.0
+      tipo: pass_fail
+      condicion: 'locals.valor == 99.0'
+  ```
+
+- **`asigna` sólo tiene sentido en un paso `grpc` o `sequence_call`.** En un
+  `statement` o un `pass_fail` es **error de carga**: ninguno de los dos produce
+  `resultado.*` que volcar, así que la `asigna` sería un no-op silencioso. Un
+  `statement` asigna dentro de su propia sentencia (`locals.x = …`).
+
 ## Por qué este recorte
 
 El motor es genérico (ADR-0005): no conoce el dominio. Las variables son

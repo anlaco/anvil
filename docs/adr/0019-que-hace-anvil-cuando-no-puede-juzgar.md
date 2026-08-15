@@ -75,6 +75,12 @@ Tres reglas. Todo lo demás se deriva de ellas.
 > `ResultadoStep` no lleva el tipo del paso que lo produjo. El exit code no hizo
 > falta tocarlo: `anvil.rs` ya negaba `"paso"` en vez de enumerar los estados
 > malos. Reglas 2 y 3 y la regla de detección estática, pendientes.
+>
+> *(La Regla 2 se implementó el 2026-08-15; ver su nota. Al hacerlo se corrigió
+> una regresión introducida aquí: `Severidad::de` mandaba un estado no
+> reconocido a `Paso` con el comentario de que congelaba «el comportamiento de
+> hoy», y no lo congelaba — el de entonces era `fallo`. De `fallo` mudo a verde
+> mudo, que es peor, y justo lo que este ADR viene a cerrar.)*
 
 Anvil sólo puede decir `paso` de lo que ha comprobado. Para poder decirlo hacen
 falta dos cosas que hoy no existen: **un estado para «no lo sé» y una
@@ -113,6 +119,21 @@ evaluó, paso a paso.
 > intermedia.
 
 ### Regla 2 — `fallo` es del DUT; `error` es de Anvil
+
+> **Implementada** el 2026-08-15 (issues #28 y #27 cerrados). El vocabulario de
+> estados de un ejecutor es cerrado y vive en `modelo::ESTADOS_DE_EJECUTOR`;
+> lo hace valer `motor::normaliza_estado_de_ejecutor`, aplicado a lo que
+> devuelve un paso `Grpc` en `corre_un_paso` —el único punto por el que pasa
+> todo resultado de ejecutor, mock de test incluido—. `Severidad::de` manda
+> ahora lo no reconocido a `Error` en vez de a `Paso`, con `saltado` en rama
+> propia; ese mapeo a `Paso` era una regresión de la Regla 1, que convirtió el
+> `fallo` mudo de #28 en un verde mudo, y por eso tiene test propio.
+> `asigna` no corre si el paso quedó en `error` (sí con `fallo`: ahí hay
+> medida). Los campos de `resultado` son `modelo::CAMPOS_RESULTADO`, estrictos
+> en el nombre y laxos en el valor: el cargador los valida (`--validate`), y en
+> ejecución el entorno devuelve error y `aplica_asigna` convierte el paso en
+> `error` por el camino que ya existía. Falta la Regla 3, y la regla de
+> detección aplicada a #22, #23 y #26.
 
 Son afirmaciones distintas y hoy se confunden:
 

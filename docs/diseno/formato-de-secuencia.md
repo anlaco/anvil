@@ -62,7 +62,9 @@ Reglas:
   `min`/`max` o `op`/`esperado`), `disable` y `pause_on_fail`
   (M4, RF-34, ver [motor-de-ejecucion.md](motor-de-ejecucion.md)),
   `precondicion` (M4, RF-33, ver [motor-de-expresiones.md](motor-de-expresiones.md)),
-  `asigna` (M4, RF-31, vuelca `resultado.*` a `Locals` tras el paso),
+  `asigna` (M4, RF-31, vuelca `resultado.*` a `Locals` tras el paso — **no**
+  si el paso dio `error`, y sólo desde los tres campos de `resultado`:
+  `estado`, `mensaje`, `valor_medido`; ADR-0019 Regla 2),
   `tipo`/`statement` (M4, RF-27: `tipo: grpc|statement`, por defecto `grpc`;
   `statement` trae las sentencias a ejecutar si el paso es local, sin gRPC), y
   desde **M4b** `tipo: sequence_call` con `secuencia` (nombre de subsecuencia
@@ -72,7 +74,9 @@ Reglas:
   subsecuencia). Desde **ADR-0018**, `tipo: pass_fail` con `condicion` (una
   expresión booleana que evalúa el motor: `true` → `paso`, `false` → `fallo`)
   — el veredicto **compuesto** sobre variables ya pobladas. Un `pass_fail` no
-  admite `reintentos > 1`, `asigna`, `limite` ni `ejecutor`.
+  admite `reintentos > 1`, `asigna`, `limite` ni `ejecutor`. Un `statement`
+  tampoco admite `asigna`, por el mismo motivo: no produce `resultado.*` que
+  volcar (ADR-0019, regla de detección).
 - Variables: `locals`, `parameters`, `file_globals` a nivel de secuencia
   (M4, RF-31, ver [variables-y-alcances.md](variables-y-alcances.md)). El tipo
   de cada variable se infiere del escalar YAML (`true`→bool, `4.5`→número,
