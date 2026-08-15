@@ -10,6 +10,17 @@ minors, con el cambio anotado aquí.
 
 ## [No publicado]
 
+## [0.2.0] — 2026-08-15
+
+**Anvil deja de dar verde donde no puede juzgar.** Toda la versión sale del
+[ADR-0019](docs/adr/0019-que-hace-anvil-cuando-no-puede-juzgar.md), y las tres
+entradas de abajo son la misma idea aplicada en tres sitios: un secuenciador de
+test existe para emitir un veredicto auditable, así que cuando no puede juzgar
+tiene que decirlo, no aprobar.
+
+Es la versión contra la que se corren las rondas de betatesting a partir de
+hoy: hasta ahora iban contra un binario del 11/08, anterior a estos arreglos.
+
 ### Cambiado
 
 - **BREAKING — el veredicto de una secuencia se agrega por severidad, y hay un
@@ -176,4 +187,5 @@ primera campaña de betatesting externa.
 - *Private vulnerability reporting* no puede activarse mientras el
   repositorio sea privado; hasta entonces vale el correo de `SECURITY.md`.
 
+[0.2.0]: https://github.com/anlaco/anvil/releases/tag/v0.2.0
 [0.1.0]: https://github.com/anlaco/anvil/releases/tag/v0.1.0
