@@ -258,11 +258,25 @@ Referencia oficial: `ejemplos/hola-paso/`.
    ```wit
    package anvil:paso@0.1.0;
    interface paso {
-     record resultado { estado: string, mensaje: string, valor-medido: option<f64> }
+     record resultado {
+       // Uno de "paso" | "fallo" | "error" | "saltado", en minúscula.
+       estado: string,
+       mensaje: string,
+       valor-medido: option<f64>,
+     }
      run: func(nombre: string, intento: s32) -> resultado;
    }
    world anvil-paso { export paso; }
    ```
+
+   **`estado` es texto, pero el vocabulario es cerrado**: exactamente uno de
+   `"paso"`, `"fallo"`, `"error"` o `"saltado"`. Cualquier otra cadena
+   —`"Paso"` con mayúscula es el caso real que motivó el issue #28— convierte
+   el paso en `error`, con un mensaje que nombra el valor que devolviste. Anvil
+   no juzga una unidad con un estado que no entiende (ADR-0019, Regla 2). La
+   distinción que más importa es la del medio: **`fallo` es de la unidad**
+   («medí y no cumple»), **`error` es del banco o del paso** («no pude
+   medir»).
 3. La implementación es una función (~15 líneas, con `wit-bindgen`):
    ```rust
    #[allow(warnings)]

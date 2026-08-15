@@ -1,0 +1,30 @@
+# Fixture de `tests/exit_codes.rs`: el issue #27, caso 2 — `asigna` no escribe
+# cuando el paso dio `error` (ADR-0019, Regla 2).
+#
+# `paso_inexistente` no existe en el ejecutor demo, que responde
+# `error: paso no reconocido`. Antes, la `asigna` corría igual: `resultado.*`
+# valía `nothing` y ese `nothing` machacaba `locals.valor`, que el `cleanup`
+# lee justo después para decidir. En un banco de verdad esa variable es la que
+# dice si hay que apagar una fuente.
+#
+#   === exit_asigna_tras_error: error ===
+#     [error] desconocido: paso no reconocido
+#     [paso] check_valor: condición cumplida
+#
+# El veredicto es `error` (exit 1) por el paso que no existe; lo que este
+# fixture vigila es la línea del `cleanup`.
+
+nombre: exit_asigna_tras_error
+
+locals:
+  valor: 99.0
+
+main:
+  - nombre: paso_inexistente
+    asigna:
+      valor: '${resultado.valor_medido}'
+
+cleanup:
+  - nombre: check_valor
+    tipo: pass_fail
+    condicion: 'locals.valor == 99.0'

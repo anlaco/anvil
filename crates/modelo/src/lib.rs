@@ -105,6 +105,22 @@ impl Limite {
     }
 }
 
+/// Los estados que un **ejecutor** puede devolver en `ResultadoStep.estado`, y
+/// los únicos (ADR-0019, Regla 2, issue #28). Cualquier otra cadena la
+/// convierte el motor en `"error"`: un estado que Anvil no entiende no dice
+/// nada sobre la unidad.
+///
+/// `"inconcluso"` **no** está aquí a propósito: lo produce el motor al agregar
+/// una secuencia, y un ejecutor que lo devuelva cae bajo la misma regla que
+/// cualquier otro valor no reconocido (ADR-0019, «Recortes»).
+pub const ESTADOS_DE_EJECUTOR: [&str; 4] = ["paso", "fallo", "error", "saltado"];
+
+/// Los campos que expone `resultado.*` a una expresión `asigna`, y los únicos
+/// (ADR-0019, regla de detección, issue #27). Son tres y conocidos, así que un
+/// `resultado.valor_meddio` es un typo comprobable **sin ejecutar**: lo rechaza
+/// el cargador (y por tanto `--validate`), no la unidad en el banco.
+pub const CAMPOS_RESULTADO: [&str; 3] = ["estado", "mensaje", "valor_medido"];
+
 /// La severidad de un estado, para agregar el veredicto de una secuencia
 /// (ADR-0019, Regla 1).
 ///
@@ -133,19 +149,26 @@ pub enum Severidad {
 impl Severidad {
     /// La severidad de un estado de paso.
     ///
-    /// Un estado **no reconocido** cae en `Paso`, es decir, es neutral. Eso es
-    /// deliberado y **no** es lo que debería ser: es el comportamiento de hoy
-    /// (issue #28, un ejecutor que devuelve `"Paso"` con mayúscula), congelado
-    /// tal cual mientras el issue siga abierto. Cambiarlo es la Regla 2 del
-    /// ADR-0019, que se hace aparte — aquí sólo se traslada intacto para no
-    /// mezclar dos cambios de semántica en el mismo commit.
+    /// Un estado **no reconocido** es `Error` (ADR-0019, Regla 2, issue #28):
+    /// que un ejecutor escriba `"Paso"` con mayúscula no dice nada sobre la
+    /// unidad, así que Anvil no puede juzgarla. `saltado` sí es neutral
+    /// (RF-33/34) y por eso tiene rama propia: comparte destino con `paso` pero
+    /// no motivo.
+    ///
+    /// Esta es la última red, no el diagnóstico: el motor normaliza el estado
+    /// que devuelve un ejecutor en cuanto lo recibe
+    /// (`motor::normaliza_estado_de_ejecutor`), y ahí es donde se nombra el
+    /// valor recibido. Si algo llega hasta aquí sin reconocer, se cuenta como
+    /// `Error` en vez de colarse como verde.
     pub fn de(estado: &str) -> Severidad {
         match estado {
             "error" => Severidad::Error,
             "fallo" => Severidad::Fallo,
             "inconcluso" => Severidad::Inconcluso,
-            // "paso", "saltado" y cualquier otra cosa (#28).
-            _ => Severidad::Paso,
+            // Neutrales: `paso` afirma, `saltado` no mueve el veredicto.
+            "paso" | "saltado" => Severidad::Paso,
+            // Lo que no se reconoce no se juzga (Regla 2).
+            _ => Severidad::Error,
         }
     }
 
@@ -711,15 +734,56 @@ mod tests {
         assert!(Severidad::Fallo < Severidad::Error);
     }
 
-    /// `saltado` es neutral (RF-33/34) y no entra en la escala. Un estado que
-    /// nadie reconoce también cae en neutral: eso **no** es correcto, es el
-    /// issue #28 congelado tal cual hasta que lo arregle la Regla 2 — si un
-    /// día deja de estar aquí, que sea porque alguien lo decidió.
+    /// `saltado` es neutral (RF-33/34) y no entra en la escala.
     #[test]
-    fn saltado_y_lo_desconocido_son_neutrales_en_la_escala() {
+    fn saltado_es_neutral_en_la_escala() {
         assert_eq!(Severidad::de("saltado"), Severidad::Paso);
-        assert_eq!(Severidad::de("Paso"), Severidad::Paso, "#28, sin arreglar");
-        assert_eq!(Severidad::de("cualquier cosa"), Severidad::Paso);
+        assert_eq!(Severidad::de("paso"), Severidad::Paso);
+    }
+
+    /// ADR-0019, Regla 2 (issue #28): un estado que nadie reconoce es `Error`,
+    /// **no** neutral. Esta severidad ya se movió una vez sin querer —al
+    /// introducir la escala, la rama `_` de `Severidad::de` mandaba lo
+    /// desconocido a `Paso`, que convirtió un `fallo` mudo en un verde mudo—,
+    /// así que aquí queda fijada: si alguien la cambia, que sea a sabiendas.
+    #[test]
+    fn un_estado_no_reconocido_es_error() {
+        assert_eq!(Severidad::de("Paso"), Severidad::Error, "#28");
+        assert_eq!(Severidad::de("PASS"), Severidad::Error);
+        assert_eq!(Severidad::de(""), Severidad::Error);
+        assert_eq!(Severidad::de("cualquier cosa"), Severidad::Error);
+        // Un ejecutor tampoco puede declararse a sí mismo no concluyente: eso
+        // lo produce el motor al agregar (ADR-0019, «Recortes»). Como cadena
+        // suelta sí es un agregado legítimo, y por eso no cae en la rama `_`.
+        assert_eq!(Severidad::de("inconcluso"), Severidad::Inconcluso);
+    }
+
+    /// Una secuencia no se pone verde porque un ejecutor escribiera mal el
+    /// estado. Es el issue #28 visto desde el agregado, que es donde dolía.
+    #[test]
+    fn un_estado_no_reconocido_no_deja_pasar_la_secuencia() {
+        let mut s = ResultadoSecuencia::nueva("s");
+        s.registra(ResultadoStep::nuevo(
+            "verificar_led",
+            "Paso",
+            "led encendido",
+        ));
+        assert_eq!(s.estado(), "error");
+    }
+
+    /// Los dos vocabularios cerrados de la Regla 2, fijados: cada estado que un
+    /// ejecutor puede devolver tiene rama propia en la escala.
+    #[test]
+    fn los_estados_de_ejecutor_estan_todos_en_la_escala() {
+        for e in ESTADOS_DE_EJECUTOR {
+            let sev = Severidad::de(e);
+            if e == "error" {
+                assert_eq!(sev, Severidad::Error);
+            } else {
+                assert_ne!(sev, Severidad::Error, "'{e}' es un estado válido");
+            }
+        }
+        assert_eq!(CAMPOS_RESULTADO.len(), 3, "los campos son tres y cerrados");
     }
 
     /// El issue #31: la secuencia declaraba un veredicto y no llegó a

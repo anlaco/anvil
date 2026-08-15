@@ -42,6 +42,41 @@ minors, con el cambio anotado aquí.
   std de `wasm32-wasip2` aplana cualquier `exit(n≠0)` a `I32Exit(1)` al cruzar
   `wasi:cli/run`. La distinción vive en el estado y en el informe.
 
+- **BREAKING — `fallo` es del DUT; `error` es de Anvil** (ADR-0019 Regla 2,
+  issues #28 y #27). Lo que antes salía `paso` o `fallo` porque Anvil no supo
+  interpretar algo, ahora sale `error`. Son tres cambios de comportamiento:
+
+  - **El vocabulario de estados de un ejecutor pasa a ser cerrado**: `paso`,
+    `fallo`, `error` y `saltado`, y nada más. Cualquier otra cadena —`"Paso"`,
+    `"PASS"`, y también `"inconcluso"`, que sólo produce el motor al agregar—
+    convierte el paso en `error`, con un mensaje que nombra el valor recibido y
+    enumera los cuatro válidos. Antes esto era un `fallo` mudo (#28); desde la
+    Regla 1 y hasta aquí fue un `paso` mudo, que era peor. Un ejecutor de
+    terceros que escribiera mal el estado dejaba pasar unidades sin medir.
+
+    Es **extensión aditiva de RNF-08**, con el precedente del `saltado` de M4:
+    el formato de línea no cambia, sólo qué estado aparece en él. Los tests que
+    congelan el reporte siguen pasando sin tocarse.
+
+  - **`asigna` no escribe si el paso dio `error`**: sin resultado no hay nada
+    que volcar, y lo que hacía antes era machacar con un `nothing` una variable
+    con valor bueno que el `cleanup` iba a leer para decidir (#27). Si el paso
+    dio `fallo`, la `asigna` sí corre: hay medida, y es justo la que interesa.
+
+  - **Un campo inexistente de `resultado` deja de valer `nothing`**: los campos
+    son tres y cerrados (`estado`, `mensaje`, `valor_medido`), así que
+    `resultado.valor_meddio` es un typo, no un dato ausente. Al ser comprobable
+    sin ejecutar, **lo rechaza el cargador** —y por tanto `--validate`—, no la
+    unidad en el banco; en ejecución, la `asigna` falla y el paso queda en
+    `error`.
+
+- **`--validate` rechaza `asigna` sobre un paso `statement`** (ADR-0019, regla
+  de detección, issue #27). Un `statement` no produce `resultado.*`, así que su
+  `asigna` era un no-op silencioso que el validador aprobaba. El caso hermano
+  (`pass_fail` con `asigna`) ya se rechazaba desde ADR-0018; ahora los dos dan
+  el mismo diagnóstico. **Hay secuencias que hoy cargan y dejarán de cargar**:
+  la `asigna` que se les quita nunca hizo nada.
+
 ## [0.1.0] — 2026-08-10
 
 Primer release. Cierra el MVP completo (M0 → M5-ext.2) y los hallazgos de la

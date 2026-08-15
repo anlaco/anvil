@@ -145,6 +145,25 @@ fn una_secuencia_cuyo_veredicto_no_se_evalua_sale_con_uno() {
 }
 
 #[test]
+fn una_asigna_tras_un_error_no_borra_la_variable_que_lee_el_cleanup() {
+    // Issue #27 / ADR-0019, Regla 2. El exit code aquí no distingue nada (el
+    // `error` del paso inexistente ya sale 1 con o sin el arreglo): lo que se
+    // mide es el reporte, donde el `pass_fail` de `cleanup` dice si
+    // `locals.valor` conservó su 99.0 o se lo llevó por delante un `nothing`.
+    let s = corre_con_reporte("packaging/anvil-host/tests/fixtures/asigna_tras_error.yaml");
+    let stdout = String::from_utf8_lossy(&s.stdout);
+    assert_eq!(
+        codigo(&s),
+        1,
+        "el paso inexistente deja la secuencia en `error`. stdout:\n{stdout}"
+    );
+    assert!(
+        stdout.contains("[paso] check_valor: condición cumplida"),
+        "la variable que el cleanup va a usar no se toca si el paso dio error. stdout:\n{stdout}"
+    );
+}
+
+#[test]
 fn una_secuencia_que_no_carga_sale_con_uno() {
     let s = corre("no-existe-de-verdad.yaml");
     assert_eq!(
