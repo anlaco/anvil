@@ -1,0 +1,11 @@
+# Issue #21: esta sección `ejecutores:` se descartaba sin una palabra.
+nombre: hija_con_ejecutores
+ejecutores:
+  - nombre: wasm_temp
+    tipo: grpc
+    host: 127.0.0.1
+    puerto: 9300
+main:
+  - nombre: medir_temperatura_bobina
+    tipo: grpc
+    ejecutor: wasm_temp

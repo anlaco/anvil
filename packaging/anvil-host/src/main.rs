@@ -145,14 +145,26 @@ fn reservar_puerto() -> Result<u16, String> {
     Ok(puerto)
 }
 
-/// Si el motor va a salir sin invocar un paso, el ejecutor embebido no pinta
-/// nada: abrirlo anuncia `escuchando en 9100` por delante de la ayuda o del
-/// error, y con el puerto fijo del MVP bloquea a otro `anvil` que sí fuera a
-/// correr. Cubre lo que se decide **sólo con los argumentos** —`-h`, `-V`,
+/// Si el motor va a salir sin invocar un paso, **nada que sirva pasos** pinta
+/// nada: ni el ejecutor embebido ni los puentes de los `.wasm` declarados.
+/// Arrancarlos anuncia `escuchando en …` por delante de la ayuda o del
+/// veredicto, y con el puerto fijo del MVP bloquea a otro `anvil` que sí fuera
+/// a correr. Cubre lo que se decide **sólo con los argumentos** —`-h`, `-V`,
 /// `--validate` (que carga sin conectar) y la falta de secuencia—; un flag
 /// desconocido no, porque el host no parsea la línea de comandos (eso es del
 /// guest) y duplicar aquí el flag set completo sería peor negocio.
-fn necesita_ejecutor_embebido(args: &[String]) -> bool {
+///
+/// Issue #22: esto existía desde el principio, pero sólo guardaba el ejecutor
+/// embebido. El bucle de los `.wasm` no lo consultaba, así que
+/// `anvil s.yaml --validate` con un `tipo: wasm` declarado spawneaba
+/// `anvil-puente-wasm`, que hacía `bind` en un puerto efímero e imprimía dos
+/// líneas — justo lo que el manual promete que `--validate` no hace, y en el
+/// escenario (CI, sin hardware) donde más importa.
+///
+/// Que el `.wasm` **exista** se sigue comprobando bajo `--validate`: eso lo
+/// hace `EjecutorYaml::a_definicion` en el cargador, es una comprobación de
+/// fichero y no requiere instanciar wasmtime ni abrir nada.
+fn va_a_ejecutar_pasos(args: &[String]) -> bool {
     let mut it = args.iter();
     let mut hay_ruta = false;
     while let Some(a) = it.next() {
@@ -426,49 +438,56 @@ fn main() {
     let mut ejecutores_wasm: Vec<EjecutorWasm> = Vec::new();
     let mut overrides_motor: Vec<String> = Vec::new();
     let mut args_motor_final: Vec<String> = args_motor;
-    if let Some(p) = programa.as_ref() {
-        // Deduplicar por path (dos ejecutores con el mismo `.wasm` → un Store).
-        let mut stores_por_path: HashMap<String, u16> = HashMap::new();
-        let mut errores: Vec<String> = Vec::new();
-        for (nombre, def) in &p.ejecutores {
-            if let modelo::TipoEjecutor::Wasm { path } = &def.tipo {
-                // El cargador ya validó que el path existe (fail-fast al
-                // cargar); aquí lo resolvemos relativo al directorio del YAML.
-                let ruta = cargador::normalizar_path(&dir_yaml, Path::new(path));
-                let clave = ruta.to_string_lossy().into_owned();
-                let puerto = if let Some(puerto) = stores_por_path.get(&clave) {
-                    *puerto
-                } else {
-                    let exec = match instanciar_wasm(nombre, &ruta) {
-                        Ok(e) => e,
-                        Err(e) => {
+    // Se calcula sobre `args_motor` (todavía sin los `--ejecutor` sintéticos,
+    // que es justo lo que este bloque produce). Da lo mismo que calcularlo
+    // sobre `args_motor_final`: el guard salta `--ejecutor` y su valor por
+    // `FLAGS_CON_VALOR`.
+    let va_a_ejecutar = va_a_ejecutar_pasos(&args_motor_final) && !yaml_invalido;
+    if va_a_ejecutar {
+        if let Some(p) = programa.as_ref() {
+            // Deduplicar por path (dos ejecutores con el mismo `.wasm` → un Store).
+            let mut stores_por_path: HashMap<String, u16> = HashMap::new();
+            let mut errores: Vec<String> = Vec::new();
+            for (nombre, def) in &p.ejecutores {
+                if let modelo::TipoEjecutor::Wasm { path } = &def.tipo {
+                    // El cargador ya validó que el path existe (fail-fast al
+                    // cargar); aquí lo resolvemos relativo al directorio del YAML.
+                    let ruta = cargador::normalizar_path(&dir_yaml, Path::new(path));
+                    let clave = ruta.to_string_lossy().into_owned();
+                    let puerto = if let Some(puerto) = stores_por_path.get(&clave) {
+                        *puerto
+                    } else {
+                        let exec = match instanciar_wasm(nombre, &ruta) {
+                            Ok(e) => e,
+                            Err(e) => {
+                                errores.push(e);
+                                continue;
+                            }
+                        };
+                        let puerto = exec.puerto;
+                        if let Err(e) = esperar_wasm(&exec) {
                             errores.push(e);
                             continue;
                         }
-                    };
-                    let puerto = exec.puerto;
-                    if let Err(e) = esperar_wasm(&exec) {
-                        errores.push(e);
-                        continue;
-                    }
-                    eprintln!(
-                        "ejecutor '{}' cargado ({} → 127.0.0.1:{})",
-                        nombre,
-                        ruta.display(),
+                        eprintln!(
+                            "ejecutor '{}' cargado ({} → 127.0.0.1:{})",
+                            nombre,
+                            ruta.display(),
+                            puerto
+                        );
+                        ejecutores_wasm.push(exec);
+                        stores_por_path.insert(clave, puerto);
                         puerto
-                    );
-                    ejecutores_wasm.push(exec);
-                    stores_por_path.insert(clave, puerto);
-                    puerto
-                };
-                overrides_motor.push(format!("{nombre}=127.0.0.1:{puerto}"));
+                    };
+                    overrides_motor.push(format!("{nombre}=127.0.0.1:{puerto}"));
+                }
             }
-        }
-        if !errores.is_empty() {
-            for e in &errores {
-                eprintln!("{e}");
+            if !errores.is_empty() {
+                for e in &errores {
+                    eprintln!("{e}");
+                }
+                std::process::exit(1);
             }
-            std::process::exit(1);
         }
     }
     for o in &overrides_motor {
@@ -485,7 +504,7 @@ fn main() {
     // ejecutor por `ANVIL_PORT` —la vía que ya usaba para los `.wasm` cargados
     // por path (ADR-0014)— y al motor como `--port`, que es como localiza al
     // ejecutor embebido.
-    let arranca_ejecutor = necesita_ejecutor_embebido(&args_motor_final) && !yaml_invalido;
+    let arranca_ejecutor = va_a_ejecutar;
     let puerto_ejecutor = match puerto_pedido(&args_motor_final) {
         Some(p) => p,
         // Sin ejecutor embebido no hay a quién asignarle puerto (y reservarlo
@@ -600,7 +619,7 @@ mod tests {
     /// debe arrancar cuando el motor va a salir sin invocar ningún paso.
     #[test]
     fn el_ejecutor_embebido_solo_arranca_si_hay_pasos_que_correr() {
-        use super::necesita_ejecutor_embebido as necesita;
+        use super::va_a_ejecutar_pasos as necesita;
         assert!(necesita(&args(&["s.yaml"])));
         assert!(necesita(&args(&["--process-model", "pm.yaml", "s.yaml"])));
         // Ayuda y versión: el motor imprime y sale.

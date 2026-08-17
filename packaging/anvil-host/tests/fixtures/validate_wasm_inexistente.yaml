@@ -1,0 +1,11 @@
+# El contrapunto del anterior: --validate no instancia, pero sigue
+# comprobando que el fichero declarado existe.
+nombre: validate_wasm_inexistente
+main:
+  - nombre: medir_voltaje
+    ejecutor: w
+    limite: { tipo: rango, min: 0.0, max: 10.0 }
+ejecutores:
+  - nombre: w
+    tipo: wasm
+    path: ./no_existe.wasm

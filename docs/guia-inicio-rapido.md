@@ -171,7 +171,13 @@ anvil <secuencia.yaml> [--process-model <pm.yaml>] [--json <ruta>] [--csv <ruta>
 - La secuencia es el primer argumento posicional (obligatorio).
 - Consola salvo `--quiet`; `--json`/`--csv` opcionales (fichero).
 - `--process-model` envuelve la secuencia en un PM Sequential (RF-38).
-- `--validate` carga y valida sin ejecutar ni conectar (CI sin hardware).
+- `--validate` carga y valida sin ejecutar ni conectar (CI sin hardware). No
+  abre ningún puerto: tampoco levanta el puente de un ejecutor `tipo: wasm`,
+  aunque sí comprueba que el `.wasm` declarado exista. Además del schema, los
+  ciclos y las firmas de las subsecuencias, valida las **expresiones**: leer un
+  nombre no declarado, escribir en `file_globals`, o escribir en `parameters`
+  desde la raíz, son errores de carga. Los **tipos** no: no son decidibles sin
+  evaluar.
 - `--port` fija el puerto del ejecutor embebido — el del ejecutor **y** el que
   el motor busca. Sin él, el host toma un puerto **efímero** por proceso, así
   que varios `anvil` pueden correr a la vez (#15).

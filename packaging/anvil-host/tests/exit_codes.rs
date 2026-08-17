@@ -193,3 +193,100 @@ fn un_error_de_uso_se_aplana_a_uno_bajo_el_host() {
         String::from_utf8_lossy(&s.stderr)
     );
 }
+
+// --- `--validate` (issues #17, #19, #20, #21, #22) ------------------------
+//
+// El manual promete que `--validate` «carga la secuencia, valida el schema,
+// resuelve subsecuencias y detecta ciclos — sin ejecutar nada ni levantar el
+// ejecutor». Cumplía la segunda mitad a medias y la primera de menos: cinco
+// clases de secuencia rota salían aprobadas y morían luego en runtime, a
+// mitad de la corrida. Hasta esta tanda no había ni un solo test E2E del flag.
+//
+// Son E2E y no unitarios del cargador por lo mismo que el resto del fichero:
+// lo que se fija aquí es el **exit code** observable, que sólo existe
+// atravesando el host.
+
+/// Corre `anvil <secuencia> --validate`. Sin `--quiet`: varios de estos tests
+/// leen stderr, que es donde va el diagnóstico.
+fn valida(secuencia: &str) -> Output {
+    Command::new(env!("CARGO_BIN_EXE_anvil"))
+        .current_dir(raiz_repo())
+        .args([secuencia, "--validate"])
+        .output()
+        .expect("lanzar anvil")
+}
+
+#[test]
+fn validate_de_una_secuencia_correcta_sale_con_cero() {
+    // La línea base que faltaba: sin ella, cualquier test de abajo pasaría en
+    // verde si `--validate` se rompiera del todo y rechazara siempre.
+    let s = valida("packaging/anvil-host/tests/fixtures/paso.yaml");
+    let err = String::from_utf8_lossy(&s.stderr);
+    assert_eq!(codigo(&s), 0, "stderr:\n{err}");
+    assert!(err.contains("válida"), "stderr:\n{err}");
+}
+
+#[test]
+fn validate_rechaza_una_variable_no_declarada() {
+    // Issue #19.
+    let s = valida("packaging/anvil-host/tests/fixtures/validate_var_no_declarada.yaml");
+    let err = String::from_utf8_lossy(&s.stderr);
+    assert_eq!(codigo(&s), 1, "stderr:\n{err}");
+    assert!(err.contains("no_existe"), "stderr:\n{err}");
+}
+
+#[test]
+fn validate_rechaza_valor_medido_en_un_sequence_call() {
+    // Issue #20.
+    let s = valida("packaging/anvil-host/tests/fixtures/validate_valor_medido_en_call.yaml");
+    let err = String::from_utf8_lossy(&s.stderr);
+    assert_eq!(codigo(&s), 1, "stderr:\n{err}");
+    assert!(err.contains("valor_medido"), "stderr:\n{err}");
+}
+
+#[test]
+fn validate_rechaza_ejecutores_en_una_subsecuencia_externa() {
+    // Issue #21. Este es el caso que salía **exit 0**: la sección se
+    // descartaba y nadie decía nada.
+    let s = valida("packaging/anvil-host/tests/fixtures/validate_sub_con_ejecutores.yaml");
+    let err = String::from_utf8_lossy(&s.stderr);
+    assert_eq!(codigo(&s), 1, "stderr:\n{err}");
+    assert!(
+        err.contains("raíz"),
+        "el mensaje tiene que decir dónde se declaran. stderr:\n{err}"
+    );
+}
+
+/// Issue #22, el test del arreglo.
+///
+/// La secuencia declara un `tipo: wasm` cuyo fichero **existe** pero no es un
+/// componente. Con el guard puesto, el host no toca ese fichero bajo
+/// `--validate` y la secuencia sale válida.
+///
+/// **Al revertir el guard este test tarda ~60 s en ponerse rojo**: el host
+/// spawnea el puente, el puente muere al instanciar el componente, y
+/// `esperar_wasm` agota sus sondeos antes de rendirse. Es el precio de no
+/// depender de un `.wasm` construido en `target/`, que no existe en un clon
+/// limpio.
+#[test]
+fn validate_no_levanta_el_puente_wasm() {
+    let s = valida("packaging/anvil-host/tests/fixtures/validate_wasm_basura.yaml");
+    let err = String::from_utf8_lossy(&s.stderr);
+    assert!(
+        !err.contains("anvil-puente-wasm"),
+        "el puente no debe arrancar bajo --validate. stderr:\n{err}"
+    );
+    assert!(!err.contains("escuchando en"), "stderr:\n{err}");
+    assert!(!err.contains("no empezó a escuchar"), "stderr:\n{err}");
+    assert_eq!(codigo(&s), 0, "stderr:\n{err}");
+}
+
+/// El contrapunto: no instanciar no es quedarse ciego. Que el `.wasm` exista
+/// es una comprobación de fichero, la hace el cargador, y sigue corriendo.
+#[test]
+fn validate_sigue_comprobando_que_el_wasm_existe() {
+    let s = valida("packaging/anvil-host/tests/fixtures/validate_wasm_inexistente.yaml");
+    let err = String::from_utf8_lossy(&s.stderr);
+    assert_eq!(codigo(&s), 1, "stderr:\n{err}");
+    assert!(err.contains("no existe"), "stderr:\n{err}");
+}

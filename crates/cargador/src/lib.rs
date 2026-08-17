@@ -605,6 +605,40 @@ pub fn cargar_de_texto(texto: &str) -> Result<DefinicionSecuencia, ErrorCarga> {
     secuencia_yaml_a_definicion(yaml, None)
 }
 
+/// Como [`cargar_de_texto`], pero para un archivo que se carga como
+/// **subsecuencia externa** de un `sequence_call`.
+///
+/// Issue #21: `leer_ejecutores` sólo se llama sobre la raíz (y, con
+/// `--process-model`, sobre el PM y la secuencia del usuario). Los archivos
+/// que entran por la cola de subsecuencias se leían con `cargar_de_texto`, que
+/// ni mira la sección `ejecutores:` — así que una subsecuencia que declaraba
+/// la suya la veía **descartada sin una palabra**. En el caso peor la raíz
+/// declaraba otro ejecutor con el mismo nombre, `--validate` decía «válida», y
+/// los pasos de la subsecuencia acababan en un ejecutor que no era el que su
+/// autor había escrito.
+///
+/// Este es el único punto del pipeline donde se tiene el YAML crudo de la
+/// subsecuencia, así que es donde se detecta.
+fn cargar_subsecuencia_externa(
+    texto: &str,
+    origen: &str,
+) -> Result<DefinicionSecuencia, ErrorCarga> {
+    let yaml: SecuenciaYaml = match noyalib::from_str(texto) {
+        Ok(y) => y,
+        Err(e) => return Err(diagnostica_campo_desconocido(texto, e)),
+    };
+    if !yaml.ejecutores.is_empty() {
+        return Err(ErrorCarga::Validacion(format!(
+            "la subsecuencia externa '{origen}' declara una sección 'ejecutores:', y \
+             Anvil no la lee: la tabla de ejecutores se declara **una sola vez**, en la \
+             secuencia raíz (la que se pasa a anvil; con --process-model, también en el \
+             process model). Las subsecuencias no declaran los suyos, los referencian \
+             por nombre con 'ejecutor:'. Mueve esa declaración a la raíz"
+        )));
+    }
+    secuencia_yaml_a_definicion(yaml, None)
+}
+
 /// Traduce una `SecuenciaYaml` (parseada) a `DefinicionSecuencia`,
 /// validándola (reglas de negocio + límites + expresiones) y traduciendo
 /// recursivamente sus `subsecuencias` inline. `fallback` es la **clave** del
@@ -635,7 +669,21 @@ fn secuencia_yaml_a_definicion(
     // SecuenciaYaml completa, con su propia validación; el nombre cae al
     // fallback de la clave).
     let mut subsecuencias = HashMap::new();
+    let nombre_secuencia = y.nombre.clone();
     for (k, sub) in y.subsecuencias {
+        // Issue #21, la mitad inline: `SecuenciaYaml` es recursiva, así que una
+        // inline puede escribir `ejecutores:` — y se descartaba igual de
+        // callado que en una externa. La tabla es del `Programa`, no de la
+        // secuencia, y sólo se lee de la raíz del archivo.
+        if !sub.ejecutores.is_empty() {
+            return Err(ErrorCarga::Validacion(format!(
+                "la subsecuencia inline '{k}' de la secuencia '{nombre_secuencia}' \
+                 declara una sección 'ejecutores:', y Anvil no la lee: los ejecutores \
+                 se declaran **una sola vez**, en el 'ejecutores:' de la secuencia raíz \
+                 del archivo. Muévela ahí; aquí basta con referenciarlos por nombre \
+                 con 'ejecutor:'"
+            )));
+        }
         subsecuencias.insert(k.clone(), secuencia_yaml_a_definicion(sub, Some(&k))?);
     }
 
@@ -664,6 +712,8 @@ fn secuencia_yaml_a_definicion(
     validar_lvalues(&def)?;
     validar_alcance_resultado(&def)?;
     validar_campos_de_resultado(&def)?;
+    // La última, a propósito: ver el docstring de `validar_variables_leidas`.
+    validar_variables_leidas(&def)?;
     Ok(def)
 }
 
@@ -862,12 +912,26 @@ fn validar_lvalues(def: &DefinicionSecuencia) -> Result<(), ErrorCarga> {
         if let Some(stmts) = &p.statement {
             for s in stmts {
                 let expr::Sentencia::Assign { scope, campo, .. } = s;
+                // `file_globals` son constantes del fichero: el motor rechaza
+                // escribirlas siempre, en cualquier secuencia
+                // (`EntornoMotor::escribe`, «sólo locals»). Que sea decidible
+                // sin ejecutar y aun así muriera a mitad de la corrida es el
+                // issue #17.
+                if *scope == expr::Scope::FileGlobals {
+                    return Err(ErrorCarga::Validacion(format!(
+                        "el paso '{}' tiene un statement que escribe en \
+                         'file_globals.{campo}', y 'file_globals' es de sólo lectura: \
+                         son las constantes del fichero, y ninguna secuencia las muta. \
+                         Si necesitas un valor que cambie, decláralo en 'locals:' de la \
+                         secuencia '{}'",
+                        p.nombre, def.nombre
+                    )));
+                }
                 let declarado = match scope {
                     expr::Scope::Locals => def.locals.contains_key(campo),
                     expr::Scope::Parameters => def.parameters.contains_key(campo),
-                    // FileGlobals/Resultado no son lvalues válidos aquí; el
-                    // motor los rechaza al evaluar (error de evaluación, no
-                    // silencioso). Nada que validar al cargar.
+                    // FileGlobals ya salió arriba; Resultado lo rechaza entero
+                    // `validar_alcance_resultado`, que corre justo después.
                     _ => true,
                 };
                 if !declarado {
@@ -881,6 +945,149 @@ fn validar_lvalues(def: &DefinicionSecuencia) -> Result<(), ErrorCarga> {
                         def.nombre
                     )));
                 }
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Issue #19: `validar_lvalues` mira **dónde se escribe**, y nadie miraba
+/// dónde se lee. `--validate` aprobaba `precondicion: 'locals.no_existe > 0.0'`
+/// y la corrida moría a mitad con «no existe 'locals.no_existe'», con la mitad
+/// del test ya ejecutada sobre la unidad. El manual promete que los tres scopes
+/// son estrictos y que leer algo no declarado es «un error de carga»: esto lo
+/// hace verdad.
+///
+/// Se valida contra las declaraciones de **la propia** secuencia, que es
+/// exactamente la tabla que verá el runtime: `EntornoMotor::desde_definicion*`
+/// materializa `locals`/`file_globals` de su `DefinicionSecuencia`, y los
+/// `parameters` de una subsecuencia los fija `validar_call` exigiendo igualdad
+/// de claves. No hay herencia de scopes, así que no hay falso positivo posible.
+///
+/// **Fuera de alcance a propósito**: el chequeo de tipos (`bool * número`).
+/// El nombre inexistente es decidible al cargar; el tipo no lo es sin evaluar,
+/// y el evaluador ya lo trata como `error` de ejecución (ADR-0019, Regla 2).
+///
+/// `parametros` de un `sequence_call` no se toca aquí: `validar_call` ya
+/// comprueba que cada `origen` esté en los `locals` del padre, y duplicarlo
+/// cambiaría qué error se dispara primero.
+///
+/// **El orden importa**: esta validación va la **última** de las cuatro. Varias
+/// secuencias mal escritas caen en más de una regla a la vez (leer un local no
+/// declarado *y* usar `resultado.*` donde no vale), y el diagnóstico útil es el
+/// de `resultado.*`, que explica un malentendido; el nombre no declarado es un
+/// typo. Adelantarla tapa el mensaje bueno.
+fn validar_variables_leidas(def: &DefinicionSecuencia) -> Result<(), ErrorCarga> {
+    for p in def
+        .pasos_setup
+        .iter()
+        .chain(&def.pasos_main)
+        .chain(&def.pasos_cleanup)
+    {
+        // (nombre del campo YAML, expresión) — el mensaje cita el campo tal y
+        // como el usuario lo escribió, igual que `validar_alcance_resultado`.
+        let mut donde: Vec<(&str, &expr::Expresion)> = Vec::new();
+        if let Some(pre) = &p.precondicion {
+            donde.push(("precondicion", pre));
+        }
+        if let Some(cond) = &p.condicion {
+            donde.push(("condicion", cond));
+        }
+        // Sólo el lado derecho: los destinos los valida `validar_lvalues`.
+        if let Some(stmts) = &p.statement {
+            for expr::Sentencia::Assign { valor, .. } in stmts {
+                donde.push(("statement", valor));
+            }
+        }
+        if let Some(asignaciones) = &p.asigna {
+            for a in asignaciones {
+                donde.push(("asigna", &a.expr));
+            }
+        }
+        for (campo_yaml, e) in donde {
+            if let Some((scope, campo)) = primera_var_no_declarada(e, def) {
+                let s = scope.nombre();
+                return Err(ErrorCarga::Validacion(format!(
+                    "el paso '{}' lee '{s}.{campo}' en '{campo_yaml}', y '{campo}' no \
+                     está declarado en '{s}:' de la secuencia '{}'. En ejecución esto \
+                     no es una variable nueva: la corrida muere a mitad con «no existe \
+                     '{s}.{campo}'». Decláralo en '{s}:' con su valor inicial, o \
+                     corrige el nombre",
+                    p.nombre, def.nombre
+                )));
+            }
+        }
+    }
+    Ok(())
+}
+
+/// La primera `scope.campo` de la expresión que no esté declarada en `def`, o
+/// `None`. Mismo recorrido recursivo que `primer_uso_de_resultado_si`: mirar
+/// sólo la raíz no basta, el caso real de la campaña era una conjunción.
+///
+/// `Scope::Resultado` se **salta**: dónde vale lo decide
+/// `validar_alcance_resultado` y qué campos tiene, `validar_campos_de_resultado`.
+fn primera_var_no_declarada<'a>(
+    e: &'a expr::Expresion,
+    def: &DefinicionSecuencia,
+) -> Option<(expr::Scope, &'a str)> {
+    match e {
+        expr::Expresion::Var {
+            scope: expr::Scope::Resultado,
+            ..
+        } => None,
+        expr::Expresion::Var { scope, campo } => {
+            let declarado = match scope {
+                expr::Scope::Locals => def.locals.contains_key(campo),
+                expr::Scope::Parameters => def.parameters.contains_key(campo),
+                expr::Scope::FileGlobals => def.file_globals.contains_key(campo),
+                expr::Scope::Resultado => true,
+            };
+            if declarado {
+                None
+            } else {
+                Some((*scope, campo))
+            }
+        }
+        expr::Expresion::Lit(_) => None,
+        expr::Expresion::BinOp { izq, der, .. } => {
+            primera_var_no_declarada(izq, def).or_else(|| primera_var_no_declarada(der, def))
+        }
+        expr::Expresion::UnOp { operando, .. } => primera_var_no_declarada(operando, def),
+    }
+}
+
+/// La otra mitad del issue #17. `parameters` es entrada/salida **by-reference
+/// de una llamada**: el motor sólo los deja mutar cuando la secuencia se está
+/// ejecutando como subsecuencia, con los argumentos del padre enlazados
+/// (`EntornoMotor::desde_definicion_con_args`, `parameters_mutables`). La
+/// secuencia raíz del programa no la llama nadie, así que sus `parameters` no
+/// tienen a quién devolver nada: escribirlos muere en runtime con «sólo
+/// locals».
+///
+/// Escribirlos **desde una subsecuencia sí es legítimo** — es el modo
+/// documentado de devolver un valor al llamador (ADR-0010) — así que esto se
+/// comprueba únicamente sobre la raíz del `Programa`, y no baja a sus
+/// `subsecuencias` inline: una inline también se invoca por `sequence_call`.
+fn validar_parameters_de_la_raiz(raiz: &DefinicionSecuencia) -> Result<(), ErrorCarga> {
+    for p in raiz
+        .pasos_setup
+        .iter()
+        .chain(&raiz.pasos_main)
+        .chain(&raiz.pasos_cleanup)
+    {
+        let Some(stmts) = &p.statement else { continue };
+        for expr::Sentencia::Assign { scope, campo, .. } in stmts {
+            if *scope == expr::Scope::Parameters {
+                return Err(ErrorCarga::Validacion(format!(
+                    "el paso '{}' tiene un statement que escribe en \
+                     'parameters.{campo}', y '{}' es la secuencia raíz: sus \
+                     'parameters' no los enlaza ningún llamador, así que escribirlos \
+                     no devuelve nada a nadie y en ejecución falla con «sólo locals». \
+                     Escribir 'parameters' sólo vale desde una subsecuencia, para \
+                     devolver el valor al padre; en la raíz, usa 'locals:'",
+                    p.nombre, raiz.nombre
+                )));
             }
         }
     }
@@ -1007,7 +1214,7 @@ pub fn cargar_programa_de_archivo(ruta: &str) -> Result<Programa, ErrorCarga> {
         cargados.insert(clave.clone());
         let path = PathBuf::from(&clave);
         let texto = std::fs::read_to_string(&path)?;
-        let mut sub = cargar_de_texto(&texto)?;
+        let mut sub = cargar_subsecuencia_externa(&texto, &clave)?;
         let dir_sub = path.parent().unwrap_or_else(|| Path::new("")).to_path_buf();
         // Reescribir paths de la subsecuencia externa y encolar los suyos.
         procesar_secuencia(&mut sub, &dir_sub, &mut cola)?;
@@ -1019,6 +1226,7 @@ pub fn cargar_programa_de_archivo(ruta: &str) -> Result<Programa, ErrorCarga> {
         .to_string_lossy()
         .into_owned();
     let mut camino: Vec<String> = Vec::new();
+    validar_parameters_de_la_raiz(&programa.raiz)?;
     visitar(&programa, &id_raiz, &programa.raiz, &mut camino)?;
 
     Ok(programa)
@@ -1123,7 +1331,7 @@ pub fn cargar_programa_con_pm(ruta_pm: &str, ruta_usuario: &str) -> Result<Progr
         cargados.insert(clave.clone());
         let path = PathBuf::from(&clave);
         let texto = std::fs::read_to_string(&path)?;
-        let mut sub = cargar_de_texto(&texto)?;
+        let mut sub = cargar_subsecuencia_externa(&texto, &clave)?;
         let dir_sub = path.parent().unwrap_or_else(|| Path::new("")).to_path_buf();
         procesar_secuencia(&mut sub, &dir_sub, &mut cola)?;
         programa.archivos.insert(clave, sub);
@@ -1139,6 +1347,9 @@ pub fn cargar_programa_con_pm(ruta_pm: &str, ruta_usuario: &str) -> Result<Progr
         .to_string_lossy()
         .into_owned();
     let mut camino: Vec<String> = Vec::new();
+    // Bajo un PM la raíz es el PM: la secuencia del usuario sí se invoca por
+    // `sequence_call`, así que sus `parameters` son legítimamente mutables.
+    validar_parameters_de_la_raiz(&programa.raiz)?;
     visitar(&programa, &id_pm, &programa.raiz, &mut camino)?;
 
     Ok(programa)
@@ -1231,8 +1442,13 @@ fn visitar(
         if let Some(nombre) = paso.ejecutor.as_deref() {
             if !programa.ejecutores.contains_key(nombre) {
                 return Err(ErrorCarga::Validacion(format!(
-                    "el paso '{}' referencia el ejecutor '{nombre}' que no está en 'ejecutores:'",
-                    paso.nombre
+                    "el paso '{}' de la secuencia '{}' referencia el ejecutor \
+                     '{nombre}' que no está en 'ejecutores:'. La tabla se declara \
+                     **una sola vez**, en la secuencia raíz (la que se pasa a anvil; \
+                     con --process-model, también en el process model): declararlo en \
+                     la subsecuencia no vale, porque Anvil no lee esa sección fuera \
+                     de la raíz",
+                    paso.nombre, def.nombre
                 )));
             }
         }
@@ -1730,6 +1946,33 @@ impl PasoYaml {
                  'locals.x = …')",
                 self.nombre
             )));
+        }
+        // Un `sequence_call` sí produce `resultado.*` — pero sólo dos tercios
+        // de él. `ejecuta_sequence_call` (motor/src/lib.rs) rellena `estado`
+        // (el agregado de la subsecuencia) y `mensaje`, y **nunca**
+        // `valor_medido`: una subsecuencia no mide, agrega. Así que
+        // `asigna: {v: '${resultado.valor_medido}'}` volcaba `nothing` encima
+        // del destino y lo destruía, sin una palabra — el mismo fallo
+        // silencioso que ADR-0019 arregló para los campos inexistentes
+        // (issue #27), sólo que aquí el campo existe y lo que falta es el
+        // valor. Anvil-Test lo cazó con una variable que valía 42.0 antes del
+        // sequence call y `nothing` después.
+        if matches!(tipo, TipoPaso::SequenceCall) {
+            if let Some(asignaciones) = &asigna {
+                for a in asignaciones {
+                    if primer_uso_de_resultado_si(&a.expr, &|c| c == "valor_medido").is_some() {
+                        return Err(ErrorCarga::Validacion(format!(
+                            "el paso '{}' es 'sequence_call' y asigna a '{}' desde \
+                             'resultado.valor_medido': una subsecuencia no mide, agrega \
+                             el veredicto de sus pasos, así que ese campo vale siempre \
+                             'nothing' y borraría '{}' sin avisar. De 'resultado' de un \
+                             sequence call hay 'estado' y 'mensaje'; para devolver un \
+                             valor medido, pásalo por 'parameters' (by-reference)",
+                            self.nombre, a.var, a.var
+                        )));
+                    }
+                }
+            }
         }
         if !matches!(tipo, TipoPaso::SequenceCall)
             && (self.secuencia.is_some() || parametros.is_some())
@@ -3833,5 +4076,393 @@ cleanup:
                 .map(|d| d.nombre.as_str()),
             Some("basica")
         );
+    }
+
+    // --- Issue #19: leer una variable no declarada es error de carga ---
+    //
+    // `validar_lvalues` miraba dónde se escribe y nadie miraba dónde se lee:
+    // `--validate` aprobaba la secuencia y la corrida moría a mitad, con la
+    // unidad medio probada. Los scopes son estrictos según el manual; estos
+    // tests son lo que lo hace verdad.
+
+    #[test]
+    fn precondicion_con_un_local_no_declarado_es_error_de_carga() {
+        let m = error_de(
+            "\
+nombre: s
+locals:
+  v: 0.0
+main:
+  - nombre: medir
+    precondicion: 'locals.no_existe > 0.0'
+",
+        );
+        assert!(m.contains("locals.no_existe"), "{m}");
+        assert!(m.contains("precondicion"), "dice en qué campo: {m}");
+        assert!(m.contains("medir"), "dice en qué paso: {m}");
+    }
+
+    #[test]
+    fn condicion_de_pass_fail_con_una_variable_no_declarada_es_error() {
+        let m = error_de(
+            "\
+nombre: s
+locals:
+  v: 0.0
+main:
+  - nombre: verdict
+    tipo: pass_fail
+    condicion: 'file_globals.umbral > 1.0'
+",
+        );
+        assert!(m.contains("file_globals.umbral"), "{m}");
+        assert!(m.contains("condicion"), "{m}");
+    }
+
+    /// El que se ve fallar al revertir: el **lvalue** sí está declarado, así
+    /// que `validar_lvalues` lo aprueba; lo no declarado está a la derecha.
+    #[test]
+    fn el_lado_derecho_de_un_statement_valida_las_lecturas() {
+        let m = error_de(
+            "\
+nombre: s
+locals:
+  x: 0.0
+main:
+  - nombre: calcula
+    tipo: statement
+    statement: 'locals.x = locals.y + 1.0'
+",
+        );
+        assert!(m.contains("locals.y"), "{m}");
+        assert!(m.contains("statement"), "{m}");
+    }
+
+    #[test]
+    fn el_lado_derecho_de_un_asigna_valida_las_lecturas() {
+        let m = error_de(
+            "\
+nombre: s
+locals:
+  x: 0.0
+main:
+  - nombre: medir
+    asigna:
+      x: '${resultado.valor_medido + locals.offset}'
+",
+        );
+        assert!(m.contains("locals.offset"), "{m}");
+        assert!(m.contains("asigna"), "{m}");
+    }
+
+    /// El caso de la campaña era una conjunción: mirar sólo la raíz del AST
+    /// no habría bastado. Mismo motivo que `primer_uso_de_resultado_si`.
+    #[test]
+    fn una_variable_no_declarada_anidada_en_la_expresion_tambien_se_detecta() {
+        let m = error_de(
+            "\
+nombre: s
+locals:
+  a: true
+main:
+  - nombre: medir
+    precondicion: '!(locals.a && (parameters.p || true))'
+",
+        );
+        assert!(m.contains("parameters.p"), "{m}");
+    }
+
+    /// Guarda contra el falso positivo, y contra que esto pise a `resultado.*`
+    /// (que tiene sus propias dos validaciones y no se toca aquí).
+    #[test]
+    fn leer_variables_declaradas_en_los_tres_scopes_es_valido() {
+        let s = cargar_de_texto(
+            "\
+nombre: s
+file_globals:
+  umbral: 4.0
+parameters:
+  canal: 0.0
+locals:
+  v: 0.0
+  ok: false
+main:
+  - nombre: medir
+    precondicion: 'parameters.canal >= 0.0'
+    asigna:
+      v: '${resultado.valor_medido}'
+  - nombre: calcula
+    tipo: statement
+    statement: 'locals.ok = locals.v > file_globals.umbral'
+  - nombre: verdict
+    tipo: pass_fail
+    condicion: 'locals.ok'
+",
+        );
+        assert!(s.is_ok(), "no debe haber falso positivo: {s:?}");
+    }
+
+    /// No hay herencia de scopes: `EntornoMotor` materializa los de **su**
+    /// definición. Rechazarlo al cargar coincide exactamente con el runtime.
+    #[test]
+    fn una_inline_valida_sus_lecturas_contra_sus_propias_declaraciones() {
+        let m = error_de(
+            "\
+nombre: padre
+locals:
+  x: 1.0
+subsecuencias:
+  hija:
+    locals:
+      propia: 0.0
+    main:
+      - nombre: usa
+        tipo: statement
+        statement: 'locals.propia = locals.x + 1.0'
+main:
+  - nombre: c
+    tipo: sequence_call
+    secuencia: hija
+",
+        );
+        assert!(
+            m.contains("locals.x"),
+            "la hija lee un local que sólo existe en el padre: {m}"
+        );
+    }
+
+    // --- Issue #17: escribir donde no se puede ---
+
+    #[test]
+    fn un_statement_que_escribe_en_file_globals_es_error_de_carga() {
+        let m = error_de(
+            "\
+nombre: s
+file_globals:
+  counter: 0.0
+locals:
+  x: 0.0
+main:
+  - nombre: set_global
+    tipo: statement
+    statement: 'file_globals.counter = 1.0'
+",
+        );
+        assert!(m.contains("file_globals.counter"), "{m}");
+        assert!(m.contains("sólo lectura"), "dice por qué: {m}");
+    }
+
+    #[test]
+    fn un_statement_que_escribe_en_parameters_de_la_raiz_es_error_de_carga() {
+        let dir = std::env::temp_dir().join("anvil_17_params_raiz");
+        std::fs::create_dir_all(&dir).unwrap();
+        let raiz = dir.join("raiz.yaml");
+        std::fs::write(
+            &raiz,
+            "nombre: raiz\nparameters: { val: 0.0 }\nlocals: { x: 0.0 }\nmain:\n  - nombre: set_param\n    tipo: statement\n    statement: 'parameters.val = 1.0'\n",
+        )
+        .unwrap();
+        let m = match cargar_programa_de_archivo(raiz.to_str().unwrap()) {
+            Err(ErrorCarga::Validacion(m)) => m,
+            otro => panic!("se esperaba error de validación, no {otro:?}"),
+        };
+        assert!(m.contains("parameters.val"), "{m}");
+        assert!(
+            m.contains("raíz"),
+            "dice que el problema es ser la raíz: {m}"
+        );
+    }
+
+    /// La otra cara: desde una subsecuencia sí vale — es el modo documentado
+    /// de devolver un valor al llamador (ADR-0010). Este test es el que impide
+    /// que el arreglo de #17 se pase de frenada.
+    #[test]
+    fn un_statement_que_escribe_en_parameters_de_una_subsecuencia_es_valido() {
+        let dir = std::env::temp_dir().join("anvil_17_params_sub");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(
+            dir.join("hija.yaml"),
+            "nombre: hija\nparameters: { val: 0.0 }\nmain:\n  - nombre: devuelve\n    tipo: statement\n    statement: 'parameters.val = 1.0'\n",
+        )
+        .unwrap();
+        let padre = dir.join("padre.yaml");
+        std::fs::write(
+            &padre,
+            "nombre: padre\nlocals: { val: 0.0 }\nmain:\n  - nombre: c\n    tipo: sequence_call\n    secuencia: ./hija.yaml\n    parametros: { val: locals.val }\n",
+        )
+        .unwrap();
+        assert!(
+            cargar_programa_de_archivo(padre.to_str().unwrap()).is_ok(),
+            "escribir parameters desde una subsecuencia es legítimo"
+        );
+    }
+
+    // --- Issue #20: un sequence_call no mide ---
+
+    #[test]
+    fn asigna_de_valor_medido_en_un_sequence_call_es_error_de_carga() {
+        let m = error_de(
+            "\
+nombre: s
+locals:
+  my_num: 42.0
+subsecuencias:
+  hija:
+    main:
+      - nombre: p
+        tipo: grpc
+main:
+  - nombre: call_sub
+    tipo: sequence_call
+    secuencia: hija
+    asigna:
+      my_num: '${resultado.valor_medido}'
+",
+        );
+        assert!(m.contains("valor_medido"), "{m}");
+        assert!(m.contains("no mide"), "dice por qué: {m}");
+    }
+
+    #[test]
+    fn valor_medido_anidado_en_el_asigna_de_un_sequence_call_tambien_se_detecta() {
+        let m = error_de(
+            "\
+nombre: s
+locals:
+  my_num: 42.0
+subsecuencias:
+  hija:
+    main:
+      - nombre: p
+        tipo: grpc
+main:
+  - nombre: call_sub
+    tipo: sequence_call
+    secuencia: hija
+    asigna:
+      my_num: '${resultado.valor_medido + 1.0}'
+",
+        );
+        assert!(m.contains("valor_medido"), "{m}");
+    }
+
+    /// `estado` y `mensaje` sí los produce un sequence call: siguen valiendo.
+    /// Protege a `process_models/sequential.yaml` y `ejemplos/subsecuencia.yaml`.
+    #[test]
+    fn asigna_de_estado_en_un_sequence_call_sigue_siendo_valido() {
+        let s = cargar_de_texto(
+            "\
+nombre: s
+locals:
+  veredicto: \"\"
+subsecuencias:
+  hija:
+    main:
+      - nombre: p
+        tipo: grpc
+main:
+  - nombre: call_sub
+    tipo: sequence_call
+    secuencia: hija
+    asigna:
+      veredicto: '${resultado.estado}'
+",
+        );
+        assert!(s.is_ok(), "{s:?}");
+    }
+
+    // --- Issue #21: `ejecutores:` fuera de la raíz ---
+
+    /// El caso silencioso: hoy devolvía `Ok` y descartaba la declaración de la
+    /// hija, incluso contradiciendo a la de la raíz.
+    #[test]
+    fn una_subsecuencia_externa_con_ejecutores_es_error_de_carga() {
+        let dir = std::env::temp_dir().join("anvil_21_ext");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(
+            dir.join("hija.yaml"),
+            "nombre: hija\nejecutores:\n  - nombre: wasm_temp\n    tipo: grpc\n    host: 127.0.0.1\n    puerto: 9300\nmain:\n  - nombre: m\n    tipo: grpc\n",
+        )
+        .unwrap();
+        let padre = dir.join("padre.yaml");
+        std::fs::write(
+            &padre,
+            "nombre: padre\nmain:\n  - nombre: c\n    tipo: sequence_call\n    secuencia: ./hija.yaml\n",
+        )
+        .unwrap();
+        let m = match cargar_programa_de_archivo(padre.to_str().unwrap()) {
+            Err(ErrorCarga::Validacion(m)) => m,
+            otro => panic!("se esperaba error de validación, no {otro:?}"),
+        };
+        assert!(m.contains("ejecutores"), "{m}");
+        assert!(m.contains("raíz"), "dice dónde declararlos: {m}");
+    }
+
+    #[test]
+    fn una_subsecuencia_inline_con_ejecutores_es_error_de_carga() {
+        let m = error_de(
+            "\
+nombre: padre
+subsecuencias:
+  hija:
+    ejecutores:
+      - nombre: e
+        tipo: grpc
+        host: 127.0.0.1
+        puerto: 9300
+    main:
+      - nombre: m
+        tipo: grpc
+main:
+  - nombre: c
+    tipo: sequence_call
+    secuencia: hija
+",
+        );
+        assert!(m.contains("ejecutores"), "{m}");
+        assert!(m.contains("raíz"), "{m}");
+    }
+
+    /// El caso (c1) del issue: el mensaje tiene que decir que el sitio es la
+    /// raíz, no dejar al usuario creyendo que le falta en la subsecuencia.
+    #[test]
+    fn el_ejecutor_no_declarado_dice_donde_declararlo() {
+        let dir = std::env::temp_dir().join("anvil_21_msg");
+        std::fs::create_dir_all(&dir).unwrap();
+        let raiz = dir.join("raiz.yaml");
+        std::fs::write(
+            &raiz,
+            "nombre: raiz\nmain:\n  - nombre: m\n    tipo: grpc\n    ejecutor: wasm_temp\n",
+        )
+        .unwrap();
+        let m = match cargar_programa_de_archivo(raiz.to_str().unwrap()) {
+            Err(ErrorCarga::Validacion(m)) => m,
+            otro => panic!("se esperaba error de validación, no {otro:?}"),
+        };
+        assert!(m.contains("wasm_temp"), "{m}");
+        assert!(m.contains("raíz"), "dice dónde declararlo: {m}");
+    }
+
+    /// El camino que **no** debe romperse: con `--process-model`, el PM y la
+    /// secuencia del usuario sí pueden declarar `ejecutores:` (los dos entran
+    /// por `cargar_de_archivo`, no por la cola de subsecuencias).
+    #[test]
+    fn con_process_model_el_pm_y_el_usuario_pueden_declarar_ejecutores() {
+        let dir = std::env::temp_dir().join("anvil_21_pm");
+        std::fs::create_dir_all(&dir).unwrap();
+        let pm = dir.join("pm.yaml");
+        std::fs::write(
+            &pm,
+            "nombre: sequential\nejecutores:\n  - nombre: del_pm\n    tipo: grpc\n    host: 127.0.0.1\n    puerto: 9300\nmain:\n  - nombre: correr\n    tipo: sequence_call\n    secuencia: secuencia_usuario\n",
+        )
+        .unwrap();
+        let usuario = dir.join("usuario.yaml");
+        std::fs::write(
+            &usuario,
+            "nombre: usuario\nejecutores:\n  - nombre: del_usuario\n    tipo: grpc\n    host: 127.0.0.1\n    puerto: 9400\nmain:\n  - nombre: m\n    tipo: grpc\n    ejecutor: del_usuario\n",
+        )
+        .unwrap();
+        let prog = cargar_programa_con_pm(pm.to_str().unwrap(), usuario.to_str().unwrap()).unwrap();
+        assert_eq!(prog.ejecutores.len(), 2, "los dos se fusionan");
     }
 }

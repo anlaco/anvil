@@ -1,6 +1,12 @@
 *~
 *.wat
 *.wasm
+# Excepción: no es un componente, es un fichero de texto con extensión .wasm.
+# El test `validate_no_levanta_el_puente_wasm` lo necesita en el repo — existe
+# para que el cargador dé el path por bueno, y no ser un componente es
+# justamente lo que delataría al puente si alguien lo levantara bajo
+# `--validate` (issue anlaco/Anvil-Test#22).
+!packaging/anvil-host/tests/fixtures/no_es_componente.wasm
 /target
 Cargo.lock
 # Salidas de smoke del CLI (./anvil ... --json ./out.json):

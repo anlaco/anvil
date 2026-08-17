@@ -10,6 +10,63 @@ minors, con el cambio anotado aquí.
 
 ## [No publicado]
 
+**`--validate` deja de decir «válida» a secuencias que no lo son.** El manual
+promete que el flag «carga la secuencia, valida el schema, resuelve
+subsecuencias y detecta ciclos — sin ejecutar nada ni levantar el ejecutor».
+Validaba menos de lo que prometía y conectaba más. Las cinco entradas de abajo
+son la misma idea: lo que se puede decidir sin hardware se decide al cargar, no
+a mitad de la corrida ni en silencio.
+
+**Hay secuencias que hoy cargan y pasarán a fallar al cargar.** Cada una de
+ellas es una definición que ya estaba rota: todas morían en ejecución, sólo que
+más tarde y con la unidad medio probada. Un caso concreto del propio repo:
+`ejemplos/medir_fuentes.yaml` escribe `parameters.canal`, legítimo porque
+`ejemplos/subsecuencia.yaml` la invoca — pero corrida **como raíz** ahora se
+rechaza al cargar en vez de morir a mitad.
+
+### Cambiado
+
+- **BREAKING — leer una variable no declarada es error de carga** (issue
+  anlaco/Anvil-Test#19). Cualquier lectura de `locals.X` / `parameters.X` /
+  `file_globals.X` en `precondicion`, en la `condicion` de un `pass_fail`, o en
+  el lado derecho de un `statement` o de un `asigna`, se valida contra las
+  declaraciones de **su propia** secuencia. Antes `--validate` decía «válida» y
+  la corrida moría a mitad con «no existe 'locals.X'». Es lo que el manual ya
+  prometía: los tres scopes son estrictos.
+  **No se comprueban tipos** (`bool * número` y compañía): eso no es decidible
+  sin evaluar y sigue siendo error de ejecución (ADR-0019, Regla 2).
+- **BREAKING — escribir donde no se puede es error de carga** (issue #17).
+  `file_globals` es de sólo lectura en cualquier secuencia; `parameters` sólo
+  es escribible **desde una subsecuencia**, que es el modo documentado de
+  devolver un valor al llamador (ADR-0010) — en la secuencia raíz no hay
+  llamador al que devolver nada. Las dos se comprobaban ya en runtime, con
+  «sólo locals», y ninguna al cargar.
+- **BREAKING — `asigna` desde `resultado.valor_medido` en un `sequence_call` es
+  error de carga** (issue anlaco/Anvil-Test#20). Una subsecuencia no mide:
+  agrega el veredicto de sus pasos. Ese campo valía siempre `nothing` y borraba
+  el destino sin avisar — el mismo fallo silencioso que ADR-0019 arregló para
+  los campos inexistentes. `resultado.estado` y `resultado.mensaje` siguen
+  siendo válidos.
+- **BREAKING — una subsecuencia que declara `ejecutores:` es error de carga**
+  (issue anlaco/Anvil-Test#21). Anvil nunca leyó esa sección fuera de la raíz:
+  la descartaba en silencio, también cuando contradecía a la de la raíz — el
+  caso peor pasaba `--validate` en verde y mandaba los pasos a un ejecutor que
+  no era el que su autor había escrito. La tabla se declara una sola vez, en la
+  secuencia raíz (con `--process-model`, también en el process model). Aplica a
+  subsecuencias externas e inline, y el mensaje de «ejecutor no declarado» dice
+  ahora dónde declararlo.
+
+### Arreglado
+
+- **`--validate` ya no levanta los puentes `.wasm`** (issue
+  anlaco/Anvil-Test#22). Validar una secuencia con un ejecutor `tipo: wasm`
+  spawneaba el proceso `anvil-puente-wasm`, que abría un puerto de loopback e
+  imprimía dos líneas por delante del veredicto — para no ejecutar nada, y en
+  CI, que es donde el flag existe. El guard que ya evitaba arrancar el ejecutor
+  embebido bajo `--validate`, `-h` y `-V` cubre ahora también los puentes. Que
+  el `.wasm` declarado **exista** se sigue comprobando: es una comprobación de
+  fichero y no requiere instanciar nada.
+
 ## [0.2.0] — 2026-08-15
 
 **Anvil deja de dar verde donde no puede juzgar.** Toda la versión sale del
