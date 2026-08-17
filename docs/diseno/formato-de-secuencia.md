@@ -71,7 +71,11 @@ Reglas:
   inline o path relativo a un archivo externo) y `parametros` (mapa
   `parameter -> "locals.X"`, by-reference). Un `sequence_call` no admite
   `reintentos > 1` ni `limite` (no mide; su estado es el agregado de la
-  subsecuencia). Desde **ADR-0018**, `tipo: pass_fail` con `condicion` (una
+  subsecuencia), y por el mismo motivo su `asigna` **no puede leer
+  `resultado.valor_medido`**: ese campo vale siempre `nothing` y borraba el
+  destino en silencio (issue anlaco/Anvil-Test#20). De su `resultado` hay
+  `estado` y `mensaje`; para devolver un valor medido, `parameters`.
+  Desde **ADR-0018**, `tipo: pass_fail` con `condicion` (una
   expresión booleana que evalúa el motor: `true` → `paso`, `false` → `fallo`)
   — el veredicto **compuesto** sobre variables ya pobladas. Un `pass_fail` no
   admite `reintentos > 1`, `asigna`, `limite` ni `ejecutor`. Un `statement`
@@ -80,7 +84,13 @@ Reglas:
 - Variables: `locals`, `parameters`, `file_globals` a nivel de secuencia
   (M4, RF-31, ver [variables-y-alcances.md](variables-y-alcances.md)). El tipo
   de cada variable se infiere del escalar YAML (`true`→bool, `4.5`→número,
-  `"A"`→texto). Desde **M4b**, `subsecuencias:` a nivel de secuencia declara
+  `"A"`→texto). Los tres son **estrictos, y se comprueban al cargar** (no en
+  runtime): leer un nombre no declarado es error de carga en cualquier
+  expresión (issue anlaco/Anvil-Test#19), y también lo es escribir donde no se
+  puede (issue #17) — `file_globals` es de sólo lectura siempre, y
+  `parameters` sólo se escribe **desde una subsecuencia**, para devolver el
+  valor al llamador. Los tipos, en cambio, no se comprueban al cargar: no son
+  decidibles sin evaluar (ADR-0019, Regla 2). Desde **M4b**, `subsecuencias:` a nivel de secuencia declara
   subsecuencias **inline** (mapa `nombre -> secuencia`), invocables por
   nombre; el `nombre:` de una inline es opcional (cae al de su clave).
 - Desde **M5-ext.1** (RF-36.3, ver [executores-lenguaje.md](executores-lenguaje.md)):
@@ -99,6 +109,13 @@ Reglas:
     `host`/`puerto` (obligatorios). IPs no-loopback **sólo si se declaran**
     (relajación acotada del loopback, ADR-0011).
   
+  La tabla se declara **una sola vez, en la secuencia raíz** — la que se pasa
+  a `anvil`; con `--process-model`, también en el process model. Una
+  subsecuencia (externa o inline) no declara los suyos: los referencia por
+  nombre con `ejecutor:`, y declarar ahí un `ejecutores:` es error de carga.
+  Antes se descartaba en silencio, incluso cuando contradecía a la de la raíz
+  (issue anlaco/Anvil-Test#21).
+
   El nombre `__anvil_embebido__` está reservado (lo usa el motor); el
   cargador lo rechaza. `ejecutor:` en un paso `statement`/`sequence_call`
   es error (sólo aplica a `grpc`). Override por CLI:

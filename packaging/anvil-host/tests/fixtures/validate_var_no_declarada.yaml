@@ -1,0 +1,7 @@
+# Issue #19: `--validate` aprobaba esto y la corrida moría a mitad.
+nombre: validate_var_no_declarada
+locals:
+  v: 0.0
+main:
+  - nombre: medir_voltaje
+    precondicion: 'locals.no_existe > 0.0'
