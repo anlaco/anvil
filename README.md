@@ -17,9 +17,34 @@ Empieza por [`docs/vision.md`](docs/vision.md).
 
 ## Correr el ejemplo
 
+**Un binario** (`anvil`, ADR-0011) hospeda wasmtime y los dos guests WASM en
+sandbox. Está enlazado estáticamente contra musl: no necesita Rust, ni cargo,
+ni glibc, ni nada instalado en el sistema.
+
+```sh
+curl -LO https://github.com/anlaco/anvil/releases/download/v0.2.0/anvil-v0.2.0-x86_64-linux-musl.tar.gz
+tar xzf anvil-v0.2.0-x86_64-linux-musl.tar.gz
+cd anvil-v0.2.0-x86_64-linux-musl
+
+./anvil ejemplos/subsecuencia.yaml --json ./out.json --csv ./out.csv
+```
+
+Linux x86_64, cualquier libc. La [página del release][rel] publica el SHA256
+del `.tar.gz`; para comprobarlo, `sha256sum -c SHA256SUMS` con el segundo
+asset descargado al lado. Los `.yaml` van en el paquete porque
+`subsecuencia.yaml` invoca a `medir_fuentes.yaml` por path relativo.
+
+[rel]: https://github.com/anlaco/anvil/releases/latest
+
+## Compilar desde fuentes
+
+Sólo hace falta si vas a tocar el código; para *usar* Anvil, descarga el
+binario de arriba.
+
 > **Antes de compilar: clona `wasi-grpc` al lado de este repo.** La pila gRPC
 > se referencia por ruta relativa y todavía no está publicada en crates.io, así
-> que sin ella `cargo` **no llega ni a leer el manifiesto**.
+> que sin ella `cargo` **no llega ni a leer el manifiesto**. Y es un repo
+> privado: si no tienes acceso, la vía es el binario del release.
 >
 > ```sh
 > git clone https://github.com/anlaco/anvil
@@ -28,9 +53,6 @@ Empieza por [`docs/vision.md`](docs/vision.md).
 > ```
 >
 > Es un apaño y está reconocido como tal: [#25](https://github.com/anlaco/anvil/issues/25).
-
-**Un binario** (`anvil`, ADR-0011) hospeda wasmtime y los dos guests WASM en
-sandbox, sin instalar nada:
 
 ```sh
 make release   # guests WASM → puente → host, en ese orden
@@ -47,6 +69,15 @@ cargo build --release --target wasm32-wasip2 -p motor -p ejecutor_pasos      # g
 cargo build --release --manifest-path packaging/anvil-puente-wasm/Cargo.toml # puente (ADR-0015)
 cargo build --release --manifest-path packaging/anvil-host/Cargo.toml        # host (wasmtime embebido)
 ```
+
+Eso deja un binario enlazado contra la glibc de tu máquina, que es lo que
+quieres para desarrollar. El **binario que se publica** en los releases es otra
+cosa: se compila al target `x86_64-unknown-linux-musl` para que corra en
+cualquier Linux. Requiere un compilador de C para musl, porque `wasmtime`
+arrastra `zstd-sys`; sirve `musl-gcc` o `zig cc -target x86_64-linux-musl` tras
+`rustup target add x86_64-unknown-linux-musl`. El puente hay que copiarlo a
+`packaging/anvil-puente-wasm/target/release/` antes de compilar el host: su
+`build.rs` busca los artifacts ahí, sin contemplar el subdirectorio del triple.
 
 `make build` hace lo mismo en debug. Úsalo para desarrollar, pero cuenta con
 que ese binario **arranca en decenas de segundos**: wasmtime compila los
