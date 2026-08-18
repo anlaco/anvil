@@ -1,0 +1,87 @@
+# Verifica que el binario publicado en un Release cumple la promesa del README:
+# se descarga, se descomprime y corre **sin instalar nada** — sin Rust, sin
+# cargo, y sin el repo hermano privado `wasi-grpc`.
+#
+# No compila nada: descarga el asset del Release (draft incluido, que para eso
+# tiene el token) y lo ejecuta dentro de contenedores limpios. Es la única
+# comprobación que mira lo que el usuario se descarga de verdad, en vez de lo
+# que salió del `target/` de quien lo construyó.
+#
+# Las dos distros no son decoración:
+#   - alpine  → musl puro, sin glibc: si el binario no fuese estático de
+#               verdad, aquí ni arranca.
+#   - debian  → glibc 2.36, más vieja que la de la máquina donde se compiló
+#               (2.39): es justo el caso que rompía el binario dinámico.
+name: Verifica el Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag del Release a verificar (p. ej. v0.2.0)"
+        required: true
+  release:
+    types: [published]
+
+jobs:
+  verifica:
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      TAG: ${{ inputs.tag || github.event.release.tag_name }}
+    steps:
+      - name: Descargar el asset del Release
+        run: |
+          gh release download "$TAG" -R "$GITHUB_REPOSITORY" \
+             -p '*.tar.gz' -p 'SHA256SUMS' -D dist
+          ls -lh dist
+
+      # El SHA de las notas tiene que ser el del fichero que está colgado, no
+      # el del que se subió desde el portátil.
+      - name: Comprobar SHA256
+        working-directory: dist
+        run: sha256sum -c SHA256SUMS
+
+      # El guion va en un fichero y se monta: metido a mano en `docker run
+      # sh -c '...'` habría que escapar comillas dentro de comillas dentro de
+      # YAML, y ahí es donde una prueba deja de probar lo que dice.
+      - name: Escribir el guion de prueba
+        run: |
+          cat > prueba.sh <<'SH'
+          set -eu
+          # Si el contenedor trajera un toolchain, la prueba no demostraría nada.
+          for prohibido in cargo rustc wasmtime; do
+            if command -v "$prohibido" >/dev/null 2>&1; then
+              echo "el contenedor trae $prohibido: la prueba no vale"; exit 1
+            fi
+          done
+          cd /tmp
+          tar xzf /dist/*.tar.gz
+          cd anvil-*/
+          ./anvil ejemplos/subsecuencia.yaml --json ./out.json
+          grep -q '"secuencia": "basica"' out.json
+          grep -q '"estado": "paso"' out.json
+          echo "OK: corre y produce el JSON"
+
+          # Control negativo: `subsecuencia.yaml` llama a `medir_fuentes.yaml`
+          # por path relativo. Si al quitarlo la corrida siguiera en verde, es
+          # que arriba no estábamos midiendo lo que creíamos.
+          rm ejemplos/medir_fuentes.yaml
+          if ./anvil ejemplos/subsecuencia.yaml --json ./out2.json; then
+            echo "sin medir_fuentes.yaml deberia fallar, y no ha fallado"; exit 1
+          fi
+          echo "OK: el control negativo falla como debe"
+          SH
+
+      # `--network none` deja al contenedor con su propio loopback y sin salida:
+      # el motor habla gRPC con el ejecutor por 127.0.0.1, y no necesita más.
+      - name: Correr en limpio
+        run: |
+          set -euo pipefail
+          for imagen in debian:12 alpine:3.20; do
+            echo "::group::$imagen"
+            docker run --rm --network none \
+              -v "$PWD/dist:/dist:ro" -v "$PWD/prueba.sh:/prueba.sh:ro" \
+              "$imagen" sh /prueba.sh
+            echo "::endgroup::"
+          done
