@@ -26,6 +26,12 @@ on:
 jobs:
   verifica:
     runs-on: ubuntu-latest
+    # `contents: write` no es para escribir: es lo que hace falta para que el
+    # token vea un Release en **draft**. Sin él, `gh release download` de un
+    # borrador responde «release not found», y verificar antes de publicar es
+    # justamente el orden que interesa.
+    permissions:
+      contents: write
     env:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       TAG: ${{ inputs.tag || github.event.release.tag_name }}
