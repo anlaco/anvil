@@ -93,13 +93,15 @@ El `estado` es `string`, no un `enum` protobuf. Es deliberado (ADR-0005):
 
 - `paso.proto` es **superficie pública crítica** (RNF-05). No se rompe sin
   un ADR/RFC.
-- **Política propuesta (MVP):** cambios *aditivos* (campos nuevos con tags
-  altos, semántica backward-compatible) son permitidos; cambios *rupturistas*
-  (renombrar/quitar campos, alterar semántica de estados) exigen un ADR nuevo
-  y, idealmente, un proceso RFC (ver [roadmap.md](roadmap.md), diferido).
-- Hoy el contrato **no declara versión** en el wire. Cuando haya más de un
-  ejecutor o pasos externos, se necesita un mecanismo de versión (campo o
-  ruta versionada) — **pendiente**.
+- **Política decidida en [ADR-0020](adr/0020-parametros-del-paso-en-la-peticion.md)
+  — aún no implementada.** Un entero monótono `contrato` en la petición y en la
+  respuesta, que el ejecutor devuelve como eco de lo que ha entendido; sube con
+  todo cambio cuyo silencio en un par antiguo pueda alterar un veredicto.
+  Retirar o renombrar un tag exige ADR y entrada *breaking*; un tag no se
+  reutiliza. Sin rutas versionadas ni RPC de saludo.
+- **Hoy** el wire **no declara versión** — eso es el contrato 1, y es lo que
+  describe este documento. El campo `contrato`, los parámetros y las salidas
+  son el contrato 2 y llegan cuando se implemente ADR-0020.
 
 ## Extensión futura: introspección de firma del paso (post-MVP)
 
@@ -121,6 +123,11 @@ paso, hace falta que el paso **exponga metadatos de su firma**.
   tipo, dirección in/out) y tipo de retorno para un `nombre` dado.
 - Esto permitiría al editor arrastrar un `.vi`/`.dll`/`.py`/`.scilab` y
   auto-poblar la tabla de parámetros del paso, igual que TestStand.
+
+**Un segundo motivo, desde [ADR-0020](adr/0020-parametros-del-paso-en-la-peticion.md):**
+no es sólo cosa del editor. Sin firma introspeccionable, el cargador no puede
+validar los nombres de `parametros` ni de `resultado.salidas.*`, y esas
+comprobaciones caen a tiempo de ejecución en vez de a `--validate`.
 
 **Tensión a resolver:** la firma introspeccionable vive en el lado del paso
 (el ejecutor la provee), no en el motor. El motor sigue siendo genérico
