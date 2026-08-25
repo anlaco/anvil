@@ -31,7 +31,7 @@ impl Scope {
             Scope::Locals => "locals",
             Scope::Parameters => "parameters",
             Scope::FileGlobals => "file_globals",
-            Scope::Resultado => "resultado",
+            Scope::Resultado => "result",
         }
     }
 
@@ -41,7 +41,7 @@ impl Scope {
             "locals" => Some(Scope::Locals),
             "parameters" => Some(Scope::Parameters),
             "file_globals" => Some(Scope::FileGlobals),
-            "resultado" => Some(Scope::Resultado),
+            "result" => Some(Scope::Resultado),
             _ => None,
         }
     }

@@ -14,7 +14,7 @@
 # Estado agregado: "fallo" (hay un fallo; saltado no cuenta). `verificar_frecuencia`
 # no se invoca: Main corta en el primer fallo (pause_on_fail refuerza).
 
-nombre: variables_demo
+name: variables_demo
 
 # Globales del archivo: visibles en toda la ejecución. El motor las carga al
 # iniciar la secuencia. Inmutables durante un paso.
@@ -31,39 +31,39 @@ locals:
   ok: false
 
 setup:
-  - nombre: conectar_equipo
-    reintentos: 3
+  - name: conectar_equipo
+    retries: 3
 
 main:
   # Statement local (RF-27): ejecuta una asignación en el motor, sin gRPC.
-  - nombre: init_log
-    tipo: statement
+  - name: init_log
+    type: statement
     statement: 'locals.ok = false'
 
   # Paso gRPC con precondición (RF-33): sólo mide si hay lote definido. Si la
   # precondición fuera falsa, el paso se saltaría sin gastar intento.
-  - nombre: medir_voltaje
-    reintentos: 1
-    precondicion: 'file_globals.lote != ""'
-    limite:
-      tipo: rango
+  - name: medir_voltaje
+    retries: 1
+    precondition: 'file_globals.lote != ""'
+    limit:
+      type: range
       min: 4.5
       max: 5.5
     # Asigna (RF-31): vuelca campos de `resultado` a Locals tras el paso.
-    asigna:
-      voltaje_leido: '${resultado.valor_medido}'
-      ok: '${resultado.estado == "paso"}'
+    assign:
+      voltaje_leido: '${result.measured_value}'
+      ok: '${result.status == "paso"}'
 
   # Paso deshabilitado (RF-34): se registra como "saltado", no se invoca.
-  - nombre: paso_obsoleto
+  - name: paso_obsoleto
     disable: true
 
   # pause_on_fail (RF-34): si este paso fallara, Main se detendría. Aquí no se
   # llega: medir_voltaje falla antes y Main corta en el primer fallo.
-  - nombre: verificar_frecuencia
-    reintentos: 1
+  - name: verificar_frecuencia
+    retries: 1
     pause_on_fail: true
 
 cleanup:
-  - nombre: desconectar_equipo
-    reintentos: 1
+  - name: desconectar_equipo
+    retries: 1

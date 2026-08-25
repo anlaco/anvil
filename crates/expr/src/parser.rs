@@ -134,7 +134,7 @@ impl Parser {
                     return Err(ErrorExpr::sintaxis(
                         t.pos,
                         t.len,
-                        format!("se esperaba un scope (locals/parameters/file_globals/resultado), pero vino '{s}'"),
+                        format!("se esperaba un scope (locals/parameters/file_globals/result), pero vino '{s}'"),
                     ));
                 }
             },
@@ -568,8 +568,8 @@ mod tests {
 
     #[test]
     fn acceso_a_scope_con_campo() {
-        let e = parse_expresion("resultado.valor_medido").unwrap();
-        assert_eq!(e, var(Scope::Resultado, "valor_medido"));
+        let e = parse_expresion("result.measured_value").unwrap();
+        assert_eq!(e, var(Scope::Resultado, "measured_value"));
     }
 
     #[test]
@@ -577,8 +577,8 @@ mod tests {
         // ADR-0020: `resultado.salidas.<nombre>`. El nombre compuesto viaja
         // dentro de `campo`; quien lo resuelve es el entorno del motor.
         assert_eq!(
-            parse_expresion("resultado.salidas.tension").unwrap(),
-            var(Scope::Resultado, "salidas.tension")
+            parse_expresion("result.outputs.tension").unwrap(),
+            var(Scope::Resultado, "outputs.tension")
         );
     }
 
@@ -588,7 +588,7 @@ mod tests {
         // superficie que nadie ha decidido, así que sigue siendo sintaxis
         // inválida — igual que `resultado.estado.x`.
         assert!(parse_expresion("locals.a.b").is_err());
-        assert!(parse_expresion("resultado.estado.x").is_err());
+        assert!(parse_expresion("result.status.x").is_err());
     }
 
     #[test]
@@ -630,7 +630,7 @@ mod tests {
 
     #[test]
     fn asignacion_se_parsea() {
-        let stmts = parse_sentencias("locals.x = resultado.valor_medido").unwrap();
+        let stmts = parse_sentencias("locals.x = result.measured_value").unwrap();
         assert_eq!(stmts.len(), 1);
         assert!(
             matches!(&stmts[0], Sentencia::Assign { scope: Scope::Locals, campo, valor: _ } if campo == "x")

@@ -20,33 +20,33 @@
 #   ./anvil ejemplos/demo_ejecutores.yaml --ejecutor python=127.0.0.1:9200
 #   (con otro server.py en --puerto 9200; el YAML no se toca)
 
-nombre: demo_ejecutores
-ejecutores:
-  - nombre: embebido
-    tipo: embebido
-  - nombre: python
-    tipo: grpc
+name: demo_ejecutores
+executors:
+  - name: embebido
+    type: embedded
+  - name: python
+    type: grpc
     host: 127.0.0.1
-    puerto: 9101
+    port: 9101
 main:
   # Paso built-in: lo atiende el ejecutor WASM embebido (de serie). No
   # declara `ejecutor` → embebido por defecto.
-  - nombre: verificar_led
-    reintentos: 1
+  - name: verificar_led
+    retries: 1
 
   # Paso en el ejecutor Python en loopback: el motor despacha por gRPC a
   # 127.0.0.1:9101; el Python habla por TCP con el simulador y devuelve la
   # medida. El límite lo evalúa el motor desde el YAML (ADR-0008).
-  - nombre: medir_simulador
-    ejecutor: python
-    reintentos: 1
-    limite:
-      tipo: rango
+  - name: medir_simulador
+    executor: python
+    retries: 1
+    limit:
+      type: range
       min: 4.0
       max: 5.0
 
   # Conexión al equipo simulado: fallo transitorio en el intento 1, pasa
   # desde el 2 (RF-09: el número de intento llega al paso).
-  - nombre: conectar_equipo
-    ejecutor: python
-    reintentos: 3
+  - name: conectar_equipo
+    executor: python
+    retries: 3

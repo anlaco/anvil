@@ -80,9 +80,9 @@ que **combina varias medidas** —el que un ingeniero escribe al final de la
 secuencia— es un paso `pass_fail`:
 
 ```yaml
-- nombre: verificar_dut
-  tipo: pass_fail
-  condicion: 'locals.v > 4.9 && locals.v < 5.1 && locals.temp < 50.0'
+- name: verificar_dut
+  type: pass_fail
+  condition: 'locals.v > 4.9 && locals.v < 5.1 && locals.temp < 50.0'
 ```
 
 Lo evalúa el **motor**, no el paso (mismo patrón que `limite` y `precondicion`):

@@ -14,17 +14,17 @@
 #   [saltado] verdict: precondición falsa
 #   (1 de 2 pasos saltados)
 
-nombre: exit_inconcluso
+name: exit_inconcluso
 
 locals:
   flag: false
 
 main:
-  - nombre: init
-    tipo: statement
+  - name: init
+    type: statement
     statement: 'locals.flag = false'
 
-  - nombre: verdict
-    tipo: pass_fail
-    precondicion: 'locals.flag'
-    condicion: 'locals.flag == true'
+  - name: verdict
+    type: pass_fail
+    precondition: 'locals.flag'
+    condition: 'locals.flag == true'

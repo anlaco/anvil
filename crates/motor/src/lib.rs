@@ -449,7 +449,7 @@ pub(crate) fn veredicto_del_eco(
 }
 
 /// Si este paso depende del contrato 2 (ADR-0020 §4b): declara parámetros de
-/// entrada, o su `asigna` lee alguna `resultado.salidas.<nombre>`.
+/// entrada, o su `asigna` lee alguna `result.outputs.<nombre>`.
 ///
 /// El recíproco es lo que mantiene vivo lo que ya funciona: un paso que no
 /// pide nada de lo nuevo corre contra un ejecutor de contrato 1 igual que
@@ -463,9 +463,9 @@ fn necesita_contrato_2(def: &DefinicionPaso) -> bool {
         .is_some_and(|asigs| asigs.iter().any(|a| lee_salidas(&a.expr)))
 }
 
-/// `true` si el AST lee en algún sitio una `resultado.salidas.<nombre>`.
+/// `true` si el AST lee en algún sitio una `result.outputs.<nombre>`.
 /// Recorre el árbol entero: la lectura puede estar dentro de una operación
-/// (`resultado.salidas.t * 2`), no sólo suelta.
+/// (`result.outputs.t * 2`), no sólo suelta.
 fn lee_salidas(e: &Expresion) -> bool {
     match e {
         Expresion::Var { scope, campo } => {
@@ -1228,7 +1228,7 @@ mod tests {
         let res = ResultadoStep::medido_valor("m", "paso", "ok", 4.2);
         let asignaciones = vec![modelo::Asignacion {
             var: "voltaje".into(),
-            expr: expr::parse_expresion("resultado.valor_medido").unwrap(),
+            expr: expr::parse_expresion("result.measured_value").unwrap(),
         }];
         let r = aplica_asigna(&asignaciones, res, &mut env);
         assert_eq!(r.estado, "paso", "el paso ya pasó; la asigna no falla");
@@ -1263,12 +1263,12 @@ mod tests {
         let res = ResultadoStep::medido_valor("m", "paso", "ok", 4.2);
         let asignaciones = vec![modelo::Asignacion {
             var: "x".into(),
-            expr: expr::parse_expresion("resultado.valor_meddio").unwrap(),
+            expr: expr::parse_expresion("result.measured_valu").unwrap(),
         }];
         let r = aplica_asigna(&asignaciones, res, &mut env);
         assert_eq!(r.estado, "error", "un typo no puede pasar por dato ausente");
         assert!(
-            r.mensaje.contains("valor_meddio") && r.mensaje.contains("'valor_medido'"),
+            r.mensaje.contains("measured_valu") && r.mensaje.contains("'measured_value'"),
             "nombra el campo escrito y los válidos: {}",
             r.mensaje
         );
@@ -1382,7 +1382,7 @@ mod tests {
         let mut p = DefinicionPaso::nuevo(nombre, 1);
         p.asigna = Some(vec![modelo::Asignacion {
             var: destino.into(),
-            expr: expr::parse_expresion("resultado.valor_medido").unwrap(),
+            expr: expr::parse_expresion("result.measured_value").unwrap(),
         }]);
         p
     }
@@ -2469,7 +2469,7 @@ mod tests_adr0020 {
         let mut d = DefinicionPaso::nuevo("medir_voltaje", 1);
         d.asigna = Some(vec![Asignacion {
             var: "t".to_string(),
-            expr: expr::parse_expresion("resultado.salidas.temperatura").unwrap(),
+            expr: expr::parse_expresion("result.outputs.temperatura").unwrap(),
         }]);
         d
     }
@@ -2537,7 +2537,7 @@ mod tests_adr0020 {
         let mut d = DefinicionPaso::nuevo("m", 1);
         d.asigna = Some(vec![Asignacion {
             var: "t".to_string(),
-            expr: expr::parse_expresion("resultado.salidas.temperatura * 2 + 1").unwrap(),
+            expr: expr::parse_expresion("result.outputs.temperatura * 2 + 1").unwrap(),
         }]);
         assert!(necesita_contrato_2(&d), "está dentro de una BinOp anidada");
     }

@@ -2,8 +2,8 @@
 //!
 //! Lenguaje de expresiones acotado: asignación con `=`, comparaciones
 //! `== != < > <= >=`, lógicos **`&&` / `||` / `!`**, acceso a campos con `.`
-//! (`locals.voltaje_leido`,
-//! `resultado.valor_medido`). Subconjunto MVP: aritmética `+ - * /`, lógica y
+//! (`locals.voltage`,
+//! `result.measured_value`). Subconjunto MVP: aritmética `+ - * /`, lógica y
 //! comparación, acceso a scopes y al resultado del paso, asignación a `Locals`.
 //!
 //! Es un AST acotado, **no** un lenguaje Turing-completo: si hace falta lógica
@@ -23,12 +23,12 @@ pub mod parser;
 pub mod value;
 
 /// El único campo de `resultado` que es un mapa y no un escalar, y por tanto
-/// el único que admite un nivel más: `resultado.salidas.<nombre>` (ADR-0020).
+/// el único que admite un nivel más: `result.outputs.<name>` (ADR-0020).
 ///
 /// Vive aquí y no en `modelo` porque lo necesitan el parser (para admitir el
 /// segundo punto) y el entorno del motor (para resolverlo), y `expr` no
 /// depende de `modelo` — el engine no conoce el dominio (ADR-0005).
-pub const CAMPO_SALIDAS: &str = "salidas";
+pub const CAMPO_SALIDAS: &str = "outputs";
 
 pub use ast::{BinOp, Expresion, Scope, Sentencia, UnOp};
 pub use error::{ErrorExpr, ErrorKind};

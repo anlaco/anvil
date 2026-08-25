@@ -1,16 +1,16 @@
-# Issue #20: un sequence_call no mide; `resultado.valor_medido` vale siempre
+# Issue #20: un sequence_call no mide; `result.measured_value` vale siempre
 # `nothing` y borraba el destino en silencio.
-nombre: validate_valor_medido_en_call
+name: validate_valor_medido_en_call
 locals:
   my_num: 42.0
-subsecuencias:
+subsequences:
   hija:
     main:
-      - nombre: medir_voltaje
-        tipo: grpc
+      - name: medir_voltaje
+        type: grpc
 main:
-  - nombre: call_sub
-    tipo: sequence_call
-    secuencia: hija
-    asigna:
-      my_num: '${resultado.valor_medido}'
+  - name: call_sub
+    type: sequence_call
+    sequence: hija
+    assign:
+      my_num: '${result.measured_value}'

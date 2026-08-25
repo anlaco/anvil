@@ -115,10 +115,10 @@ en la secuencia, no aserciones ad-hoc en código:
 
 ```yaml
 pasos_main:
-  - nombre: medir_voltaje
-    reintentos: 1
-    limite:
-      tipo: rango          # rango | comparacion
+  - name: medir_voltaje
+    retries: 1
+    limit:
+      type: range          # rango | comparacion
       min: 4.5
       max: 5.5
 ```
@@ -126,11 +126,11 @@ pasos_main:
 o, para una comparación:
 
 ```yaml
-  - nombre: verificar_frecuencia
-    limite:
-      tipo: comparacion
+  - name: verificar_frecuencia
+    limit:
+      type: comparison
       op: ge               # eq | ne | lt | le | gt | ge
-      esperado: 1000.0
+      expected: 1000.0
 ```
 
 Consecuencia: el paso mide y reporta que la medición fue bien (`paso`); el

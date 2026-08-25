@@ -9,11 +9,11 @@
 #   2) wasmtime ... target/wasm32-wasip2/debug/ejecutor_pasos.wasm   (9100)
 #   3) wasmtime ... target/wasm32-wasip2/debug/anvil-guest.wasm ejemplos/scpi.yaml
 # El motor evalúa 4.8 contra 4.0–5.0 → `paso`.
-nombre: scpi_demo
+name: scpi_demo
 main:
-  - nombre: medir_voltaje_scpi
-    reintentos: 1
-    limite:
-      tipo: rango
+  - name: medir_voltaje_scpi
+    retries: 1
+    limit:
+      type: range
       min: 4.0
       max: 5.0

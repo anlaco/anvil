@@ -5,6 +5,6 @@
 # de la secuencia. El sidecar manda sobre el límite embebido (ADR-0008).
 
 medir_voltaje:
-  tipo: comparacion
+  type: comparison
   op: ge
-  esperado: 4.0
+  expected: 4.0
