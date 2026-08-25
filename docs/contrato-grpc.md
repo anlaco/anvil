@@ -14,9 +14,20 @@ si se toca uno, hay que tocar el otro.
 ```proto
 syntax = "proto3";
 
+message Valor {
+  string nombre = 1;
+  oneof valor {              // sin rama puesta = error, no un cero
+    double numero   = 2;
+    string texto    = 3;
+    bool   booleano = 4;
+  }
+}
+
 message PeticionPaso {
   string nombre = 1;   // el paso a invocar (despacho por nombre, ADR-0003)
   int32  intento = 2;  // nº de intento, desde 1 (para simular fallos transitorios)
+  repeated Valor parametros = 3;  // ya evaluados por el motor (ADR-0020)
+  int32  contrato = 4;            // la versión que habla el motor
 }
 
 message ResultadoPasoProto {
@@ -26,6 +37,8 @@ message ResultadoPasoProto {
   string valor_medido = 4;   // medida: como string
   string limite_min = 5;
   string limite_max = 6;
+  repeated Valor salidas = 7;  // valores con nombre, aparte de la medida
+  int32  contrato = 8;         // el eco: la versión que el ejecutor entendió
 }
 
 service EjecutorPasos {
@@ -46,6 +59,8 @@ service EjecutorPasos {
 |---|---|---|
 | `nombre` | string | El paso a invocar. El ejecutor lo ata a una función en `despacha`; desconocido → `error` (RF-12). |
 | `intento` | int32 | Número de intento **desde 1**. Llega al paso para simular fallos transitorios (ver `pasos_demo::conectar`: falla el 1, pasa el 2+). |
+| `parametros` | repeated Valor | Los parámetros del paso, **ya evaluados**: el motor resuelve las expresiones `${...}` del YAML contra su entorno antes de llamar (ADR-0009). El paso no ve `locals`; se le pasan valores. Un `oneof` sin rama es `error` (ADR-0019, Regla 2). |
+| `contrato` | int32 | La versión de contrato que habla el motor. Ver «Versionado» más abajo. |
 
 ### `ResultadoPasoProto`
 
@@ -56,6 +71,45 @@ service EjecutorPasos {
 | `mensaje` | string | Texto humano del resultado. |
 | `valor_medido` | string | La medida, como texto. **Vacío** si el paso no mide (Pass/Fail). |
 | `limite_min` / `limite_max` | string | Límites high/low, como texto. Vacíos si no aplican. |
+| `salidas` | repeated Valor | Valores con nombre que devuelve el paso **además** de la medida. No participan en el veredicto: `asigna` los lee como `resultado.salidas.<nombre>`. |
+| `contrato` | int32 | **El eco**: la versión que el ejecutor ha entendido. Ver «Versionado». |
+
+## Versionado del contrato (ADR-0020 §4)
+
+Un entero monótono, `contrato`, en la petición y en la respuesta. El motor
+manda el que habla; el ejecutor devuelve **el que ha entendido**. No hay rutas
+versionadas ni RPC de saludo: dos mecanismos para lo mismo divergen.
+
+| Versión | Qué trae |
+|---|---|
+| 1 | El contrato original: `PeticionPaso{nombre, intento}`. Un ejecutor de contrato 1 no conoce el tag 8 y devuelve `0` por el default de proto3 — así es como se le reconoce. |
+| 2 | Parámetros de entrada y salidas con nombre. |
+
+**Por qué hace falta el eco.** Un campo aditivo es «compatible» sólo en el
+sentido de que el mensaje decodifica. Un ejecutor de contrato 1 ignora
+`parametros` —proto3 se lo permite—, **mide otra cosa y dice `paso`**. Ese
+verde falso no lo delata ninguna otra señal. Por eso:
+
+> Si el paso declaró `parametros` (o su `asigna` lee `salidas`) y el eco es
+> menor que 2, el paso es **`error`**, nombrando el endpoint y las dos
+> versiones. Nunca `fallo`, y nunca se ejecuta con los parámetros perdidos.
+
+Y su recíproco, que es lo que mantiene vivo lo que ya funciona: si el paso
+**no** declara parámetros ni lee salidas, un ejecutor de contrato 1 sigue
+siendo válido y no cambia nada.
+
+**Cuándo sube el número.** No es «aditivo vs. rupturista»:
+
+> Sube `contrato` todo cambio en el que **el silencio de un par antiguo pueda
+> alterar un veredicto**. Lo que un par puede ignorar sin que la afirmación
+> sobre la unidad cambie (un campo informativo, una traza), no lo sube.
+
+Retirar o renombrar un tag exige ADR, entrada *breaking* en el CHANGELOG y
+`reserved` sobre el tag: **un tag no se reutiliza jamás**.
+
+**Los pasos WASM no ven este número.** El WIT se versiona por recompilación
+(`anvil:paso@0.2.0`) y **es el puente quien responde el eco** por ellos: un
+componente no sabe de gRPC ni de versiones (ADR-0015).
 
 ## Codificación de medidas
 
@@ -105,12 +159,20 @@ El `estado` es `string`, no un `enum` protobuf. Es deliberado (ADR-0005):
 
 ## Extensión futura: introspección de firma del paso (post-MVP)
 
-> **No implementada.** Es un hueco explícito para el editor visual
-> ([diseno/ui-vs-headless.md](diseno/ui-vs-headless.md)).
+> **No implementada**, y desde ADR-0020 ya no es sólo cosa del editor visual
+> ([diseno/ui-vs-headless.md](diseno/ui-vs-headless.md)): es
+> [issue #45](https://github.com/anlaco/anvil/issues/45).
+>
+> El motivo nuevo: `resultado.salidas.<nombre>` **no es validable al cargar**,
+> porque el cargador no sabe qué devuelve un paso. Un nombre equivocado es
+> `error` de ejecución, no de carga — la única excepción a la regla de
+> detección de ADR-0019 en el repo. La introspección es lo que le devolvería
+> ese terreno a `--validate`.
 
-Hoy el contrato solo describe *cómo invocar* (`PeticionPaso`) y *qué
-devuelve* (`ResultadoPasoProto`), pero **no describe la firma del paso**: ni
-qué parámetros admite, ni qué retorna tipadamente. Para que un editor
+El contrato describe *cómo invocar* (`PeticionPaso`) y *qué devuelve*
+(`ResultadoPasoProto`), y desde ADR-0020 los parámetros y las salidas viajan
+tipados — pero **no describe la firma del paso**: ni qué parámetros admite,
+ni cuáles son obligatorios, ni qué salidas produce. Para que un editor
 visual (drag-and-drop del archivo del code module) pueda, como TestStand,
 **auto-descubrir y actualizar los parámetros y el valor de retorno** del
 paso, hace falta que el paso **exponga metadatos de su firma**.

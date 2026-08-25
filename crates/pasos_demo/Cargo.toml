@@ -6,4 +6,7 @@ license.workspace = true
 description = "Los pasos de la secuencia de ejemplo del secuenciador anvil"
 
 [dependencies]
+# `expr::Value` es el tipo de los parámetros que llegan del motor (ADR-0020):
+# ya evaluados, sin expresiones.
+expr.workspace = true
 modelo.workspace = true

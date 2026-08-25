@@ -15,10 +15,10 @@
 
 mod entorno;
 
-use modelo::proto::{PeticionPaso, ResultadoPasoProto, RUTA_INVOCA};
+use modelo::proto::{PeticionPaso, ResultadoPasoProto, Valor as ProtoValor, CONTRATO, RUTA_INVOCA};
 use modelo::{
-    Asignacion, DefinicionEjecutor, DefinicionPaso, DefinicionSecuencia, Fase, Limite, Programa,
-    ResultSink, ResultadoSecuencia, ResultadoStep, TipoEjecutor, TipoPaso,
+    Asignacion, DefinicionEjecutor, DefinicionPaso, DefinicionSecuencia, EntradaPaso, Fase, Limite,
+    Programa, ResultSink, ResultadoSecuencia, ResultadoStep, TipoEjecutor, TipoPaso,
 };
 use prost::Message;
 use wasi_grpc::grpc::Cliente;
@@ -174,18 +174,56 @@ impl Motor {
         def: &DefinicionPaso,
         programa: &Programa,
         intento: i32,
+        parametros: &[(String, Value)],
     ) -> Result<ResultadoStep, Error> {
         let endpoint = Self::resolver_endpoint(def, programa)?;
         let peticion = PeticionPaso {
             nombre: def.nombre.clone(),
             intento,
+            parametros: parametros
+                .iter()
+                .filter_map(|(n, v)| ProtoValor::desde_value(n, v))
+                .collect(),
+            contrato: CONTRATO,
         };
         let cliente = self
             .conexiones
             .get_mut(endpoint)
             .ok_or_else(|| Error::EjecutorNoConectado(endpoint.to_string()))?;
         let bytes = cliente.unaria(RUTA_INVOCA, &peticion.encode_to_vec())?;
-        Ok(ResultadoPasoProto::decode(&bytes[..])?.into())
+        let respuesta = ResultadoPasoProto::decode(&bytes[..])?;
+
+        // El eco (ADR-0020 §4b). Un campo aditivo es «compatible» sólo en el
+        // sentido de que el mensaje decodifica: un ejecutor de contrato 1
+        // ignora `parametros`, **mide otra cosa y dice `paso`**. Ese es el
+        // verde falso de ADR-0019 por una puerta nueva, y es lo único que
+        // este número existe para impedir.
+        //
+        // Sólo se exige si el paso depende de lo nuevo. Si no declara
+        // parámetros ni lee salidas, un ejecutor de contrato 1 sigue siendo
+        // válido y no cambia nada — que es lo que mantiene vivo lo que ya
+        // funciona.
+        if let Some(r) = veredicto_del_eco(def, endpoint, respuesta.contrato) {
+            return Ok(r);
+        }
+
+        // Una salida sin tipo no se puede interpretar, y tragársela sería
+        // inventarse un dato sobre la unidad (ADR-0019, Regla 2).
+        let mut r = match respuesta.a_resultado() {
+            Ok(r) => r,
+            Err(e) => {
+                return Ok(ResultadoStep::nuevo(
+                    &def.nombre,
+                    "error",
+                    format!("el ejecutor '{}' devolvió {e}", nombre_visible(endpoint)),
+                ))
+            }
+        };
+        // Los parámetros no vuelven del cable: los sella el motor, que es
+        // quien sabe qué envió. Es lo que hace que dos corridas con distinto
+        // canal dejen de producir informes idénticos.
+        r.parametros = parametros.to_vec();
+        Ok(r)
     }
 
     /// Corre un paso hasta que pase o se agoten los intentos.
@@ -194,13 +232,18 @@ impl Motor {
         &mut self,
         def: &DefinicionPaso,
         programa: &Programa,
+        parametros: &[(String, Value)],
     ) -> Result<ResultadoStep, Error> {
         let max = def.reintentos.max(1);
-        let mut resultado = self.ejecuta_paso(def, programa, 1)?;
+        // Los mismos parámetros en todos los intentos: se evaluaron una vez,
+        // antes de la primera llamada. Un reintento repite la medida, no
+        // vuelve a resolver el entorno — si lo hiciera, dos intentos del
+        // mismo paso podrían medir cosas distintas sin que se note.
+        let mut resultado = self.ejecuta_paso(def, programa, 1, parametros)?;
         let mut intento = 1;
         while !resultado.paso() && intento < max {
             intento += 1;
-            resultado = self.ejecuta_paso(def, programa, intento as i32)?;
+            resultado = self.ejecuta_paso(def, programa, intento as i32, parametros)?;
         }
         // El límite (si la secuencia lo declara) se evalúa tras la invocación:
         // el paso devuelve la medida, el motor produce el estado final
@@ -275,10 +318,14 @@ impl Motor {
 /// (ADR-0005): la lógica de la secuencia no sabe si el paso corre por gRPC o
 /// por un sustituto.
 pub trait InvocaPasos {
+    /// `parametros` llega **ya evaluado** (ADR-0009/ADR-0020): quien resuelve
+    /// las expresiones `${...}` es el motor, contra su entorno, antes de
+    /// llegar aquí. El paso no ve `locals`; se le pasan valores.
     fn ejecuta_paso_grpc(
         &mut self,
         def: &DefinicionPaso,
         programa: &Programa,
+        parametros: &[(String, Value)],
     ) -> Result<ResultadoStep, Error>;
 }
 
@@ -287,8 +334,149 @@ impl InvocaPasos for Motor {
         &mut self,
         def: &DefinicionPaso,
         programa: &Programa,
+        parametros: &[(String, Value)],
     ) -> Result<ResultadoStep, Error> {
-        self.ejecuta_con_reintentos(def, programa)
+        self.ejecuta_con_reintentos(def, programa, parametros)
+    }
+}
+
+/// Resuelve los parámetros de entrada de un paso `Grpc` (ADR-0020 §2) contra
+/// el entorno del motor, **antes** de invocar.
+///
+/// `Ok` con la lista ya evaluada, en el orden determinista que fijó el
+/// cargador. `Err` con el `ResultadoStep` en `error` si alguna expresión no se
+/// pudo evaluar — y entonces el ejecutor no llega a llamarse. Va en `Box`
+/// porque el caso de error es el raro y no debe pagarlo el `Ok` de cada paso.
+///
+/// Nunca hay valor por defecto: es la Regla 2 de ADR-0019 aplicada a la
+/// entrada. Un paso que mide con un parámetro que el motor no supo resolver
+/// devuelve un número que parece bueno, y eso es peor que no medir.
+fn evalua_entradas(
+    p: &DefinicionPaso,
+    ent: &mut EntornoMotor,
+) -> Result<Vec<(String, Value)>, Box<ResultadoStep>> {
+    let Some(entradas) = &p.entradas else {
+        return Ok(Vec::new());
+    };
+    // Sin resultado en curso: un parámetro se evalúa antes de que este paso
+    // mida, así que `resultado.*` sería el del paso anterior. Igual que la
+    // precondición (RF-33).
+    ent.limpia_resultado();
+    let mut fuera = Vec::with_capacity(entradas.len());
+    for (nombre, entrada) in entradas {
+        let v = match entrada {
+            EntradaPaso::Literal(lit) => lit.a_value(),
+            EntradaPaso::Expresion(e) => match eval(e, ent) {
+                Ok(v) => v,
+                Err(err) => {
+                    return Err(Box::new(ResultadoStep::nuevo(
+                        &p.nombre,
+                        "error",
+                        format!("el parámetro '{nombre}' no se pudo evaluar: {err}"),
+                    )))
+                }
+            },
+        };
+        // Un `Nulo` no tiene representación en el cable. Mandarlo como
+        // ausencia sería que el paso midiera sin ese parámetro y no se
+        // enterase nadie.
+        if v == Value::Nulo {
+            return Err(Box::new(ResultadoStep::nuevo(
+                &p.nombre,
+                "error",
+                format!(
+                    "el parámetro '{nombre}' evaluó a 'nothing', y un paso no puede recibir \
+                     un parámetro ausente: mediría sin él y nadie se enteraría"
+                ),
+            )));
+        }
+        fuera.push((nombre.clone(), v));
+    }
+    Ok(fuera)
+}
+
+/// Cómo se nombra un endpoint en un mensaje para el usuario. `EMBEDIDO` es
+/// una clave interna que no se puede declarar en el YAML, así que enseñarla
+/// tal cual sería enseñar un detalle de implementación.
+fn nombre_visible(endpoint: &str) -> &str {
+    if endpoint == EMBEDIDO {
+        "embebido"
+    } else {
+        endpoint
+    }
+}
+
+/// La comprobación del eco (ADR-0020 §4b), aislada de la red para poder
+/// probarla.
+///
+/// `Some(error)` si el paso depende del contrato 2 y el ejecutor respondió
+/// uno menor; `None` si la llamada es legítima.
+///
+/// **Por qué existe este número.** Un campo aditivo es «compatible» sólo en
+/// el sentido de que el mensaje decodifica. Un ejecutor de contrato 1 ignora
+/// `parametros` —proto3 se lo permite—, mide con lo que tuviera dentro y
+/// devuelve `paso`. Eso es un verde falso sobre una unidad que no se ha
+/// probado como dice la secuencia, y no hay ninguna otra señal que lo delate.
+///
+/// Y el recíproco es lo que mantiene vivo lo que ya funciona: un paso que no
+/// pide nada nuevo corre contra un ejecutor de contrato 1 igual que siempre.
+pub(crate) fn veredicto_del_eco(
+    def: &DefinicionPaso,
+    endpoint: &str,
+    eco: i32,
+) -> Option<ResultadoStep> {
+    if !necesita_contrato_2(def) || eco >= CONTRATO {
+        return None;
+    }
+    // Un ejecutor de contrato 1 no conoce el tag del eco y devuelve `0` por
+    // el default de proto3. Enseñar ese `0` tal cual sería enseñar un detalle
+    // de protobuf: para quien lee el error, el ejecutor habla el contrato 1.
+    let cual = if eco == 0 {
+        "1 (no declara versión, que es como se reconoce al contrato 1)".to_string()
+    } else {
+        eco.to_string()
+    };
+    Some(ResultadoStep::nuevo(
+        &def.nombre,
+        "error",
+        format!(
+            "el ejecutor '{}' entiende el contrato {cual} y este paso necesita el {CONTRATO}: \
+             sus 'parametros' se habrían perdido sin aviso y habría medido otra cosa. \
+             Recompila o actualiza ese ejecutor.",
+            nombre_visible(endpoint),
+        ),
+    ))
+}
+
+/// Si este paso depende del contrato 2 (ADR-0020 §4b): declara parámetros de
+/// entrada, o su `asigna` lee alguna `resultado.salidas.<nombre>`.
+///
+/// El recíproco es lo que mantiene vivo lo que ya funciona: un paso que no
+/// pide nada de lo nuevo corre contra un ejecutor de contrato 1 igual que
+/// antes.
+fn necesita_contrato_2(def: &DefinicionPaso) -> bool {
+    if def.entradas.is_some() {
+        return true;
+    }
+    def.asigna
+        .as_deref()
+        .is_some_and(|asigs| asigs.iter().any(|a| lee_salidas(&a.expr)))
+}
+
+/// `true` si el AST lee en algún sitio una `resultado.salidas.<nombre>`.
+/// Recorre el árbol entero: la lectura puede estar dentro de una operación
+/// (`resultado.salidas.t * 2`), no sólo suelta.
+fn lee_salidas(e: &Expresion) -> bool {
+    match e {
+        Expresion::Var { scope, campo } => {
+            *scope == Scope::Resultado
+                && campo
+                    .strip_prefix(expr::CAMPO_SALIDAS)
+                    .is_some_and(|r| r.starts_with('.'))
+        }
+        Expresion::BinOp { izq, der, .. } => lee_salidas(izq) || lee_salidas(der),
+        Expresion::UnOp { operando, .. } => lee_salidas(operando),
+        Expresion::Lit(_) => false,
     }
 }
 
@@ -437,7 +625,7 @@ fn corre_un_paso<I: InvocaPasos>(
         match evalua_precondicion(pre, ent, &p.nombre) {
             VeredictoPre::Continua => {}
             VeredictoPre::Salta(r) => {
-                let r = sella(r);
+                let r = sella(*r);
                 sink.on_resultado(&r);
                 sink.on_fin_paso(p);
                 return Ok(r);
@@ -454,7 +642,17 @@ fn corre_un_paso<I: InvocaPasos>(
     let mut r = match p.tipo {
         TipoPaso::Statement => ejecuta_statement_puro(p.statement.as_deref(), &p.nombre, ent),
         TipoPaso::PassFail => evalua_pass_fail(p.condicion.as_ref(), &p.nombre, ent),
-        TipoPaso::Grpc => normaliza_estado_de_ejecutor(inv.ejecuta_paso_grpc(p, ctx.programa)?),
+        // ADR-0020: los parámetros se evalúan **aquí**, donde está el entorno,
+        // y antes de invocar. Una expresión que falla convierte el paso en
+        // `error` y **no se llama al ejecutor**: medir con un parámetro
+        // inventado da un número que parece bueno y no lo es.
+        TipoPaso::Grpc => match evalua_entradas(p, ent) {
+            Ok(parametros) => {
+                let r = inv.ejecuta_paso_grpc(p, ctx.programa, &parametros)?;
+                normaliza_estado_de_ejecutor(r)
+            }
+            Err(r) => *r,
+        },
         TipoPaso::SequenceCall => ejecuta_sequence_call(inv, p, ent, sink, ctx)?,
     };
 
@@ -628,7 +826,10 @@ fn ejecuta_sequence_call<I: InvocaPasos>(
 /// a registrar, ya sea `"saltado"` o `"error"`).
 enum VeredictoPre {
     Continua,
-    Salta(ResultadoStep),
+    // `Box` porque `ResultadoStep` creció con `parametros` y `salidas`
+    // (ADR-0020) y el enum entero pasaría a ocupar lo que ocupa el caso
+    // raro, en todas las llamadas del caso normal.
+    Salta(Box<ResultadoStep>),
 }
 
 /// Evalúa la precondición contra el entorno. Es **pura** (sin gRPC): la
@@ -638,21 +839,21 @@ fn evalua_precondicion(pre: &Expresion, ent: &mut EntornoMotor, nombre: &str) ->
     ent.limpia_resultado();
     match eval(pre, ent) {
         Ok(Value::Bool(true)) => VeredictoPre::Continua,
-        Ok(Value::Bool(false)) => VeredictoPre::Salta(ResultadoStep::nuevo(
+        Ok(Value::Bool(false)) => VeredictoPre::Salta(Box::new(ResultadoStep::nuevo(
             nombre,
             "saltado",
             "precondición falsa",
-        )),
-        Ok(v) => VeredictoPre::Salta(ResultadoStep::nuevo(
+        ))),
+        Ok(v) => VeredictoPre::Salta(Box::new(ResultadoStep::nuevo(
             nombre,
             "error",
             format!("precondición: se esperaba bool, no {}", v.tipo()),
-        )),
-        Err(e) => VeredictoPre::Salta(ResultadoStep::nuevo(
+        ))),
+        Err(e) => VeredictoPre::Salta(Box::new(ResultadoStep::nuevo(
             nombre,
             "error",
             format!("precondición: {e}"),
-        )),
+        ))),
     }
 }
 
@@ -1136,6 +1337,7 @@ mod tests {
             &mut self,
             _def: &DefinicionPaso,
             _programa: &Programa,
+            _parametros: &[(String, Value)],
         ) -> Result<ResultadoStep, Error> {
             panic!("InvocadorMock no espera pasos grpc en estos tests");
         }
@@ -1156,6 +1358,7 @@ mod tests {
             &mut self,
             def: &DefinicionPaso,
             _programa: &Programa,
+            _parametros: &[(String, Value)],
         ) -> Result<ResultadoStep, Error> {
             Ok(ResultadoStep::nuevo(&def.nombre, self.estado, self.mensaje))
         }
@@ -1251,6 +1454,7 @@ mod tests {
                 &mut self,
                 def: &DefinicionPaso,
                 _programa: &Programa,
+                _parametros: &[(String, Value)],
             ) -> Result<ResultadoStep, Error> {
                 Ok(ResultadoStep::medido_valor(
                     &def.nombre,
@@ -1284,6 +1488,7 @@ mod tests {
                 &mut self,
                 def: &DefinicionPaso,
                 _programa: &Programa,
+                _parametros: &[(String, Value)],
             ) -> Result<ResultadoStep, Error> {
                 Ok(ResultadoStep::medido_valor(
                     &def.nombre,
@@ -1713,6 +1918,7 @@ mod tests {
             &mut self,
             def: &DefinicionPaso,
             _programa: &Programa,
+            _parametros: &[(String, Value)],
         ) -> Result<ResultadoStep, Error> {
             let mensaje = match def.ejecutor.as_deref() {
                 None => "embebido",
@@ -2239,5 +2445,172 @@ mod tests {
         assert_eq!(call.fase, Fase::Setup, "el call, con la fase del padre");
         let sub = call.sub_pasos.as_ref().unwrap();
         assert_eq!(sub[0].fase, Fase::Main, "el sub-paso, con la suya");
+    }
+}
+
+/// ADR-0020: los tests del contrato de parámetros y salidas. Cada uno se ha
+/// visto en rojo reintroduciendo el fallo que vigila — un test de regresión
+/// que no se ha visto fallar no está verificado.
+#[cfg(test)]
+mod tests_adr0020 {
+    use super::*;
+    use modelo::ValorDefinicion;
+
+    fn paso_con_parametros() -> DefinicionPaso {
+        let mut d = DefinicionPaso::nuevo("medir_voltaje", 1);
+        d.entradas = Some(vec![(
+            "canal".to_string(),
+            EntradaPaso::Literal(ValorDefinicion::Numero(2.0)),
+        )]);
+        d
+    }
+
+    fn paso_que_lee_salidas() -> DefinicionPaso {
+        let mut d = DefinicionPaso::nuevo("medir_voltaje", 1);
+        d.asigna = Some(vec![Asignacion {
+            var: "t".to_string(),
+            expr: expr::parse_expresion("resultado.salidas.temperatura").unwrap(),
+        }]);
+        d
+    }
+
+    /// **El test que el ADR señala como el que importa.** Un ejecutor de
+    /// contrato 1 que recibe un paso con `parametros` tiene que salir
+    /// `error`, nunca `paso` ni `fallo`.
+    ///
+    /// Visto en rojo devolviendo `CONTRATO` en vez de `0` como eco: el paso
+    /// sale `paso`, que es exactamente el verde falso que esto impide. Un
+    /// test de eco que sólo recorre el camino feliz no protege de nada.
+    #[test]
+    fn un_ejecutor_de_contrato_1_con_parametros_es_error() {
+        let r = veredicto_del_eco(&paso_con_parametros(), EMBEDIDO, 0)
+            .expect("el eco insuficiente tiene que producir un veredicto");
+        assert_eq!(r.estado, "error", "nunca 'fallo': no es culpa de la unidad");
+        assert!(
+            r.mensaje.contains("embebido"),
+            "nombra el endpoint: {}",
+            r.mensaje
+        );
+        // Un ejecutor de contrato 1 responde `0` (default de proto3), pero
+        // el mensaje tiene que hablarle al usuario de contratos, no de
+        // detalles de protobuf.
+        assert!(
+            r.mensaje.contains("contrato 1"),
+            "nombra el contrato que entiende, no el 0 del cable: {}",
+            r.mensaje
+        );
+        assert!(
+            r.mensaje.contains(&CONTRATO.to_string()),
+            "y el que hacía falta"
+        );
+    }
+
+    /// El mismo verde falso por la otra puerta: el paso no manda parámetros,
+    /// pero su `asigna` lee una salida que un ejecutor de contrato 1 no sabe
+    /// devolver.
+    #[test]
+    fn leer_salidas_de_un_ejecutor_de_contrato_1_tambien_es_error() {
+        let r = veredicto_del_eco(&paso_que_lee_salidas(), "python", 0).expect("también aquí");
+        assert_eq!(r.estado, "error");
+        assert!(r.mensaje.contains("python"));
+    }
+
+    /// Y el recíproco, que es lo que mantiene vivo todo lo escrito hasta
+    /// ahora: un paso que no pide nada nuevo corre contra un ejecutor viejo
+    /// exactamente igual que antes.
+    #[test]
+    fn un_paso_sin_parametros_sigue_valiendo_con_contrato_1() {
+        let viejo = DefinicionPaso::nuevo("verificar_led", 1);
+        assert!(veredicto_del_eco(&viejo, EMBEDIDO, 0).is_none());
+    }
+
+    #[test]
+    fn con_el_eco_correcto_no_hay_veredicto() {
+        assert!(veredicto_del_eco(&paso_con_parametros(), EMBEDIDO, CONTRATO).is_none());
+    }
+
+    /// `lee_salidas` recorre el AST entero: la lectura puede estar dentro de
+    /// una operación, no sólo suelta. Visto en rojo dejando el recorrido sólo
+    /// en el nodo raíz.
+    #[test]
+    fn una_salida_leida_dentro_de_una_operacion_tambien_cuenta() {
+        let mut d = DefinicionPaso::nuevo("m", 1);
+        d.asigna = Some(vec![Asignacion {
+            var: "t".to_string(),
+            expr: expr::parse_expresion("resultado.salidas.temperatura * 2 + 1").unwrap(),
+        }]);
+        assert!(necesita_contrato_2(&d), "está dentro de una BinOp anidada");
+    }
+
+    /// ADR-0020 §2: una expresión que falla convierte el paso en `error` y
+    /// **el ejecutor no se llama**. Nunca un valor por defecto: medir con un
+    /// parámetro inventado da un número que parece bueno y no lo es.
+    ///
+    /// Visto en rojo haciendo que `evalua_entradas` caiga a `Value::Nulo`
+    /// cuando la evaluación falla.
+    #[test]
+    fn una_expresion_que_falla_deja_el_paso_en_error() {
+        let mut d = DefinicionPaso::nuevo("medir_voltaje", 1);
+        d.entradas = Some(vec![(
+            "canal".to_string(),
+            EntradaPaso::Expresion(expr::parse_expresion("locals.no_existe").unwrap()),
+        )]);
+        let def = DefinicionSecuencia::default();
+        let mut ent = EntornoMotor::desde_definicion(&def);
+        let r = evalua_entradas(&d, &mut ent).expect_err("no se puede evaluar");
+        assert_eq!(r.estado, "error");
+        assert!(
+            r.mensaje.contains("canal"),
+            "nombra el parámetro: {}",
+            r.mensaje
+        );
+    }
+
+    /// Un parámetro que evalúa a `nothing` tampoco se manda: el paso mediría
+    /// sin él y nadie se enteraría.
+    #[test]
+    fn un_parametro_nulo_no_viaja() {
+        let mut d = DefinicionPaso::nuevo("m", 1);
+        d.entradas = Some(vec![(
+            "canal".to_string(),
+            EntradaPaso::Expresion(expr::parse_expresion("nothing").unwrap()),
+        )]);
+        let def = DefinicionSecuencia::default();
+        let mut ent = EntornoMotor::desde_definicion(&def);
+        let r = evalua_entradas(&d, &mut ent).expect_err("un nulo no puede viajar");
+        assert_eq!(r.estado, "error");
+    }
+
+    /// Los literales se mandan con su tipo y en el orden que fijó el
+    /// cargador, que es determinista para que dos corridas iguales produzcan
+    /// los mismos bytes.
+    #[test]
+    fn los_literales_viajan_con_su_tipo() {
+        let mut d = DefinicionPaso::nuevo("m", 1);
+        d.entradas = Some(vec![
+            (
+                "a_canal".to_string(),
+                EntradaPaso::Literal(ValorDefinicion::Numero(2.0)),
+            ),
+            (
+                "b_etiqueta".to_string(),
+                EntradaPaso::Literal(ValorDefinicion::Texto("banco-3".into())),
+            ),
+            (
+                "c_promediar".to_string(),
+                EntradaPaso::Literal(ValorDefinicion::Bool(true)),
+            ),
+        ]);
+        let def = DefinicionSecuencia::default();
+        let mut ent = EntornoMotor::desde_definicion(&def);
+        let v = evalua_entradas(&d, &mut ent).unwrap();
+        assert_eq!(
+            v,
+            vec![
+                ("a_canal".to_string(), Value::Numero(2.0)),
+                ("b_etiqueta".to_string(), Value::Texto("banco-3".into())),
+                ("c_promediar".to_string(), Value::Bool(true)),
+            ]
+        );
     }
 }

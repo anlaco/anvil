@@ -4,7 +4,23 @@
 //! Todos toman `intento` aunque la mayoría lo ignore: es la convención
 //! uniforme que necesita el despacho por nombre.
 
+use expr::Value;
 use modelo::ResultadoStep;
+
+/// Busca un parámetro por nombre entre los que mandó el motor (ADR-0020).
+/// Los parámetros llegan **ya evaluados**: aquí no hay expresiones, sólo
+/// valores.
+fn param<'a>(parametros: &'a [(String, Value)], nombre: &str) -> Option<&'a Value> {
+    parametros.iter().find(|(n, _)| n == nombre).map(|(_, v)| v)
+}
+
+/// Un parámetro numérico, o `None` si no vino o no es un número.
+fn param_numero(parametros: &[(String, Value)], nombre: &str) -> Option<f64> {
+    match param(parametros, nombre) {
+        Some(Value::Numero(x)) => Some(*x),
+        _ => None,
+    }
+}
 
 /// Falla el primer intento y pasa a partir del segundo: simula un equipo
 /// que tarda en responder, y ejercita los reintentos del motor.
@@ -33,9 +49,39 @@ pub fn conectar(intento: i32) -> ResultadoStep {
 /// Por eso mide 4.2 contra un rango 4.5–5.5 declarado en `ejemplos/basica.yaml`
 /// y el resultado final de la secuencia sigue siendo `fallo` — solo que ahora
 /// el umbral ya no está grabado aquí.
-pub fn medir_voltaje(_intento: i32) -> ResultadoStep {
-    let valor = 4.2;
-    ResultadoStep::medido_valor("medir_voltaje", "paso", "medido: 4.2 V", valor)
+///
+/// Desde ADR-0020 acepta dos parámetros, y son la demostración de para qué
+/// sirve todo esto: hasta ahora el `4.2` estaba **a fuego en el código** y
+/// medir otro canal exigía recompilar el paso. Ahora el canal viaja en la
+/// petición y, lo que importa más, **queda escrito en el informe**.
+///
+/// - `canal` (número, opcional): qué canal se mide. Sin él, el canal 1 y el
+///   mismo 4.2 de siempre, que es lo que mantiene `ejemplos/basica.yaml`
+///   funcionando sin tocarlo.
+/// - `offset` (número, opcional): corrección de calibración, sumada a la
+///   medida.
+///
+/// Devuelve además una **salida con nombre**: `temperatura`, que es contexto
+/// de la medida y no participa en el veredicto (el motor sigue juzgando
+/// `valor_medido` contra el `limite` del YAML, ADR-0008).
+pub fn medir_voltaje(_intento: i32, parametros: &[(String, Value)]) -> ResultadoStep {
+    let canal = param_numero(parametros, "canal").unwrap_or(1.0);
+    let offset = param_numero(parametros, "offset").unwrap_or(0.0);
+    // Simulado y determinista: el canal 1 mide los 4.2 de toda la vida y cada
+    // canal siguiente 0,1 V más. Lo que importa no es la fórmula, es que la
+    // medida ya depende de algo que viene de fuera.
+    let valor = 4.2 + (canal - 1.0) * 0.1 + offset;
+    let mut r = ResultadoStep::medido_valor(
+        "medir_voltaje",
+        "paso",
+        format!("medido: {valor} V (canal {canal})"),
+        valor,
+    );
+    r.salidas = vec![
+        ("canal_usado".to_string(), Value::Numero(canal)),
+        ("temperatura".to_string(), Value::Numero(21.5)),
+    ];
+    r
 }
 
 /// Pass/fail (RF-25): hace algo y reporta `paso`/`fallo` **sin medida**. El
@@ -77,10 +123,10 @@ pub fn notificar_resultado(_intento: i32) -> ResultadoStep {
 /// una llamada directa, así que este es el único punto donde el nombre del
 /// cable se ata a una función. Un nombre desconocido es `error`, no pánico:
 /// una secuencia mal escrita no debe tumbar el ejecutor.
-pub fn despacha(nombre: &str, intento: i32) -> ResultadoStep {
+pub fn despacha(nombre: &str, intento: i32, parametros: &[(String, Value)]) -> ResultadoStep {
     match nombre {
         "conectar_equipo" => conectar(intento),
-        "medir_voltaje" => medir_voltaje(intento),
+        "medir_voltaje" => medir_voltaje(intento, parametros),
         "verificar_led" => verificar_led(intento),
         "abrir_rele" => abrir_rele(intento),
         "desconectar_equipo" => desconectar(intento),
@@ -94,6 +140,18 @@ pub fn despacha(nombre: &str, intento: i32) -> ResultadoStep {
 mod tests {
     use super::*;
 
+    /// Un paso sin parámetros declarados: es el caso por defecto y el que
+    /// mantiene vivo lo que ya funcionaba antes del ADR-0020.
+    const SIN_PARAMETROS: &[(String, Value)] = &[];
+
+    /// Comparación de medidas con tolerancia: la fórmula del paso hace
+    /// aritmética en `f64` y `4.2 + 2 × 0,1` no da `4.4` exacto. Comparar por
+    /// igualdad aquí sería un test que falla por el redondeo y no por el
+    /// comportamiento.
+    fn casi(v: Option<f64>, esperado: f64) -> bool {
+        v.is_some_and(|x| (x - esperado).abs() < 1e-9)
+    }
+
     #[test]
     fn conectar_falla_el_primero_y_pasa_el_segundo() {
         assert_eq!(conectar(1).estado, "fallo");
@@ -105,7 +163,7 @@ mod tests {
     fn voltaje_mide_y_pasa_el_paso_no_conoce_el_umbral() {
         // En M3 el paso mide y devuelve `paso` (medición OK); el motor
         // evalúa el límite del YAML. El paso no trae límites embebidos.
-        let r = medir_voltaje(1);
+        let r = medir_voltaje(1, SIN_PARAMETROS);
         assert_eq!(
             r.estado, "paso",
             "el paso solo mide: la regla la aplica el motor"
@@ -113,6 +171,43 @@ mod tests {
         assert_eq!(r.valor_medido, Some(4.2));
         assert_eq!(r.limite_min, None, "el umbral vive en el YAML, no aquí");
         assert_eq!(r.limite_max, None);
+    }
+
+    #[test]
+    fn el_canal_ya_no_esta_a_fuego() {
+        // Lo que el ADR-0020 fue a arreglar: medir otro canal ya no exige
+        // recompilar el paso. Si esto vuelve a dar 4.2 pase lo que pase, el
+        // parámetro ha dejado de llegar.
+        let p = vec![("canal".to_string(), Value::Numero(3.0))];
+        let r = medir_voltaje(1, &p);
+        assert!(casi(r.valor_medido, 4.4), "canal 3 = 4.2 + 2 × 0,1");
+        assert!(
+            !casi(r.valor_medido, 4.2),
+            "el parámetro tiene que cambiar la medida"
+        );
+    }
+
+    #[test]
+    fn el_paso_devuelve_salidas_con_nombre() {
+        let r = medir_voltaje(1, &[("canal".to_string(), Value::Numero(2.0))]);
+        assert_eq!(
+            r.salidas,
+            vec![
+                ("canal_usado".to_string(), Value::Numero(2.0)),
+                ("temperatura".to_string(), Value::Numero(21.5)),
+            ]
+        );
+        // Y no participan en el veredicto: la medida sigue siendo la única
+        // contra la que el motor evalúa el límite (ADR-0008).
+        assert!(casi(r.valor_medido, 4.3));
+    }
+
+    #[test]
+    fn un_parametro_del_tipo_equivocado_no_se_cuela_como_numero() {
+        // `canal: "2"` (texto) no es `canal: 2`. Se ignora y vale el default,
+        // en vez de intentar adivinar: adivinar aquí es medir otra cosa.
+        let p = vec![("canal".to_string(), Value::Texto("3".into()))];
+        assert!(casi(medir_voltaje(1, &p).valor_medido, 4.2));
     }
 
     #[test]
@@ -124,16 +219,22 @@ mod tests {
 
     #[test]
     fn nombre_desconocido_es_error() {
-        let r = despacha("no_existe", 1);
+        let r = despacha("no_existe", 1, SIN_PARAMETROS);
         assert_eq!(r.estado, "error");
         assert_eq!(r.nombre, "desconocido");
     }
 
     #[test]
     fn despacho_por_nombre() {
-        assert_eq!(despacha("verificar_led", 1).nombre, "verificar_led");
-        assert_eq!(despacha("abrir_rele", 1).estado, "paso");
-        assert_eq!(despacha("desconectar_equipo", 1).estado, "paso");
+        assert_eq!(
+            despacha("verificar_led", 1, SIN_PARAMETROS).nombre,
+            "verificar_led"
+        );
+        assert_eq!(despacha("abrir_rele", 1, SIN_PARAMETROS).estado, "paso");
+        assert_eq!(
+            despacha("desconectar_equipo", 1, SIN_PARAMETROS).estado,
+            "paso"
+        );
     }
 
     #[test]
@@ -153,7 +254,13 @@ mod tests {
 
     #[test]
     fn despacha_resuelve_los_dos_plugines_del_pm() {
-        assert_eq!(despacha("identificar_uut", 1).nombre, "identificar_uut");
-        assert_eq!(despacha("notificar_resultado", 1).estado, "paso");
+        assert_eq!(
+            despacha("identificar_uut", 1, SIN_PARAMETROS).nombre,
+            "identificar_uut"
+        );
+        assert_eq!(
+            despacha("notificar_resultado", 1, SIN_PARAMETROS).estado,
+            "paso"
+        );
     }
 }

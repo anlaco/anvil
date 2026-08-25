@@ -21,6 +21,13 @@ prost = "0.13"
 # restricciones WASM).
 tokio = { version = "1", features = ["rt-multi-thread"] }
 
+[dev-dependencies]
+# Sólo para los tests: comparar `CONTRATO` con el de `modelo` y que las dos
+# copias del número no se separen (ADR-0020 §4e). No entra en el binario, así
+# que el puente sigue sin linkar `modelo` ni arrastrar su prost 0.14 al
+# ejecutable.
+modelo = { path = "../../crates/modelo" }
+
 [build-dependencies]
 tonic-build = "0.12"
 prost-build = "0.13"

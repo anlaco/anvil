@@ -10,6 +10,66 @@ minors, con el cambio anotado aquí.
 
 ## [No publicado]
 
+**Un paso ya puede recibir parámetros y devolver valores con nombre**
+(ADR-0020, issue #46). Hasta ahora un paso sólo recibía su nombre y el número
+de intento, así que todo lo que necesitaba para medir iba grabado dentro: un
+`4.2` a fuego en `pasos_demo`, una variable de entorno en `pasos_scpi`, un
+flag de proceso en el ejecutor Python. Tres formas distintas, y ninguna
+llegaba al informe: **dos corridas de la misma secuencia con distinto canal
+producían informes idénticos.**
+
+### Añadido
+
+- **`parametros:` en un paso `grpc`.** Un mapa de literales o de expresiones
+  `${...}` que evalúa el motor **antes** de llamar (ADR-0009: el paso no ve
+  `locals`, se le pasan valores). El tipo es el del escalar YAML —`canal: 2`
+  es un número y `canal: "2"` es texto— y es el que viaja por el cable.
+  Una expresión que falla deja el paso en `error` y **no llega a invocar al
+  ejecutor**: nunca hay valor por defecto, porque medir con un parámetro
+  inventado da un número que parece bueno y no lo es.
+- **Salidas con nombre.** Un paso puede devolver N valores además de la
+  medida, y `asigna` los lee como `resultado.salidas.<nombre>`.
+  `valor_medido` no cambia: sigue siendo lo único contra lo que el motor
+  evalúa el `limite` (ADR-0008). Sin `inout`: entra por `parametros`, sale
+  por `salidas`.
+- **Los parámetros enviados y las salidas van al JSON y al CSV**, con su tipo
+  en JSON (un número es un número, no una cadena). Es la Regla 3 de ADR-0019
+  por la puerta que aquel ADR no miró: no altera el criterio el límite, lo
+  altera la condición en la que se midió. En CSV son dos columnas nuevas
+  **al final**, como se hizo con `fase`, para no mover las que ya había.
+  El reporte de texto no se toca (RNF-08).
+- **Número de contrato en el cable, con eco.** El motor manda el contrato que
+  habla (2) y el ejecutor devuelve el que ha entendido. Si un paso declara
+  `parametros` —o lee `salidas`— y el ejecutor responde un contrato menor, el
+  paso es **`error`**, nombrando el endpoint y las dos versiones. Sin esto, un
+  ejecutor antiguo ignoraría los parámetros en silencio, **mediría otra cosa y
+  diría `paso`**. Un paso que no pide nada nuevo sigue corriendo contra un
+  ejecutor de contrato 1 exactamente igual que antes.
+
+### Cambiado
+
+- **BREAKING — el WIT pasa a `anvil:paso@0.2.0` y hay que recompilar los
+  componentes.** `run` cambia de firma (`run(nombre, intento, parametros)`) y
+  el `record resultado` gana `salidas`. **No hay capa de compatibilidad en el
+  puente**: la versión viaja pegada al artefacto y wasmtime falla al
+  instanciar si no casa (ADR-0020 §4d, que es la respuesta al issue #39).
+  Afecta a `ejemplos/hola-paso` y a cualquier `.wasm` de paso ya compilado.
+  Un componente sigue sin saber de gRPC ni de versiones de contrato: **el eco
+  lo responde el puente por él** (ADR-0015).
+  Por gRPC no se rompe nada: los ejemplos, `pasos_demo`, `pasos_scpi` y el
+  ejecutor Python siguen funcionando.
+- **`parametros:` deja de estar reservado a `sequence_call`.** Sigue
+  significando allí lo mismo (argumentos by-reference, ADR-0010) y significa
+  lo nuevo en un paso `grpc` (by-value). Son mutuamente excluyentes por
+  `tipo`, y para que copiar un bloque de un sitio al otro no cambie el
+  significado en silencio, **un valor como `locals.canal` sin `${}` en un
+  paso `grpc` es error de carga**, con el mensaje diciendo la forma correcta.
+  En un `statement` o un `pass_fail` sigue sin admitirse.
+- **`pasos_demo::medir_voltaje` acepta `canal` y `offset`** y devuelve las
+  salidas `canal_usado` y `temperatura`. Sin parámetros mide los 4,2 V de
+  siempre, así que `ejemplos/basica.yaml` no cambia.
+
+
 **`--validate` deja de decir «válida» a secuencias que no lo son.** El manual
 promete que el flag «carga la secuencia, valida el schema, resuelve
 subsecuencias y detecta ciclos — sin ejecutar nada ni levantar el ejecutor».

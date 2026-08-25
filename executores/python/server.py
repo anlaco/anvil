@@ -35,6 +35,68 @@ HOST = "127.0.0.1"
 PUERTO = 9101
 SIMULADOR_DEFECTO = ("127.0.0.1", 4000)
 
+# La versión de contrato que habla este ejecutor (ADR-0020 §4).
+#
+# Tiene que coincidir con `modelo::proto::CONTRATO` del core. El motor
+# comprueba este número —el "eco"— y convierte el paso en `error` si un
+# ejecutor que recibe `parametros` responde uno menor: un ejecutor que ignora
+# los parámetros **mide otra cosa y dice `paso`**, y ese verde falso es lo
+# único que este número existe para impedir.
+#
+# Si subes el contrato en el core y te olvidas de aquí, este ejecutor deja de
+# poder correr pasos con parámetros — que es el fallo ruidoso y correcto.
+CONTRATO = 2
+
+
+def valor_a_python(v):
+    """Un `Valor` del cable al tipo de Python que le corresponde.
+
+    Devuelve `None` si el `oneof` llegó sin rama: no dice de qué tipo es, y
+    ejecutar el paso sin ese parámetro sería medir otra cosa en silencio
+    (ADR-0019, Regla 2). Ojo: `None` aquí significa "no interpretable", no
+    "ausente" — un parámetro ausente sencillamente no está en la lista.
+    """
+    cual = v.WhichOneof("valor")
+    if cual is None:
+        return None
+    return getattr(v, cual)
+
+
+def parametros_de(request):
+    """Los parámetros de la petición como `dict`, o `(None, nombre)` si uno
+    llegó sin tipo."""
+    fuera = {}
+    for v in request.parametros:
+        valor = valor_a_python(v)
+        if valor is None:
+            return None, v.nombre
+        fuera[v.nombre] = valor
+    return fuera, None
+
+
+def resultado(nombre, estado, mensaje, valor_medido=None, salidas=None):
+    """Construye la respuesta **con el eco del contrato siempre puesto**.
+
+    Existe para que no haya forma de devolver un resultado sin eco: con 6
+    puntos de retorno, olvidarse en uno solo sería un ejecutor que a veces
+    dice que entiende el contrato y a veces no.
+    """
+    r = paso_pb2.ResultadoPasoProto(
+        nombre=nombre, estado=estado, mensaje=mensaje, contrato=CONTRATO,
+    )
+    if valor_medido is not None:
+        r.valor_medido = str(valor_medido)
+    for n, v in (salidas or {}).items():
+        s = r.salidas.add()
+        s.nombre = n
+        if isinstance(v, bool):
+            s.booleano = v
+        elif isinstance(v, (int, float)):
+            s.numero = float(v)
+        else:
+            s.texto = str(v)
+    return r
+
 
 def lee_simulador(host, puerto, comando, timeout=2.0):
     """Una petición al simulador: abre TCP, envía `comando`, lee la línea.
@@ -63,55 +125,56 @@ class EjecutorPasosServicer(paso_pb2_grpc.EjecutorPasosServicer):
     def Invoca(self, request, context):
         nombre = request.nombre
         intento = request.intento
+        params, sin_tipo = parametros_de(request)
+        if sin_tipo is not None:
+            return resultado(
+                nombre, "error",
+                f"el parámetro '{sin_tipo}' llegó sin tipo (ninguna de las "
+                f"ramas numero/texto/booleano): el paso no puede saber con "
+                f"qué medir")
 
         if nombre == "medir_simulador":
             # Mide contra el simulador: comando = "medir", respuesta
             # "medida: <valor>". El límite lo evalúa el motor desde el YAML
             # (ADR-0008); aquí solo se devuelve la medida.
+            # ADR-0020: el canal ya no está grabado en el ejecutor. Sin
+            # parámetro, el canal 1 y el mismo comando de siempre.
+            canal = params.get("canal", 1)
+            comando = "medir" if canal == 1 else f"medir {canal}"
             try:
-                linea = lee_simulador(*self.simulador, "medir")
+                linea = lee_simulador(*self.simulador, comando)
             except OSError as e:
-                return paso_pb2.ResultadoPasoProto(
-                    nombre=nombre,
-                    estado="error",
-                    mensaje=f"no se pudo hablar con el simulador: {e}",
-                )
+                return resultado(
+                    nombre, "error", f"no se pudo hablar con el simulador: {e}")
             if linea.lower().startswith("medida:"):
-                return paso_pb2.ResultadoPasoProto(
-                    nombre=nombre,
-                    estado="paso",
-                    mensaje=f"simulador respondió {linea}",
+                return resultado(
+                    nombre, "paso", f"simulador respondió {linea}",
                     valor_medido=linea.split(":", 1)[1].strip(),
+                    # El canal usado vuelve como salida con nombre: es la
+                    # condición en la que se midió, y ahora queda en el
+                    # informe (ADR-0020, Regla 3 de ADR-0019).
+                    salidas={"canal_usado": canal},
                 )
-            return paso_pb2.ResultadoPasoProto(
-                nombre=nombre,
-                estado="error",
-                mensaje=f"respuesta ilegible del simulador: {linea!r}",
-            )
+            return resultado(
+                nombre, "error", f"respuesta ilegible del simulador: {linea!r}")
 
         if nombre == "conectar_equipo":
             # Mismo patrón que pasos_demo::conectar: fallo transitorio en el
             # intento 1, pasa desde el 2 (RF-09: el número de intento llega
             # al paso).
             if intento == 1:
-                return paso_pb2.ResultadoPasoProto(
-                    nombre=nombre, estado="fallo",
-                    mensaje="handshake del simulador perdido (transitorio)",
-                )
-            return paso_pb2.ResultadoPasoProto(
-                nombre=nombre, estado="paso", mensaje="conectado",
-            )
+                return resultado(
+                    nombre, "fallo",
+                    "handshake del simulador perdido (transitorio)")
+            return resultado(nombre, "paso", "conectado")
 
         if nombre == "verificar_led":
             # Pass/fail sin medida (built-in de ejemplo en Python).
-            return paso_pb2.ResultadoPasoProto(
-                nombre=nombre, estado="paso", mensaje="led encendido",
-            )
+            return resultado(nombre, "paso", "led encendido")
 
-        return paso_pb2.ResultadoPasoProto(
-            nombre=nombre, estado="error",
-            mensaje=f"paso no reconocido por el ejecutor python: {nombre}",
-        )
+        return resultado(
+            nombre, "error",
+            f"paso no reconocido por el ejecutor python: {nombre}")
 
 
 def main():

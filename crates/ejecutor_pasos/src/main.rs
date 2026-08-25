@@ -6,7 +6,9 @@
 //!   wasmtime -S cli -S tcp=y -S inherit-network=y \
 //!     target/wasm32-wasip2/debug/ejecutor_pasos.wasm
 
+use expr::Value;
 use modelo::proto::{PeticionPaso, ResultadoPasoProto, RUTA_INVOCA};
+use modelo::ResultadoStep;
 use prost::Message;
 use wasi_grpc::grpc::Servidor;
 
@@ -20,12 +22,33 @@ const PUERTO_DEFECTO: u16 = 9100;
 /// SCPI/TCP) y luego los pasos **simulados** (`pasos_demo`). Un nombre
 /// desconocido en ambos cae a `error` en `pasos_demo::despacha` (no
 /// pánico: RF-12). El motor no cambia: sigue pidiendo `nombre` por gRPC
-/// y el paso sigue siendo opaco (ADR-0003/0005). `paso.proto` no cambia.
-fn despacha(nombre: &str, intento: i32) -> modelo::ResultadoStep {
+/// y el paso sigue siendo opaco (ADR-0003/0005).
+///
+/// Desde ADR-0020 el despacho lleva también los `parametros` de la petición,
+/// ya evaluados por el motor. `pasos_scpi` todavía no los usa —su dirección
+/// sigue viniendo de `ANVIL_SCPI_ADDR`, que es configuración de despliegue y
+/// no un parámetro del paso— así que se le pasan sólo a `pasos_demo`.
+fn despacha(nombre: &str, intento: i32, parametros: &[(String, Value)]) -> ResultadoStep {
     if let Some(r) = pasos_scpi::despacha(nombre, intento) {
         return r;
     }
-    pasos_demo::despacha(nombre, intento)
+    pasos_demo::despacha(nombre, intento, parametros)
+}
+
+/// Traduce los parámetros del cable a valores del motor (ADR-0020).
+///
+/// `Err(nombre)` si uno llegó con el `oneof` sin rama: no se puede saber de
+/// qué tipo es, y un paso que mide sin un parámetro que le mandaron mide otra
+/// cosa. Devuelve el nombre para poder nombrarlo en el error.
+fn parametros_de(pet: &PeticionPaso) -> Result<Vec<(String, Value)>, String> {
+    pet.parametros
+        .iter()
+        .map(|v| {
+            v.a_value()
+                .map(|valor| (v.nombre.clone(), valor))
+                .ok_or_else(|| v.nombre.clone())
+        })
+        .collect()
 }
 
 fn main() {
@@ -84,7 +107,24 @@ fn main() {
             };
             eprintln!("paso pedido: {} intento={}", pet.nombre, pet.intento);
 
-            let resultado = despacha(&pet.nombre, pet.intento);
+            // ADR-0020: los parámetros llegan tipados y ya evaluados. Uno con
+            // el `oneof` sin rama no dice de qué tipo es, y ejecutar el paso
+            // sin él sería medir otra cosa en silencio: es `error` (Regla 2
+            // de ADR-0019), no un valor por defecto.
+            let resultado = match parametros_de(&pet) {
+                Ok(parametros) => despacha(&pet.nombre, pet.intento, &parametros),
+                Err(nombre) => ResultadoStep::nuevo(
+                    &pet.nombre,
+                    "error",
+                    format!(
+                        "el parámetro '{nombre}' llegó sin tipo (ninguna de las ramas numero/\
+                         texto/booleano): el paso no puede saber con qué medir"
+                    ),
+                ),
+            };
+            // El eco lo pone `From<&ResultadoStep>`: este ejecutor entiende el
+            // contrato de `modelo::proto::CONTRATO`, y decirlo es lo que
+            // permite al motor detectar a un par que no lo entiende.
             let respuesta: ResultadoPasoProto = (&resultado).into();
 
             if let Err(e) = conn.responder(peticion.stream, &respuesta.encode_to_vec()) {
