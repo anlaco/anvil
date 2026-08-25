@@ -1,0 +1,36 @@
+# Parámetros y salidas de un paso (ADR-0020).
+#
+# Hasta ADR-0020 un paso sólo recibía su nombre y el número de intento, así
+# que el canal a medir iba grabado dentro del código del paso: cambiarlo
+# obligaba a recompilar, y —peor— no quedaba escrito en el informe. Dos
+# corridas de esta secuencia con distinto canal producían informes idénticos.
+#
+# Correr:
+#   ./anvil ejemplos/parametros.yaml --json /tmp/r.json
+#   # y mirar "parametros" y "salidas" de cada paso en el JSON.
+nombre: parametros
+
+locals:
+  # El canal se declara una vez aquí y se usa abajo con `${...}`.
+  canal_activo: 2.0
+  temperatura_leida: 0.0
+
+main:
+  # Un literal (`offset`) y una expresión (`canal`). Los dos llegan al paso
+  # ya evaluados: el paso no ve `locals`, se le pasan valores.
+  - nombre: medir_voltaje
+    reintentos: 1
+    parametros:
+      canal: '${locals.canal_activo}'
+      offset: 0.05
+    limite: { tipo: rango, min: 4.2, max: 4.5 }
+    # `salidas` son los valores con nombre que devuelve el paso además de la
+    # medida. No entran en el veredicto: el límite de arriba se evalúa contra
+    # `valor_medido` y nada más (ADR-0008).
+    asigna:
+      temperatura_leida: resultado.salidas.temperatura
+
+  # Y ya se pueden usar como cualquier otra variable.
+  - nombre: temperatura_en_rango
+    tipo: pass_fail
+    condicion: 'locals.temperatura_leida > 15.0 && locals.temperatura_leida < 30.0'

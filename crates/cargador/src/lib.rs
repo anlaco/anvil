@@ -26,8 +26,8 @@
 //! [`aplicar_limites`](aplicar_limites) y ADR-0008.
 
 use modelo::{
-    Argumento, Asignacion, DefinicionEjecutor, DefinicionPaso, DefinicionSecuencia, Limite,
-    Operador, Programa, TipoEjecutor, TipoPaso, ValorDefinicion,
+    Argumento, Asignacion, DefinicionEjecutor, DefinicionPaso, DefinicionSecuencia, EntradaPaso,
+    Limite, Operador, Programa, TipoEjecutor, TipoPaso, ValorDefinicion,
 };
 use serde::Deserialize;
 use std::collections::{HashMap, HashSet};
@@ -106,7 +106,7 @@ fn tipo_ejecutor_por_defecto() -> String {
 /// infiere del escalar YAML: `true`→bool, `4.5`→número, `"A-2026"`→texto.
 /// `untagged` prueba variantes en orden; `Bool` primero evita que `true` se
 /// intente como `f64`.
-#[derive(Debug, PartialEq, Deserialize)]
+#[derive(Debug, PartialEq, Clone, Deserialize)]
 #[serde(untagged)]
 enum ValorYaml {
     Bool(bool),
@@ -170,11 +170,26 @@ struct PasoYaml {
     /// relativo** (archivo externo); se distingue con [`es_path`]. Texto.
     #[serde(default)]
     secuencia: Option<String>,
-    /// M4b (RF-27): argumentos by-reference del sequence call, mapa
-    /// `nombre_parameter -> "locals.X"`. Cada valor se parsea a AST y se
-    /// valida como `Expresion::Var { scope: Locals, .. }` (un lvalue local).
+    /// Dos cosas distintas según el `tipo` del paso, y son excluyentes:
+    ///
+    /// - `sequence_call` (M4b, RF-27): argumentos **by-reference**, mapa
+    ///   `nombre_parameter -> "locals.X"`. Cada valor se parsea a AST y se
+    ///   valida como `Expresion::Var { scope: Locals, .. }` (un lvalue local).
+    /// - `grpc` (ADR-0020): parámetros **by-value** que viajan en la
+    ///   petición, mapa `nombre -> literal | "${expr}"`.
+    ///
+    /// El nombre es el mismo porque el ADR-0020 lo fija así y porque no
+    /// pueden coincidir nunca en el mismo paso. El riesgo es copiar uno de un
+    /// sitio al otro —`{ canal: locals.canal }` es una referencia en un
+    /// `sequence_call` y sería el **texto literal** `"locals.canal"` en un
+    /// `grpc`— y por eso ese caso concreto es error de carga, no un silencio
+    /// (ver `entradas_de_paso`).
+    ///
+    /// Es `ValorYaml` y no `String` para poder distinguir `canal: 2` de
+    /// `canal: "2"`: en un paso `grpc` el tipo del literal es el tipo que
+    /// viaja por el cable.
     #[serde(default)]
-    parametros: Option<HashMap<String, String>>,
+    parametros: Option<HashMap<String, ValorYaml>>,
     /// M5-ext.1 (RF-36.3): nombre del ejecutor que atiende este paso. Debe
     /// existir en `ejecutores` de la secuencia (fail-fast al cargar). Si se
     /// omite, el paso va al ejecutor embebido (default).
@@ -819,8 +834,25 @@ fn primer_uso_de_resultado_si(e: &expr::Expresion, pred: &impl Fn(&str) -> bool)
 /// Se mira sólo `asigna` porque es el único sitio donde `resultado.*` es
 /// legal; en `precondicion`, `condicion` y `statement` lo rechaza entero
 /// `validar_alcance_resultado`, que corre justo antes.
+///
+/// **`resultado.salidas.<nombre>` es la excepción, y es deliberada**
+/// (ADR-0020 §3). El cargador no sabe qué salidas devuelve un paso —eso sólo
+/// se ve corriendo— así que aquí sólo se comprueba la *forma*: que haya un
+/// nombre detrás del punto. Que ese nombre exista lo caza el motor en
+/// ejecución, como `error`. Es la excepción a la regla de detección de
+/// ADR-0019 que el propio ADR-0020 asume, y lo que devolvería este terreno a
+/// `--validate` es la introspección de firma del issue #45.
 fn validar_campos_de_resultado(def: &DefinicionSecuencia) -> Result<(), ErrorCarga> {
-    let desconocido = |campo: &str| !modelo::CAMPOS_RESULTADO.contains(&campo);
+    let desconocido = |campo: &str| {
+        match campo.strip_prefix(expr::CAMPO_SALIDAS) {
+            // `resultado.salidas.<algo>`: la forma es válida.
+            Some(resto) if resto.starts_with('.') && resto.len() > 1 => false,
+            // `resultado.salidas` a secas, o `resultado.salidas.` — no nombra
+            // ninguna salida, así que no puede valer nada.
+            Some(_) => true,
+            None => !modelo::CAMPOS_RESULTADO.contains(&campo),
+        }
+    };
     for p in def
         .pasos_setup
         .iter()
@@ -834,7 +866,8 @@ fn validar_campos_de_resultado(def: &DefinicionSecuencia) -> Result<(), ErrorCar
             if let Some(campo) = primer_uso_de_resultado_si(&a.expr, &desconocido) {
                 return Err(ErrorCarga::Validacion(format!(
                     "el paso '{}' asigna a '{}' desde 'resultado.{campo}', que no existe: \
-                     los campos de 'resultado' son {} (los tres, y no hay más)",
+                     los campos de 'resultado' son {}, y 'salidas.<nombre>' para \
+                     lo que devuelva el paso",
                     p.nombre,
                     a.var,
                     modelo::CAMPOS_RESULTADO
@@ -1754,7 +1787,10 @@ fn validar(y: &SecuenciaYaml) -> Result<(), ErrorCarga> {
 }
 
 impl PasoYaml {
-    fn a_definicion(self) -> Result<DefinicionPaso, ErrorCarga> {
+    // `mut self` porque `parametros` se consume por una vía o por la otra
+    // según el `tipo` (ADR-0020): by-value en un `grpc`, by-reference en un
+    // `sequence_call`. El `take()` deja claro cuál se ha llevado el mapa.
+    fn a_definicion(mut self) -> Result<DefinicionPaso, ErrorCarga> {
         let limite = match self.limite {
             Some(l) => Some(l.a_limite(&self.nombre)?),
             None => None,
@@ -1837,10 +1873,47 @@ impl PasoYaml {
         // puro (`Expresion::Var { scope: Locals, .. }`). Que el `campo`
         // exista en `locals` de la secuencia contenedora se valida al
         // resolver el programa (ver `cargar_programa_de_archivo`).
-        let parametros = match self.parametros {
+        // `parametros` sólo significa algo en un `grpc` (by-value, ADR-0020) o
+        // en un `sequence_call` (by-reference, ADR-0010). En los otros dos no
+        // quiere decir nada, y se rechaza **antes** de que ninguna de las dos
+        // ramas de abajo consuma el mapa: si no, un `statement` con
+        // `parametros` acabaría en el error de by-reference, que habla de
+        // lvalues y no le dice nada a quien escribió el YAML.
+        if matches!(tipo, TipoPaso::Statement | TipoPaso::PassFail) && self.parametros.is_some() {
+            return Err(ErrorCarga::Validacion(format!(
+                "el paso '{}' es '{}' pero trae 'parametros' (son de 'grpc', by-value, o de \
+                 'sequence_call', by-reference)",
+                self.nombre, self.tipo
+            )));
+        }
+
+        // ADR-0020: en un paso `grpc`, `parametros:` es otra cosa —valores
+        // by-value que viajan en la petición— y se resuelve aparte.
+        let entradas = if matches!(tipo, TipoPaso::Grpc) {
+            entradas_de_paso(&self.nombre, self.parametros.take())?
+        } else {
+            None
+        };
+
+        let parametros = match self.parametros.take() {
             Some(mapa) if !mapa.is_empty() => Some(
                 mapa.into_iter()
-                    .map(|(param, texto)| {
+                    .map(|(param, valor)| {
+                        // By-reference: el valor tiene que ser el texto
+                        // "locals.X". Un escalar no-texto (`p: 2`) no puede
+                        // ser un lvalue, y decirlo aquí evita el mensaje
+                        // interno de serde del issue #20.
+                        let texto = match valor {
+                            ValorYaml::Texto(t) => t,
+                            otro => {
+                                return Err(ErrorCarga::Validacion(format!(
+                                    "el argumento '{param}' del sequence call '{}' es {}, y \
+                                     by-reference sólo admite una variable local (locals.X)",
+                                    self.nombre,
+                                    describe_valor(&otro)
+                                )))
+                            }
+                        };
                         let origen = expr::parse_expresion(extraer_expr(&texto)).map_err(|e| {
                             ErrorCarga::Validacion(format!(
                                 "parámetro '{param}' del sequence call '{}': {e}",
@@ -1974,11 +2047,13 @@ impl PasoYaml {
                 }
             }
         }
-        if !matches!(tipo, TipoPaso::SequenceCall)
-            && (self.secuencia.is_some() || parametros.is_some())
-        {
+        // `secuencia` sigue siendo sólo de `sequence_call`. `parametros` ya
+        // no: en un paso `grpc` son los parámetros by-value del ADR-0020, y
+        // se han recogido antes en `entradas`. En `statement` y `pass_fail`
+        // no significa nada, y se sigue rechazando.
+        if !matches!(tipo, TipoPaso::SequenceCall) && self.secuencia.is_some() {
             return Err(ErrorCarga::Validacion(format!(
-                "el paso '{}' es '{}' pero trae 'secuencia'/'parametros' (reservado para 'sequence_call')",
+                "el paso '{}' es '{}' pero trae 'secuencia' (reservado para 'sequence_call')",
                 self.nombre, self.tipo
             )));
         }
@@ -2004,9 +2079,82 @@ impl PasoYaml {
             condicion,
             secuencia: self.secuencia,
             parametros,
+            entradas,
             ejecutor: self.ejecutor,
         })
     }
+}
+
+/// Cómo se nombra un escalar YAML en un mensaje de error. Existe para que el
+/// cargador diga «es un número» y no `TypeMismatch { expected: "string",
+/// found: "non-string scalar" }`, que es el defecto de diagnóstico del #20.
+fn describe_valor(v: &ValorYaml) -> String {
+    match v {
+        ValorYaml::Bool(b) => format!("el booleano `{b}`"),
+        ValorYaml::Numero(n) => format!("el número `{n}`"),
+        ValorYaml::Texto(t) => format!("el texto `{t}`"),
+    }
+}
+
+/// Los scopes que el motor conoce. Si un parámetro by-value empieza por uno de
+/// éstos y **no** va entre `${...}`, casi seguro que quien lo escribió quería
+/// una expresión y va a mandar el nombre de la variable como texto.
+const SCOPES: [&str; 3] = ["locals.", "file_globals.", "parameters."];
+
+/// ADR-0020 §2: los parámetros **by-value** de un paso `grpc`.
+///
+/// Cada valor es un literal —y su tipo es el del escalar YAML— o una
+/// expresión `${...}` que evalúa el motor antes de llamar.
+///
+/// **La red de seguridad.** `parametros:` significa otra cosa en un
+/// `sequence_call`: allí `{ canal: locals.canal }` es una referencia a la
+/// variable. Aquí sería el texto literal `"locals.canal"`, y el paso mediría
+/// con una cadena en vez de con el número. Copiar un bloque de un sitio al
+/// otro no puede cambiar el significado en silencio (es lo que ADR-0019
+/// combate), así que ese caso concreto **no se traga**: es error de carga y el
+/// mensaje dice cuál es la forma correcta.
+///
+/// Se devuelve ordenado por nombre: el orden del cable tiene que ser
+/// determinista para que dos corridas iguales produzcan bytes iguales.
+fn entradas_de_paso(
+    paso: &str,
+    mapa: Option<HashMap<String, ValorYaml>>,
+) -> Result<Option<Vec<(String, EntradaPaso)>>, ErrorCarga> {
+    let mapa = match mapa {
+        Some(m) if !m.is_empty() => m,
+        _ => return Ok(None),
+    };
+    let mut entradas: Vec<(String, EntradaPaso)> = Vec::with_capacity(mapa.len());
+    for (nombre, valor) in mapa {
+        let entrada = match &valor {
+            ValorYaml::Bool(b) => EntradaPaso::Literal(ValorDefinicion::Bool(*b)),
+            ValorYaml::Numero(n) => EntradaPaso::Literal(ValorDefinicion::Numero(*n)),
+            ValorYaml::Texto(t) => {
+                let interior = extraer_expr(t);
+                if interior != t {
+                    // Venía como `${...}`: es una expresión.
+                    EntradaPaso::Expresion(expr::parse_expresion(interior).map_err(|e| {
+                        ErrorCarga::Validacion(format!(
+                            "parámetro '{nombre}' del paso '{paso}': {e}"
+                        ))
+                    })?)
+                } else if SCOPES.iter().any(|s| t.starts_with(s)) {
+                    return Err(ErrorCarga::Validacion(format!(
+                        "el parámetro '{nombre}' del paso '{paso}' vale '{t}', que viajaría \
+                         como el texto literal \"{t}\" y no como el valor de esa variable. \
+                         Si querías la variable, escríbela como '${{{t}}}'. (En un \
+                         'sequence_call' 'parametros' sí es by-reference y '{t}' sería la \
+                         referencia; en un paso 'grpc' los parámetros van by-value.)"
+                    )));
+                } else {
+                    EntradaPaso::Literal(ValorDefinicion::Texto(t.clone()))
+                }
+            }
+        };
+        entradas.push((nombre, entrada));
+    }
+    entradas.sort_by(|a, b| a.0.cmp(&b.0));
+    Ok(Some(entradas))
 }
 
 /// Si `texto` es de la forma `${expr}` (toda la cadena), devuelve `expr`;
@@ -4464,5 +4612,141 @@ main:
         .unwrap();
         let prog = cargar_programa_con_pm(pm.to_str().unwrap(), usuario.to_str().unwrap()).unwrap();
         assert_eq!(prog.ejecutores.len(), 2, "los dos se fusionan");
+    }
+    // --- ADR-0020: parámetros by-value de un paso `grpc` -------------------
+
+    /// La red de seguridad de la colisión de nombres. `parametros:` significa
+    /// dos cosas según el `tipo`: en un `sequence_call` es by-reference y
+    /// `{ canal: locals.canal }` es una **referencia** a la variable; en un
+    /// `grpc` sería el **texto literal** `"locals.canal"`, y el paso mediría
+    /// con una cadena en vez de con el número.
+    ///
+    /// Copiar un bloque de un sitio al otro no puede cambiar el significado
+    /// en silencio (ADR-0019), así que ese caso no se traga.
+    ///
+    /// Visto en rojo quitando la comprobación de `SCOPES` en
+    /// `entradas_de_paso`: el YAML carga sin rechistar y el parámetro viaja
+    /// como texto.
+    #[test]
+    fn un_scope_sin_llaves_en_un_paso_grpc_no_se_traga_como_texto() {
+        let yaml = "\
+nombre: s
+locals: { canal: 2.0 }
+main:
+  - nombre: medir
+    parametros: { canal: locals.canal }
+";
+        let err = cargar_de_texto(yaml).unwrap_err();
+        let ErrorCarga::Validacion(m) = &err else {
+            panic!("tiene que ser error de validación, no de sintaxis: {err:?}");
+        };
+        assert!(m.contains("medir"), "nombra el paso: {m}");
+        assert!(m.contains("canal"), "nombra el parámetro: {m}");
+        assert!(m.contains("${locals.canal}"), "dice la forma correcta: {m}");
+    }
+
+    /// Y con `${...}` sí: es una expresión, y se parsea al cargar.
+    #[test]
+    fn un_scope_entre_llaves_es_una_expresion() {
+        let yaml = "\
+nombre: s
+locals: { canal: 2.0 }
+main:
+  - nombre: medir
+    parametros: { canal: '${locals.canal}' }
+";
+        let s = cargar_de_texto(yaml).unwrap();
+        let e = s.pasos_main[0].entradas.as_ref().expect("hay parámetros");
+        assert!(matches!(e[0], (ref n, EntradaPaso::Expresion(_)) if n == "canal"));
+    }
+
+    /// El tipo del literal es el del escalar YAML: `2` es número y `"2"` es
+    /// texto. Es lo que viaja por el cable, así que confundirlos es medir
+    /// otra cosa.
+    #[test]
+    fn el_tipo_del_literal_es_el_del_escalar_yaml() {
+        let yaml = "\
+nombre: s
+main:
+  - nombre: medir
+    parametros:
+      canal: 2
+      etiqueta: '2'
+      promediar: true
+";
+        let s = cargar_de_texto(yaml).unwrap();
+        let e = s.pasos_main[0].entradas.as_ref().unwrap();
+        // Ordenados por nombre: el orden del cable es determinista.
+        assert_eq!(
+            e,
+            &vec![
+                (
+                    "canal".to_string(),
+                    EntradaPaso::Literal(ValorDefinicion::Numero(2.0))
+                ),
+                (
+                    "etiqueta".to_string(),
+                    EntradaPaso::Literal(ValorDefinicion::Texto("2".into()))
+                ),
+                (
+                    "promediar".to_string(),
+                    EntradaPaso::Literal(ValorDefinicion::Bool(true))
+                ),
+            ]
+        );
+    }
+
+    /// ADR-0020 §2: un `parametros:` que no es un mapa de escalares es error
+    /// **de carga**, no de ejecución — es decidible sin banco.
+    #[test]
+    fn un_parametro_que_no_es_escalar_no_carga() {
+        let yaml = "\
+nombre: s
+main:
+  - nombre: medir
+    parametros:
+      canal: [1, 2]
+";
+        assert!(cargar_de_texto(yaml).is_err(), "una lista no es un escalar");
+    }
+
+    /// Un `sequence_call` sigue funcionando exactamente igual: su
+    /// `parametros` es by-reference y no pasa por la ruta nueva.
+    #[test]
+    fn el_sequence_call_conserva_su_parametros_by_reference() {
+        let yaml = "\
+nombre: s
+locals: { canal: 1.0 }
+subsecuencias:
+  hija:
+    nombre: hija
+    parameters: { canal: 0.0 }
+    main:
+      - nombre: p
+main:
+  - nombre: c
+    tipo: sequence_call
+    secuencia: hija
+    parametros: { canal: locals.canal }
+";
+        let s = cargar_de_texto(yaml).unwrap();
+        let p = &s.pasos_main[0];
+        assert!(p.entradas.is_none(), "un call no tiene parámetros by-value");
+        assert_eq!(p.parametros.as_ref().unwrap()[0].param, "canal");
+    }
+
+    /// Y un `statement` sigue sin admitirlo, porque ahí no significa nada.
+    #[test]
+    fn un_statement_no_admite_parametros() {
+        let yaml = "\
+nombre: s
+main:
+  - nombre: p
+    tipo: statement
+    statement: 'locals.x = 1'
+    parametros: { canal: 2 }
+";
+        let err = cargar_de_texto(yaml).unwrap_err();
+        assert!(matches!(&err, ErrorCarga::Validacion(m) if m.contains("parametros")));
     }
 }

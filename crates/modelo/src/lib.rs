@@ -250,6 +250,19 @@ pub struct ResultadoStep {
     /// **sequence call**, el paso de la llamada lleva la fase del padre y cada
     /// sub-paso la suya dentro de la subsecuencia. No viaja en `paso.proto`.
     pub fase: Fase,
+    /// Los parámetros que el motor **envió** a este paso, ya evaluados
+    /// (ADR-0020). No vuelven del cable: los sella el motor tras la
+    /// invocación, para que queden en el informe.
+    ///
+    /// Es lo que arregla el agujero que abrió este ADR: hasta ahora dos
+    /// corridas de la misma secuencia con distinto canal producían informes
+    /// idénticos, porque la condición en la que se midió no viajaba a ningún
+    /// sitio (Regla 3 de ADR-0019, por la puerta que aquel ADR no miró).
+    pub parametros: Vec<(String, expr::Value)>,
+    /// Los valores con nombre que **devolvió** el paso además de la medida.
+    /// Vienen del cable (tag 7). No participan en el veredicto: `asigna` los
+    /// lee como `resultado.salidas.<nombre>` y los sinks los escriben.
+    pub salidas: Vec<(String, expr::Value)>,
 }
 
 impl ResultadoStep {
@@ -266,6 +279,8 @@ impl ResultadoStep {
             operador: None,
             sub_pasos: None,
             fase: Fase::Main,
+            parametros: Vec::new(),
+            salidas: Vec::new(),
         }
     }
 
@@ -541,6 +556,23 @@ pub struct Argumento {
     pub origen: expr::Expresion,
 }
 
+/// Un parámetro de entrada de un paso `Grpc`, tal y como queda tras cargar
+/// (ADR-0020 §2).
+///
+/// O es un literal —y su tipo es el del escalar YAML— o es una expresión
+/// `${...}` que el motor evalúa **antes** de llamar, contra su propio entorno
+/// (ADR-0009: las expresiones las evalúa el motor; el paso no ve `locals`,
+/// se le pasa un valor).
+///
+/// Una expresión que falla convierte el paso en `error`, **nunca en un valor
+/// por defecto**: un banco que mide con un parámetro inventado da un número
+/// que parece bueno y no lo es.
+#[derive(Debug, Clone, PartialEq)]
+pub enum EntradaPaso {
+    Literal(ValorDefinicion),
+    Expresion(expr::Expresion),
+}
+
 /// El valor literal de una variable declarada en el YAML (scopes
 /// `locals`/`parameters`/`file_globals`). El tipo se infiere del escalar YAML:
 /// número, texto o booleano. Sin árbol de propiedades tipado recursivo de
@@ -612,6 +644,21 @@ pub struct DefinicionPaso {
     /// M4b/RF-27: argumentos by-reference del sequence call (`locals.X`
     /// ↔ `parameters.param`). `None` si no es `SequenceCall`.
     pub parametros: Option<Vec<Argumento>>,
+    /// ADR-0020: los parámetros **de entrada** de un paso `Grpc`, que viajan
+    /// by-value en la petición. `None` = el paso no declara ninguno, y
+    /// entonces un ejecutor de contrato 1 sigue siendo válido.
+    ///
+    /// **Se llama `entradas` y no `parametros` porque ese nombre ya está
+    /// cogido** por los argumentos by-reference del `sequence_call` (arriba),
+    /// que son otra cosa: aquéllos son lvalues que se escriben de vuelta,
+    /// éstos son valores que se envían. En el YAML los dos se declaran como
+    /// `parametros:` —son mutuamente excluyentes por `tipo`— y el cargador
+    /// rechaza el caso en que confundirlos cambiaría el significado en
+    /// silencio (ver `EntradaPaso`).
+    ///
+    /// Ordenado por nombre al cargar: el orden del cable tiene que ser
+    /// determinista para que dos corridas iguales produzcan bytes iguales.
+    pub entradas: Option<Vec<(String, EntradaPaso)>>,
     /// M5-ext.1 (RF-36.3): nombre del ejecutor que atiende este paso. Si es
     /// `None`, el motor usa el ejecutor **embebido** (default,
     /// `127.0.0.1:9100`) — compat con M4b. El cargador valida que el nombre
@@ -634,6 +681,7 @@ impl DefinicionPaso {
             condicion: None,
             secuencia: None,
             parametros: None,
+            entradas: None,
             ejecutor: None,
         }
     }

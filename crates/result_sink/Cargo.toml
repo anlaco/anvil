@@ -6,5 +6,8 @@ license.workspace = true
 description = "ResultSinks de anvil: consola, JSON, CSV (SQLite aplazado, ADR-0007)"
 
 [dependencies]
+# `expr::Value`: el tipo de los parámetros y salidas del paso (ADR-0020),
+# que los sinks escriben con su tipo en vez de aplanarlos a texto.
+expr.workspace = true
 modelo.workspace = true
 serde_json.workspace = true

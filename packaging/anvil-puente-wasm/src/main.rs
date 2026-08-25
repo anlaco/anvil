@@ -36,8 +36,24 @@ pub mod pb {
     tonic::include_proto!("_");
 }
 
+use exports::anvil::paso::paso::Nombrado;
 use pb::ejecutor_pasos_server::{EjecutorPasos, EjecutorPasosServer};
 use pb::{PeticionPaso, ResultadoPasoProto};
+
+/// La versión de contrato que habla este puente (ADR-0020 §4).
+///
+/// **Está repetida a mano, y eso es exactamente lo que el ADR avisa que es
+/// peligroso.** No se puede importar de `modelo` porque este crate no lo
+/// linka a propósito: `modelo` usa prost 0.14 y el `pb` de aquí lo genera
+/// tonic 0.12 con prost 0.13 (ver `Cargo.toml`).
+///
+/// Lo que impide que se desincronice es el test
+/// `el_contrato_del_puente_es_el_de_modelo`, que sí linka `modelo` (como
+/// dev-dependency, sin tocar el binario) y compara los dos números. Si
+/// alguien sube el contrato en `modelo` y se olvida de aquí, ese test se pone
+/// rojo — que es la diferencia entre un fallo de compilación y **un eco que
+/// miente**.
+const CONTRATO: i32 = 2;
 
 // Bindings del WIT `anvil:paso` (el `wit/` de este crate es la fuente de
 // verdad del contrato; el autor del componente usa el mismo fichero).
@@ -129,11 +145,16 @@ impl ComponenteCargado {
     // a desenvolverlo en cada punto donde tonic lo espera, a cambio de nada:
     // esto se llama una vez por paso, no en un bucle caliente.
     #[allow(clippy::result_large_err)]
-    fn llamar(&mut self, nombre: &str, intento: i32) -> Result<ResultadoPasoProto, Status> {
+    fn llamar(
+        &mut self,
+        nombre: &str,
+        intento: i32,
+        parametros: &[Nombrado],
+    ) -> Result<ResultadoPasoProto, Status> {
         let r = self
             .paso
             .anvil_paso_paso()
-            .call_run(&mut self.store, nombre, intento)
+            .call_run(&mut self.store, nombre, intento, parametros)
             .map_err(|e| Status::internal(format!("el paso '{nombre}' falló: {e}")))?;
         Ok(ResultadoPasoProto {
             nombre: nombre.to_string(),
@@ -142,6 +163,15 @@ impl ComponenteCargado {
             valor_medido: r.valor_medido.map(|v| v.to_string()).unwrap_or_default(),
             limite_min: String::new(),
             limite_max: String::new(),
+            salidas: r.salidas.iter().map(nombrado_a_proto).collect(),
+            // **El puente responde el eco por el componente** (ADR-0020 §4d).
+            // Un componente no sabe de gRPC, de protobuf ni de versiones de
+            // contrato (ADR-0015); el puente es el único que traduce, y por
+            // tanto el único que sabe qué número de contrato corresponde a
+            // qué versión del WIT. Si llegó hasta aquí es que el `.wasm`
+            // casaba con `anvil:paso@0.2.0` —wasmtime falla al instanciar si
+            // no— así que habla el contrato de este binario.
+            contrato: CONTRATO,
         })
     }
 }
@@ -164,11 +194,24 @@ impl EjecutorPasos for ServicioEjecutor {
         request: Request<PeticionPaso>,
     ) -> Result<Response<ResultadoPasoProto>, Status> {
         let pet = request.into_inner();
+        // Un parámetro cuyo `oneof` llegó sin rama no dice de qué tipo es. No
+        // se puede pasar al componente ni omitirlo en silencio: omitirlo sería
+        // que el paso midiera sin él y nadie se enterase (ADR-0019, Regla 2).
+        let parametros = pet
+            .parametros
+            .iter()
+            .map(proto_a_nombrado)
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|n: String| {
+                Status::invalid_argument(format!(
+                    "el parámetro '{n}' llegó sin tipo (ninguna de las ramas numero/texto/booleano)"
+                ))
+            })?;
         let mut comp = self
             .componente
             .lock()
             .map_err(|_| Status::internal("componente en uso"))?;
-        let respuesta = comp.llamar(&pet.nombre, pet.intento)?;
+        let respuesta = comp.llamar(&pet.nombre, pet.intento, &parametros)?;
         Ok(Response::new(respuesta))
     }
 }
@@ -319,5 +362,87 @@ mod tests {
     fn fichero_mas_corto_que_la_cabecera_se_diagnostica() {
         let diag = diagnostica_no_componente(&CABECERA_COMPONENTE[..4]).expect("debe diagnosticar");
         assert!(diag.contains("no es un fichero WebAssembly"), "{diag}");
+    }
+}
+
+/// Un `Nombrado` del WIT al `Valor` del protobuf (la salida del componente).
+fn nombrado_a_proto(n: &Nombrado) -> pb::Valor {
+    use exports::anvil::paso::paso::Valor as ValorWit;
+    let dato = match &n.valor {
+        ValorWit::Numero(x) => pb::valor::Valor::Numero(*x),
+        ValorWit::Texto(s) => pb::valor::Valor::Texto(s.clone()),
+        ValorWit::Booleano(b) => pb::valor::Valor::Booleano(*b),
+    };
+    pb::Valor {
+        nombre: n.nombre.clone(),
+        valor: Some(dato),
+    }
+}
+
+/// Un `Valor` del protobuf al `Nombrado` del WIT (el parámetro de entrada).
+///
+/// `Err(nombre)` si el `oneof` llegó vacío: no hay forma de construir el
+/// `variant` del WIT sin saber de qué tipo es, y no la hay a propósito — el
+/// WIT no tiene rama «desconocido», que es lo que hace imposible pasarle al
+/// componente un parámetro que nadie sabe interpretar.
+fn proto_a_nombrado(v: &pb::Valor) -> Result<Nombrado, String> {
+    use exports::anvil::paso::paso::Valor as ValorWit;
+    let valor = match v.valor.as_ref().ok_or_else(|| v.nombre.clone())? {
+        pb::valor::Valor::Numero(x) => ValorWit::Numero(*x),
+        pb::valor::Valor::Texto(s) => ValorWit::Texto(s.clone()),
+        pb::valor::Valor::Booleano(b) => ValorWit::Booleano(*b),
+    };
+    Ok(Nombrado {
+        nombre: v.nombre.clone(),
+        valor,
+    })
+}
+
+#[cfg(test)]
+mod tests_contrato {
+    use super::*;
+
+    /// La red que sostiene el `const CONTRATO` copiado a mano. Ver su
+    /// comentario: el puente no puede linkar `modelo` en el binario, así que
+    /// la única forma de que las dos copias no se separen es compararlas en
+    /// un test.
+    #[test]
+    fn el_contrato_del_puente_es_el_de_modelo() {
+        assert_eq!(
+            CONTRATO,
+            modelo::proto::CONTRATO,
+            "el puente responde el eco por los componentes WASM: si su número \
+             se queda atrás, dice que entiende un contrato que no entiende"
+        );
+    }
+
+    #[test]
+    fn un_parametro_sin_tipo_no_llega_al_componente() {
+        // Regla 2 de ADR-0019 en la frontera del puente. Si esto empezara a
+        // devolver `Ok`, un paso mediría sin un parámetro que le mandaron.
+        let v = pb::Valor {
+            nombre: "canal".into(),
+            valor: None,
+        };
+        assert_eq!(proto_a_nombrado(&v).unwrap_err(), "canal");
+    }
+
+    #[test]
+    fn los_tres_tipos_cruzan_la_frontera_en_los_dos_sentidos() {
+        use exports::anvil::paso::paso::Valor as ValorWit;
+        for wit in [
+            ValorWit::Numero(4.2),
+            ValorWit::Texto("banco-3".into()),
+            ValorWit::Booleano(true),
+        ] {
+            let n = Nombrado {
+                nombre: "p".into(),
+                valor: wit,
+            };
+            let ida = nombrado_a_proto(&n);
+            let vuelta = proto_a_nombrado(&ida).expect("un valor con tipo siempre vuelve");
+            assert_eq!(vuelta.nombre, "p");
+            assert_eq!(nombrado_a_proto(&vuelta), ida);
+        }
     }
 }

@@ -6,6 +6,8 @@ license.workspace = true
 description = "Servidor gRPC que ejecuta pasos del secuenciador por nombre"
 
 [dependencies]
+# `expr::Value`: el tipo de los parámetros del paso (ADR-0020).
+expr.workspace = true
 modelo.workspace = true
 pasos_demo.workspace = true
 pasos_scpi.workspace = true

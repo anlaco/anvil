@@ -85,6 +85,12 @@ fn paso_a_json(p: &ResultadoStep) -> Value {
         "limite_max": opt_num(p.limite_max),
         "valor_esperado": opt_num(p.valor_esperado),
         "operador": p.operador.map(|op| json!(op.simbolo())).unwrap_or(Value::Null),
+        // ADR-0020 + Regla 3 de ADR-0019: **la condición en la que se midió
+        // queda escrita**. Hasta ahora dos corridas de la misma secuencia con
+        // distinto canal producían informes idénticos, porque el canal iba
+        // grabado dentro del paso y no viajaba a ningún sitio.
+        "parametros": nombrados_a_json(&p.parametros),
+        "salidas": nombrados_a_json(&p.salidas),
     });
     match &p.sub_pasos {
         Some(sub) => {
@@ -96,6 +102,34 @@ fn paso_a_json(p: &ResultadoStep) -> Value {
             Value::Object(obj)
         }
         None => base,
+    }
+}
+
+/// Valores con nombre (parámetros o salidas) como objeto JSON, con el **tipo
+/// preservado**: un número sale como número y un booleano como booleano.
+///
+/// Escribirlos todos como texto perdería justo lo que el ADR-0020 fue a
+/// ganar: que quien lea el informe sepa que el canal era el número 2 y no la
+/// cadena "2".
+///
+/// Un mapa vacío, y no `null`, cuando no hay ninguno: quien consuma el JSON
+/// no tiene que distinguir dos formas de decir «nada».
+fn nombrados_a_json(vs: &[(String, expr::Value)]) -> Value {
+    let mut obj = serde_json::Map::with_capacity(vs.len());
+    for (nombre, v) in vs {
+        obj.insert(nombre.clone(), valor_a_json(v));
+    }
+    Value::Object(obj)
+}
+
+/// Un `expr::Value` al JSON de su tipo. `Nulo` → `null`, aunque hoy no puede
+/// llegar (ni un parámetro ni una salida nula cruzan el cable).
+fn valor_a_json(v: &expr::Value) -> Value {
+    match v {
+        expr::Value::Numero(x) => json!(x),
+        expr::Value::Texto(s) => json!(s),
+        expr::Value::Bool(b) => json!(b),
+        expr::Value::Nulo => Value::Null,
     }
 }
 
@@ -304,5 +338,48 @@ mod tests {
         let doc: Value = serde_json::from_slice(&sink.salida).unwrap();
         assert_eq!(doc["secuencia"], "sequential");
         assert_eq!(doc["secuencia_usuario"], "ejemplos/basica.yaml");
+    }
+    /// ADR-0020: los parámetros y las salidas van al JSON **con su tipo**.
+    /// Aplanarlos a texto perdería justo lo que este ADR fue a ganar: que
+    /// quien lea el informe sepa que el canal era el número 2 y no la cadena
+    /// "2".
+    ///
+    /// Visto en rojo escribiendo todos los valores con `json!(v.to_string())`.
+    #[test]
+    fn los_parametros_y_las_salidas_conservan_su_tipo() {
+        let mut p = ResultadoStep::medido_valor("medir", "paso", "ok", 4.4);
+        p.parametros = vec![
+            ("canal".into(), expr::Value::Numero(3.0)),
+            ("etiqueta".into(), expr::Value::Texto("banco-3".into())),
+            ("promediar".into(), expr::Value::Bool(true)),
+        ];
+        p.salidas = vec![("temperatura".into(), expr::Value::Numero(21.5))];
+        let mut s = ResultadoSecuencia::nueva("c");
+        s.registra(p);
+
+        let mut sink = SinkJson::nuevo(Vec::new());
+        sink.on_fin_secuencia(&s);
+        let doc: Value = serde_json::from_slice(&sink.salida).unwrap();
+        let paso = &doc["pasos"][0];
+
+        assert_eq!(paso["parametros"]["canal"], 3.0, "número, no cadena");
+        assert!(paso["parametros"]["canal"].is_number());
+        assert_eq!(paso["parametros"]["etiqueta"], "banco-3");
+        assert_eq!(paso["parametros"]["promediar"], true);
+        assert!(paso["parametros"]["promediar"].is_boolean());
+        assert_eq!(paso["salidas"]["temperatura"], 21.5);
+    }
+
+    /// Sin parámetros, un objeto vacío y no `null`: quien consuma el JSON no
+    /// tiene que distinguir dos formas de decir «nada».
+    #[test]
+    fn sin_parametros_es_un_objeto_vacio_y_no_null() {
+        let mut s = ResultadoSecuencia::nueva("c");
+        s.registra(ResultadoStep::nuevo("p", "paso", "ok"));
+        let mut sink = SinkJson::nuevo(Vec::new());
+        sink.on_fin_secuencia(&s);
+        let doc: Value = serde_json::from_slice(&sink.salida).unwrap();
+        assert_eq!(doc["pasos"][0]["parametros"], json!({}));
+        assert_eq!(doc["pasos"][0]["salidas"], json!({}));
     }
 }

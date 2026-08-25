@@ -21,6 +21,19 @@ use std::collections::HashMap;
 use expr::{Entorno, ErrorExpr, Scope, Value};
 use modelo::{DefinicionSecuencia, ResultadoStep, ValorDefinicion};
 
+/// `resultado.salidas.tension` llega aquí como `campo == "salidas.tension"`:
+/// el parser mete el nombre compuesto dentro de `campo` (ADR-0020). Devuelve
+/// el nombre de la salida pedida, o `None` si `campo` no es una salida.
+///
+/// Se deriva de `expr::CAMPO_SALIDAS` en vez de repetir el literal: el parser
+/// y el entorno tienen que estar de acuerdo en cómo se escribe, y dos copias
+/// del mismo string es cómo dejan de estarlo.
+fn salida_pedida(campo: &str) -> Option<&str> {
+    campo
+        .strip_prefix(expr::CAMPO_SALIDAS)
+        .and_then(|resto| resto.strip_prefix('.'))
+}
+
 /// El runtime de variables de una ejecución de secuencia. `Locals` mutable
 /// (por `asigna`); `Parameters` mutable sólo si la secuencia es una
 /// subsecuencia (`parameters_mutables`); `FileGlobals` inmutable durante un
@@ -130,6 +143,49 @@ impl Entorno for EntornoMotor {
                     .as_ref()
                     .map(|r| Value::Texto(r.mensaje.clone()))
                     .unwrap_or(Value::Nulo)),
+                // ADR-0020: `resultado.salidas.<nombre>`. Estricta también
+                // aquí, y por el mismo motivo que los otros campos: una
+                // salida que el paso no devolvió **no es `Nulo`**, es que la
+                // secuencia pide algo que no existe. Devolver `Nulo` lo
+                // volcaría a una local y la secuencia saldría verde.
+                //
+                // La diferencia con los tres campos fijos es *cuándo* se caza:
+                // esto no es validable al cargar, porque el cargador no sabe
+                // qué devuelve un paso hasta que corre. Es la excepción a la
+                // regla de detección de ADR-0019 que el propio ADR-0020 asume,
+                // y lo que le devolvería el terreno a `--validate` es la
+                // introspección de firma del #45.
+                _ if salida_pedida(campo).is_some() => {
+                    let quiere = salida_pedida(campo).expect("acabamos de comprobarlo");
+                    let r = self.resultado.as_ref().ok_or_else(|| {
+                        ErrorExpr::entorno(
+                            0,
+                            format!("no hay resultado en curso del que leer 'salidas.{quiere}'"),
+                        )
+                    })?;
+                    r.salidas
+                        .iter()
+                        .find(|(n, _)| n == quiere)
+                        .map(|(_, v)| v.clone())
+                        .ok_or_else(|| {
+                            let trajo = if r.salidas.is_empty() {
+                                "el paso no devolvió ninguna salida".to_string()
+                            } else {
+                                format!(
+                                    "el paso devolvió {}",
+                                    r.salidas
+                                        .iter()
+                                        .map(|(n, _)| format!("'{n}'"))
+                                        .collect::<Vec<_>>()
+                                        .join(", ")
+                                )
+                            };
+                            ErrorExpr::entorno(
+                                0,
+                                format!("no existe 'resultado.salidas.{quiere}': {trajo}"),
+                            )
+                        })
+                }
                 // Estricta en el *nombre*: los campos son tres y conocidos
                 // (`modelo::CAMPOS_RESULTADO`), así que `resultado.valor_meddio`
                 // no es un dato ausente, es un typo. Devolvía `Nulo`, y ese

@@ -30,6 +30,13 @@ const CABECERA: &[&str] = &[
     "valor_esperado",
     "operador",
     "fase",
+    // ADR-0020, al final por el mismo motivo que `fase`. Un CSV no puede
+    // tener columnas distintas por fila, así que los valores con nombre van
+    // compactados en una sola celda (ver `nombrados_a_csv`) en vez de una
+    // columna por parámetro — que es lo que rompería el formato en cuanto dos
+    // pasos declararan parámetros distintos.
+    "parametros",
+    "salidas",
 ];
 
 /// Verte el resultado a un `Write` como CSV (una fila por paso).
@@ -109,7 +116,33 @@ fn fila_paso(
             .map(|op| op.simbolo().to_string())
             .unwrap_or_default(),
         p.fase.como_texto().to_string(),
+        nombrados_a_csv(&p.parametros),
+        nombrados_a_csv(&p.salidas),
     ]
+}
+
+/// Valores con nombre en una sola celda: `canal=2;etiqueta=banco-3`.
+///
+/// El separador es `;` y no `,` para no forzar el entrecomillado de RFC-4180
+/// en la mayoría de los casos; si aun así aparece una coma en un valor de
+/// texto, `csv_campo` lo escapa igual que a cualquier otro campo.
+///
+/// Los números se escriben con `a_texto`, el mismo formato que el resto de
+/// medidas del fichero: una única fuente de verdad para cómo se escribe un
+/// número, en vez de dos que se separan con el tiempo.
+fn nombrados_a_csv(vs: &[(String, expr::Value)]) -> String {
+    vs.iter()
+        .map(|(n, v)| {
+            let valor = match v {
+                expr::Value::Numero(x) => a_texto(Some(*x)),
+                expr::Value::Texto(s) => s.clone(),
+                expr::Value::Bool(b) => b.to_string(),
+                expr::Value::Nulo => String::new(),
+            };
+            format!("{n}={valor}")
+        })
+        .collect::<Vec<_>>()
+        .join(";")
 }
 
 /// Escapa un campo según RFC-4180 y lo añade a `fila`: si contiene coma,
@@ -177,17 +210,17 @@ mod tests {
 
         let out = String::from_utf8(sink.salida).unwrap();
         let lineas: Vec<&str> = out.split("\r\n").collect();
-        assert_eq!(lineas[0], "nombre_secuencia,estado,nombre_paso,estado_paso,mensaje,valor_medido,limite_min,limite_max,valor_esperado,operador,fase");
+        assert_eq!(lineas[0], "nombre_secuencia,estado,nombre_paso,estado_paso,mensaje,valor_medido,limite_min,limite_max,valor_esperado,operador,fase,parametros,salidas");
         // rango: valor_esperado/operador vacíos (no aplican a un rango).
         // primer campo = nombre de la secuencia (DEF-2), segundo = su estado agregado.
         assert_eq!(
             lineas[1],
-            "basica,fallo,medir_voltaje,fallo,fuera de rango,4.2,4.5,5.5,,,main"
+            "basica,fallo,medir_voltaje,fallo,fuera de rango,4.2,4.5,5.5,,,main,,"
         );
         // sin medida ni límite: valor_medido..operador vacíos, y la fase al final.
         assert_eq!(
             lineas[2],
-            "basica,fallo,verificar_led,paso,led encendido,,,,,,main"
+            "basica,fallo,verificar_led,paso,led encendido,,,,,,main,,"
         );
         assert!(lineas[3].is_empty(), "termina en CRLF");
     }
@@ -210,7 +243,7 @@ mod tests {
         let out = String::from_utf8(sink.salida).unwrap();
         assert_eq!(
             out.split("\r\n").nth(1).unwrap(),
-            "b31,inconcluso,verdict,saltado,precondición falsa,,,,,,main"
+            "b31,inconcluso,verdict,saltado,precondición falsa,,,,,,main,,"
         );
     }
 
@@ -286,7 +319,7 @@ mod tests {
         let lineas: Vec<&str> = out.split("\r\n").collect();
         assert_eq!(
             lineas[0],
-            "nombre_secuencia,estado,nombre_paso,estado_paso,mensaje,valor_medido,limite_min,limite_max,valor_esperado,operador,fase"
+            "nombre_secuencia,estado,nombre_paso,estado_paso,mensaje,valor_medido,limite_min,limite_max,valor_esperado,operador,fase,parametros,salidas"
         );
         // Call. Primer campo = nombre de secuencia, segundo = estado agregado
         // (fallo, el mismo en las tres filas).
@@ -327,8 +360,52 @@ mod tests {
         sink.on_fin_secuencia(&s);
         let out = String::from_utf8(sink.salida).unwrap();
         let lineas: Vec<&str> = out.split("\r\n").collect();
-        assert!(lineas[1].ends_with(",setup"), "setup: {}", lineas[1]);
-        assert!(lineas[2].ends_with(",main"), "main: {}", lineas[2]);
-        assert!(lineas[3].ends_with(",cleanup"), "cleanup: {}", lineas[3]);
+        assert!(lineas[1].ends_with(",setup,,"), "setup: {}", lineas[1]);
+        assert!(lineas[2].ends_with(",main,,"), "main: {}", lineas[2]);
+        assert!(lineas[3].ends_with(",cleanup,,"), "cleanup: {}", lineas[3]);
+    }
+    /// ADR-0020 + Regla 3 de ADR-0019: **la condición en la que se midió
+    /// queda escrita**. Antes de esto, dos corridas de la misma secuencia con
+    /// distinto canal producían ficheros idénticos.
+    ///
+    /// Visto en rojo devolviendo `String::new()` en `nombrados_a_csv`: las
+    /// dos celdas salen vacías y el CSV vuelve a no distinguir las corridas.
+    #[test]
+    fn los_parametros_y_las_salidas_van_a_su_celda() {
+        let mut p = ResultadoStep::medido_valor("medir", "paso", "ok", 4.4);
+        p.parametros = vec![
+            ("canal".into(), expr::Value::Numero(3.0)),
+            ("etiqueta".into(), expr::Value::Texto("banco-3".into())),
+        ];
+        p.salidas = vec![("temperatura".into(), expr::Value::Numero(21.5))];
+        let mut s = ResultadoSecuencia::nueva("c");
+        s.registra(p);
+
+        let mut sink = SinkCsv::nuevo(Vec::new());
+        sink.on_fin_secuencia(&s);
+        let doc = String::from_utf8(sink.salida).unwrap();
+        let fila = doc.split("\r\n").nth(1).expect("una fila de paso");
+        let celdas: Vec<&str> = fila.split(',').collect();
+        assert_eq!(
+            celdas[11], "canal=3;etiqueta=banco-3",
+            "los parámetros enviados, con el número sin decimales"
+        );
+        assert_eq!(celdas[12], "temperatura=21.5");
+    }
+
+    /// Dos corridas con distinto canal ya **no** producen el mismo fichero.
+    /// Es la frase del ADR convertida en test.
+    #[test]
+    fn dos_corridas_con_distinto_canal_ya_no_dan_el_mismo_csv() {
+        let csv_de = |canal: f64| {
+            let mut p = ResultadoStep::medido_valor("medir", "paso", "ok", 4.2);
+            p.parametros = vec![("canal".into(), expr::Value::Numero(canal))];
+            let mut s = ResultadoSecuencia::nueva("c");
+            s.registra(p);
+            let mut sink = SinkCsv::nuevo(Vec::new());
+            sink.on_fin_secuencia(&s);
+            String::from_utf8(sink.salida).unwrap()
+        };
+        assert_ne!(csv_de(1.0), csv_de(2.0));
     }
 }

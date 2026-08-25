@@ -15,3 +15,7 @@ out.csv
 
 # Salidas de las corridas del betatester (la herramienta vive en Anvil-Test).
 betatester/
+
+# Banco de medida temporal (`#43`, `#46`): se regenera con el script del
+# issue anlaco/anvil#43 y sus ficheros son de usar y tirar.
+/.bench-tmp

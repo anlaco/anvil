@@ -358,7 +358,25 @@ impl Parser {
                 if let Some(scope) = Scope::de_nombre(s) {
                     self.advance();
                     self.expect_tok(TokKind::Punto)?;
-                    let campo = self.ident_name()?;
+                    let mut campo = self.ident_name()?;
+                    // ADR-0020: `resultado.salidas.<nombre>` — el único campo
+                    // con un nivel más, porque el único que es un mapa. El
+                    // punto extra se admite **sólo** en `resultado`: los otros
+                    // scopes son planos y aceptar `locals.a.b` ahí abriría
+                    // superficie que nadie ha decidido.
+                    //
+                    // El nombre compuesto viaja dentro de `campo`
+                    // ("salidas.tension") en vez de en un nodo nuevo del AST:
+                    // quien lo resuelve es el entorno, que es el que sabe qué
+                    // salidas trajo el paso.
+                    if scope == Scope::Resultado
+                        && campo == crate::CAMPO_SALIDAS
+                        && matches!(self.cur().kind, TokKind::Punto)
+                    {
+                        self.advance();
+                        let sub = self.ident_name()?;
+                        campo = format!("{campo}.{sub}");
+                    }
                     Ok(Expresion::Var { scope, campo })
                 } else {
                     Err(ErrorExpr::sintaxis(
@@ -552,6 +570,25 @@ mod tests {
     fn acceso_a_scope_con_campo() {
         let e = parse_expresion("resultado.valor_medido").unwrap();
         assert_eq!(e, var(Scope::Resultado, "valor_medido"));
+    }
+
+    #[test]
+    fn salidas_admite_un_nivel_mas() {
+        // ADR-0020: `resultado.salidas.<nombre>`. El nombre compuesto viaja
+        // dentro de `campo`; quien lo resuelve es el entorno del motor.
+        assert_eq!(
+            parse_expresion("resultado.salidas.tension").unwrap(),
+            var(Scope::Resultado, "salidas.tension")
+        );
+    }
+
+    #[test]
+    fn el_nivel_extra_es_solo_de_salidas_y_solo_en_resultado() {
+        // Los demás scopes son planos. Admitir `locals.a.b` sería abrir
+        // superficie que nadie ha decidido, así que sigue siendo sintaxis
+        // inválida — igual que `resultado.estado.x`.
+        assert!(parse_expresion("locals.a.b").is_err());
+        assert!(parse_expresion("resultado.estado.x").is_err());
     }
 
     #[test]

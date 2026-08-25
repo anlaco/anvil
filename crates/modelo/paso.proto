@@ -1,8 +1,31 @@
 syntax = "proto3";
 
+// Un valor con nombre y tipo. Los tres tipos son exactamente los de
+// `expr::Value` y `modelo::ValorDefinicion`: ni más (nada de listas ni mapas —
+// un parámetro que necesita estructura es un paso mal cortado) ni menos.
+//
+// Un `oneof` sin rama puesta es **error**, no un cero (ADR-0020 §2, que es la
+// Regla 2 de ADR-0019 aplicada al cable de entrada).
+message Valor {
+  string nombre = 1;
+  oneof valor {
+    double numero   = 2;
+    string texto    = 3;
+    bool   booleano = 4;
+  }
+}
+
 message PeticionPaso {
   string nombre = 1;
   int32 intento = 2;
+  // Los parámetros de esta invocación, ya evaluados por el motor (ADR-0009:
+  // las expresiones las evalúa el motor, el paso no ve el entorno). Van
+  // *dentro* de la llamada y no en un RPC de configuración previo: partirla
+  // en dos convertiría al ejecutor en un objeto con estado, y dos
+  // invocaciones concurrentes se pisarían (ADR-0020 §1).
+  repeated Valor parametros = 3;
+  // Versión de contrato que habla el motor. Ver `Valor` y ADR-0020 §4.
+  int32 contrato = 4;
 }
 
 message ResultadoPasoProto {
@@ -12,6 +35,16 @@ message ResultadoPasoProto {
   string valor_medido = 4;
   string limite_min = 5;
   string limite_max = 6;
+  // Valores con nombre que devuelve el paso además de la medida. NO
+  // participan en el veredicto: `valor_medido` sigue siendo lo único contra
+  // lo que el motor evalúa el `limite` (ADR-0008). `asigna` los lee como
+  // `resultado.salidas.<nombre>`.
+  repeated Valor salidas = 7;
+  // Eco: la versión de contrato que el ejecutor **ha entendido**. Es lo que
+  // impide el verde falso — un ejecutor viejo que ignora `parametros` mide
+  // otra cosa y diría `paso` (ADR-0020 §4b). Un ejecutor de contrato 1 no
+  // conoce este tag y devuelve 0 por defecto de proto3.
+  int32 contrato = 8;
 }
 
 service EjecutorPasos {

@@ -63,13 +63,16 @@ Reglas:
   (M4, RF-34, ver [motor-de-ejecucion.md](motor-de-ejecucion.md)),
   `precondicion` (M4, RF-33, ver [motor-de-expresiones.md](motor-de-expresiones.md)),
   `asigna` (M4, RF-31, vuelca `resultado.*` a `Locals` tras el paso — **no**
-  si el paso dio `error`, y sólo desde los tres campos de `resultado`:
-  `estado`, `mensaje`, `valor_medido`; ADR-0019 Regla 2),
+  si el paso dio `error`, y desde los tres campos de `resultado`
+  —`estado`, `mensaje`, `valor_medido`; ADR-0019 Regla 2— más
+  `resultado.salidas.<nombre>` desde ADR-0020),
   `tipo`/`statement` (M4, RF-27: `tipo: grpc|statement`, por defecto `grpc`;
   `statement` trae las sentencias a ejecutar si el paso es local, sin gRPC), y
+  desde **ADR-0020** `parametros` en un paso `grpc` (ver más abajo), y
   desde **M4b** `tipo: sequence_call` con `secuencia` (nombre de subsecuencia
   inline o path relativo a un archivo externo) y `parametros` (mapa
-  `parameter -> "locals.X"`, by-reference). Un `sequence_call` no admite
+  `parameter -> "locals.X"`, by-reference — **ojo: el mismo nombre, otra
+  cosa**; ver más abajo). Un `sequence_call` no admite
   `reintentos > 1` ni `limite` (no mide; su estado es el agregado de la
   subsecuencia), y por el mismo motivo su `asigna` **no puede leer
   `resultado.valor_medido`**: ese campo vale siempre `nothing` y borraba el
@@ -140,6 +143,80 @@ ficheros. Ver ADR-0010.
   falla la carga en vez de ignorarse en silencio. `precondicion`/`asigna`/
   `statement` se **parsean a AST al cargar** (fail-fast): un error de sintaxis
   se reporta como error de validación con el nombre del paso (ADR-0009).
+
+
+## `parametros` en un paso `grpc` (ADR-0020)
+
+Un paso puede recibir valores desde la secuencia, en vez de llevarlos grabados
+dentro:
+
+```yaml
+- nombre: medir_voltaje
+  reintentos: 1
+  parametros:
+    canal: 2                      # número
+    etiqueta: "banco-3"           # texto
+    promediar: true               # booleano
+    muestras: '${locals.n_muestras}'   # expresión, la evalúa el motor
+  limite: { tipo: rango, min: 4.5, max: 5.5 }
+  asigna:
+    temp: resultado.salidas.temperatura
+```
+
+- **El tipo es el del escalar YAML**, y es el que viaja por el cable: `canal:
+  2` es un número y `canal: "2"` es texto. No se convierten entre sí.
+- **Las expresiones van entre `${...}`** y las evalúa el **motor** antes de
+  llamar (ADR-0009): el paso no ve `locals`, se le pasan valores.
+- Una expresión que falla deja el paso en **`error`** y el ejecutor no llega a
+  invocarse. **Nunca hay valor por defecto**: medir con un parámetro inventado
+  da un número que parece bueno y no lo es.
+- Un `parametros:` que no sea un mapa de escalares es **error de carga**, no
+  de ejecución: es decidible sin banco.
+
+### El mismo nombre significa dos cosas, y por eso hay una red
+
+`parametros:` ya existía en un `tipo: sequence_call`, donde es **by-reference**
+(ADR-0010): `{ canal: locals.canal }` es una *referencia* a esa variable, y la
+subsecuencia puede escribirla de vuelta. En un paso `grpc` es **by-value**: se
+envía una copia del valor y no vuelve nada por ahí (lo que vuelve son las
+`salidas`).
+
+Los dos no pueden coincidir en el mismo paso, así que no hay ambigüedad real —
+pero copiar un bloque de un sitio al otro sí cambiaría el significado en
+silencio. Por eso **esto no carga**:
+
+```yaml
+- nombre: medir_voltaje
+  parametros: { canal: locals.canal }   # error de carga
+```
+
+> el parámetro 'canal' del paso 'medir_voltaje' vale 'locals.canal', que
+> viajaría como el texto literal "locals.canal" y no como el valor de esa
+> variable. Si querías la variable, escríbela como '${locals.canal}'.
+
+En un `statement` o un `pass_fail`, `parametros` no significa nada y se
+rechaza.
+
+## Salidas: `resultado.salidas.<nombre>`
+
+Un paso puede devolver valores con nombre además de la medida. No participan
+en el veredicto —el motor sigue evaluando el `limite` contra `valor_medido`
+(ADR-0008)— y se leen desde `asigna`:
+
+```yaml
+asigna:
+  temp: resultado.salidas.temperatura
+```
+
+**No es validable al cargar**: el cargador no sabe qué devuelve un paso hasta
+que corre, así que un nombre equivocado es `error` de **ejecución**, no de
+carga. Es la única excepción a la regla de detección de ADR-0019 en el
+formato, y lo que le devolvería este terreno a `--validate` es la
+introspección de firma ([issue #45](https://github.com/anlaco/anvil/issues/45)).
+
+Sin `inout`: entra por `parametros`, sale por `salidas`, y no hay tercer
+camino. Un `sequence_call` sí pasa valores by-reference, y puede porque lo
+orquesta el motor contra su propio entorno; un paso gRPC no.
 
 ## Cargador
 
