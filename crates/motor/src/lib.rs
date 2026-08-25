@@ -42,7 +42,7 @@ pub struct Motor {
     /// Conexiones abiertas, keyed por nombre de ejecutor (o `EMBEDIDO`
     /// para el embebido). Un `TipoEjecutor::Wasm` **no** abre conexión: el
     /// motor nunca lo ejecuta (ADR-0014) — el host lo traduce a `grpc`
-    /// (override `--ejecutor`) antes de que llegue aquí; si llega sin
+    /// (override `--executor`) antes de que llegue aquí; si llega sin
     /// traducir, `Error::EjecutorWasmSinHost`.
     conexiones: HashMap<String, Cliente>,
 }
@@ -65,7 +65,7 @@ pub enum Error {
     /// **sin traducir**. Eso sólo pasa si se corre el guest motor suelto
     /// (`wasmtime run anvil.wasm`) sin el host: el cargador de `.wasm` por
     /// path vive en el host (M5-ext.2, ADR-0014), que lo instancia y lo
-    /// expone como `grpc` (override `--ejecutor`). El motor no ejecuta
+    /// expone como `grpc` (override `--executor`). El motor no ejecuta
     /// `Wasm` nunca.
     EjecutorWasmSinHost(String),
 }

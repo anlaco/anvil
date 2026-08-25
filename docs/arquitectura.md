@@ -98,7 +98,7 @@ que sea gRPC para pasos en cualquier lenguaje (ADR-0003).
 
 **M5-ext.1 (ADR-0013):** el ejecutor WASM embebido se mantiene como **de
 serie** (zero-install, ADR-0011); el motor despacha por **nombre→endpoint**
-(`ejecutores:` en el YAML + override `--ejecutor`), con IPs no-loopback
+(`ejecutores:` en el YAML + override `--executor`), con IPs no-loopback
 solo si se declaran. A su lado, **executores de lenguaje** (`executores/`,
 Apache-2.0) atienden pasos con gRPC nativo de su ecosistema.
 
@@ -108,7 +108,7 @@ YAML spawnea el **puente** `anvil-puente-wasm` (embebido en el binario,
 extraído a temp), que carga el componente `.wasm` del usuario (interfaz WIT
 `anvil:paso`: una función `run`, sin gRPC ni protobuf) y traduce
 gRPC↔función por tonic. El puente corre con sandbox WASI vacío (el
-componente es una función pura). El motor sólo ve overrides `--ejecutor`
+componente es una función pura). El motor sólo ve overrides `--executor`
 sintéticos — nunca un `Wasm`. El patrón **LID** para SO legacy queda
 aplazado a post-M5-ext. Ver
 [diseno/executores-lenguaje.md](diseno/executores-lenguaje.md),

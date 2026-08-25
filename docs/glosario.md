@@ -96,7 +96,7 @@ término de TestStand no se replica igual en Anvil, se dice explícitamente.
   que carga el componente del usuario (interfaz WIT `anvil:paso`: una
   función `run`, sin gRPC ni protobuf) y traduce gRPC↔función. El puente
   corre con sandbox WASI vacío (el componente es una función pura); el
-  motor ve el endpoint como un `grpc` más (override `--ejecutor` sintético)
+  motor ve el endpoint como un `grpc` más (override `--executor` sintético)
   y nunca ejecuta `Wasm`. Agnóstico al origen del `.wasm` (C, Rust, Zig, un
   editor visual, un tercero). Ver
   [ADR-0013](adr/0013-cargador-wasm-host-side-y-routing.md),
@@ -106,7 +106,7 @@ término de TestStand no se replica igual en Anvil, se dice explícitamente.
 - **Routing nombre→endpoint.** (M5-ext.1, implementado) El YAML declara
   `ejecutores:` y cada paso `grpc` su `ejecutor:`; el motor despacha por
   nombre contra una tabla de conexiones (embebido por defecto). Override por
-  CLI `--ejecutor nombre=host:puerto`. Ver
+  CLI `--executor nombre=host:puerto`. Ver
   [ADR-0013](adr/0013-cargador-wasm-host-side-y-routing.md).
 
 - **LID** (*Legacy Isolation Domain*). Patrón de despliegue: un ejecutor de

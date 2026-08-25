@@ -3994,7 +3994,7 @@ main:
         );
     }
 
-    /// Override `--ejecutor nombre=host:puerto`: re-apunta un grpc, convierte
+    /// Override `--executor nombre=host:puerto`: re-apunta un grpc, convierte
     /// un embebido, y falla si el nombre no está declarado.
     #[test]
     fn override_de_ejecutores() {

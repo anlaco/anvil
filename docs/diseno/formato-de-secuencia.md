@@ -122,7 +122,7 @@ Reglas:
   El nombre `__anvil_embebido__` está reservado (lo usa el motor); el
   cargador lo rechaza. `ejecutor:` en un paso `statement`/`sequence_call`
   es error (sólo aplica a `grpc`). Override por CLI:
-  `--ejecutor nombre=host:puerto` (re-apunta o convierte un ejecutor sin
+  `--executor nombre=host:puerto` (re-apunta o convierte un ejecutor sin
   tocar el YAML, patrón `--limits`).
 
 ### Subsecuencias: inline o por path (M4b)

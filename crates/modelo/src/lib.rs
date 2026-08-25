@@ -504,7 +504,7 @@ pub enum TipoEjecutor {
     /// (RF-36.2, M5-ext.2; el ejecutor embebido no puede, ADR-0013). Es una
     /// **directiva de carga para el host** (ADR-0014): el cargador la valida
     /// al cargar (el path debe existir), el host la instancia y la expone
-    /// como `grpc` (override `--ejecutor`); el motor **nunca la ejecuta**
+    /// como `grpc` (override `--executor`); el motor **nunca la ejecuta**
     /// (si llega sin traducir, `Error::EjecutorWasmSinHost`).
     Wasm { path: String },
     /// Ejecutor de lenguaje distribuido (Python, …) accesible por gRPC

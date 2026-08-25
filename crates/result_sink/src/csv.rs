@@ -19,24 +19,24 @@ const REINTENTOS: u32 = 3;
 /// Columnas del CSV, en orden. `fase` se añadió al **final** a propósito:
 /// así quien lea por índice las diez originales no se rompe.
 const CABECERA: &[&str] = &[
-    "nombre_secuencia",
-    "estado",
-    "nombre_paso",
-    "estado_paso",
-    "mensaje",
-    "valor_medido",
-    "limite_min",
-    "limite_max",
-    "valor_esperado",
-    "operador",
-    "fase",
+    "sequence_name",
+    "status",
+    "step_name",
+    "step_status",
+    "message",
+    "measured_value",
+    "limit_min",
+    "limit_max",
+    "expected_value",
+    "operator",
+    "phase",
     // ADR-0020, al final por el mismo motivo que `fase`. Un CSV no puede
     // tener columnas distintas por fila, así que los valores con nombre van
     // compactados en una sola celda (ver `nombrados_a_csv`) en vez de una
     // columna por parámetro — que es lo que rompería el formato en cuanto dos
     // pasos declararan parámetros distintos.
-    "parametros",
-    "salidas",
+    "inputs",
+    "outputs",
 ];
 
 /// Verte el resultado a un `Write` como CSV (una fila por paso).
@@ -210,7 +210,7 @@ mod tests {
 
         let out = String::from_utf8(sink.salida).unwrap();
         let lineas: Vec<&str> = out.split("\r\n").collect();
-        assert_eq!(lineas[0], "nombre_secuencia,estado,nombre_paso,estado_paso,mensaje,valor_medido,limite_min,limite_max,valor_esperado,operador,fase,parametros,salidas");
+        assert_eq!(lineas[0], "sequence_name,status,step_name,step_status,message,measured_value,limit_min,limit_max,expected_value,operator,phase,inputs,outputs");
         // rango: valor_esperado/operador vacíos (no aplican a un rango).
         // primer campo = nombre de la secuencia (DEF-2), segundo = su estado agregado.
         assert_eq!(
@@ -319,7 +319,7 @@ mod tests {
         let lineas: Vec<&str> = out.split("\r\n").collect();
         assert_eq!(
             lineas[0],
-            "nombre_secuencia,estado,nombre_paso,estado_paso,mensaje,valor_medido,limite_min,limite_max,valor_esperado,operador,fase,parametros,salidas"
+            "sequence_name,status,step_name,step_status,message,measured_value,limit_min,limit_max,expected_value,operator,phase,inputs,outputs"
         );
         // Call. Primer campo = nombre de secuencia, segundo = estado agregado
         // (fallo, el mismo en las tres filas).

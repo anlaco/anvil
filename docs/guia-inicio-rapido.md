@@ -12,7 +12,7 @@ Descarga el binario `anvil` y corre:
 
 ```sh
 ./anvil <secuencia.yaml> [--process-model <pm.yaml>] [--json <ruta>] \
-  [--csv <ruta>] [--limits <ruta>] [--ejecutor nombre=host:puerto] \
+  [--csv <ruta>] [--limits <ruta>] [--executor nombre=host:puerto] \
   [--port <n>] [--validate] [--quiet]
 ```
 
@@ -25,7 +25,7 @@ Ejemplos (con los del repo en `ejemplos/` y `process_models/`):
 ./anvil ejemplos/variables.yaml
 ./anvil ejemplos/basica.yaml --limits ejemplos/limites.limits.yaml
 ./anvil ejemplos/demo_ejecutores.yaml      # routing: embebido + Python en loopback
-./anvil ejemplos/demo_ejecutores.yaml --ejecutor python=127.0.0.1:9200
+./anvil ejemplos/demo_ejecutores.yaml --executor python=127.0.0.1:9200
 # Con process model (identifica el UUT, corre la secuencia, notifica):
 ./anvil ejemplos/basica.yaml --process-model process_models/sequential.yaml
 # Validar sin ejecutar ni tocar hardware (CI):
@@ -43,7 +43,7 @@ dependencias que instalar.
 > ejecutor embebido (de serie) y `medir_simulador`/`conectar_equipo` un
 > ejecutor Python en `127.0.0.1:9101` (arranca `simulador_tcp.py` y
 > `server.py` de `executores/python/` en otras dos terminales). El flag
-> `--ejecutor nombre=host:puerto` re-apunta un ejecutor sin tocar el YAML
+> `--executor nombre=host:puerto` re-apunta un ejecutor sin tocar el YAML
 > (patrón `--limits`). Sin `ejecutores:` declarado, todo va al embebido.
 
 ## Para desarrolladores (build desde source)
@@ -164,7 +164,7 @@ unitario: `cargo test -p motor sequence_call_by_reference`.
 
 ```
 anvil <secuencia.yaml> [--process-model <pm.yaml>] [--json <ruta>] [--csv <ruta>]
-      [--limits <ruta>] [--ejecutor nombre=host:puerto] [--port <n>]
+      [--limits <ruta>] [--executor nombre=host:puerto] [--port <n>]
       [--validate] [--quiet] [--help] [--version]
 ```
 
@@ -189,10 +189,10 @@ anvil <secuencia.yaml> [--process-model <pm.yaml>] [--json <ruta>] [--csv <ruta>
   nombre del sidecar no casa con ningún paso, **avisa por stderr y los
   nombra** —incluso con `--quiet`—: un límite que no se aplica deja en pie el
   embebido y da un veredicto que no es el que pediste.
-- `--ejecutor nombre=host:puerto` re-apunta un ejecutor declarado en
+- `--executor nombre=host:puerto` re-apunta un ejecutor declarado en
   `ejecutores:` a otro endpoint sin tocar el YAML (R&D vs. fábrica, RF-36.3);
   puede repetirse. Si el nombre no está declarado, error al cargar.
-- Flag del host: `--solo-loopback` rechaza cualquier `grpc` no-loopback
+- Flag del host: `--loopback-only` rechaza cualquier `grpc` no-loopback
   declarado (CI/paranoia).
 - Los diagnósticos van a **stderr**; stdout queda limpio para el reporte.
 
