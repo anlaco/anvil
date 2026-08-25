@@ -16,19 +16,19 @@
 # Criterio de aceptacion: el cargador deberia rechazar (o al menos avisar de)
 # un `asigna` cuyo destino es un nombre declarado en `parameters:`.
 
-nombre: sub_asigna_parameter
+name: sub_asigna_parameter
 parameters:
   p: 0.0
 main:
-  - nombre: medir_voltaje
-    reintentos: 1
-    asigna:
-      p: '${resultado.valor_medido}'
+  - name: medir_voltaje
+    retries: 1
+    assign:
+      p: '${result.measured_value}'
   # lee el PARAMETER: sigue a 0.0 -> se salta
-  - nombre: verificar_led
-    reintentos: 1
-    precondicion: 'parameters.p > 4.0'
+  - name: verificar_led
+    retries: 1
+    precondition: 'parameters.p > 4.0'
   # lee el LOCAL homonimo creado por asigna: vale 4.2 -> se ejecuta
-  - nombre: abrir_rele
-    reintentos: 1
-    precondicion: 'locals.p > 4.0'
+  - name: abrir_rele
+    retries: 1
+    precondition: 'locals.p > 4.0'

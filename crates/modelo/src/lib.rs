@@ -119,7 +119,7 @@ pub const ESTADOS_DE_EJECUTOR: [&str; 4] = ["paso", "fallo", "error", "saltado"]
 /// (ADR-0019, regla de detección, issue #27). Son tres y conocidos, así que un
 /// `resultado.valor_meddio` es un typo comprobable **sin ejecutar**: lo rechaza
 /// el cargador (y por tanto `--validate`), no la unidad en el banco.
-pub const CAMPOS_RESULTADO: [&str; 3] = ["estado", "mensaje", "valor_medido"];
+pub const CAMPOS_RESULTADO: [&str; 3] = ["status", "message", "measured_value"];
 
 /// La severidad de un estado, para agregar el veredicto de una secuencia
 /// (ADR-0019, Regla 1).

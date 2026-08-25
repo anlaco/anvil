@@ -32,22 +32,22 @@ El objetivo: expresar lo mismo en YAML, cargarlo y traducirlo a
 
 ```yaml
 # Secuencia de ejemplo "basica"
-nombre: basica
+name: basica
 setup:
-  - nombre: conectar_equipo
-    reintentos: 3
+  - name: conectar_equipo
+    retries: 3
 main:
-  - nombre: medir_voltaje
-    reintentos: 1
-    limite:
-      tipo: rango
+  - name: medir_voltaje
+    retries: 1
+    limit:
+      type: range
       min: 4.5
       max: 5.5
-  - nombre: verificar_led
-    reintentos: 1
+  - name: verificar_led
+    retries: 1
 cleanup:
-  - nombre: desconectar_equipo
-    reintentos: 1
+  - name: desconectar_equipo
+    retries: 1
 ```
 
 Reglas:
@@ -151,16 +151,16 @@ Un paso puede recibir valores desde la secuencia, en vez de llevarlos grabados
 dentro:
 
 ```yaml
-- nombre: medir_voltaje
-  reintentos: 1
-  parametros:
+- name: medir_voltaje
+  retries: 1
+  inputs:
     canal: 2                      # número
     etiqueta: "banco-3"           # texto
     promediar: true               # booleano
     muestras: '${locals.n_muestras}'   # expresión, la evalúa el motor
-  limite: { tipo: rango, min: 4.5, max: 5.5 }
-  asigna:
-    temp: resultado.salidas.temperatura
+  limit: { type: range, min: 4.5, max: 5.5 }
+  assign:
+    temp: result.outputs.temperatura
 ```
 
 - **El tipo es el del escalar YAML**, y es el que viaja por el cable: `canal:
@@ -186,8 +186,8 @@ pero copiar un bloque de un sitio al otro sí cambiaría el significado en
 silencio. Por eso **esto no carga**:
 
 ```yaml
-- nombre: medir_voltaje
-  parametros: { canal: locals.canal }   # error de carga
+- name: medir_voltaje
+  inputs: { canal: locals.canal }   # error de carga
 ```
 
 > el parámetro 'canal' del paso 'medir_voltaje' vale 'locals.canal', que
@@ -204,8 +204,8 @@ en el veredicto —el motor sigue evaluando el `limite` contra `valor_medido`
 (ADR-0008)— y se leen desde `asigna`:
 
 ```yaml
-asigna:
-  temp: resultado.salidas.temperatura
+assign:
+  temp: result.outputs.temperatura
 ```
 
 **No es validable al cargar**: el cargador no sabe qué devuelve un paso hasta

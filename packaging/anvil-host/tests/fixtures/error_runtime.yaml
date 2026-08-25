@@ -16,12 +16,12 @@
 # error de carga: seguiría saliendo 1, pero por otro camino. Por eso el test
 # comprueba además que el error NO es de carga.
 
-nombre: exit_error
+name: exit_error
 
 locals:
   x: 0.0
 
 main:
-  - nombre: division_por_cero
-    tipo: statement
+  - name: division_por_cero
+    type: statement
     statement: 'locals.x = 1 / 0'

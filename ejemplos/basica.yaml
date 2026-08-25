@@ -9,19 +9,19 @@
 # (ADR-0008). Campos de hitos posteriores (disable, pause_on_fail, etc.)
 # aún se rechazan —llegan en M4.
 
-nombre: basica
+name: basica
 setup:
-  - nombre: conectar_equipo
-    reintentos: 3
+  - name: conectar_equipo
+    retries: 3
 main:
-  - nombre: medir_voltaje
-    reintentos: 1
-    limite:
-      tipo: rango
+  - name: medir_voltaje
+    retries: 1
+    limit:
+      type: range
       min: 4.5
       max: 5.5
-  - nombre: verificar_led
-    reintentos: 1
+  - name: verificar_led
+    retries: 1
 cleanup:
-  - nombre: desconectar_equipo
-    reintentos: 1
+  - name: desconectar_equipo
+    retries: 1

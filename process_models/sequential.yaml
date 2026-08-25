@@ -25,19 +25,19 @@
 # despachados por el ejecutor — pasos reales, no callbacks motor-side —
 # así el PM es datos editables sin recompilar.
 
-nombre: sequential
+name: sequential
 locals:
   uut_id: ""
   estado_usuario: ""
 setup:
-  - nombre: identificar_uut
-    reintentos: 1
-    asigna: { uut_id: "${resultado.mensaje}" }
+  - name: identificar_uut
+    retries: 1
+    assign: { uut_id: "${result.message}" }
 main:
-  - nombre: correr_secuencia_usuario
-    tipo: sequence_call
-    secuencia: secuencia_usuario          # reservado; reescrito por el cargador
-    asigna: { estado_usuario: "${resultado.estado}" }
+  - name: correr_secuencia_usuario
+    type: sequence_call
+    sequence: secuencia_usuario          # reservado; reescrito por el cargador
+    assign: { estado_usuario: "${result.status}" }
 cleanup:
-  - nombre: notificar_resultado
-    reintentos: 1
+  - name: notificar_resultado
+    retries: 1

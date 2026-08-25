@@ -6,21 +6,21 @@
 #   - Lo muta (`parameters.canal = parameters.canal + 1.0`) con un statement.
 #   - Al volver, el motor copia `parameters.canal` (final) al `locals.canal_in`
 #     del padre (el mismo lvalue de la entrada).
-nombre: medir_fuentes
+name: medir_fuentes
 parameters:
   canal: 0.0
 main:
-  - nombre: ajustar_canal
-    tipo: statement
+  - name: ajustar_canal
+    type: statement
     statement: 'parameters.canal = parameters.canal + 1.0'
-  - nombre: medir_voltaje
-    tipo: grpc
-    reintentos: 1
-    limite:
-      tipo: rango
+  - name: medir_voltaje
+    type: grpc
+    retries: 1
+    limit:
+      type: range
       min: 4.0
       max: 5.0
 cleanup:
-  - nombre: desconectar_equipo
-    tipo: grpc
-    reintentos: 1
+  - name: desconectar_equipo
+    type: grpc
+    retries: 1

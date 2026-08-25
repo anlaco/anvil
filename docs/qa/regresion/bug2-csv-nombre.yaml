@@ -16,12 +16,12 @@
 # Criterio de aceptacion: la primera columna debe contener
 # "regresion_csv_nombre" en las tres filas.
 
-nombre: regresion_csv_nombre
+name: regresion_csv_nombre
 main:
-  - nombre: verificar_led
-    reintentos: 1
-  - nombre: abrir_rele
-    reintentos: 1
-  - nombre: medir_voltaje
-    reintentos: 1
-    limite: { tipo: comparacion, op: ge, esperado: 4.0 }
+  - name: verificar_led
+    retries: 1
+  - name: abrir_rele
+    retries: 1
+  - name: medir_voltaje
+    retries: 1
+    limit: { type: comparison, op: ge, expected: 4.0 }

@@ -13,14 +13,14 @@
 # (ver bug3-sub-asigna-parameter.yaml), o el retorno by-reference trae 4.2 y
 # verificar_led se ejecuta.
 
-nombre: padre_asigna_parameter
+name: padre_asigna_parameter
 locals:
   t: 0.0
 main:
-  - nombre: llama_sub
-    tipo: sequence_call
-    secuencia: ./bug3-sub-asigna-parameter.yaml
-    parametros: { p: locals.t }
-  - nombre: verificar_led
-    reintentos: 1
-    precondicion: 'locals.t > 4.0'
+  - name: llama_sub
+    type: sequence_call
+    sequence: ./bug3-sub-asigna-parameter.yaml
+    args: { p: locals.t }
+  - name: verificar_led
+    retries: 1
+    precondition: 'locals.t > 4.0'

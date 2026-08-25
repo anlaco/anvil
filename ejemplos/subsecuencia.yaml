@@ -9,30 +9,30 @@
 # Ambas pasan `parametros` by-reference: cada argumento es `locals.X` del
 # padre ↔ `parameters.P` de la subsecuencia (entrada al iniciar, salida al
 # volver). El `asigna` del segundo call vuelca el estado agregado del call
-# (`resultado.estado`) a `locals.estado_fuentes`.
-nombre: basica
+# (`result.status`) a `locals.estado_fuentes`.
+name: basica
 locals:
   canal_in: 0.5
   ok_init: false
   estado_fuentes: ""
-subsecuencias:
+subsequences:
   init_comun:                       # inline, por nombre; toma el nombre de la clave
     parameters:
       canal: 0.0
       listo: false
     main:
-      - nombre: preparar_canal
-        tipo: statement
+      - name: preparar_canal
+        type: statement
         statement: 'parameters.listo = (parameters.canal >= 0.0)'
 main:
-  - nombre: preparar
-    tipo: sequence_call
-    secuencia: init_comun              # nombre → inline
-    parametros: { canal: locals.canal_in, listo: locals.ok_init }
+  - name: preparar
+    type: sequence_call
+    sequence: init_comun              # nombre → inline
+    args: { canal: locals.canal_in, listo: locals.ok_init }
     # al volver: locals.ok_init = parameters.listo (final, true)
-  - nombre: test_fuentes
-    tipo: sequence_call
-    secuencia: ./medir_fuentes.yaml    # path → archivo externo
-    parametros: { canal: locals.canal_in }
-    asigna: { estado_fuentes: "${resultado.estado}" }
+  - name: test_fuentes
+    type: sequence_call
+    sequence: ./medir_fuentes.yaml    # path → archivo externo
+    args: { canal: locals.canal_in }
+    assign: { estado_fuentes: "${result.status}" }
     # al volver: locals.canal_in = parameters.canal (final, mutado a 1.5)

@@ -14,17 +14,17 @@
 # El veredicto es `error` (exit 1) por el paso que no existe; lo que este
 # fixture vigila es la línea del `cleanup`.
 
-nombre: exit_asigna_tras_error
+name: exit_asigna_tras_error
 
 locals:
   valor: 99.0
 
 main:
-  - nombre: paso_inexistente
-    asigna:
-      valor: '${resultado.valor_medido}'
+  - name: paso_inexistente
+    assign:
+      valor: '${result.measured_value}'
 
 cleanup:
-  - nombre: check_valor
-    tipo: pass_fail
-    condicion: 'locals.valor == 99.0'
+  - name: check_valor
+    type: pass_fail
+    condition: 'locals.valor == 99.0'

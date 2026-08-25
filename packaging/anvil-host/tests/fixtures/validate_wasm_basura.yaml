@@ -1,14 +1,14 @@
 # Issue #22: `--validate` levantaba el puente WASM. El `.wasm` existe (así
 # pasa la validación de path del cargador) pero no es un componente: si el
 # puente llegara a arrancar, moriría al instanciarlo y se notaría.
-nombre: validate_wasm_basura
+name: validate_wasm_basura
 locals:
   v: 0.0
-ejecutores:
-  - nombre: w
-    tipo: wasm
+executors:
+  - name: w
+    type: wasm
     path: ./no_es_componente.wasm
 main:
-  - nombre: medir_voltaje
-    ejecutor: w
-    limite: { tipo: rango, min: 0.0, max: 10.0 }
+  - name: medir_voltaje
+    executor: w
+    limit: { type: range, min: 0.0, max: 10.0 }

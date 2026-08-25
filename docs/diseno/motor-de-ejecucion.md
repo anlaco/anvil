@@ -116,18 +116,18 @@ Atributos de `DefinicionPaso` (campos YAML):
 
 ```yaml
 pasos_main:
-  - nombre: medir_voltaje
-    reintentos: 1
+  - name: medir_voltaje
+    retries: 1
     disable: false        # si true, se salta (estado "saltado")
     pause_on_fail: false  # si true y falla, detiene la fase
-    precondicion: 'locals.contador > 0'  # si falsa, se salta sin intento
-    tipo: grpc            # o "statement" (paso local, sin gRPC)
+    precondition: 'locals.contador > 0'  # si falsa, se salta sin intento
+    type: grpc            # o "statement" (paso local, sin gRPC)
                           # o "sequence_call" (invoca subsecuencia, M4b)
     statement: 'locals.x = 1'   # sólo si tipo: statement
-    secuencia: init           # sólo si tipo: sequence_call (nombre o path)
-    parametros: { p: locals.x } # sólo si sequence_call (by-reference)
-    asigna:               # si tipo: grpc o sequence_call; vuelca resultado.* a Locals
-      voltaje: '${resultado.valor_medido}'
+    sequence: init           # sólo si tipo: sequence_call (nombre o path)
+    inputs: { p: locals.x } # sólo si sequence_call (by-reference)
+    assign:               # si tipo: grpc o sequence_call; vuelca resultado.* a Locals
+      voltaje: '${result.measured_value}'
 ```
 
 ## Determinismo

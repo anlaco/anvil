@@ -1,5 +1,5 @@
-nombre: validate_sub_con_ejecutores
+name: validate_sub_con_ejecutores
 main:
-  - nombre: test_temp_sub
-    tipo: sequence_call
-    secuencia: ./validate_sub_con_ejecutores_hija.yaml
+  - name: test_temp_sub
+    type: sequence_call
+    sequence: ./validate_sub_con_ejecutores_hija.yaml

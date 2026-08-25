@@ -27,7 +27,7 @@
 # Prueba a relajar la condición a `locals.voltaje > 4.0` y verás que la
 # secuencia entera pasa.
 
-nombre: veredicto
+name: veredicto
 
 # El veredicto se evalúa sobre variables, así que hay que volcarlas primero
 # con `asigna`. Deben estar declaradas (el cargador lo exige).
@@ -36,35 +36,35 @@ locals:
   led_ok: false
 
 setup:
-  - nombre: abrir_rele
-    reintentos: 1
+  - name: abrir_rele
+    retries: 1
 
 main:
   # (2) Límite laxo: el motor lo evalúa y pasa. Es el "está vivo", no el
   # criterio de producto.
-  - nombre: medir_voltaje
-    reintentos: 1
-    limite:
-      tipo: rango
+  - name: medir_voltaje
+    retries: 1
+    limit:
+      type: range
       min: 4.0
       max: 6.0
-    asigna:
-      voltaje: '${resultado.valor_medido}'
+    assign:
+      voltaje: '${result.measured_value}'
 
   # (1) Pass/fail clásico: lo decide el paso, sin medida.
-  - nombre: verificar_led
-    reintentos: 1
-    asigna:
-      led_ok: '${resultado.estado == "paso"}'
+  - name: verificar_led
+    retries: 1
+    assign:
+      led_ok: '${result.status == "paso"}'
 
   # (3) El veredicto compuesto: combina las dos medidas anteriores. Lo evalúa
   # el motor; el paso no interviene. `false` → fallo, y Main corta aquí.
   # No admite `reintentos > 1`: evalúa una expresión pura, el resultado no
   # cambiaría entre intentos.
-  - nombre: verificar_dut
-    tipo: pass_fail
-    condicion: 'locals.voltaje > 4.9 && locals.voltaje < 5.1 && locals.led_ok'
+  - name: verificar_dut
+    type: pass_fail
+    condition: 'locals.voltaje > 4.9 && locals.voltaje < 5.1 && locals.led_ok'
 
 cleanup:
-  - nombre: desconectar_equipo
-    reintentos: 1
+  - name: desconectar_equipo
+    retries: 1

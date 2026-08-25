@@ -30,7 +30,7 @@ de alcance más abajo.
 ## En el formato de secuencia (YAML)
 
 ```yaml
-nombre: basica
+name: basica
 locals:
   voltaje_leido: 0.0
 parameters: {}            # al llamar desde otra secuencia
@@ -38,12 +38,12 @@ file_globals:
   lote: "A-2026-08"
 
 setup:
-  - nombre: conectar_equipo
-    reintentos: 3
+  - name: conectar_equipo
+    retries: 3
 main:
-  - nombre: medir_voltaje
-    reintentos: 1
-    asigna: { voltaje_leido: "${resultado.valor_medido}" }
+  - name: medir_voltaje
+    retries: 1
+    assign: { voltaje_leido: "${result.measured_value}" }
 ```
 
 ## Reglas de acceso
@@ -77,10 +77,10 @@ main:
 
   ```yaml
   main:
-    - nombre: medir_voltaje
-      asigna: { v: '${resultado.valor_medido}' }   # aquí sí
-    - nombre: verificar
-      precondicion: 'locals.v > 4.5'               # y aquí se lee el local
+    - name: medir_voltaje
+      assign: { v: '${result.measured_value}' }   # aquí sí
+    - name: verificar
+      precondition: 'locals.v > 4.5'               # y aquí se lee el local
   ```
 
   Usarlo fuera de `asigna` es **error de carga** desde #12. Antes no fallaba:
@@ -115,12 +115,12 @@ main:
   locals:
     valor: 99.0
   main:
-    - nombre: medir            # si este paso da `error`…
-      asigna: { valor: '${resultado.valor_medido}' }
+    - name: medir            # si este paso da `error`…
+      assign: { valor: '${result.measured_value}' }
   cleanup:
-    - nombre: comprobar        # …aquí `locals.valor` sigue siendo 99.0
-      tipo: pass_fail
-      condicion: 'locals.valor == 99.0'
+    - name: comprobar        # …aquí `locals.valor` sigue siendo 99.0
+      type: pass_fail
+      condition: 'locals.valor == 99.0'
   ```
 
 - **`asigna` sólo tiene sentido en un paso `grpc` o `sequence_call`.** En un

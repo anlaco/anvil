@@ -61,17 +61,17 @@ El motor despacha por **nombre→endpoint** (tabla de conexiones en
 `Motor::desde_programa`); sin declaración, todo va al embebido (compat M4b).
 
 ```yaml
-ejecutores:
-  - nombre: embebido        # el ejecutor WASM de serie (127.0.0.1:9100)
-    tipo: embebido
-  - nombre: python          # ejecutor de lenguaje aparte
-    tipo: grpc
+executors:
+  - name: embebido        # el ejecutor WASM de serie (127.0.0.1:9100)
+    type: embedded
+  - name: python          # ejecutor de lenguaje aparte
+    type: grpc
     host: 127.0.0.1         # o 192.168.x.y (LID futuro) — solo si se declara
-    puerto: 9101
+    port: 9101
 main:
-  - nombre: verificar_led   # embebido (default)
-  - nombre: medir_simulador
-    ejecutor: python
+  - name: verificar_led   # embebido (default)
+  - name: medir_simulador
+    executor: python
 ```
 
 Override por CLI: `--ejecutor python=192.168.1.50:9101` (patrón `--limits`).
@@ -84,9 +84,9 @@ Como en TestStand con un `.vi`: tú compilas el módulo, lo guardas en un
 archivo, y la secuencia lo referencia por path. **No se recompila nada.**
 
 ```yaml
-ejecutores:
-  - nombre: mi_paso_wasm      # clave libre para la secuencia
-    tipo: wasm                # componente cargado por el HOST (ADR-0015)
+executors:
+  - name: mi_paso_wasm      # clave libre para la secuencia
+    type: wasm                # componente cargado por el HOST (ADR-0015)
     path: ./pasos/mi_paso.wasm  # relativo al YAML
 ```
 
@@ -177,16 +177,16 @@ Patrón embebido primero, sidecar después (igual que los límites, RF-30):
    versionable con la secuencia.
 
    ```yaml
-   ejecutores:
-     - nombre: embebido        # el ejecutor WASM de serie
-       tipo: embebido
-     - nombre: mi_paso_wasm    # módulo .wasm cargado por path
-       tipo: wasm
+   executors:
+     - name: embebido        # el ejecutor WASM de serie
+       type: embedded
+     - name: mi_paso_wasm    # módulo .wasm cargado por path
+       type: wasm
        path: ./pasos/mi_paso.wasm
-     - nombre: python          # ejecutor de lenguaje aparte
-       tipo: grpc              # mismo contrato, otro proceso/host
+     - name: python          # ejecutor de lenguaje aparte
+       type: grpc              # mismo contrato, otro proceso/host
        host: 127.0.0.1         # o 192.168.x.y (LID) — solo si se declara
-       puerto: 9101
+       port: 9101
    ```
 
    Y cada paso referencia su ejecutor: `ejecutor: python` en
@@ -208,14 +208,14 @@ La demo real es `ejemplos/demo_ejecutores.yaml`: **embebido + Python en
 loopback** (sin Docker, sin LID).
 
 ```yaml
-nombre: demo_ejecutores
-ejecutores:
-  - { nombre: embebido, tipo: embebido }
-  - { nombre: python, tipo: grpc, host: 127.0.0.1, puerto: 9101 }
+name: demo_ejecutores
+executors:
+  - { name: embebido, type: embedded }
+  - { name: python, type: grpc, host: 127.0.0.1, port: 9101 }
 main:
-  - nombre: verificar_led        # embebido (default)
-  - nombre: medir_simulador, ejecutor: python
-  - nombre: conectar_equipo, ejecutor: python
+  - name: verificar_led        # embebido (default)
+  - name: medir_simulador, executor: python
+  - name: conectar_equipo, executor: python
 ```
 
 Verificación: la secuencia pasa/falla según cada paso, y el reporte muestra

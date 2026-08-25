@@ -21,7 +21,7 @@ use std::collections::HashMap;
 use expr::{Entorno, ErrorExpr, Scope, Value};
 use modelo::{DefinicionSecuencia, ResultadoStep, ValorDefinicion};
 
-/// `resultado.salidas.tension` llega aquí como `campo == "salidas.tension"`:
+/// `result.outputs.tension` llega aquí como `campo == "salidas.tension"`:
 /// el parser mete el nombre compuesto dentro de `campo` (ADR-0020). Devuelve
 /// el nombre de la salida pedida, o `None` si `campo` no es una salida.
 ///
@@ -128,22 +128,22 @@ impl Entorno for EntornoMotor {
                 // Laxa en el *valor*: si no hay resultado en curso, o si el
                 // paso no midió, es Nulo — `valor_medido` puede faltar
                 // legítimamente.
-                "estado" => Ok(self
+                "status" => Ok(self
                     .resultado
                     .as_ref()
                     .map(|r| Value::Texto(r.estado.clone()))
                     .unwrap_or(Value::Nulo)),
-                "valor_medido" => Ok(self
+                "measured_value" => Ok(self
                     .resultado
                     .as_ref()
                     .and_then(|r| r.valor_medido.map(Value::Numero))
                     .unwrap_or(Value::Nulo)),
-                "mensaje" => Ok(self
+                "message" => Ok(self
                     .resultado
                     .as_ref()
                     .map(|r| Value::Texto(r.mensaje.clone()))
                     .unwrap_or(Value::Nulo)),
-                // ADR-0020: `resultado.salidas.<nombre>`. Estricta también
+                // ADR-0020: `result.outputs.<nombre>`. Estricta también
                 // aquí, y por el mismo motivo que los otros campos: una
                 // salida que el paso no devolvió **no es `Nulo`**, es que la
                 // secuencia pide algo que no existe. Devolver `Nulo` lo
@@ -160,7 +160,7 @@ impl Entorno for EntornoMotor {
                     let r = self.resultado.as_ref().ok_or_else(|| {
                         ErrorExpr::entorno(
                             0,
-                            format!("no hay resultado en curso del que leer 'salidas.{quiere}'"),
+                            format!("no hay resultado en curso del que leer 'outputs.{quiere}'"),
                         )
                     })?;
                     r.salidas
@@ -182,12 +182,12 @@ impl Entorno for EntornoMotor {
                             };
                             ErrorExpr::entorno(
                                 0,
-                                format!("no existe 'resultado.salidas.{quiere}': {trajo}"),
+                                format!("no existe 'result.outputs.{quiere}': {trajo}"),
                             )
                         })
                 }
                 // Estricta en el *nombre*: los campos son tres y conocidos
-                // (`modelo::CAMPOS_RESULTADO`), así que `resultado.valor_meddio`
+                // (`modelo::CAMPOS_RESULTADO`), así que `result.measured_valu`
                 // no es un dato ausente, es un typo. Devolvía `Nulo`, y ese
                 // `Nulo` se volcaba a una local y la secuencia salía verde
                 // (ADR-0019, Regla 2, issue #27). Ahora falla la asigna, y una
@@ -198,7 +198,7 @@ impl Entorno for EntornoMotor {
                 _ => Err(ErrorExpr::entorno(
                     0,
                     format!(
-                        "no existe 'resultado.{campo}': los campos de 'resultado' son {}",
+                        "no existe 'result.{campo}': los campos de 'result' son {}",
                         modelo::CAMPOS_RESULTADO
                             .map(|c| format!("'{c}'"))
                             .join(", ")
@@ -290,7 +290,7 @@ mod tests {
     fn resultado_valor_medido_es_nulo_si_no_hay_resultado() {
         let def = secuencia_con(&[]);
         let env = EntornoMotor::desde_definicion(&def);
-        let e = expr::parse_expresion("resultado.valor_medido").unwrap();
+        let e = expr::parse_expresion("result.measured_value").unwrap();
         assert_eq!(eval(&e, &env).unwrap(), Value::Nulo);
     }
 
@@ -300,12 +300,12 @@ mod tests {
         let mut env = EntornoMotor::desde_definicion(&def);
         env.set_resultado(ResultadoStep::medido_valor("m", "paso", "ok", 4.2));
         assert_eq!(
-            eval(&expr::parse_expresion("resultado.estado").unwrap(), &env).unwrap(),
+            eval(&expr::parse_expresion("result.status").unwrap(), &env).unwrap(),
             Value::Texto("paso".into())
         );
         assert_eq!(
             eval(
-                &expr::parse_expresion("resultado.valor_medido").unwrap(),
+                &expr::parse_expresion("result.measured_value").unwrap(),
                 &env
             )
             .unwrap(),
@@ -314,18 +314,18 @@ mod tests {
     }
 
     /// ADR-0019, Regla 2 (issue #27): el nombre del campo es **estricto**. Un
-    /// `resultado.valor_meddio` valía `nothing`, y ese `nothing` se volcaba a
+    /// `result.measured_valu` valía `nothing`, y ese `nothing` se volcaba a
     /// la local que decidía el veredicto.
     #[test]
     fn leer_un_campo_inexistente_de_resultado_es_error() {
         let def = secuencia_con(&[]);
         let mut env = EntornoMotor::desde_definicion(&def);
         env.set_resultado(ResultadoStep::medido_valor("m", "paso", "ok", 4.2));
-        let e = expr::parse_expresion("resultado.valor_meddio").unwrap();
+        let e = expr::parse_expresion("result.measured_valu").unwrap();
         let err = eval(&e, &env).expect_err("un typo no es un dato ausente");
         let msg = err.to_string();
-        assert!(msg.contains("valor_meddio"), "nombra el campo: {msg}");
-        assert!(msg.contains("'valor_medido'"), "y los válidos: {msg}");
+        assert!(msg.contains("measured_valu"), "nombra el campo: {msg}");
+        assert!(msg.contains("'measured_value'"), "y los válidos: {msg}");
     }
 
     /// Lo estricto es el **nombre**, no el valor: los tres campos conocidos se
@@ -337,12 +337,12 @@ mod tests {
         let mut env = EntornoMotor::desde_definicion(&def);
         env.set_resultado(ResultadoStep::nuevo("m", "paso", "sin medida"));
         for campo in modelo::CAMPOS_RESULTADO {
-            let e = expr::parse_expresion(&format!("resultado.{campo}")).unwrap();
+            let e = expr::parse_expresion(&format!("result.{campo}")).unwrap();
             eval(&e, &env).unwrap_or_else(|_| panic!("'resultado.{campo}' debe ser legible"));
         }
         // Y sin resultado en curso, tampoco fallan: valen `nothing`.
         env.limpia_resultado();
-        let e = expr::parse_expresion("resultado.valor_medido").unwrap();
+        let e = expr::parse_expresion("result.measured_value").unwrap();
         assert_eq!(eval(&e, &env).unwrap(), Value::Nulo);
     }
 
@@ -354,7 +354,7 @@ mod tests {
         let stmts = vec![Sentencia::Assign {
             scope: Scope::Locals,
             campo: "x".into(),
-            valor: expr::parse_expresion("resultado.valor_medido").unwrap(),
+            valor: expr::parse_expresion("result.measured_value").unwrap(),
         }];
         eval_sentencias(&stmts, &mut env).unwrap();
         assert_eq!(env.locals().get("x"), Some(&Value::Numero(4.2)));

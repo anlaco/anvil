@@ -9,12 +9,12 @@
 #   === exit_paso: paso ===
 #   [paso] asignacion_trivial: statement ok
 
-nombre: exit_paso
+name: exit_paso
 
 locals:
   x: 0.0
 
 main:
-  - nombre: asignacion_trivial
-    tipo: statement
+  - name: asignacion_trivial
+    type: statement
     statement: 'locals.x = 1 + 1'

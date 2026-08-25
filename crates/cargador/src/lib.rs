@@ -43,7 +43,7 @@ struct SecuenciaYaml {
     /// toma el nombre de su **clave** en `subsecuencias` (ver
     /// [`secuencia_yaml_a_definicion`]); la raíz, en cambio, debe tenerlo.
     #[serde(default)]
-    nombre: String,
+    name: String,
     /// Opcional: si no viene, no hay pasos de setup.
     #[serde(default)]
     setup: Vec<PasoYaml>,
@@ -68,11 +68,11 @@ struct SecuenciaYaml {
     /// archivo: los otros archivos invocan la secuencia raíz por path, no
     /// éstas. Es recursivo: una inline es otra `SecuenciaYaml` completa.
     #[serde(default)]
-    subsecuencias: HashMap<String, SecuenciaYaml>,
+    subsequences: HashMap<String, SecuenciaYaml>,
     /// M5-ext.1 (RF-36.3): ejecutores declarados en el YAML. Sin esta
     /// sección, todo paso va al ejecutor embebido (default, compat M4b).
     #[serde(default)]
-    ejecutores: Vec<EjecutorYaml>,
+    executors: Vec<EjecutorYaml>,
 }
 
 /// Un ejecutor como se lee del YAML (`ejecutores:`), antes de traducirse a
@@ -82,10 +82,14 @@ struct SecuenciaYaml {
 #[derive(Debug, PartialEq, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct EjecutorYaml {
-    nombre: String,
-    /// `"embebido"` (default), `"wasm"` o `"grpc"`.
-    #[serde(default = "tipo_ejecutor_por_defecto")]
-    tipo: String,
+    name: String,
+    /// `"embedded"` (default), `"wasm"` o `"grpc"`.
+    ///
+    /// `kind` y no `type`: `type` es palabra reservada de Rust. El
+    /// `serde(rename)` es por el lenguaje, no por el idioma — en el YAML la
+    /// clave es `type`.
+    #[serde(default = "tipo_ejecutor_por_defecto", rename = "type")]
+    kind: String,
     /// Sólo si `tipo == "wasm"`. Path relativo al directorio del YAML.
     #[serde(default)]
     path: Option<String>,
@@ -93,13 +97,13 @@ struct EjecutorYaml {
     /// declara** (relajación acotada del loopback de ADR-0011).
     #[serde(default)]
     host: Option<String>,
-    /// Sólo si `tipo == "grpc"`. Puerto.
+    /// Sólo si `type == "grpc"`. Puerto.
     #[serde(default)]
-    puerto: Option<u16>,
+    port: Option<u16>,
 }
 
 fn tipo_ejecutor_por_defecto() -> String {
-    "embebido".into()
+    "embedded".into()
 }
 
 /// Un literal de variable declarado en el YAML (scopes de M4). El tipo se
@@ -135,11 +139,11 @@ impl ValorYaml {
 #[derive(Debug, PartialEq, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct PasoYaml {
-    nombre: String,
+    name: String,
     #[serde(default = "reintentos_por_defecto")]
-    reintentos: u32,
+    retries: u32,
     #[serde(default)]
-    limite: Option<LimiteYaml>,
+    limit: Option<LimiteYaml>,
     /// RF-34: si `true`, el motor salta el paso sin invocarlo.
     #[serde(default)]
     disable: bool,
@@ -149,52 +153,50 @@ struct PasoYaml {
     /// RF-33: expresión booleana; si es falsa, el paso se salta sin gastar
     /// intento. Texto → AST en `a_definicion`.
     #[serde(default)]
-    precondicion: Option<String>,
+    precondition: Option<String>,
     /// RF-31: mapa `nombre_local -> expr`; el motor vuelca cada `expr` (sobre
     /// `resultado`/scopes) a la Local. Texto → AST en `a_definicion`.
     #[serde(default)]
-    asigna: Option<HashMap<String, String>>,
+    assign: Option<HashMap<String, String>>,
     /// RF-27: `"grpc"` (default), `"statement"`, `"sequence_call"` o
-    /// `"pass_fail"`.
-    #[serde(default = "tipo_por_defecto")]
-    tipo: String,
+    /// `"pass_fail"`. `kind` por la palabra reservada de Rust; en el YAML la
+    /// clave es `type`.
+    #[serde(default = "tipo_por_defecto", rename = "type")]
+    kind: String,
     /// RF-27: sentencia(s) a ejecutar si `tipo == "statement"`. Texto → AST.
     #[serde(default)]
     statement: Option<String>,
     /// RF-25 (ADR-0018): expresión booleana del veredicto si
     /// `tipo == "pass_fail"`. Texto → AST en `a_definicion`.
     #[serde(default)]
-    condicion: Option<String>,
+    condition: Option<String>,
     /// M4b (RF-27): destino del sequence call si `tipo == "sequence_call"`.
     /// Un **nombre** (subsecuencia inline del mismo archivo) o un **path
     /// relativo** (archivo externo); se distingue con [`es_path`]. Texto.
     #[serde(default)]
-    secuencia: Option<String>,
-    /// Dos cosas distintas según el `tipo` del paso, y son excluyentes:
+    sequence: Option<String>,
+    /// ADR-0020: los parámetros **by-value** de un paso `grpc`. Mapa
+    /// `nombre -> literal | "${expr}"`, que viaja en la petición.
     ///
-    /// - `sequence_call` (M4b, RF-27): argumentos **by-reference**, mapa
-    ///   `nombre_parameter -> "locals.X"`. Cada valor se parsea a AST y se
-    ///   valida como `Expresion::Var { scope: Locals, .. }` (un lvalue local).
-    /// - `grpc` (ADR-0020): parámetros **by-value** que viajan en la
-    ///   petición, mapa `nombre -> literal | "${expr}"`.
-    ///
-    /// El nombre es el mismo porque el ADR-0020 lo fija así y porque no
-    /// pueden coincidir nunca en el mismo paso. El riesgo es copiar uno de un
-    /// sitio al otro —`{ canal: locals.canal }` es una referencia en un
-    /// `sequence_call` y sería el **texto literal** `"locals.canal"` en un
-    /// `grpc`— y por eso ese caso concreto es error de carga, no un silencio
-    /// (ver `entradas_de_paso`).
-    ///
-    /// Es `ValorYaml` y no `String` para poder distinguir `canal: 2` de
-    /// `canal: "2"`: en un paso `grpc` el tipo del literal es el tipo que
-    /// viaja por el cable.
+    /// Es `ValorYaml` y no `String` para poder distinguir `channel: 2` de
+    /// `channel: "2"`: el tipo del literal es el tipo que viaja por el cable.
     #[serde(default)]
-    parametros: Option<HashMap<String, ValorYaml>>,
+    inputs: Option<HashMap<String, ValorYaml>>,
+    /// M4b (RF-27): argumentos **by-reference** de un `sequence_call`, mapa
+    /// `nombre_parameter -> "locals.X"`. Cada valor se parsea a AST y se
+    /// valida como `Expresion::Var { scope: Locals, .. }` (un lvalue local).
+    ///
+    /// Se llamaba `parametros` igual que los de arriba, y esa colisión era
+    /// una trampa: el mismo bloque copiado de un sitio al otro cambiaba de
+    /// significado —aquí es una referencia, allí sería el texto literal—.
+    /// Con dos nombres distintos, copiarlo da error de campo desconocido.
+    #[serde(default)]
+    args: Option<HashMap<String, ValorYaml>>,
     /// M5-ext.1 (RF-36.3): nombre del ejecutor que atiende este paso. Debe
     /// existir en `ejecutores` de la secuencia (fail-fast al cargar). Si se
     /// omite, el paso va al ejecutor embebido (default).
     #[serde(default)]
-    ejecutor: Option<String>,
+    executor: Option<String>,
 }
 
 fn reintentos_por_defecto() -> u32 {
@@ -214,8 +216,10 @@ fn tipo_por_defecto() -> String {
 #[derive(Debug, PartialEq, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct LimiteYaml {
-    /// `"rango"` o `"comparacion"`.
-    tipo: String,
+    /// `"range"` o `"comparison"`. `kind` por la palabra reservada de Rust;
+    /// en el YAML la clave es `type`.
+    #[serde(rename = "type")]
+    kind: String,
     #[serde(default)]
     min: Option<f64>,
     #[serde(default)]
@@ -223,62 +227,62 @@ struct LimiteYaml {
     #[serde(default)]
     op: Option<String>,
     #[serde(default)]
-    esperado: Option<f64>,
+    expected: Option<f64>,
 }
 
 impl LimiteYaml {
     /// Traduce a `modelo::Limite`, validando que los campos cuadren con el
     /// `tipo` declarado. `nombre_paso` solo para mensajes de error.
     fn a_limite(&self, nombre_paso: &str) -> Result<Limite, ErrorCarga> {
-        match self.tipo.as_str() {
-            "rango" => {
+        match self.kind.as_str() {
+            "range" => {
                 let Some(min) = self.min else {
                     return Err(ErrorCarga::Validacion(format!(
-                        "el paso '{nombre_paso}' tiene un límite rango sin 'min'"
+                        "el paso '{nombre_paso}' tiene un límite 'range' sin 'min'"
                     )));
                 };
                 let Some(max) = self.max else {
                     return Err(ErrorCarga::Validacion(format!(
-                        "el paso '{nombre_paso}' tiene un límite rango sin 'max'"
+                        "el paso '{nombre_paso}' tiene un límite 'range' sin 'max'"
                     )));
                 };
                 if min > max {
                     return Err(ErrorCarga::Validacion(format!(
-                        "el paso '{nombre_paso}' tiene un límite rango con min ({min}) > max ({max})"
+                        "el paso '{nombre_paso}' tiene un límite 'range' con min ({min}) > max ({max})"
                     )));
                 }
-                if self.op.is_some() || self.esperado.is_some() {
+                if self.op.is_some() || self.expected.is_some() {
                     return Err(ErrorCarga::Validacion(format!(
-                        "el paso '{nombre_paso}' tiene un límite rango con campos 'op'/'esperado' (no aplican a un rango)"
+                        "el paso '{nombre_paso}' tiene un límite 'range' con campos 'op'/'expected' (no aplican a un rango)"
                     )));
                 }
                 Ok(Limite::Rango { min, max })
             }
-            "comparacion" => {
+            "comparison" => {
                 let Some(op_texto) = &self.op else {
                     return Err(ErrorCarga::Validacion(format!(
-                        "el paso '{nombre_paso}' tiene un límite comparacion sin 'op'"
+                        "el paso '{nombre_paso}' tiene un límite 'comparison' sin 'op'"
                     )));
                 };
                 let Some(op) = Operador::de_texto(op_texto) else {
                     return Err(ErrorCarga::Validacion(format!(
-                        "el paso '{nombre_paso}' tiene un límite comparacion con 'op' inválido '{op_texto}' (eq/ne/lt/le/gt/ge)"
+                        "el paso '{nombre_paso}' tiene un límite 'comparison' con 'op' inválido '{op_texto}' (eq/ne/lt/le/gt/ge)"
                     )));
                 };
-                let Some(esperado) = self.esperado else {
+                let Some(esperado) = self.expected else {
                     return Err(ErrorCarga::Validacion(format!(
-                        "el paso '{nombre_paso}' tiene un límite comparacion sin 'esperado'"
+                        "el paso '{nombre_paso}' tiene un límite 'comparison' sin 'expected'"
                     )));
                 };
                 if self.min.is_some() || self.max.is_some() {
                     return Err(ErrorCarga::Validacion(format!(
-                        "el paso '{nombre_paso}' tiene un límite comparacion con campos 'min'/'max' (no aplican a una comparacion)"
+                        "el paso '{nombre_paso}' tiene un límite 'comparison' con campos 'min'/'max' (no aplican a una comparación)"
                     )));
                 }
                 Ok(Limite::Comparacion { op, esperado })
             }
             otro => Err(ErrorCarga::Validacion(format!(
-                "el paso '{nombre_paso}' tiene un límite con tipo '{otro}' desconocido (rango|comparacion)"
+                "el paso '{nombre_paso}' tiene un límite con 'type' '{otro}' desconocido (range|comparison)"
             ))),
         }
     }
@@ -294,32 +298,32 @@ impl EjecutorYaml {
     /// archivo que declara el ejecutor: los paths `wasm` se resuelven
     /// relativo a él.
     fn a_definicion(self, dir_yaml: &Path) -> Result<DefinicionEjecutor, ErrorCarga> {
-        if self.nombre == NOMBRE_EMBEDIDO_RESERVADO {
+        if self.name == NOMBRE_EMBEDIDO_RESERVADO {
             return Err(ErrorCarga::Validacion(format!(
                 "el ejecutor '{NOMBRE_EMBEDIDO_RESERVADO}' está reservado; elige otro nombre"
             )));
         }
-        let tipo = match self.tipo.as_str() {
-            "embebido" => {
-                if self.path.is_some() || self.host.is_some() || self.puerto.is_some() {
+        let tipo = match self.kind.as_str() {
+            "embedded" => {
+                if self.path.is_some() || self.host.is_some() || self.port.is_some() {
                     return Err(ErrorCarga::Validacion(format!(
-                        "el ejecutor '{}' es 'embebido' pero trae 'path'/'host'/'puerto' (no aplican)",
-                        self.nombre
+                        "el ejecutor '{}' es 'embedded' pero trae 'path'/'host'/'port' (no aplican)",
+                        self.name
                     )));
                 }
                 TipoEjecutor::Embebido
             }
             "wasm" => {
-                if self.host.is_some() || self.puerto.is_some() {
+                if self.host.is_some() || self.port.is_some() {
                     return Err(ErrorCarga::Validacion(format!(
                         "el ejecutor '{}' es 'wasm' pero trae 'host'/'puerto' (sólo aplican a 'grpc')",
-                        self.nombre
+                        self.name
                     )));
                 }
                 let Some(path) = self.path else {
                     return Err(ErrorCarga::Validacion(format!(
                         "el ejecutor '{}' es 'wasm' pero no trae 'path'",
-                        self.nombre
+                        self.name
                     )));
                 };
                 // El cargador corre dentro del sandbox WASM del motor, que
@@ -331,7 +335,7 @@ impl EjecutorYaml {
                         "el ejecutor '{}' es 'wasm' con 'path' absoluto '{}': el \
                          cargador corre en un sandbox que solo ve el directorio \
                          del YAML; usa un path relativo",
-                        self.nombre, path
+                        self.name, path
                     )));
                 }
                 // El path debe existir (relativo al directorio del YAML),
@@ -340,7 +344,7 @@ impl EjecutorYaml {
                 if !ruta.exists() {
                     return Err(ErrorCarga::Validacion(format!(
                         "el ejecutor '{}' es 'wasm' y su 'path' '{}' no existe",
-                        self.nombre, path
+                        self.name, path
                     )));
                 }
                 TipoEjecutor::Wasm { path }
@@ -349,26 +353,26 @@ impl EjecutorYaml {
                 if self.path.is_some() {
                     return Err(ErrorCarga::Validacion(format!(
                         "el ejecutor '{}' es 'grpc' pero trae 'path' (sólo aplica a 'wasm')",
-                        self.nombre
+                        self.name
                     )));
                 }
-                let (Some(host), Some(puerto)) = (self.host, self.puerto) else {
+                let (Some(host), Some(puerto)) = (self.host, self.port) else {
                     return Err(ErrorCarga::Validacion(format!(
-                        "el ejecutor '{}' es 'grpc' pero no trae 'host' y 'puerto'",
-                        self.nombre
+                        "el ejecutor '{}' es 'grpc' pero no trae 'host' y 'port'",
+                        self.name
                     )));
                 };
                 TipoEjecutor::Grpc { host, puerto }
             }
             otro => {
                 return Err(ErrorCarga::Validacion(format!(
-                    "el ejecutor '{}' tiene tipo '{otro}' desconocido (embebido|wasm|grpc)",
-                    self.nombre
+                    "el ejecutor '{}' tiene 'type' '{otro}' desconocido (embedded|wasm|grpc)",
+                    self.name
                 )))
             }
         };
         Ok(DefinicionEjecutor {
-            nombre: self.nombre,
+            nombre: self.name,
             tipo,
         })
     }
@@ -468,56 +472,78 @@ impl From<noyalib::Error> for ErrorCarga {
 /// errata. Es una ayuda de diagnóstico, no una fuente de verdad: el schema lo
 /// imponen los `struct` con `deny_unknown_fields`, y si esta lista se queda
 /// corta lo único que se pierde es una sugerencia.
-const CAMPOS_DEL_SCHEMA: [&str; 27] = [
+const CAMPOS_DEL_SCHEMA: [&str; 28] = [
     // SecuenciaYaml
-    "nombre",
+    "name",
     "setup",
     "main",
     "cleanup",
     "locals",
     "parameters",
     "file_globals",
-    "subsecuencias",
-    "ejecutores",
+    "subsequences",
+    "executors",
     // PasoYaml
-    "reintentos",
-    "limite",
+    "retries",
+    "limit",
     "disable",
     "pause_on_fail",
-    "precondicion",
-    "asigna",
-    "tipo",
+    "precondition",
+    "assign",
+    "type",
     "statement",
-    "condicion",
-    "secuencia",
-    "parametros",
-    "ejecutor",
+    "condition",
+    "sequence",
+    "inputs",
+    "args",
+    "executor",
     // EjecutorYaml
     "path",
     "host",
-    "puerto",
+    "port",
     // LimiteYaml
     "min",
     "max",
     "op",
 ];
 
-/// Lo que la gente escribe de verdad cuando se equivoca: el inglés del campo
-/// (Anvil es un schema en español) y los nombres que traen de otras
-/// herramientas. Sale de los ficheros de la beta.
-const ALIAS_DE_CAMPO: [(&str, &str); 12] = [
+/// Lo que la gente escribe de verdad cuando se equivoca, y a qué campo se le
+/// redirige.
+///
+/// **La mitad de esta tabla acaba de desaparecer, y conviene saber por qué.**
+/// Salió de los ficheros de la beta, y lo que registraba era que el
+/// betatester escribía `name`, `retries`, `assign`, `precondition`,
+/// `executor` y `sequence` por instinto contra un schema que estaba en
+/// español. Eran ocho entradas para traducir de vuelta lo que la gente ya
+/// escribía en inglés. Ahora el schema **es** ese inglés, así que sobran: es
+/// la evidencia de campo de que la traducción iba en la dirección correcta.
+///
+/// Lo que queda son dos grupos: los nombres que la gente trae de otras
+/// herramientas (`steps`, `variables`), y **el castellano del schema
+/// anterior**, para que quien tenga una secuencia vieja reciba «querías decir
+/// `name`» en vez de «campo desconocido». Eso es diagnóstico, no
+/// compatibilidad: el campo viejo **no se acepta**, sólo se reconoce para
+/// explicar el error.
+const ALIAS_DE_CAMPO: [(&str, &str); 17] = [
+    // De otras herramientas.
     ("steps", "main"),
     ("pasos", "main"),
-    ("sequence", "secuencia"),
-    ("subsequences", "subsecuencias"),
-    ("name", "nombre"),
-    ("precondition", "precondicion"),
-    ("assign", "asigna"),
-    ("retries", "reintentos"),
-    ("limits", "limite"),
-    ("limites", "limite"),
-    ("executor", "ejecutor"),
     ("variables", "locals"),
+    ("limits", "limit"),
+    // El schema anterior, en castellano.
+    ("nombre", "name"),
+    ("reintentos", "retries"),
+    ("limite", "limit"),
+    ("limites", "limit"),
+    ("precondicion", "precondition"),
+    ("asigna", "assign"),
+    ("tipo", "type"),
+    ("condicion", "condition"),
+    ("secuencia", "sequence"),
+    ("subsecuencias", "subsequences"),
+    ("ejecutor", "executor"),
+    ("ejecutores", "executors"),
+    ("puerto", "port"),
 ];
 
 /// Distancia de edición (Levenshtein) en caracteres, no en bytes: el schema
@@ -642,9 +668,9 @@ fn cargar_subsecuencia_externa(
         Ok(y) => y,
         Err(e) => return Err(diagnostica_campo_desconocido(texto, e)),
     };
-    if !yaml.ejecutores.is_empty() {
+    if !yaml.executors.is_empty() {
         return Err(ErrorCarga::Validacion(format!(
-            "la subsecuencia externa '{origen}' declara una sección 'ejecutores:', y \
+            "la subsecuencia externa '{origen}' declara una sección 'executors:', y \
              Anvil no la lee: la tabla de ejecutores se declara **una sola vez**, en la \
              secuencia raíz (la que se pasa a anvil; con --process-model, también en el \
              process model). Las subsecuencias no declaran los suyos, los referencian \
@@ -664,12 +690,12 @@ fn secuencia_yaml_a_definicion(
     mut y: SecuenciaYaml,
     fallback: Option<&str>,
 ) -> Result<DefinicionSecuencia, ErrorCarga> {
-    if y.nombre.trim().is_empty() {
+    if y.name.trim().is_empty() {
         match fallback {
-            Some(k) => y.nombre = k.to_string(),
+            Some(k) => y.name = k.to_string(),
             None => {
                 return Err(ErrorCarga::Validacion(
-                    "el nombre de la secuencia no puede estar vacío".into(),
+                    "el 'name' de la secuencia no puede estar vacío".into(),
                 ))
             }
         }
@@ -684,17 +710,17 @@ fn secuencia_yaml_a_definicion(
     // SecuenciaYaml completa, con su propia validación; el nombre cae al
     // fallback de la clave).
     let mut subsecuencias = HashMap::new();
-    let nombre_secuencia = y.nombre.clone();
-    for (k, sub) in y.subsecuencias {
+    let nombre_secuencia = y.name.clone();
+    for (k, sub) in y.subsequences {
         // Issue #21, la mitad inline: `SecuenciaYaml` es recursiva, así que una
         // inline puede escribir `ejecutores:` — y se descartaba igual de
         // callado que en una externa. La tabla es del `Programa`, no de la
         // secuencia, y sólo se lee de la raíz del archivo.
-        if !sub.ejecutores.is_empty() {
+        if !sub.executors.is_empty() {
             return Err(ErrorCarga::Validacion(format!(
                 "la subsecuencia inline '{k}' de la secuencia '{nombre_secuencia}' \
-                 declara una sección 'ejecutores:', y Anvil no la lee: los ejecutores \
-                 se declaran **una sola vez**, en el 'ejecutores:' de la secuencia raíz \
+                 declara una sección 'executors:', y Anvil no la lee: los ejecutores \
+                 se declaran **una sola vez**, en el 'executors:' de la secuencia raíz \
                  del archivo. Muévela ahí; aquí basta con referenciarlos por nombre \
                  con 'ejecutor:'"
             )));
@@ -703,7 +729,7 @@ fn secuencia_yaml_a_definicion(
     }
 
     let def = DefinicionSecuencia {
-        nombre: y.nombre,
+        nombre: y.name,
         pasos_setup: traduce_pasos(y.setup)?,
         pasos_main: traduce_pasos(y.main)?,
         pasos_cleanup: traduce_pasos(y.cleanup)?,
@@ -738,7 +764,7 @@ fn secuencia_yaml_a_definicion(
 /// no fallaba: valía `nothing`.
 ///
 /// Eso convertía un error de definición en tres capas de silencio
-/// encadenadas. `precondicion: 'resultado.valor_medido != nothing'` es un
+/// encadenadas. `precondition: 'result.measured_value != nothing'` es un
 /// `false` constante → el paso se salta → y como `saltado` es neutral en el
 /// agregado, **la secuencia termina en verde**. En la campaña ese patrón se
 /// propagó a 19 secuencias y 51 precondiciones, y produjo dos «bugs críticos»
@@ -758,10 +784,10 @@ fn validar_alcance_resultado(def: &DefinicionSecuencia) -> Result<(), ErrorCarga
         // el campo tal y como el usuario lo escribió.
         let mut donde: Vec<(&str, &expr::Expresion)> = Vec::new();
         if let Some(pre) = &p.precondicion {
-            donde.push(("precondicion", pre));
+            donde.push(("precondition", pre));
         }
         if let Some(cond) = &p.condicion {
-            donde.push(("condicion", cond));
+            donde.push(("condition", cond));
         }
         for (campo_yaml, e) in donde {
             if let Some(campo) = primer_uso_de_resultado(e) {
@@ -826,7 +852,7 @@ fn primer_uso_de_resultado_si(e: &expr::Expresion, pred: &impl Fn(&str) -> bool)
 
 /// ADR-0019, regla de detección (issue #27): los campos de `resultado` son
 /// tres y conocidos (`modelo::CAMPOS_RESULTADO`), así que un
-/// `resultado.valor_meddio` es **comprobable sin ejecutar**. Y hay que
+/// `result.measured_valu` es **comprobable sin ejecutar**. Y hay que
 /// comprobarlo ahí: en runtime valía `nothing`, ese `nothing` se volcaba a la
 /// local que iba a decidir el veredicto, y la secuencia salía en `paso` con la
 /// variable destruida. Un typo no puede costar una campaña entera.
@@ -865,8 +891,8 @@ fn validar_campos_de_resultado(def: &DefinicionSecuencia) -> Result<(), ErrorCar
         for a in asignaciones {
             if let Some(campo) = primer_uso_de_resultado_si(&a.expr, &desconocido) {
                 return Err(ErrorCarga::Validacion(format!(
-                    "el paso '{}' asigna a '{}' desde 'resultado.{campo}', que no existe: \
-                     los campos de 'resultado' son {}, y 'salidas.<nombre>' para \
+                    "el paso '{}' asigna a '{}' desde 'result.{campo}', que no existe: \
+                     los campos de 'result' son {}, y 'outputs.<name>' para \
                      lo que devuelva el paso",
                     p.nombre,
                     a.var,
@@ -884,11 +910,11 @@ fn validar_campos_de_resultado(def: &DefinicionSecuencia) -> Result<(), ErrorCar
 /// lo que faltó en la campaña: el diagnóstico llegaba como un `false` mudo.
 fn error_resultado_fuera_de_asigna(paso: &str, campo_yaml: &str, campo: &str) -> ErrorCarga {
     ErrorCarga::Validacion(format!(
-        "el paso '{paso}' usa 'resultado.{campo}' en '{campo_yaml}', donde no \
-         está disponible: 'resultado.*' sólo es visible dentro del 'asigna' del \
+        "el paso '{paso}' usa 'result.{campo}' en '{campo_yaml}', donde no \
+         está disponible: 'result.*' sólo es visible dentro del 'assign' del \
          propio paso, porque es el resultado que ese paso acaba de devolver. \
          Fuera de ahí valdría siempre 'nothing'. Vuelca lo que necesites a un \
-         local con 'asigna' y léelo desde '{campo_yaml}'"
+         local con 'assign' y léelo desde '{campo_yaml}'"
     ))
 }
 
@@ -1021,10 +1047,10 @@ fn validar_variables_leidas(def: &DefinicionSecuencia) -> Result<(), ErrorCarga>
         // como el usuario lo escribió, igual que `validar_alcance_resultado`.
         let mut donde: Vec<(&str, &expr::Expresion)> = Vec::new();
         if let Some(pre) = &p.precondicion {
-            donde.push(("precondicion", pre));
+            donde.push(("precondition", pre));
         }
         if let Some(cond) = &p.condicion {
-            donde.push(("condicion", cond));
+            donde.push(("condition", cond));
         }
         // Sólo el lado derecho: los destinos los valida `validar_lvalues`.
         if let Some(stmts) = &p.statement {
@@ -1034,7 +1060,7 @@ fn validar_variables_leidas(def: &DefinicionSecuencia) -> Result<(), ErrorCarga>
         }
         if let Some(asignaciones) = &p.asigna {
             for a in asignaciones {
-                donde.push(("asigna", &a.expr));
+                donde.push(("assign", &a.expr));
             }
         }
         for (campo_yaml, e) in donde {
@@ -1187,7 +1213,7 @@ fn leer_ejecutores(
         Ok(y) => y,
         Err(e) => return Err(diagnostica_campo_desconocido(&texto, e)),
     };
-    for y in yaml.ejecutores {
+    for y in yaml.executors {
         let def = y.a_definicion(dir_base)?;
         if acc.contains_key(&def.nombre) {
             return Err(ErrorCarga::Validacion(format!(
@@ -1771,15 +1797,15 @@ fn validar(y: &SecuenciaYaml) -> Result<(), ErrorCarga> {
         ));
     }
     for p in y.setup.iter().chain(&y.main).chain(&y.cleanup) {
-        if p.reintentos == 0 {
+        if p.retries == 0 {
             return Err(ErrorCarga::Validacion(format!(
-                "el paso '{}' tiene reintentos 0; el mínimo es 1",
-                p.nombre
+                "el paso '{}' tiene 'retries' 0; el mínimo es 1",
+                p.name
             )));
         }
-        if p.nombre.trim().is_empty() {
+        if p.name.trim().is_empty() {
             return Err(ErrorCarga::Validacion(
-                "un paso tiene el nombre vacío".into(),
+                "un paso tiene el 'name' vacío".into(),
             ));
         }
     }
@@ -1791,18 +1817,18 @@ impl PasoYaml {
     // según el `tipo` (ADR-0020): by-value en un `grpc`, by-reference en un
     // `sequence_call`. El `take()` deja claro cuál se ha llevado el mapa.
     fn a_definicion(mut self) -> Result<DefinicionPaso, ErrorCarga> {
-        let limite = match self.limite {
-            Some(l) => Some(l.a_limite(&self.nombre)?),
+        let limite = match self.limit {
+            Some(l) => Some(l.a_limite(&self.name)?),
             None => None,
         };
 
         // RF-33: la precondición se parsea a AST aquí (fail-fast). Un error de
         // sintaxis se reporta con el nombre del paso.
-        let precondicion = match self.precondicion.as_deref() {
+        let precondicion = match self.precondition.as_deref() {
             Some(texto) => Some(expr::parse_expresion(extraer_expr(texto)).map_err(|e| {
                 ErrorCarga::Validacion(format!(
                     "precondición del paso '{}' inválida: {e}",
-                    self.nombre
+                    self.name
                 ))
             })?),
             None => None,
@@ -1810,14 +1836,14 @@ impl PasoYaml {
 
         // RF-31: cada `asigna` es `nombre_local -> expr`. La expr se evalúa
         // sobre `resultado`/scopes y el motor la vuelca a Locals.
-        let asigna = match self.asigna {
+        let asigna = match self.assign {
             Some(mapa) => Some(
                 mapa.into_iter()
                     .map(|(var, texto)| {
                         let expr = expr::parse_expresion(extraer_expr(&texto)).map_err(|e| {
                             ErrorCarga::Validacion(format!(
                                 "asigna '{}' del paso '{}': {e}",
-                                var, self.nombre
+                                var, self.name
                             ))
                         })?;
                         Ok(Asignacion { var, expr })
@@ -1829,7 +1855,7 @@ impl PasoYaml {
 
         // RF-27: tipo de paso. `grpc` (default), `statement`, `sequence_call`
         // (M4b) o `pass_fail` (RF-25, ADR-0018).
-        let tipo = match self.tipo.as_str() {
+        let tipo = match self.kind.as_str() {
             "grpc" => TipoPaso::Grpc,
             "statement" => TipoPaso::Statement,
             "sequence_call" => TipoPaso::SequenceCall,
@@ -1838,7 +1864,7 @@ impl PasoYaml {
                 return Err(ErrorCarga::Validacion(format!(
                     "el paso '{}' tiene tipo '{otro}' inválido \
                      (grpc|statement|sequence_call|pass_fail)",
-                    self.nombre
+                    self.name
                 )))
             }
         };
@@ -1846,10 +1872,7 @@ impl PasoYaml {
         // RF-27: el statement se parsea a una lista de sentencias.
         let statement = match self.statement.as_deref() {
             Some(texto) => Some(expr::parse_sentencias(texto).map_err(|e| {
-                ErrorCarga::Validacion(format!(
-                    "statement del paso '{}' inválido: {e}",
-                    self.nombre
-                ))
+                ErrorCarga::Validacion(format!("statement del paso '{}' inválido: {e}", self.name))
             })?),
             None => None,
         };
@@ -1858,12 +1881,9 @@ impl PasoYaml {
         // (fail-fast), igual que la precondición. Bool estricto al evaluar:
         // que sea booleana no se sabe hasta el runtime (tipos dinámicos), así
         // que un no-Bool es `error` de ejecución, no de carga.
-        let condicion = match self.condicion.as_deref() {
+        let condicion = match self.condition.as_deref() {
             Some(texto) => Some(expr::parse_expresion(extraer_expr(texto)).map_err(|e| {
-                ErrorCarga::Validacion(format!(
-                    "condición del paso '{}' inválida: {e}",
-                    self.nombre
-                ))
+                ErrorCarga::Validacion(format!("condición del paso '{}' inválida: {e}", self.name))
             })?),
             None => None,
         };
@@ -1873,29 +1893,29 @@ impl PasoYaml {
         // puro (`Expresion::Var { scope: Locals, .. }`). Que el `campo`
         // exista en `locals` de la secuencia contenedora se valida al
         // resolver el programa (ver `cargar_programa_de_archivo`).
-        // `parametros` sólo significa algo en un `grpc` (by-value, ADR-0020) o
-        // en un `sequence_call` (by-reference, ADR-0010). En los otros dos no
-        // quiere decir nada, y se rechaza **antes** de que ninguna de las dos
-        // ramas de abajo consuma el mapa: si no, un `statement` con
-        // `parametros` acabaría en el error de by-reference, que habla de
-        // lvalues y no le dice nada a quien escribió el YAML.
-        if matches!(tipo, TipoPaso::Statement | TipoPaso::PassFail) && self.parametros.is_some() {
+        // `inputs` es de un paso `grpc` (by-value, ADR-0020) y `args` de un
+        // `sequence_call` (by-reference, ADR-0010). Cada uno en el sitio que
+        // no le toca es un error de definición, no algo que ignorar: un paso
+        // que declara valores que nadie va a leer está mal escrito.
+        if !matches!(tipo, TipoPaso::Grpc) && self.inputs.is_some() {
             return Err(ErrorCarga::Validacion(format!(
-                "el paso '{}' es '{}' pero trae 'parametros' (son de 'grpc', by-value, o de \
-                 'sequence_call', by-reference)",
-                self.nombre, self.tipo
+                "el paso '{}' es '{}' pero trae 'inputs' (son los parámetros by-value de un \
+                 paso 'grpc'; para pasar variables a una subsecuencia es 'args')",
+                self.name, self.kind
+            )));
+        }
+        if !matches!(tipo, TipoPaso::SequenceCall) && self.args.is_some() {
+            return Err(ErrorCarga::Validacion(format!(
+                "el paso '{}' es '{}' pero trae 'args' (son los argumentos by-reference de un \
+                 'sequence_call'; para pasar valores a un paso es 'inputs')",
+                self.name, self.kind
             )));
         }
 
-        // ADR-0020: en un paso `grpc`, `parametros:` es otra cosa —valores
-        // by-value que viajan en la petición— y se resuelve aparte.
-        let entradas = if matches!(tipo, TipoPaso::Grpc) {
-            entradas_de_paso(&self.nombre, self.parametros.take())?
-        } else {
-            None
-        };
+        // ADR-0020: los parámetros by-value que viajan en la petición.
+        let entradas = entradas_de_paso(&self.name, self.inputs.take())?;
 
-        let parametros = match self.parametros.take() {
+        let parametros = match self.args.take() {
             Some(mapa) if !mapa.is_empty() => Some(
                 mapa.into_iter()
                     .map(|(param, valor)| {
@@ -1909,7 +1929,7 @@ impl PasoYaml {
                                 return Err(ErrorCarga::Validacion(format!(
                                     "el argumento '{param}' del sequence call '{}' es {}, y \
                                      by-reference sólo admite una variable local (locals.X)",
-                                    self.nombre,
+                                    self.name,
                                     describe_valor(&otro)
                                 )))
                             }
@@ -1917,7 +1937,7 @@ impl PasoYaml {
                         let origen = expr::parse_expresion(extraer_expr(&texto)).map_err(|e| {
                             ErrorCarga::Validacion(format!(
                                 "parámetro '{param}' del sequence call '{}': {e}",
-                                self.nombre
+                                self.name
                             ))
                         })?;
                         match &origen {
@@ -1929,7 +1949,7 @@ impl PasoYaml {
                                 return Err(ErrorCarga::Validacion(format!(
                                     "el argumento '{param}' del sequence call '{}' debe ser una \
                                      variable local (locals.X); by-reference no admite expresiones",
-                                    self.nombre
+                                    self.name
                                 )))
                             }
                         }
@@ -1944,58 +1964,58 @@ impl PasoYaml {
         if matches!(tipo, TipoPaso::Statement) && statement.is_none() {
             return Err(ErrorCarga::Validacion(format!(
                 "el paso '{}' es 'statement' pero no trae 'statement'",
-                self.nombre
+                self.name
             )));
         }
         if !matches!(tipo, TipoPaso::Statement) && statement.is_some() {
             return Err(ErrorCarga::Validacion(format!(
                 "el paso '{}' es '{}' pero trae 'statement' (reservado para 'statement')",
-                self.nombre, self.tipo
+                self.name, self.kind
             )));
         }
         // RF-25 (ADR-0018): un `pass_fail` es su condición; sin ella no hay
         // veredicto que dar.
         if matches!(tipo, TipoPaso::PassFail) && condicion.is_none() {
             return Err(ErrorCarga::Validacion(format!(
-                "el paso '{}' es 'pass_fail' pero no trae 'condicion'",
-                self.nombre
+                "el paso '{}' es 'pass_fail' pero no trae 'condition'",
+                self.name
             )));
         }
         if !matches!(tipo, TipoPaso::PassFail) && condicion.is_some() {
             return Err(ErrorCarga::Validacion(format!(
-                "el paso '{}' es '{}' pero trae 'condicion' (reservado para 'pass_fail')",
-                self.nombre, self.tipo
+                "el paso '{}' es '{}' pero trae 'condition' (reservado para 'pass_fail')",
+                self.name, self.kind
             )));
         }
-        if matches!(tipo, TipoPaso::SequenceCall) && self.secuencia.is_none() {
+        if matches!(tipo, TipoPaso::SequenceCall) && self.sequence.is_none() {
             return Err(ErrorCarga::Validacion(format!(
-                "el paso '{}' es 'sequence_call' pero no trae 'secuencia'",
-                self.nombre
+                "el paso '{}' es 'sequence_call' pero no trae 'sequence'",
+                self.name
             )));
         }
         // Ni un sequence call ni un pass_fail miden: el primero agrega los
         // resultados de sus pasos, el segundo evalúa variables ya pobladas.
         if matches!(tipo, TipoPaso::SequenceCall | TipoPaso::PassFail) && limite.is_some() {
             return Err(ErrorCarga::Validacion(format!(
-                "el paso '{}' es '{}' y trae 'limite': no mide",
-                self.nombre, self.tipo
+                "el paso '{}' es '{}' y trae 'limit': no mide",
+                self.name, self.kind
             )));
         }
-        if matches!(tipo, TipoPaso::SequenceCall) && self.reintentos > 1 {
+        if matches!(tipo, TipoPaso::SequenceCall) && self.retries > 1 {
             return Err(ErrorCarga::Validacion(format!(
                 "el paso '{}' es 'sequence_call' con reintentos={}: no admite reintentos \
                  (sus pasos internos declaran los suyos)",
-                self.nombre, self.reintentos
+                self.name, self.retries
             )));
         }
         // Un `pass_fail` es puro y determinista (el motor evalúa una
         // expresión, sin red): reintentarlo daría el mismo veredicto. Se
         // rechaza en vez de aceptarlo e ignorarlo en silencio.
-        if matches!(tipo, TipoPaso::PassFail) && self.reintentos > 1 {
+        if matches!(tipo, TipoPaso::PassFail) && self.retries > 1 {
             return Err(ErrorCarga::Validacion(format!(
                 "el paso '{}' es 'pass_fail' con reintentos={}: no admite reintentos \
                  (evalúa una expresión, el resultado no cambia entre intentos)",
-                self.nombre, self.reintentos
+                self.name, self.retries
             )));
         }
         // Un `pass_fail` no produce `resultado.*`, así que su `asigna` no
@@ -2003,9 +2023,9 @@ impl PasoYaml {
         // aplica es la clase de fallo silencioso de DEF-3.
         if matches!(tipo, TipoPaso::PassFail) && asigna.is_some() {
             return Err(ErrorCarga::Validacion(format!(
-                "el paso '{}' es 'pass_fail' y trae 'asigna': un pass_fail no produce \
-                 'resultado.*' que volcar (usa un paso 'statement' aparte)",
-                self.nombre
+                "el paso '{}' es 'pass_fail' y trae 'assign': un pass_fail no produce \
+                 'result.*' que volcar (usa un paso 'statement' aparte)",
+                self.name
             )));
         }
         // Lo mismo para un `statement`, por el mismo motivo (ADR-0019, regla de
@@ -2014,17 +2034,17 @@ impl PasoYaml {
         // (`pass_fail`) llevaba resuelto desde ADR-0018; éste se quedó fuera.
         if matches!(tipo, TipoPaso::Statement) && asigna.is_some() {
             return Err(ErrorCarga::Validacion(format!(
-                "el paso '{}' es 'statement' y trae 'asigna': un statement no produce \
-                 'resultado.*' que volcar (asigna dentro del propio 'statement': \
+                "el paso '{}' es 'statement' y trae 'assign': un statement no produce \
+                 'result.*' que volcar (asigna dentro del propio 'statement': \
                  'locals.x = …')",
-                self.nombre
+                self.name
             )));
         }
         // Un `sequence_call` sí produce `resultado.*` — pero sólo dos tercios
         // de él. `ejecuta_sequence_call` (motor/src/lib.rs) rellena `estado`
         // (el agregado de la subsecuencia) y `mensaje`, y **nunca**
         // `valor_medido`: una subsecuencia no mide, agrega. Así que
-        // `asigna: {v: '${resultado.valor_medido}'}` volcaba `nothing` encima
+        // `assign: {v: '${result.measured_value}'}` volcaba `nothing` encima
         // del destino y lo destruía, sin una palabra — el mismo fallo
         // silencioso que ADR-0019 arregló para los campos inexistentes
         // (issue #27), sólo que aquí el campo existe y lo que falta es el
@@ -2033,15 +2053,15 @@ impl PasoYaml {
         if matches!(tipo, TipoPaso::SequenceCall) {
             if let Some(asignaciones) = &asigna {
                 for a in asignaciones {
-                    if primer_uso_de_resultado_si(&a.expr, &|c| c == "valor_medido").is_some() {
+                    if primer_uso_de_resultado_si(&a.expr, &|c| c == "measured_value").is_some() {
                         return Err(ErrorCarga::Validacion(format!(
                             "el paso '{}' es 'sequence_call' y asigna a '{}' desde \
-                             'resultado.valor_medido': una subsecuencia no mide, agrega \
+                             'result.measured_value': una subsecuencia no mide, agrega \
                              el veredicto de sus pasos, así que ese campo vale siempre \
-                             'nothing' y borraría '{}' sin avisar. De 'resultado' de un \
-                             sequence call hay 'estado' y 'mensaje'; para devolver un \
-                             valor medido, pásalo por 'parameters' (by-reference)",
-                            self.nombre, a.var, a.var
+                             'nothing' y borraría '{}' sin avisar. De 'result' de un \
+                             sequence call hay 'status' y 'message'; para devolver un \
+                             valor medido, pásalo por 'args' (by-reference)",
+                            self.name, a.var, a.var
                         )));
                     }
                 }
@@ -2051,24 +2071,24 @@ impl PasoYaml {
         // no: en un paso `grpc` son los parámetros by-value del ADR-0020, y
         // se han recogido antes en `entradas`. En `statement` y `pass_fail`
         // no significa nada, y se sigue rechazando.
-        if !matches!(tipo, TipoPaso::SequenceCall) && self.secuencia.is_some() {
+        if !matches!(tipo, TipoPaso::SequenceCall) && self.sequence.is_some() {
             return Err(ErrorCarga::Validacion(format!(
-                "el paso '{}' es '{}' pero trae 'secuencia' (reservado para 'sequence_call')",
-                self.nombre, self.tipo
+                "el paso '{}' es '{}' pero trae 'sequence' (reservado para 'sequence_call')",
+                self.name, self.kind
             )));
         }
         // M5-ext.1 (RF-36.3): `ejecutor` sólo aplica a un paso `Grpc` (los
         // `statement`/`sequence_call` son motor-side y no van por gRPC).
-        if !matches!(tipo, TipoPaso::Grpc) && self.ejecutor.is_some() {
+        if !matches!(tipo, TipoPaso::Grpc) && self.executor.is_some() {
             return Err(ErrorCarga::Validacion(format!(
-                "el paso '{}' es '{}' pero trae 'ejecutor' (reservado para 'grpc')",
-                self.nombre, self.tipo
+                "el paso '{}' es '{}' pero trae 'executor' (reservado para 'grpc')",
+                self.name, self.kind
             )));
         }
 
         Ok(DefinicionPaso {
-            nombre: self.nombre,
-            reintentos: self.reintentos,
+            nombre: self.name,
+            reintentos: self.retries,
             limite,
             disable: self.disable,
             pause_on_fail: self.pause_on_fail,
@@ -2077,10 +2097,10 @@ impl PasoYaml {
             tipo,
             statement,
             condicion,
-            secuencia: self.secuencia,
+            secuencia: self.sequence,
             parametros,
             entradas,
-            ejecutor: self.ejecutor,
+            ejecutor: self.executor,
         })
     }
 }
@@ -2106,13 +2126,18 @@ const SCOPES: [&str; 3] = ["locals.", "file_globals.", "parameters."];
 /// Cada valor es un literal —y su tipo es el del escalar YAML— o una
 /// expresión `${...}` que evalúa el motor antes de llamar.
 ///
-/// **La red de seguridad.** `parametros:` significa otra cosa en un
-/// `sequence_call`: allí `{ canal: locals.canal }` es una referencia a la
-/// variable. Aquí sería el texto literal `"locals.canal"`, y el paso mediría
-/// con una cadena en vez de con el número. Copiar un bloque de un sitio al
-/// otro no puede cambiar el significado en silencio (es lo que ADR-0019
-/// combate), así que ese caso concreto **no se traga**: es error de carga y el
-/// mensaje dice cuál es la forma correcta.
+/// **La red de seguridad.** `{ channel: locals.channel }` viajaría como el
+/// texto literal `"locals.channel"`, y el paso mediría con una cadena en vez
+/// de con el número. Es un error silencioso —el YAML carga, el paso corre, la
+/// medida es otra— así que no se traga: es error de carga y el mensaje dice
+/// cuál es la forma correcta.
+///
+/// Antes esto tapaba además una trampa peor: `parametros` se llamaba igual en
+/// un `sequence_call`, donde sí es by-reference, y copiar un bloque cambiaba
+/// el significado. Eso lo arregla ahora el schema —`inputs` y `args` son
+/// campos distintos y `deny_unknown_fields` rechaza el cruce— pero la
+/// comprobación se queda: escribir el nombre de una variable sin `${}` sigue
+/// siendo un error plausible por sí solo.
 ///
 /// Se devuelve ordenado por nombre: el orden del cable tiene que ser
 /// determinista para que dos corridas iguales produzcan bytes iguales.
@@ -2142,9 +2167,7 @@ fn entradas_de_paso(
                     return Err(ErrorCarga::Validacion(format!(
                         "el parámetro '{nombre}' del paso '{paso}' vale '{t}', que viajaría \
                          como el texto literal \"{t}\" y no como el valor de esa variable. \
-                         Si querías la variable, escríbela como '${{{t}}}'. (En un \
-                         'sequence_call' 'parametros' sí es by-reference y '{t}' sería la \
-                         referencia; en un paso 'grpc' los parámetros van by-value.)"
+                         Si querías la variable, escríbela como '${{{t}}}'."
                     )));
                 } else {
                     EntradaPaso::Literal(ValorDefinicion::Texto(t.clone()))
@@ -2159,7 +2182,7 @@ fn entradas_de_paso(
 
 /// Si `texto` es de la forma `${expr}` (toda la cadena), devuelve `expr`;
 /// si no, devuelve `texto` tal cual. Así `asigna` admite las dos formas
-/// `x: resultado.valor_medido` y `x: "${resultado.valor_medido}"`. La
+/// `x: result.measured_value` y `x: "${result.measured_value}"`. La
 /// interpolación parcial (`"V=${...}"`) se rechaza: post-MVP.
 fn extraer_expr(texto: &str) -> &str {
     let s = texto.trim();
@@ -2179,22 +2202,22 @@ mod tests {
 
     fn basica_yaml() -> &'static str {
         "\
-nombre: basica
+name: basica
 setup:
-  - nombre: conectar_equipo
-    reintentos: 3
+  - name: conectar_equipo
+    retries: 3
 main:
-  - nombre: medir_voltaje
-    reintentos: 1
-    limite:
-      tipo: rango
+  - name: medir_voltaje
+    retries: 1
+    limit:
+      type: range
       min: 4.5
       max: 5.5
-  - nombre: verificar_led
-    reintentos: 1
+  - name: verificar_led
+    retries: 1
 cleanup:
-  - nombre: desconectar_equipo
-    reintentos: 1
+  - name: desconectar_equipo
+    retries: 1
 "
     }
 
@@ -2232,9 +2255,9 @@ cleanup:
     #[test]
     fn reintentos_omitido_es_1() {
         let yaml = "\
-nombre: s
+name: s
 main:
-  - nombre: un_paso
+  - name: un_paso
 ";
         let s = cargar_de_texto(yaml).unwrap();
         assert_eq!(s.pasos_main[0].reintentos, 1);
@@ -2243,9 +2266,9 @@ main:
     #[test]
     fn setup_y_cleanup_son_opcionales() {
         let yaml = "\
-nombre: s
+name: s
 main:
-  - nombre: un_paso
+  - name: un_paso
 ";
         let s = cargar_de_texto(yaml).unwrap();
         assert!(s.pasos_setup.is_empty());
@@ -2254,7 +2277,7 @@ main:
 
     #[test]
     fn main_ausente_es_error() {
-        let yaml = "nombre: s\n";
+        let yaml = "name: s\n";
         let err = cargar_de_texto(yaml).unwrap_err();
         assert!(
             matches!(&err, ErrorCarga::Sintaxis(_)),
@@ -2264,7 +2287,7 @@ main:
 
     #[test]
     fn main_vacio_es_error_de_validacion() {
-        let yaml = "nombre: s\nmain: []\n";
+        let yaml = "name: s\nmain: []\n";
         let err = cargar_de_texto(yaml).unwrap_err();
         assert!(matches!(&err, ErrorCarga::Validacion(ref m) if m.contains("main")));
     }
@@ -2272,24 +2295,24 @@ main:
     #[test]
     fn nombre_vacio_es_error() {
         let yaml = "\
-nombre: ''
+name: ''
 main:
-  - nombre: un_paso
+  - name: un_paso
 ";
         let err = cargar_de_texto(yaml).unwrap_err();
-        assert!(matches!(&err, ErrorCarga::Validacion(ref m) if m.contains("nombre")));
+        assert!(matches!(&err, ErrorCarga::Validacion(ref m) if m.contains("name")));
     }
 
     #[test]
     fn reintentos_cero_es_error() {
         let yaml = "\
-nombre: s
+name: s
 main:
-  - nombre: un_paso
-    reintentos: 0
+  - name: un_paso
+    retries: 0
 ";
         let err = cargar_de_texto(yaml).unwrap_err();
-        assert!(matches!(&err, ErrorCarga::Validacion(ref m) if m.contains("reintentos")));
+        assert!(matches!(&err, ErrorCarga::Validacion(ref m) if m.contains("retries")));
     }
 
     #[test]
@@ -2300,9 +2323,9 @@ main:
         // realmente desconocido (`foo`) para seguir probando
         // `deny_unknown_fields` (fail-fast).
         let yaml = "\
-nombre: s
+name: s
 main:
-  - nombre: un_paso
+  - name: un_paso
     foo: bar
 ";
         let err = cargar_de_texto(yaml).unwrap_err();
@@ -2320,20 +2343,20 @@ main:
     #[test]
     fn sequence_call_inline_se_carga_y_resuelve() {
         let yaml = "\
-nombre: padre
+name: padre
 locals: { ok: false }
-subsecuencias:
+subsequences:
   init:
     parameters: { canal: 0.0, listo: false }
     main:
-      - nombre: comprobar
-        tipo: statement
+      - name: comprobar
+        type: statement
         statement: 'parameters.listo = (parameters.canal >= 0.0)'
 main:
-  - nombre: preparar
-    tipo: sequence_call
-    secuencia: init
-    parametros: { canal: locals.ok, listo: locals.ok }
+  - name: preparar
+    type: sequence_call
+    sequence: init
+    args: { canal: locals.ok, listo: locals.ok }
 ";
         let s = cargar_de_texto(yaml).unwrap();
         assert_eq!(s.subsecuencias.len(), 1);
@@ -2349,12 +2372,12 @@ main:
     #[test]
     fn argumento_que_no_es_locals_x_es_error() {
         let yaml = "\
-nombre: s
+name: s
 main:
-  - nombre: c
-    tipo: sequence_call
-    secuencia: ./h.yaml
-    parametros: { p: file_globals.g }
+  - name: c
+    type: sequence_call
+    sequence: ./h.yaml
+    args: { p: file_globals.g }
 ";
         let err = cargar_de_texto(yaml).unwrap_err();
         assert!(matches!(&err, ErrorCarga::Validacion(m) if m.contains("locals.X")));
@@ -2363,12 +2386,12 @@ main:
     #[test]
     fn argumento_expresion_no_es_lvalue_es_error() {
         let yaml = "\
-nombre: s
+name: s
 main:
-  - nombre: c
-    tipo: sequence_call
-    secuencia: ./h.yaml
-    parametros: { p: 'locals.x + 1' }
+  - name: c
+    type: sequence_call
+    sequence: ./h.yaml
+    args: { p: 'locals.x + 1' }
 ";
         let err = cargar_de_texto(yaml).unwrap_err();
         assert!(matches!(&err, ErrorCarga::Validacion(m) if m.contains("by-reference")));
@@ -2379,10 +2402,10 @@ main:
     #[test]
     fn sequence_call_mal_usado_es_error() {
         let casos = [
-            ("nombre: s\nmain:\n  - nombre: c\n    tipo: sequence_call\n", "no trae 'secuencia'"),
-            ("nombre: s\nmain:\n  - nombre: c\n    tipo: sequence_call\n    secuencia: x\n    limite: { tipo: rango, min: 1, max: 2 }\n", "no mide"),
-            ("nombre: s\nmain:\n  - nombre: c\n    tipo: sequence_call\n    secuencia: x\n    reintentos: 2\n", "no admite reintentos"),
-            ("nombre: s\nmain:\n  - nombre: c\n    tipo: sequence_call\n    secuencia: x\n    statement: 'locals.y = 1'\n", "reservado para 'statement'"),
+            ("name: s\nmain:\n  - name: c\n    type: sequence_call\n", "no trae 'sequence'"),
+            ("name: s\nmain:\n  - name: c\n    type: sequence_call\n    sequence: x\n    limit: { type: range, min: 1, max: 2 }\n", "no mide"),
+            ("name: s\nmain:\n  - name: c\n    type: sequence_call\n    sequence: x\n    retries: 2\n", "no admite reintentos"),
+            ("name: s\nmain:\n  - name: c\n    type: sequence_call\n    sequence: x\n    statement: 'locals.y = 1'\n", "reservado para 'statement'"),
         ];
         for (yaml, frag) in casos {
             let err = cargar_de_texto(yaml).unwrap_err();
@@ -2397,13 +2420,13 @@ main:
     #[test]
     fn pass_fail_se_parsea_a_condicion() {
         let yaml = "\
-nombre: s
+name: s
 locals:
   v: 0.0
 main:
-  - nombre: verificar_dut
-    tipo: pass_fail
-    condicion: 'locals.v > 4.9 && locals.v < 5.1'
+  - name: verificar_dut
+    type: pass_fail
+    condition: 'locals.v > 4.9 && locals.v < 5.1'
 ";
         let s = cargar_de_texto(yaml).unwrap();
         let p = &s.pasos_main[0];
@@ -2416,13 +2439,13 @@ main:
     #[test]
     fn pass_fail_admite_la_forma_interpolada() {
         let yaml = "\
-nombre: s
+name: s
 locals:
   v: 0.0
 main:
-  - nombre: verificar_dut
-    tipo: pass_fail
-    condicion: '${locals.v > 4.9}'
+  - name: verificar_dut
+    type: pass_fail
+    condition: '${locals.v > 4.9}'
 ";
         assert!(cargar_de_texto(yaml).is_ok());
     }
@@ -2433,31 +2456,31 @@ main:
     fn pass_fail_mal_usado_es_error() {
         let casos = [
             (
-                "nombre: s\nmain:\n  - nombre: v\n    tipo: pass_fail\n",
-                "no trae 'condicion'",
+                "name: s\nmain:\n  - name: v\n    type: pass_fail\n",
+                "no trae 'condition'",
             ),
             (
-                "nombre: s\nmain:\n  - nombre: v\n    condicion: 'true'\n",
+                "name: s\nmain:\n  - name: v\n    condition: 'true'\n",
                 "reservado para 'pass_fail'",
             ),
             (
-                "nombre: s\nmain:\n  - nombre: v\n    tipo: statement\n    statement: 'locals.x = 1'\n    condicion: 'true'\n",
+                "name: s\nmain:\n  - name: v\n    type: statement\n    statement: 'locals.x = 1'\n    condition: 'true'\n",
                 "reservado para 'pass_fail'",
             ),
             (
-                "nombre: s\nmain:\n  - nombre: v\n    tipo: pass_fail\n    condicion: 'true'\n    limite: { tipo: rango, min: 1, max: 2 }\n",
+                "name: s\nmain:\n  - name: v\n    type: pass_fail\n    condition: 'true'\n    limit: { type: range, min: 1, max: 2 }\n",
                 "no mide",
             ),
             (
-                "nombre: s\nmain:\n  - nombre: v\n    tipo: pass_fail\n    condicion: 'true'\n    reintentos: 2\n",
+                "name: s\nmain:\n  - name: v\n    type: pass_fail\n    condition: 'true'\n    retries: 2\n",
                 "no admite reintentos",
             ),
             (
-                "nombre: s\nlocals:\n  x: 0.0\nmain:\n  - nombre: v\n    tipo: pass_fail\n    condicion: 'true'\n    asigna: { x: '1.0' }\n",
-                "no produce 'resultado.*'",
+                "name: s\nlocals:\n  x: 0.0\nmain:\n  - name: v\n    type: pass_fail\n    condition: 'true'\n    assign: { x: '1.0' }\n",
+                "no produce 'result.*'",
             ),
             (
-                "nombre: s\nmain:\n  - nombre: v\n    tipo: pass_fail\n    condicion: 'locals.v >'\n",
+                "name: s\nmain:\n  - name: v\n    type: pass_fail\n    condition: 'locals.v >'\n",
                 "condición del paso",
             ),
         ];
@@ -2474,10 +2497,10 @@ main:
     #[test]
     fn grpc_no_admite_secuencia_ni_parametros() {
         let yaml = "\
-nombre: s
+name: s
 main:
-  - nombre: c
-    secuencia: ./h.yaml
+  - name: c
+    sequence: ./h.yaml
 ";
         let err = cargar_de_texto(yaml).unwrap_err();
         assert!(
@@ -2490,12 +2513,12 @@ main:
     #[test]
     fn inline_sin_main_es_error() {
         let yaml = "\
-nombre: s
-subsecuencias:
+name: s
+subsequences:
   init:
-    nombre: init
+    name: init
 main:
-  - nombre: p
+  - name: p
 ";
         let err = cargar_de_texto(yaml).unwrap_err();
         assert!(
@@ -2508,13 +2531,13 @@ main:
     #[test]
     fn inline_hereda_nombre_de_la_clave() {
         let yaml = "\
-nombre: s
-subsecuencias:
+name: s
+subsequences:
   init:
     main:
-      - nombre: p
+      - name: p
 main:
-  - nombre: m
+  - name: m
 ";
         let s = cargar_de_texto(yaml).unwrap();
         assert_eq!(s.subsecuencias.get("init").unwrap().nombre, "init");
@@ -2525,21 +2548,21 @@ main:
     #[test]
     fn inline_con_campo_desconocido_es_error() {
         let yaml = "\
-nombre: s
-subsecuencias:
+name: s
+subsequences:
   init:
-    nombre: init
+    name: init
     main:
-      - nombre: p
+      - name: p
     foo: bar
 main:
-  - nombre: p
+  - name: p
 ";
         let err = cargar_de_texto(yaml).unwrap_err();
         // DIAG-5: en un fichero con varias inline, saber en cuál está es la
         // diferencia entre arreglarlo y buscarlo a ojo.
         assert!(
-            matches!(&err, ErrorCarga::Diagnostico(m) if m.contains("subsecuencias.init")),
+            matches!(&err, ErrorCarga::Diagnostico(m) if m.contains("subsequences.init")),
             "{err}"
         );
     }
@@ -2554,13 +2577,13 @@ main:
         let hija = dir.join("hija.yaml");
         std::fs::write(
             &hija,
-            "nombre: hija\nparameters: { canal: 0.0 }\nmain:\n  - nombre: m\n    tipo: grpc\n",
+            "name: hija\nparameters: { canal: 0.0 }\nmain:\n  - name: m\n    type: grpc\n",
         )
         .unwrap();
         let padre = dir.join("padre.yaml");
         std::fs::write(
             &padre,
-            "nombre: padre\nlocals: { canal: 1.0 }\nmain:\n  - nombre: c\n    tipo: sequence_call\n    secuencia: ./hija.yaml\n    parametros: { canal: locals.canal }\n",
+            "name: padre\nlocals: { canal: 1.0 }\nmain:\n  - name: c\n    type: sequence_call\n    sequence: ./hija.yaml\n    args: { canal: locals.canal }\n",
         )
         .unwrap();
 
@@ -2585,12 +2608,12 @@ main:
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(
             dir.join("a.yaml"),
-            "nombre: a\nmain:\n  - nombre: c\n    tipo: sequence_call\n    secuencia: ./b.yaml\n",
+            "name: a\nmain:\n  - name: c\n    type: sequence_call\n    sequence: ./b.yaml\n",
         )
         .unwrap();
         std::fs::write(
             dir.join("b.yaml"),
-            "nombre: b\nmain:\n  - nombre: c\n    tipo: sequence_call\n    secuencia: ./a.yaml\n",
+            "name: b\nmain:\n  - name: c\n    type: sequence_call\n    sequence: ./a.yaml\n",
         )
         .unwrap();
         let err = cargar_programa_de_archivo(dir.join("a.yaml").to_str().unwrap()).unwrap_err();
@@ -2604,10 +2627,10 @@ main:
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(
             dir.join("h.yaml"),
-            "nombre: h\nparameters: { canal: 0.0, extra: 0.0 }\nmain:\n  - nombre: m\n",
+            "name: h\nparameters: { canal: 0.0, extra: 0.0 }\nmain:\n  - name: m\n",
         )
         .unwrap();
-        std::fs::write(dir.join("p.yaml"), "nombre: p\nlocals: { canal: 1.0 }\nmain:\n  - nombre: c\n    tipo: sequence_call\n    secuencia: ./h.yaml\n    parametros: { canal: locals.canal }\n").unwrap();
+        std::fs::write(dir.join("p.yaml"), "name: p\nlocals: { canal: 1.0 }\nmain:\n  - name: c\n    type: sequence_call\n    sequence: ./h.yaml\n    args: { canal: locals.canal }\n").unwrap();
         let err = cargar_programa_de_archivo(dir.join("p.yaml").to_str().unwrap()).unwrap_err();
         assert!(matches!(&err, ErrorCarga::Validacion(m) if m.contains("firma")));
     }
@@ -2619,10 +2642,10 @@ main:
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(
             dir.join("h.yaml"),
-            "nombre: h\nparameters: { canal: 0.0 }\nmain:\n  - nombre: m\n",
+            "name: h\nparameters: { canal: 0.0 }\nmain:\n  - name: m\n",
         )
         .unwrap();
-        std::fs::write(dir.join("p.yaml"), "nombre: p\nmain:\n  - nombre: c\n    tipo: sequence_call\n    secuencia: ./h.yaml\n    parametros: { canal: locals.inventado }\n").unwrap();
+        std::fs::write(dir.join("p.yaml"), "name: p\nmain:\n  - name: c\n    type: sequence_call\n    sequence: ./h.yaml\n    args: { canal: locals.inventado }\n").unwrap();
         let err = cargar_programa_de_archivo(dir.join("p.yaml").to_str().unwrap()).unwrap_err();
         assert!(matches!(&err, ErrorCarga::Validacion(m) if m.contains("locals.inventado")));
     }
@@ -2632,7 +2655,7 @@ main:
     fn programa_path_no_encontrado_es_error() {
         let dir = std::env::temp_dir().join(format!("anvil_m4b_{}", "nofile"));
         std::fs::create_dir_all(&dir).unwrap();
-        std::fs::write(dir.join("p.yaml"), "nombre: p\nmain:\n  - nombre: c\n    tipo: sequence_call\n    secuencia: ./no_existe.yaml\n").unwrap();
+        std::fs::write(dir.join("p.yaml"), "name: p\nmain:\n  - name: c\n    type: sequence_call\n    sequence: ./no_existe.yaml\n").unwrap();
         let err = cargar_programa_de_archivo(dir.join("p.yaml").to_str().unwrap()).unwrap_err();
         assert!(matches!(&err, ErrorCarga::Lectura(_)));
     }
@@ -2663,11 +2686,11 @@ main:
     #[test]
     fn limite_rango_embebido_se_carga() {
         let yaml = "\
-nombre: s
+name: s
 main:
-  - nombre: medir_voltaje
-    limite:
-      tipo: rango
+  - name: medir_voltaje
+    limit:
+      type: range
       min: 4.5
       max: 5.5
 ";
@@ -2681,13 +2704,13 @@ main:
     #[test]
     fn limite_comparacion_embebido_se_carga() {
         let yaml = "\
-nombre: s
+name: s
 main:
-  - nombre: verificar_frecuencia
-    limite:
-      tipo: comparacion
+  - name: verificar_frecuencia
+    limit:
+      type: comparison
       op: ge
-      esperado: 1000.0
+      expected: 1000.0
 ";
         let s = cargar_de_texto(yaml).unwrap();
         assert_eq!(
@@ -2702,11 +2725,11 @@ main:
     #[test]
     fn limite_rango_sin_min_es_error_de_validacion() {
         let yaml = "\
-nombre: s
+name: s
 main:
-  - nombre: m
-    limite:
-      tipo: rango
+  - name: m
+    limit:
+      type: range
       max: 5.5
 ";
         let err = cargar_de_texto(yaml).unwrap_err();
@@ -2719,11 +2742,11 @@ main:
     #[test]
     fn limite_rango_min_mayor_que_max_es_error() {
         let yaml = "\
-nombre: s
+name: s
 main:
-  - nombre: m
-    limite:
-      tipo: rango
+  - name: m
+    limit:
+      type: range
       min: 6.0
       max: 5.5
 ";
@@ -2737,13 +2760,13 @@ main:
     #[test]
     fn limite_comparacion_op_invalido_es_error() {
         let yaml = "\
-nombre: s
+name: s
 main:
-  - nombre: m
-    limite:
-      tipo: comparacion
+  - name: m
+    limit:
+      type: comparison
       op: mayor_que
-      esperado: 1000.0
+      expected: 1000.0
 ";
         let err = cargar_de_texto(yaml).unwrap_err();
         assert!(
@@ -2756,11 +2779,11 @@ main:
     fn limite_rango_con_campos_de_comparacion_es_error() {
         // fail-fast: un rango no admite op/esperado.
         let yaml = "\
-nombre: s
+name: s
 main:
-  - nombre: m
-    limite:
-      tipo: rango
+  - name: m
+    limit:
+      type: range
       min: 4.5
       max: 5.5
       op: ge
@@ -2775,17 +2798,17 @@ main:
     #[test]
     fn limite_tipo_desconocido_es_error() {
         let yaml = "\
-nombre: s
+name: s
 main:
-  - nombre: m
-    limite:
-      tipo: ventana
+  - name: m
+    limit:
+      type: ventana
       min: 4.5
       max: 5.5
 ";
         let err = cargar_de_texto(yaml).unwrap_err();
         assert!(
-            matches!(&err, ErrorCarga::Validacion(ref m) if m.contains("tipo")),
+            matches!(&err, ErrorCarga::Validacion(ref m) if m.contains("type")),
             "{err}"
         );
     }
@@ -2794,18 +2817,18 @@ main:
     fn limite_campo_desconocido_dentro_del_limite_es_error() {
         // deny_unknown_fields en LimiteYaml: un campo raro dentro del límite.
         let yaml = "\
-nombre: s
+name: s
 main:
-  - nombre: m
-    limite:
-      tipo: rango
+  - name: m
+    limit:
+      type: range
       min: 4.5
       max: 5.5
       tolerancia: 0.1
 ";
         let err = cargar_de_texto(yaml).unwrap_err();
         assert!(
-            matches!(&err, ErrorCarga::Diagnostico(m) if m.contains("main[0].limite")),
+            matches!(&err, ErrorCarga::Diagnostico(m) if m.contains("main[0].limit")),
             "{err}"
         );
     }
@@ -2835,11 +2858,11 @@ main:
     fn property_loader_sobreescribe_el_limite_embebido() {
         // El sidecar manda sobre el límite embebido (variabilidad por lote).
         let yaml = "\
-nombre: s
+name: s
 main:
-  - nombre: medir_voltaje
-    limite:
-      tipo: rango
+  - name: medir_voltaje
+    limit:
+      type: range
       min: 4.5
       max: 5.5
 ";
@@ -2910,13 +2933,13 @@ main:
         let pm = dir.join("pm.yaml");
         std::fs::write(
             &pm,
-            "nombre: pm\nmain:\n  - nombre: test_uut\n    tipo: sequence_call\n    secuencia: secuencia_usuario\n",
+            "name: pm\nmain:\n  - name: test_uut\n    type: sequence_call\n    sequence: secuencia_usuario\n",
         )
         .unwrap();
         let usuario = dir.join("usuario.yaml");
         std::fs::write(
             &usuario,
-            "nombre: usuario\nmain:\n  - nombre: medir_voltaje\n    tipo: grpc\n",
+            "name: usuario\nmain:\n  - name: medir_voltaje\n    type: grpc\n",
         )
         .unwrap();
 
@@ -2958,13 +2981,13 @@ main:
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(
             dir.join("hija.yaml"),
-            "nombre: hija\nmain:\n  - nombre: medir_voltaje\n    tipo: grpc\n",
+            "name: hija\nmain:\n  - name: medir_voltaje\n    type: grpc\n",
         )
         .unwrap();
         let padre = dir.join("padre.yaml");
         std::fs::write(
             &padre,
-            "nombre: padre\nsubsecuencias:\n  inline:\n    nombre: inline\n    main:\n      - nombre: medir_voltaje\n        tipo: grpc\nmain:\n  - nombre: medir_voltaje\n    tipo: grpc\n  - nombre: c1\n    tipo: sequence_call\n    secuencia: ./hija.yaml\n  - nombre: c2\n    tipo: sequence_call\n    secuencia: inline\n",
+            "name: padre\nsubsequences:\n  inline:\n    name: inline\n    main:\n      - name: medir_voltaje\n        type: grpc\nmain:\n  - name: medir_voltaje\n    type: grpc\n  - name: c1\n    type: sequence_call\n    sequence: ./hija.yaml\n  - name: c2\n    type: sequence_call\n    sequence: inline\n",
         )
         .unwrap();
 
@@ -2988,7 +3011,7 @@ main:
         };
         prog.archivos.insert(
             "hija.yaml".to_string(),
-            cargar_de_texto("nombre: hija\nmain:\n  - nombre: solo_en_la_hija\n    tipo: grpc\n")
+            cargar_de_texto("name: hija\nmain:\n  - name: solo_en_la_hija\n    type: grpc\n")
                 .unwrap(),
         );
         let rango = Limite::Rango { min: 0.0, max: 1.0 };
@@ -3009,7 +3032,7 @@ main:
     /// herramienta, y el campo correcto está a una palabra de distancia.
     #[test]
     fn steps_sugiere_main() {
-        let err = cargar_de_texto("nombre: s\nsteps:\n  - nombre: p\n").unwrap_err();
+        let err = cargar_de_texto("name: s\nsteps:\n  - name: p\n").unwrap_err();
         let msg = err.to_string();
         assert!(msg.contains("campo desconocido 'steps'"), "{msg}");
         assert!(msg.contains("la raíz"), "{msg}");
@@ -3019,33 +3042,33 @@ main:
     #[test]
     fn steps_en_una_inline_ubica_la_inline_y_sugiere() {
         let yaml = "\
-nombre: s
-subsecuencias:
+name: s
+subsequences:
   interna:
     steps:
-      - nombre: p
+      - name: p
 main:
-  - nombre: p
+  - name: p
 ";
         let msg = cargar_de_texto(yaml).unwrap_err().to_string();
-        assert!(msg.contains("subsecuencias.interna"), "{msg}");
+        assert!(msg.contains("subsequences.interna"), "{msg}");
         assert!(msg.contains("¿querías 'main'?"), "{msg}");
     }
 
     /// Una errata sin alias se resuelve por parecido.
     #[test]
     fn errata_sugiere_el_campo_parecido() {
-        let msg = cargar_de_texto("nombre: s\nmain:\n  - nombre: p\n    reintento: 2\n")
+        let msg = cargar_de_texto("name: s\nmain:\n  - name: p\n    retrie: 2\n")
             .unwrap_err()
             .to_string();
-        assert!(msg.contains("¿querías 'reintentos'?"), "{msg}");
+        assert!(msg.contains("¿querías 'retries'?"), "{msg}");
     }
 
     /// Y un campo que no se parece a nada no recibe una sugerencia inventada:
     /// desorienta más que callarse.
     #[test]
     fn campo_sin_parecido_no_sugiere_nada() {
-        let msg = cargar_de_texto("nombre: s\nmain:\n  - nombre: p\n    zumbido: 2\n")
+        let msg = cargar_de_texto("name: s\nmain:\n  - name: p\n    zumbido: 2\n")
             .unwrap_err()
             .to_string();
         assert!(msg.contains("campo desconocido 'zumbido'"), "{msg}");
@@ -3056,18 +3079,18 @@ main:
     #[test]
     fn campo_repetido_lista_todas_las_ubicaciones() {
         let yaml = "\
-nombre: s
-subsecuencias:
+name: s
+subsequences:
   a:
     steps: []
   b:
     steps: []
 main:
-  - nombre: p
+  - name: p
 ";
         let msg = cargar_de_texto(yaml).unwrap_err().to_string();
-        assert!(msg.contains("subsecuencias.a"), "{msg}");
-        assert!(msg.contains("subsecuencias.b"), "{msg}");
+        assert!(msg.contains("subsequences.a"), "{msg}");
+        assert!(msg.contains("subsequences.b"), "{msg}");
     }
 
     #[test]
@@ -3139,13 +3162,13 @@ main:
         // Versión sin disco de cargar_limites_de_archivo para testear directo.
         let texto = "\
 medir_voltaje:
-  tipo: rango
+  type: range
   min: 4.5
   max: 5.5
 verificar_frecuencia:
-  tipo: comparacion
+  type: comparison
   op: ge
-  esperado: 1000.0
+  expected: 1000.0
 ";
         let mapa: HashMap<String, LimiteYaml> = noyalib::from_str(texto).unwrap();
         let lim: HashMap<String, Limite> = mapa
@@ -3177,7 +3200,7 @@ verificar_frecuencia:
     #[test]
     fn locals_file_globals_y_parameters_se_cargan_con_tipos_inferidos() {
         let yaml = "\
-nombre: s
+name: s
 file_globals:
   lote: \"A-2026-08\"
   umbral: 4.5
@@ -3186,7 +3209,7 @@ locals:
   ok: false
 parameters: {}
 main:
-  - nombre: un_paso
+  - name: un_paso
 ";
         let s = cargar_de_texto(yaml).unwrap();
         assert_eq!(
@@ -3205,9 +3228,9 @@ main:
     #[test]
     fn disable_y_pause_on_fail_se_aceptan_y_por_defecto_son_false() {
         let yaml = "\
-nombre: s
+name: s
 main:
-  - nombre: un_paso
+  - name: un_paso
     disable: true
     pause_on_fail: true
 ";
@@ -3215,7 +3238,7 @@ main:
         assert!(s.pasos_main[0].disable);
         assert!(s.pasos_main[0].pause_on_fail);
         // Sin los campos: defaults false (compat con M3).
-        let s2 = cargar_de_texto("nombre: s\nmain:\n  - nombre: otro\n").unwrap();
+        let s2 = cargar_de_texto("name: s\nmain:\n  - name: otro\n").unwrap();
         assert!(!s2.pasos_main[0].disable);
         assert!(!s2.pasos_main[0].pause_on_fail);
     }
@@ -3226,13 +3249,13 @@ main:
         // nothing`, que es justo el patrón que la campaña propagó a 51
         // precondiciones y que hoy es error de carga (§5 del informe).
         let yaml = "\
-nombre: s
+name: s
 locals:
   contador: 0
   listo: false
 main:
-  - nombre: medir
-    precondicion: 'locals.contador > 0 && locals.listo'
+  - name: medir
+    precondition: 'locals.contador > 0 && locals.listo'
 ";
         let s = cargar_de_texto(yaml).unwrap();
         assert!(
@@ -3258,32 +3281,32 @@ main:
         // es un `false` constante. Antes cargaba, saltaba el paso y salía verde.
         let m = error_de(
             "\
-nombre: s
+name: s
 locals:
   v_real: 0.0
 main:
-  - nombre: medir
-    precondicion: 'locals.v_real > 4.9 && resultado.valor_medido != nothing'
+  - name: medir
+    precondition: 'locals.v_real > 4.9 && result.measured_value != nothing'
 ",
         );
         assert!(m.contains("medir"), "nombra el paso: {m}");
-        assert!(m.contains("resultado.valor_medido"), "nombra el campo: {m}");
-        assert!(m.contains("precondicion"), "ubica el campo YAML: {m}");
-        assert!(m.contains("asigna"), "dice dónde sí vale: {m}");
+        assert!(m.contains("result.measured_value"), "nombra el campo: {m}");
+        assert!(m.contains("precondition"), "ubica el campo YAML: {m}");
+        assert!(m.contains("assign"), "dice dónde sí vale: {m}");
     }
 
     #[test]
     fn resultado_en_condicion_de_pass_fail_es_error_de_carga() {
         let m = error_de(
             "\
-nombre: s
+name: s
 main:
-  - nombre: veredicto
-    tipo: pass_fail
-    condicion: 'resultado.valor_medido > 4.5'
+  - name: veredicto
+    type: pass_fail
+    condition: 'result.measured_value > 4.5'
 ",
         );
-        assert!(m.contains("veredicto") && m.contains("condicion"), "{m}");
+        assert!(m.contains("veredicto") && m.contains("condition"), "{m}");
     }
 
     #[test]
@@ -3291,13 +3314,13 @@ main:
         // Como lectura en el lado derecho...
         let m = error_de(
             "\
-nombre: s
+name: s
 locals:
   v: 0.0
 main:
-  - nombre: copiar
-    tipo: statement
-    statement: 'locals.v = resultado.valor_medido'
+  - name: copiar
+    type: statement
+    statement: 'locals.v = result.measured_value'
 ",
         );
         assert!(m.contains("copiar") && m.contains("statement"), "{m}");
@@ -3305,14 +3328,14 @@ main:
         // ...y como lvalue, que es el mismo malentendido al revés.
         let m = error_de(
             "\
-nombre: s
+name: s
 main:
-  - nombre: escribir
-    tipo: statement
-    statement: 'resultado.valor_medido = 1.0'
+  - name: escribir
+    type: statement
+    statement: 'result.measured_value = 1.0'
 ",
         );
-        assert!(m.contains("resultado.valor_medido"), "{m}");
+        assert!(m.contains("result.measured_value"), "{m}");
     }
 
     // --- ADR-0019, regla de detección: lo comprobable sin ejecutar, al cargar ---
@@ -3324,17 +3347,17 @@ main:
     fn asigna_desde_un_campo_inexistente_de_resultado_es_error_de_carga() {
         let m = error_de(
             "\
-nombre: r27c
+name: r27c
 locals:
   val: 0.0
 main:
-  - nombre: medir_voltaje
-    asigna:
-      val: '${resultado.valor_meddio}'
+  - name: medir_voltaje
+    assign:
+      val: '${result.measured_valu}'
 ",
         );
         assert!(m.contains("medir_voltaje"), "nombra el paso: {m}");
-        assert!(m.contains("valor_meddio"), "nombra el campo escrito: {m}");
+        assert!(m.contains("measured_valu"), "nombra el campo escrito: {m}");
         for campo in modelo::CAMPOS_RESULTADO {
             assert!(m.contains(&format!("'{campo}'")), "enumera '{campo}': {m}");
         }
@@ -3346,16 +3369,16 @@ main:
     fn el_campo_inexistente_se_caza_dentro_de_una_expresion() {
         let m = error_de(
             "\
-nombre: s
+name: s
 locals:
   ok: false
 main:
-  - nombre: medir
-    asigna:
-      ok: '${resultado.valor_medido > 1.0 && resultado.estdo == \"paso\"}'
+  - name: medir
+    assign:
+      ok: '${result.measured_value > 1.0 && result.stauts == \"pass\"}'
 ",
         );
-        assert!(m.contains("estdo"), "{m}");
+        assert!(m.contains("stauts"), "{m}");
     }
 
     /// Y los tres campos buenos siguen cargando, claro.
@@ -3363,17 +3386,17 @@ main:
     fn asigna_desde_los_campos_buenos_carga() {
         let s = cargar_de_texto(
             "\
-nombre: s
+name: s
 locals:
   v: 0.0
   e: ''
   msg: ''
 main:
-  - nombre: medir
-    asigna:
-      v: '${resultado.valor_medido}'
-      e: '${resultado.estado}'
-      msg: '${resultado.mensaje}'
+  - name: medir
+    assign:
+      v: '${result.measured_value}'
+      e: '${result.status}'
+      msg: '${result.message}'
 ",
         )
         .expect("los tres campos son válidos");
@@ -3387,19 +3410,19 @@ main:
     fn asigna_sobre_un_statement_es_error_de_carga() {
         let m = error_de(
             "\
-nombre: r27e
+name: r27e
 locals:
   val: 0.0
 main:
-  - nombre: stmt
-    tipo: statement
+  - name: stmt
+    type: statement
     statement: 'locals.val = 99.0'
-    asigna:
-      val: '${resultado.valor_medido}'
+    assign:
+      val: '${result.measured_value}'
 ",
         );
         assert!(m.contains("stmt"), "nombra el paso: {m}");
-        assert!(m.contains("no produce 'resultado.*'"), "el motivo: {m}");
+        assert!(m.contains("no produce 'result.*'"), "el motivo: {m}");
         assert!(m.contains("locals.x = …"), "qué hacer en su lugar: {m}");
     }
 
@@ -3407,13 +3430,13 @@ main:
     fn resultado_en_asigna_sigue_siendo_valido() {
         // `asigna` es su sitio: ahí el motor sí lo tiene ligado.
         let yaml = "\
-nombre: s
+name: s
 locals:
   v: 0.0
 main:
-  - nombre: medir
-    asigna:
-      v: 'resultado.valor_medido'
+  - name: medir
+    assign:
+      v: 'result.measured_value'
 ";
         let s = cargar_de_texto(yaml).unwrap();
         assert!(s.pasos_main[0].asigna.is_some());
@@ -3425,24 +3448,24 @@ main:
         // dentro de un `&&`, y aquí va aún más hondo.
         let m = error_de(
             "\
-nombre: s
+name: s
 locals:
   v: 0.0
 main:
-  - nombre: medir
-    precondicion: '!(locals.v > 1.0 && (resultado.valor_medido < 2.0 || false))'
+  - name: medir
+    precondition: '!(locals.v > 1.0 && (result.measured_value < 2.0 || false))'
 ",
         );
-        assert!(m.contains("resultado.valor_medido"), "{m}");
+        assert!(m.contains("result.measured_value"), "{m}");
     }
 
     #[test]
     fn precondicion_mal_formada_es_error_de_validacion_con_nombre() {
         let yaml = "\
-nombre: s
+name: s
 main:
-  - nombre: medir
-    precondicion: 'locals.contador >'
+  - name: medir
+    precondition: 'locals.contador >'
 ";
         let err = cargar_de_texto(yaml).unwrap_err();
         assert!(
@@ -3454,15 +3477,15 @@ main:
     #[test]
     fn asigna_se_parsea_y_acepta_las_dos_formas() {
         let yaml = "\
-nombre: s
+name: s
 locals:
   voltaje: 0.0
   ok: false
 main:
-  - nombre: medir
-    asigna:
-      voltaje: resultado.valor_medido
-      ok: '${resultado.estado == \"paso\"}'
+  - name: medir
+    assign:
+      voltaje: result.measured_value
+      ok: '${result.status == \"paso\"}'
 ";
         let s = cargar_de_texto(yaml).unwrap();
         let asigna = s.pasos_main[0].asigna.as_ref().unwrap();
@@ -3475,11 +3498,11 @@ main:
     #[test]
     fn asigna_mal_formada_es_error_con_var_y_paso() {
         let yaml = "\
-nombre: s
+name: s
 main:
-  - nombre: medir
-    asigna:
-      x: 'resultado.valor_medido +'
+  - name: medir
+    assign:
+      x: 'result.measured_value +'
 ";
         let err = cargar_de_texto(yaml).unwrap_err();
         assert!(
@@ -3491,10 +3514,10 @@ main:
     #[test]
     fn tipo_statement_sin_statement_es_error() {
         let yaml = "\
-nombre: s
+name: s
 main:
-  - nombre: init
-    tipo: statement
+  - name: init
+    type: statement
 ";
         let err = cargar_de_texto(yaml).unwrap_err();
         assert!(
@@ -3506,10 +3529,10 @@ main:
     #[test]
     fn tipo_grpc_con_statement_es_error() {
         let yaml = "\
-nombre: s
+name: s
 main:
-  - nombre: init
-    tipo: grpc
+  - name: init
+    type: grpc
     statement: 'locals.x = 1'
 ";
         let err = cargar_de_texto(yaml).unwrap_err();
@@ -3522,13 +3545,13 @@ main:
     #[test]
     fn statement_se_parsea_a_sentencias() {
         let yaml = "\
-nombre: s
+name: s
 locals:
   ok: false
   contador: 0
 main:
-  - nombre: init
-    tipo: statement
+  - name: init
+    type: statement
     statement: 'locals.ok = false; locals.contador = 0'
 ";
         let s = cargar_de_texto(yaml).unwrap();
@@ -3544,12 +3567,12 @@ main:
         // el destino coincida con un `parameter` era un local homónimo
         // silencioso, sin avisar ni al cargar ni al ejecutar.
         let yaml = "\
-nombre: s
+name: s
 parameters:
   p: 0.0
 main:
-  - nombre: medir_voltaje
-    asigna: { p: '${resultado.valor_medido}' }
+  - name: medir_voltaje
+    assign: { p: '${result.measured_value}' }
 ";
         let err = cargar_de_texto(yaml).unwrap_err();
         assert!(
@@ -3565,12 +3588,12 @@ main:
         // nuevo en vez de fallar, y quien lea el nombre bien escrito no ve
         // nunca el valor.
         let yaml = "\
-nombre: s
+name: s
 locals:
   voltaje: 0.0
 main:
-  - nombre: medir_voltaje
-    asigna: { voltage: '${resultado.valor_medido}' }
+  - name: medir_voltaje
+    assign: { voltage: '${result.measured_value}' }
 ";
         let err = cargar_de_texto(yaml).unwrap_err();
         assert!(
@@ -3583,10 +3606,10 @@ main:
     #[test]
     fn statement_a_un_local_no_declarado_es_error() {
         let yaml = "\
-nombre: s
+name: s
 main:
-  - nombre: init
-    tipo: statement
+  - name: init
+    type: statement
     statement: 'locals.x = 1'
 ";
         let err = cargar_de_texto(yaml).unwrap_err();
@@ -3600,10 +3623,10 @@ main:
     #[test]
     fn statement_a_un_parameter_no_declarado_es_error() {
         let yaml = "\
-nombre: s
+name: s
 main:
-  - nombre: init
-    tipo: statement
+  - name: init
+    type: statement
     statement: 'parameters.p = 1'
 ";
         let err = cargar_de_texto(yaml).unwrap_err();
@@ -3619,12 +3642,12 @@ main:
         // No debe romper el canal de retorno by-reference de una subsecuencia
         // (patrón de ejemplos/medir_fuentes.yaml).
         let yaml = "\
-nombre: s
+name: s
 parameters:
   canal: 0.0
 main:
-  - nombre: ajustar_canal
-    tipo: statement
+  - name: ajustar_canal
+    type: statement
     statement: 'parameters.canal = parameters.canal + 1.0'
 ";
         assert!(cargar_de_texto(yaml).is_ok());
@@ -3634,19 +3657,19 @@ main:
     fn asigna_sobre_parameter_declarado_en_subsecuencia_inline_es_error() {
         // La validación baja también a las inline, con sus propios scopes.
         let yaml = "\
-nombre: s
-subsecuencias:
+name: s
+subsequences:
   init:
     parameters:
       p: 0.0
     main:
-      - nombre: medir
-        asigna: { p: '${resultado.valor_medido}' }
+      - name: medir
+        assign: { p: '${result.measured_value}' }
 main:
-  - nombre: c
-    tipo: sequence_call
-    secuencia: init
-    parametros: {}
+  - name: c
+    type: sequence_call
+    sequence: init
+    args: {}
 ";
         let err = cargar_de_texto(yaml).unwrap_err();
         assert!(
@@ -3659,10 +3682,10 @@ main:
     #[test]
     fn tipo_desconocido_es_error() {
         let yaml = "\
-nombre: s
+name: s
 main:
-  - nombre: init
-    tipo: magia
+  - name: init
+    type: magia
 ";
         let err = cargar_de_texto(yaml).unwrap_err();
         assert!(
@@ -3673,7 +3696,7 @@ main:
 
     #[test]
     fn tipo_omitido_es_grpc_por_defecto() {
-        let s = cargar_de_texto("nombre: s\nmain:\n  - nombre: un_paso\n").unwrap();
+        let s = cargar_de_texto("name: s\nmain:\n  - name: un_paso\n").unwrap();
         assert_eq!(s.pasos_main[0].tipo, modelo::TipoPaso::Grpc);
     }
 
@@ -3717,14 +3740,14 @@ main:
         std::fs::write(
             &y,
             "\
-nombre: demo
-ejecutores:
-  - { nombre: embebido, tipo: embebido }
-  - { nombre: python, tipo: grpc, host: 127.0.0.1, puerto: 9101 }
+name: demo
+executors:
+  - { name: embebido, type: embedded }
+  - { name: python, type: grpc, host: 127.0.0.1, port: 9101 }
 main:
-  - nombre: a
-  - nombre: b
-    ejecutor: python
+  - name: a
+  - name: b
+    executor: python
 ",
         )
         .unwrap();
@@ -3749,7 +3772,7 @@ main:
         let dir = std::env::temp_dir().join(format!("anvil_m5ext_{}", "vacio"));
         std::fs::create_dir_all(&dir).unwrap();
         let y = dir.join("s.yaml");
-        std::fs::write(&y, "nombre: s\nmain:\n  - nombre: a\n").unwrap();
+        std::fs::write(&y, "name: s\nmain:\n  - name: a\n").unwrap();
         let prog = cargar_programa_de_archivo(y.to_str().unwrap()).unwrap();
         assert!(prog.ejecutores.is_empty());
         assert_eq!(prog.raiz.pasos_main[0].ejecutor, None);
@@ -3761,11 +3784,7 @@ main:
         let dir = std::env::temp_dir().join(format!("anvil_m5ext_{}", "indef"));
         std::fs::create_dir_all(&dir).unwrap();
         let y = dir.join("s.yaml");
-        std::fs::write(
-            &y,
-            "nombre: s\nmain:\n  - nombre: a\n    ejecutor: inventado\n",
-        )
-        .unwrap();
+        std::fs::write(&y, "name: s\nmain:\n  - name: a\n    executor: inventado\n").unwrap();
         let err = cargar_programa_de_archivo(y.to_str().unwrap()).unwrap_err();
         assert!(
             matches!(&err, ErrorCarga::Validacion(m) if m.contains("inventado")),
@@ -3786,7 +3805,7 @@ main:
         std::fs::write(
             &y,
             format!(
-                "nombre: s\nejecutores:\n  - {{ nombre: p, tipo: wasm, path: {} }}\nmain:\n  - nombre: a\n",
+                "name: s\nexecutors:\n  - {{ name: p, type: wasm, path: {} }}\nmain:\n  - name: a\n",
                 wasm.display()
             ),
         )
@@ -3806,7 +3825,7 @@ main:
         let y = dir.join("s.yaml");
         std::fs::write(
             &y,
-            "nombre: s\nejecutores:\n  - { nombre: p, tipo: wasm }\nmain:\n  - nombre: a\n",
+            "name: s\nexecutors:\n  - { name: p, type: wasm }\nmain:\n  - name: a\n",
         )
         .unwrap();
         let err = cargar_programa_de_archivo(y.to_str().unwrap()).unwrap_err();
@@ -3815,7 +3834,7 @@ main:
             "{err}"
         );
 
-        std::fs::write(&y, "nombre: s\nejecutores:\n  - { nombre: p, tipo: wasm, path: ./no_existe.wasm }\nmain:\n  - nombre: a\n").unwrap();
+        std::fs::write(&y, "name: s\nexecutors:\n  - { name: p, type: wasm, path: ./no_existe.wasm }\nmain:\n  - name: a\n").unwrap();
         let err = cargar_programa_de_archivo(y.to_str().unwrap()).unwrap_err();
         assert!(
             matches!(&err, ErrorCarga::Validacion(m) if m.contains("no existe")),
@@ -3830,7 +3849,7 @@ main:
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(dir.join("p.wasm"), b"\0asm").unwrap();
         let y = dir.join("s.yaml");
-        std::fs::write(&y, "nombre: s\nejecutores:\n  - { nombre: p, tipo: wasm, path: ./p.wasm }\nmain:\n  - nombre: a\n    ejecutor: p\n").unwrap();
+        std::fs::write(&y, "name: s\nexecutors:\n  - { name: p, type: wasm, path: ./p.wasm }\nmain:\n  - name: a\n    executor: p\n").unwrap();
         let prog = cargar_programa_de_archivo(y.to_str().unwrap()).unwrap();
         assert_eq!(
             prog.ejecutores["p"].tipo,
@@ -3846,14 +3865,14 @@ main:
         let dir = std::env::temp_dir().join(format!("anvil_m5ext_{}", "grpc"));
         std::fs::create_dir_all(&dir).unwrap();
         let y = dir.join("s.yaml");
-        std::fs::write(&y, "nombre: s\nejecutores:\n  - { nombre: p, tipo: grpc, host: 127.0.0.1 }\nmain:\n  - nombre: a\n").unwrap();
+        std::fs::write(&y, "name: s\nexecutors:\n  - { name: p, type: grpc, host: 127.0.0.1 }\nmain:\n  - name: a\n").unwrap();
         let err = cargar_programa_de_archivo(y.to_str().unwrap()).unwrap_err();
         assert!(
-            matches!(&err, ErrorCarga::Validacion(m) if m.contains("'host' y 'puerto'")),
+            matches!(&err, ErrorCarga::Validacion(m) if m.contains("'host' y 'port'")),
             "{err}"
         );
 
-        std::fs::write(&y, "nombre: s\nejecutores:\n  - { nombre: p, tipo: grpc, host: 127.0.0.1, puerto: 9101, path: ./p.wasm }\nmain:\n  - nombre: a\n").unwrap();
+        std::fs::write(&y, "name: s\nexecutors:\n  - { name: p, type: grpc, host: 127.0.0.1, port: 9101, path: ./p.wasm }\nmain:\n  - name: a\n").unwrap();
         let err = cargar_programa_de_archivo(y.to_str().unwrap()).unwrap_err();
         assert!(
             matches!(&err, ErrorCarga::Validacion(m) if m.contains("'path'")),
@@ -3867,7 +3886,7 @@ main:
         let dir = std::env::temp_dir().join(format!("anvil_m5ext_{}", "emb"));
         std::fs::create_dir_all(&dir).unwrap();
         let y = dir.join("s.yaml");
-        std::fs::write(&y, "nombre: s\nejecutores:\n  - { nombre: e, tipo: embebido, path: ./p.wasm }\nmain:\n  - nombre: a\n").unwrap();
+        std::fs::write(&y, "name: s\nexecutors:\n  - { name: e, type: embedded, path: ./p.wasm }\nmain:\n  - name: a\n").unwrap();
         let err = cargar_programa_de_archivo(y.to_str().unwrap()).unwrap_err();
         assert!(
             matches!(&err, ErrorCarga::Validacion(m) if m.contains("no aplican")),
@@ -3876,7 +3895,7 @@ main:
 
         std::fs::write(
             &y,
-            "nombre: s\nejecutores:\n  - { nombre: e, tipo: raro }\nmain:\n  - nombre: a\n",
+            "name: s\nexecutors:\n  - { name: e, type: raro }\nmain:\n  - name: a\n",
         )
         .unwrap();
         let err = cargar_programa_de_archivo(y.to_str().unwrap()).unwrap_err();
@@ -3892,14 +3911,14 @@ main:
         let dir = std::env::temp_dir().join(format!("anvil_m5ext_{}", "dups"));
         std::fs::create_dir_all(&dir).unwrap();
         let y = dir.join("s.yaml");
-        std::fs::write(&y, "nombre: s\nejecutores:\n  - { nombre: a, tipo: embebido }\n  - { nombre: a, tipo: embebido }\nmain:\n  - nombre: p\n").unwrap();
+        std::fs::write(&y, "name: s\nexecutors:\n  - { name: a, type: embedded }\n  - { name: a, type: embedded }\nmain:\n  - name: p\n").unwrap();
         let err = cargar_programa_de_archivo(y.to_str().unwrap()).unwrap_err();
         assert!(
             matches!(&err, ErrorCarga::Validacion(m) if m.contains("más de una vez")),
             "{err}"
         );
 
-        std::fs::write(&y, format!("nombre: s\nejecutores:\n  - {{ nombre: {NOMBRE_EMBEDIDO_RESERVADO}, tipo: embebido }}\nmain:\n  - nombre: p\n")).unwrap();
+        std::fs::write(&y, format!("name: s\nexecutors:\n  - {{ name: {NOMBRE_EMBEDIDO_RESERVADO}, type: embedded }}\nmain:\n  - name: p\n")).unwrap();
         let err = cargar_programa_de_archivo(y.to_str().unwrap()).unwrap_err();
         assert!(
             matches!(&err, ErrorCarga::Validacion(m) if m.contains("reservado")),
@@ -3913,7 +3932,7 @@ main:
         let dir = std::env::temp_dir().join(format!("anvil_m5ext_{}", "tipo"));
         std::fs::create_dir_all(&dir).unwrap();
         let y = dir.join("s.yaml");
-        std::fs::write(&y, "nombre: s\nejecutores:\n  - { nombre: e, tipo: embebido }\nmain:\n  - nombre: a\n    tipo: statement\n    statement: 'locals.x = 1'\n    ejecutor: e\n").unwrap();
+        std::fs::write(&y, "name: s\nexecutors:\n  - { name: e, type: embedded }\nmain:\n  - name: a\n    type: statement\n    statement: 'locals.x = 1'\n    executor: e\n").unwrap();
         let err = cargar_programa_de_archivo(y.to_str().unwrap()).unwrap_err();
         assert!(
             matches!(&err, ErrorCarga::Validacion(m) if m.contains("reservado para 'grpc'")),
@@ -3927,10 +3946,14 @@ main:
         let dir = std::env::temp_dir().join(format!("anvil_m5ext_{}", "deny"));
         std::fs::create_dir_all(&dir).unwrap();
         let y = dir.join("s.yaml");
-        std::fs::write(&y, "nombre: s\nejecutores:\n  - { nombre: e, tipo: embebido, foo: bar }\nmain:\n  - nombre: a\n").unwrap();
+        std::fs::write(
+            &y,
+            "name: s\nexecutors:\n  - { name: e, type: embedded, foo: bar }\nmain:\n  - name: a\n",
+        )
+        .unwrap();
         let err = cargar_programa_de_archivo(y.to_str().unwrap()).unwrap_err();
         assert!(
-            matches!(&err, ErrorCarga::Diagnostico(m) if m.contains("ejecutores[0]")),
+            matches!(&err, ErrorCarga::Diagnostico(m) if m.contains("executors[0]")),
             "{err}"
         );
     }
@@ -3978,7 +4001,7 @@ main:
         let dir = std::env::temp_dir().join(format!("anvil_m5ext_{}", "override"));
         std::fs::create_dir_all(&dir).unwrap();
         let y = dir.join("s.yaml");
-        std::fs::write(&y, "nombre: s\nejecutores:\n  - { nombre: e, tipo: embebido }\n  - { nombre: py, tipo: grpc, host: 127.0.0.1, puerto: 9101 }\nmain:\n  - nombre: a\n").unwrap();
+        std::fs::write(&y, "name: s\nexecutors:\n  - { name: e, type: embedded }\n  - { name: py, type: grpc, host: 127.0.0.1, port: 9101 }\nmain:\n  - name: a\n").unwrap();
         let mut prog = cargar_programa_de_archivo(y.to_str().unwrap()).unwrap();
 
         // Re-apuntar un grpc a remoto.
@@ -4023,20 +4046,20 @@ main:
 
     fn pm_yaml() -> &'static str {
         "\
-nombre: sequential
+name: sequential
 locals: { uut_id: \"\", estado_usuario: \"\" }
 setup:
-  - nombre: identificar_uut
-    reintentos: 1
-    asigna: { uut_id: \"${resultado.mensaje}\" }
+  - name: identificar_uut
+    retries: 1
+    assign: { uut_id: \"${result.message}\" }
 main:
-  - nombre: correr_secuencia_usuario
-    tipo: sequence_call
-    secuencia: secuencia_usuario
-    asigna: { estado_usuario: \"${resultado.estado}\" }
+  - name: correr_secuencia_usuario
+    type: sequence_call
+    sequence: secuencia_usuario
+    assign: { estado_usuario: \"${result.status}\" }
 cleanup:
-  - nombre: notificar_resultado
-    reintentos: 1
+  - name: notificar_resultado
+    retries: 1
 "
     }
 
@@ -4073,7 +4096,7 @@ cleanup:
     #[test]
     fn pm_sin_call_a_secuencia_usuario_es_error() {
         let dir = dir_pm("sin_call");
-        std::fs::write(dir.join("pm.yaml"), "nombre: pm\nmain:\n  - nombre: x\n").unwrap();
+        std::fs::write(dir.join("pm.yaml"), "name: pm\nmain:\n  - name: x\n").unwrap();
         std::fs::write(dir.join("usuario.yaml"), basica_yaml()).unwrap();
         let err = cargar_programa_con_pm(
             dir.join("pm.yaml").to_str().unwrap(),
@@ -4088,7 +4111,7 @@ cleanup:
         let dir = dir_pm("dos_calls");
         std::fs::write(
             dir.join("pm.yaml"),
-            "nombre: pm\nmain:\n  - nombre: a\n    tipo: sequence_call\n    secuencia: secuencia_usuario\n  - nombre: b\n    tipo: sequence_call\n    secuencia: secuencia_usuario\n",
+            "name: pm\nmain:\n  - name: a\n    type: sequence_call\n    sequence: secuencia_usuario\n  - name: b\n    type: sequence_call\n    sequence: secuencia_usuario\n",
         )
         .unwrap();
         std::fs::write(dir.join("usuario.yaml"), basica_yaml()).unwrap();
@@ -4105,7 +4128,7 @@ cleanup:
         let dir = dir_pm("reservado");
         std::fs::write(
             dir.join("pm.yaml"),
-            "nombre: pm\nsubsecuencias:\n  secuencia_usuario:\n    nombre: secuencia_usuario\n    main:\n      - nombre: x\nmain:\n  - nombre: a\n    tipo: sequence_call\n    secuencia: secuencia_usuario\n",
+            "name: pm\nsubsequences:\n  secuencia_usuario:\n    name: secuencia_usuario\n    main:\n      - name: x\nmain:\n  - name: a\n    type: sequence_call\n    sequence: secuencia_usuario\n",
         )
         .unwrap();
         std::fs::write(dir.join("usuario.yaml"), basica_yaml()).unwrap();
@@ -4162,7 +4185,7 @@ cleanup:
         std::fs::write(dir.join("pm.yaml"), pm_yaml()).unwrap();
         std::fs::write(
             dir.join("usuario.yaml"),
-            "nombre: u\nparameters: { p: 0.0 }\nmain:\n  - nombre: m\n",
+            "name: u\nparameters: { p: 0.0 }\nmain:\n  - name: m\n",
         )
         .unwrap();
         let err = cargar_programa_con_pm(
@@ -4180,7 +4203,7 @@ cleanup:
         std::fs::write(dir.join("pm.yaml"), pm_yaml()).unwrap();
         std::fs::write(
             dir.join("usuario.yaml"),
-            "nombre: u\nmain:\n  - nombre: vuelta\n    tipo: sequence_call\n    secuencia: ./pm.yaml\n",
+            "name: u\nmain:\n  - name: vuelta\n    type: sequence_call\n    sequence: ./pm.yaml\n",
         )
         .unwrap();
         let err = cargar_programa_con_pm(
@@ -4237,16 +4260,16 @@ cleanup:
     fn precondicion_con_un_local_no_declarado_es_error_de_carga() {
         let m = error_de(
             "\
-nombre: s
+name: s
 locals:
   v: 0.0
 main:
-  - nombre: medir
-    precondicion: 'locals.no_existe > 0.0'
+  - name: medir
+    precondition: 'locals.no_existe > 0.0'
 ",
         );
         assert!(m.contains("locals.no_existe"), "{m}");
-        assert!(m.contains("precondicion"), "dice en qué campo: {m}");
+        assert!(m.contains("precondition"), "dice en qué campo: {m}");
         assert!(m.contains("medir"), "dice en qué paso: {m}");
     }
 
@@ -4254,17 +4277,17 @@ main:
     fn condicion_de_pass_fail_con_una_variable_no_declarada_es_error() {
         let m = error_de(
             "\
-nombre: s
+name: s
 locals:
   v: 0.0
 main:
-  - nombre: verdict
-    tipo: pass_fail
-    condicion: 'file_globals.umbral > 1.0'
+  - name: verdict
+    type: pass_fail
+    condition: 'file_globals.umbral > 1.0'
 ",
         );
         assert!(m.contains("file_globals.umbral"), "{m}");
-        assert!(m.contains("condicion"), "{m}");
+        assert!(m.contains("condition"), "{m}");
     }
 
     /// El que se ve fallar al revertir: el **lvalue** sí está declarado, así
@@ -4273,12 +4296,12 @@ main:
     fn el_lado_derecho_de_un_statement_valida_las_lecturas() {
         let m = error_de(
             "\
-nombre: s
+name: s
 locals:
   x: 0.0
 main:
-  - nombre: calcula
-    tipo: statement
+  - name: calcula
+    type: statement
     statement: 'locals.x = locals.y + 1.0'
 ",
         );
@@ -4290,17 +4313,17 @@ main:
     fn el_lado_derecho_de_un_asigna_valida_las_lecturas() {
         let m = error_de(
             "\
-nombre: s
+name: s
 locals:
   x: 0.0
 main:
-  - nombre: medir
-    asigna:
-      x: '${resultado.valor_medido + locals.offset}'
+  - name: medir
+    assign:
+      x: '${result.measured_value + locals.offset}'
 ",
         );
         assert!(m.contains("locals.offset"), "{m}");
-        assert!(m.contains("asigna"), "{m}");
+        assert!(m.contains("assign"), "{m}");
     }
 
     /// El caso de la campaña era una conjunción: mirar sólo la raíz del AST
@@ -4309,12 +4332,12 @@ main:
     fn una_variable_no_declarada_anidada_en_la_expresion_tambien_se_detecta() {
         let m = error_de(
             "\
-nombre: s
+name: s
 locals:
   a: true
 main:
-  - nombre: medir
-    precondicion: '!(locals.a && (parameters.p || true))'
+  - name: medir
+    precondition: '!(locals.a && (parameters.p || true))'
 ",
         );
         assert!(m.contains("parameters.p"), "{m}");
@@ -4326,7 +4349,7 @@ main:
     fn leer_variables_declaradas_en_los_tres_scopes_es_valido() {
         let s = cargar_de_texto(
             "\
-nombre: s
+name: s
 file_globals:
   umbral: 4.0
 parameters:
@@ -4335,16 +4358,16 @@ locals:
   v: 0.0
   ok: false
 main:
-  - nombre: medir
-    precondicion: 'parameters.canal >= 0.0'
-    asigna:
-      v: '${resultado.valor_medido}'
-  - nombre: calcula
-    tipo: statement
+  - name: medir
+    precondition: 'parameters.canal >= 0.0'
+    assign:
+      v: '${result.measured_value}'
+  - name: calcula
+    type: statement
     statement: 'locals.ok = locals.v > file_globals.umbral'
-  - nombre: verdict
-    tipo: pass_fail
-    condicion: 'locals.ok'
+  - name: verdict
+    type: pass_fail
+    condition: 'locals.ok'
 ",
         );
         assert!(s.is_ok(), "no debe haber falso positivo: {s:?}");
@@ -4356,21 +4379,21 @@ main:
     fn una_inline_valida_sus_lecturas_contra_sus_propias_declaraciones() {
         let m = error_de(
             "\
-nombre: padre
+name: padre
 locals:
   x: 1.0
-subsecuencias:
+subsequences:
   hija:
     locals:
       propia: 0.0
     main:
-      - nombre: usa
-        tipo: statement
+      - name: usa
+        type: statement
         statement: 'locals.propia = locals.x + 1.0'
 main:
-  - nombre: c
-    tipo: sequence_call
-    secuencia: hija
+  - name: c
+    type: sequence_call
+    sequence: hija
 ",
         );
         assert!(
@@ -4385,14 +4408,14 @@ main:
     fn un_statement_que_escribe_en_file_globals_es_error_de_carga() {
         let m = error_de(
             "\
-nombre: s
+name: s
 file_globals:
   counter: 0.0
 locals:
   x: 0.0
 main:
-  - nombre: set_global
-    tipo: statement
+  - name: set_global
+    type: statement
     statement: 'file_globals.counter = 1.0'
 ",
         );
@@ -4407,7 +4430,7 @@ main:
         let raiz = dir.join("raiz.yaml");
         std::fs::write(
             &raiz,
-            "nombre: raiz\nparameters: { val: 0.0 }\nlocals: { x: 0.0 }\nmain:\n  - nombre: set_param\n    tipo: statement\n    statement: 'parameters.val = 1.0'\n",
+            "name: raiz\nparameters: { val: 0.0 }\nlocals: { x: 0.0 }\nmain:\n  - name: set_param\n    type: statement\n    statement: 'parameters.val = 1.0'\n",
         )
         .unwrap();
         let m = match cargar_programa_de_archivo(raiz.to_str().unwrap()) {
@@ -4430,13 +4453,13 @@ main:
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(
             dir.join("hija.yaml"),
-            "nombre: hija\nparameters: { val: 0.0 }\nmain:\n  - nombre: devuelve\n    tipo: statement\n    statement: 'parameters.val = 1.0'\n",
+            "name: hija\nparameters: { val: 0.0 }\nmain:\n  - name: devuelve\n    type: statement\n    statement: 'parameters.val = 1.0'\n",
         )
         .unwrap();
         let padre = dir.join("padre.yaml");
         std::fs::write(
             &padre,
-            "nombre: padre\nlocals: { val: 0.0 }\nmain:\n  - nombre: c\n    tipo: sequence_call\n    secuencia: ./hija.yaml\n    parametros: { val: locals.val }\n",
+            "name: padre\nlocals: { val: 0.0 }\nmain:\n  - name: c\n    type: sequence_call\n    sequence: ./hija.yaml\n    args: { val: locals.val }\n",
         )
         .unwrap();
         assert!(
@@ -4451,23 +4474,23 @@ main:
     fn asigna_de_valor_medido_en_un_sequence_call_es_error_de_carga() {
         let m = error_de(
             "\
-nombre: s
+name: s
 locals:
   my_num: 42.0
-subsecuencias:
+subsequences:
   hija:
     main:
-      - nombre: p
-        tipo: grpc
+      - name: p
+        type: grpc
 main:
-  - nombre: call_sub
-    tipo: sequence_call
-    secuencia: hija
-    asigna:
-      my_num: '${resultado.valor_medido}'
+  - name: call_sub
+    type: sequence_call
+    sequence: hija
+    assign:
+      my_num: '${result.measured_value}'
 ",
         );
-        assert!(m.contains("valor_medido"), "{m}");
+        assert!(m.contains("measured_value"), "{m}");
         assert!(m.contains("no mide"), "dice por qué: {m}");
     }
 
@@ -4475,23 +4498,23 @@ main:
     fn valor_medido_anidado_en_el_asigna_de_un_sequence_call_tambien_se_detecta() {
         let m = error_de(
             "\
-nombre: s
+name: s
 locals:
   my_num: 42.0
-subsecuencias:
+subsequences:
   hija:
     main:
-      - nombre: p
-        tipo: grpc
+      - name: p
+        type: grpc
 main:
-  - nombre: call_sub
-    tipo: sequence_call
-    secuencia: hija
-    asigna:
-      my_num: '${resultado.valor_medido + 1.0}'
+  - name: call_sub
+    type: sequence_call
+    sequence: hija
+    assign:
+      my_num: '${result.measured_value + 1.0}'
 ",
         );
-        assert!(m.contains("valor_medido"), "{m}");
+        assert!(m.contains("measured_value"), "{m}");
     }
 
     /// `estado` y `mensaje` sí los produce un sequence call: siguen valiendo.
@@ -4500,20 +4523,20 @@ main:
     fn asigna_de_estado_en_un_sequence_call_sigue_siendo_valido() {
         let s = cargar_de_texto(
             "\
-nombre: s
+name: s
 locals:
   veredicto: \"\"
-subsecuencias:
+subsequences:
   hija:
     main:
-      - nombre: p
-        tipo: grpc
+      - name: p
+        type: grpc
 main:
-  - nombre: call_sub
-    tipo: sequence_call
-    secuencia: hija
-    asigna:
-      veredicto: '${resultado.estado}'
+  - name: call_sub
+    type: sequence_call
+    sequence: hija
+    assign:
+      veredicto: '${result.status}'
 ",
         );
         assert!(s.is_ok(), "{s:?}");
@@ -4529,20 +4552,20 @@ main:
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(
             dir.join("hija.yaml"),
-            "nombre: hija\nejecutores:\n  - nombre: wasm_temp\n    tipo: grpc\n    host: 127.0.0.1\n    puerto: 9300\nmain:\n  - nombre: m\n    tipo: grpc\n",
+            "name: hija\nexecutors:\n  - name: wasm_temp\n    type: grpc\n    host: 127.0.0.1\n    port: 9300\nmain:\n  - name: m\n    type: grpc\n",
         )
         .unwrap();
         let padre = dir.join("padre.yaml");
         std::fs::write(
             &padre,
-            "nombre: padre\nmain:\n  - nombre: c\n    tipo: sequence_call\n    secuencia: ./hija.yaml\n",
+            "name: padre\nmain:\n  - name: c\n    type: sequence_call\n    sequence: ./hija.yaml\n",
         )
         .unwrap();
         let m = match cargar_programa_de_archivo(padre.to_str().unwrap()) {
             Err(ErrorCarga::Validacion(m)) => m,
             otro => panic!("se esperaba error de validación, no {otro:?}"),
         };
-        assert!(m.contains("ejecutores"), "{m}");
+        assert!(m.contains("executors"), "{m}");
         assert!(m.contains("raíz"), "dice dónde declararlos: {m}");
     }
 
@@ -4550,24 +4573,24 @@ main:
     fn una_subsecuencia_inline_con_ejecutores_es_error_de_carga() {
         let m = error_de(
             "\
-nombre: padre
-subsecuencias:
+name: padre
+subsequences:
   hija:
-    ejecutores:
-      - nombre: e
-        tipo: grpc
+    executors:
+      - name: e
+        type: grpc
         host: 127.0.0.1
-        puerto: 9300
+        port: 9300
     main:
-      - nombre: m
-        tipo: grpc
+      - name: m
+        type: grpc
 main:
-  - nombre: c
-    tipo: sequence_call
-    secuencia: hija
+  - name: c
+    type: sequence_call
+    sequence: hija
 ",
         );
-        assert!(m.contains("ejecutores"), "{m}");
+        assert!(m.contains("executors"), "{m}");
         assert!(m.contains("raíz"), "{m}");
     }
 
@@ -4580,7 +4603,7 @@ main:
         let raiz = dir.join("raiz.yaml");
         std::fs::write(
             &raiz,
-            "nombre: raiz\nmain:\n  - nombre: m\n    tipo: grpc\n    ejecutor: wasm_temp\n",
+            "name: raiz\nmain:\n  - name: m\n    type: grpc\n    executor: wasm_temp\n",
         )
         .unwrap();
         let m = match cargar_programa_de_archivo(raiz.to_str().unwrap()) {
@@ -4601,13 +4624,13 @@ main:
         let pm = dir.join("pm.yaml");
         std::fs::write(
             &pm,
-            "nombre: sequential\nejecutores:\n  - nombre: del_pm\n    tipo: grpc\n    host: 127.0.0.1\n    puerto: 9300\nmain:\n  - nombre: correr\n    tipo: sequence_call\n    secuencia: secuencia_usuario\n",
+            "name: sequential\nexecutors:\n  - name: del_pm\n    type: grpc\n    host: 127.0.0.1\n    port: 9300\nmain:\n  - name: correr\n    type: sequence_call\n    sequence: secuencia_usuario\n",
         )
         .unwrap();
         let usuario = dir.join("usuario.yaml");
         std::fs::write(
             &usuario,
-            "nombre: usuario\nejecutores:\n  - nombre: del_usuario\n    tipo: grpc\n    host: 127.0.0.1\n    puerto: 9400\nmain:\n  - nombre: m\n    tipo: grpc\n    ejecutor: del_usuario\n",
+            "name: usuario\nexecutors:\n  - name: del_usuario\n    type: grpc\n    host: 127.0.0.1\n    port: 9400\nmain:\n  - name: m\n    type: grpc\n    executor: del_usuario\n",
         )
         .unwrap();
         let prog = cargar_programa_con_pm(pm.to_str().unwrap(), usuario.to_str().unwrap()).unwrap();
@@ -4630,11 +4653,11 @@ main:
     #[test]
     fn un_scope_sin_llaves_en_un_paso_grpc_no_se_traga_como_texto() {
         let yaml = "\
-nombre: s
+name: s
 locals: { canal: 2.0 }
 main:
-  - nombre: medir
-    parametros: { canal: locals.canal }
+  - name: medir
+    inputs: { canal: locals.canal }
 ";
         let err = cargar_de_texto(yaml).unwrap_err();
         let ErrorCarga::Validacion(m) = &err else {
@@ -4649,11 +4672,11 @@ main:
     #[test]
     fn un_scope_entre_llaves_es_una_expresion() {
         let yaml = "\
-nombre: s
+name: s
 locals: { canal: 2.0 }
 main:
-  - nombre: medir
-    parametros: { canal: '${locals.canal}' }
+  - name: medir
+    inputs: { canal: '${locals.canal}' }
 ";
         let s = cargar_de_texto(yaml).unwrap();
         let e = s.pasos_main[0].entradas.as_ref().expect("hay parámetros");
@@ -4666,10 +4689,10 @@ main:
     #[test]
     fn el_tipo_del_literal_es_el_del_escalar_yaml() {
         let yaml = "\
-nombre: s
+name: s
 main:
-  - nombre: medir
-    parametros:
+  - name: medir
+    inputs:
       canal: 2
       etiqueta: '2'
       promediar: true
@@ -4701,10 +4724,10 @@ main:
     #[test]
     fn un_parametro_que_no_es_escalar_no_carga() {
         let yaml = "\
-nombre: s
+name: s
 main:
-  - nombre: medir
-    parametros:
+  - name: medir
+    inputs:
       canal: [1, 2]
 ";
         assert!(cargar_de_texto(yaml).is_err(), "una lista no es un escalar");
@@ -4715,19 +4738,19 @@ main:
     #[test]
     fn el_sequence_call_conserva_su_parametros_by_reference() {
         let yaml = "\
-nombre: s
+name: s
 locals: { canal: 1.0 }
-subsecuencias:
+subsequences:
   hija:
-    nombre: hija
+    name: hija
     parameters: { canal: 0.0 }
     main:
-      - nombre: p
+      - name: p
 main:
-  - nombre: c
-    tipo: sequence_call
-    secuencia: hija
-    parametros: { canal: locals.canal }
+  - name: c
+    type: sequence_call
+    sequence: hija
+    args: { canal: locals.canal }
 ";
         let s = cargar_de_texto(yaml).unwrap();
         let p = &s.pasos_main[0];
@@ -4739,14 +4762,14 @@ main:
     #[test]
     fn un_statement_no_admite_parametros() {
         let yaml = "\
-nombre: s
+name: s
 main:
-  - nombre: p
-    tipo: statement
+  - name: p
+    type: statement
     statement: 'locals.x = 1'
-    parametros: { canal: 2 }
+    inputs: { canal: 2 }
 ";
         let err = cargar_de_texto(yaml).unwrap_err();
-        assert!(matches!(&err, ErrorCarga::Validacion(m) if m.contains("parametros")));
+        assert!(matches!(&err, ErrorCarga::Validacion(m) if m.contains("inputs")));
     }
 }

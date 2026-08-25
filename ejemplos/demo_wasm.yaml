@@ -23,32 +23,32 @@
 # queda `ejemplos/hola-paso/target/wasm32-wasip1/debug/hola_paso.wasm`. El
 # host spawnea el puente y loguea `nombre → 127.0.0.1:<puerto efímero>`.)
 
-nombre: demo_wasm
-ejecutores:
-  - nombre: embebido
-    tipo: embebido
-  - nombre: mi_paso_wasm
-    tipo: wasm
+name: demo_wasm
+executors:
+  - name: embebido
+    type: embedded
+  - name: mi_paso_wasm
+    type: wasm
     path: hola-paso/target/wasm32-wasip1/debug/hola_paso.wasm
 main:
   # Paso built-in: lo atiende el ejecutor WASM embebido (de serie). No
   # declara `ejecutor` → embebido por defecto.
-  - nombre: verificar_led
-    reintentos: 1
+  - name: verificar_led
+    retries: 1
 
   # Paso en el `.wasm` cargado por path: el host spawnea el puente, que
   # llama a `run` del componente. El componente devuelve valor_medido 4.2;
   # el límite lo evalúa el motor desde el YAML (ADR-0008).
-  - nombre: medir_voltaje
-    ejecutor: mi_paso_wasm
-    reintentos: 1
-    limite:
-      tipo: rango
+  - name: medir_voltaje
+    executor: mi_paso_wasm
+    retries: 1
+    limit:
+      type: range
       min: 4.0
       max: 5.0
 
   # Otro paso en el mismo `.wasm` (mismo path → el host comparte un único
   # puente: 1 Store, N llamadas, patrón RTE de TestStand).
-  - nombre: conectar_equipo
-    ejecutor: mi_paso_wasm
-    reintentos: 3
+  - name: conectar_equipo
+    executor: mi_paso_wasm
+    retries: 3

@@ -12,21 +12,21 @@
 #     target/wasm32-wasip2/debug/anvil.wasm ejemplos/limites.yaml \
 #     --limits ejemplos/limites.limits.yaml --json /tmp/out.json
 
-nombre: limites
+name: limites
 setup:
-  - nombre: abrir_rele        # action (RF-27): éxito técnico, sin medida
-    reintentos: 1
-  - nombre: conectar_equipo
-    reintentos: 3
+  - name: abrir_rele        # action (RF-27): éxito técnico, sin medida
+    retries: 1
+  - name: conectar_equipo
+    retries: 3
 main:
-  - nombre: medir_voltaje     # limit test (RF-26): el motor evalúa el rango
-    reintentos: 1
-    limite:
-      tipo: rango
+  - name: medir_voltaje     # limit test (RF-26): el motor evalúa el rango
+    retries: 1
+    limit:
+      type: range
       min: 4.5
       max: 5.5
-  - nombre: verificar_led      # pass/fail (RF-25)
-    reintentos: 1
+  - name: verificar_led      # pass/fail (RF-25)
+    retries: 1
 cleanup:
-  - nombre: desconectar_equipo
-    reintentos: 1
+  - name: desconectar_equipo
+    retries: 1
