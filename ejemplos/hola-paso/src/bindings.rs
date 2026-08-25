@@ -5,101 +5,104 @@
 #[allow(dead_code, clippy::all)]
 pub mod exports {
     pub mod anvil {
-        pub mod paso {
+        pub mod step {
             #[allow(dead_code, async_fn_in_trait, unused_imports, clippy::all)]
-            pub mod paso {
+            pub mod step {
                 #[used]
                 #[doc(hidden)]
                 static __FORCE_SECTION_REF: fn() = super::super::super::super::__link_custom_section_describing_imports;
                 use super::super::super::super::_rt;
-                /// Un valor tipado que cruza la frontera del componente. Los tres tipos son
-                /// los mismos del `oneof Valor` de `paso.proto` y de `expr::Value`: ni
-                /// listas ni mapas (un parámetro que necesita estructura es un paso mal
-                /// cortado, ADR-0020 §2).
+                /// A typed value crossing the component boundary. The three types are the
+                /// same as the `oneof Value` of `paso.proto` and of `expr::Value`: no lists
+                /// and no maps (a parameter that needs structure is a badly cut step,
+                /// ADR-0020 §2).
                 #[derive(Clone)]
-                pub enum Valor {
-                    Numero(f64),
-                    Texto(_rt::String),
-                    Booleano(bool),
+                pub enum Value {
+                    Number(f64),
+                    Text(_rt::String),
+                    Boolean(bool),
                 }
-                impl ::core::fmt::Debug for Valor {
+                impl ::core::fmt::Debug for Value {
                     fn fmt(
                         &self,
                         f: &mut ::core::fmt::Formatter<'_>,
                     ) -> ::core::fmt::Result {
                         match self {
-                            Valor::Numero(e) => {
-                                f.debug_tuple("Valor::Numero").field(e).finish()
+                            Value::Number(e) => {
+                                f.debug_tuple("Value::Number").field(e).finish()
                             }
-                            Valor::Texto(e) => {
-                                f.debug_tuple("Valor::Texto").field(e).finish()
+                            Value::Text(e) => {
+                                f.debug_tuple("Value::Text").field(e).finish()
                             }
-                            Valor::Booleano(e) => {
-                                f.debug_tuple("Valor::Booleano").field(e).finish()
+                            Value::Boolean(e) => {
+                                f.debug_tuple("Value::Boolean").field(e).finish()
                             }
                         }
                     }
                 }
-                /// Un `valor` con su nombre. Con nombre y no posicional: el YAML se escribe
-                /// y se revisa a mano, y reordenar dos parámetros no puede cambiar lo que
-                /// mide el banco.
+                /// A `value` with its name. Named rather than positional: sequences are
+                /// written and reviewed by hand, and reordering two parameters must not
+                /// change what the bench measures.
                 #[derive(Clone)]
-                pub struct Nombrado {
-                    pub nombre: _rt::String,
-                    pub valor: Valor,
+                pub struct Named {
+                    pub name: _rt::String,
+                    pub value: Value,
                 }
-                impl ::core::fmt::Debug for Nombrado {
+                impl ::core::fmt::Debug for Named {
                     fn fmt(
                         &self,
                         f: &mut ::core::fmt::Formatter<'_>,
                     ) -> ::core::fmt::Result {
-                        f.debug_struct("Nombrado")
-                            .field("nombre", &self.nombre)
-                            .field("valor", &self.valor)
+                        f.debug_struct("Named")
+                            .field("name", &self.name)
+                            .field("value", &self.value)
                             .finish()
                     }
                 }
+                /// `step-result` y no `result`: `result` es palabra reservada de WIT. Es
+                /// una concesión al lenguaje, no al idioma — igual que `type` en Rust.
                 #[derive(Clone)]
-                pub struct Resultado {
-                    /// El veredicto del paso. Es texto porque así viaja en `paso.proto` y un
-                    /// paso puede escribirse en cualquier lenguaje, pero el vocabulario es
-                    /// **cerrado**: exactamente uno de estos cuatro literales, en minúscula.
+                pub struct StepResult {
+                    /// The step's verdict. It is text because that is how it travels in
+                    /// `paso.proto` and a step may be written in any language, but the
+                    /// vocabulary is **closed**: exactly one of these four literals, lowercase.
                     ///
-                    ///   "paso"     el paso cumplió su criterio
-                    ///   "fallo"    la unidad no cumple — información sobre el DUT
-                    ///   "error"    no se pudo juzgar — información sobre el banco o el paso
-                    ///   "saltado"  no se ejecutó (lo pone el motor; un paso no lo devuelve)
+                    ///   "pass"     the step met its criterion
+                    ///   "fail"     the unit does not comply — information about the DUT
+                    ///   "error"    could not be judged — information about the bench or step
+                    ///   "skipped"  did not run (set by the engine; a step never returns it)
                     ///
-                    /// Cualquier otra cadena —"Paso", "PASS", "ok", y también "inconcluso",
-                    /// que sólo produce el motor al agregar— convierte el paso en "error", con
-                    /// un mensaje que nombra el valor recibido. Un estado que Anvil no entiende
-                    /// no dice nada sobre la unidad (ADR-0019, Regla 2).
-                    pub estado: _rt::String,
-                    /// Texto libre para el informe: qué hizo el paso, o por qué no pudo.
-                    pub mensaje: _rt::String,
-                    /// La medida, si el paso mide. El **umbral no es del paso**: el motor
-                    /// evalúa contra él el `limite` declarado en la secuencia (ADR-0008).
-                    pub valor_medido: Option<f64>,
-                    /// Valores con nombre que el paso devuelve **además** de la medida: una
-                    /// temperatura de contexto, un número de serie leído, un coeficiente.
-                    /// No participan en el veredicto; `asigna` los lee como
-                    /// `resultado.salidas.<nombre>` (ADR-0020 §3).
+                    /// Any other string —"Pass", "PASS", "ok", and also "inconclusive", which
+                    /// only the engine produces when aggregating— turns the step into "error",
+                    /// with a message naming the value received. A status Anvil cannot read
+                    /// says nothing about the unit (ADR-0019, Rule 2).
+                    pub status: _rt::String,
+                    /// Free text for the report: what the step did, or why it could not.
+                    pub message: _rt::String,
+                    /// The measurement, if the step measures. The **threshold does not belong
+                    /// to the step**: the engine evaluates the `limit` declared in the
+                    /// sequence against it (ADR-0008).
+                    pub measured_value: Option<f64>,
+                    /// Named values the step returns **besides** the measurement: a context
+                    /// temperature, a serial number read off the unit, a coefficient. They
+                    /// take no part in the verdict; `assign` reads them as
+                    /// `result.outputs.<name>` (ADR-0020 §3).
                     ///
-                    /// Sin `inout`: entra por `parametros`, sale por `salidas`, y no hay
-                    /// tercer camino. Dárselo sería darle al paso una referencia al entorno
-                    /// del motor, que es lo que ADR-0003 y ADR-0005 evitan.
-                    pub salidas: _rt::Vec<Nombrado>,
+                    /// No `inout`: in through `inputs`, out through `outputs`, and there is no
+                    /// third path. Giving one would hand the step a reference to the engine's
+                    /// environment, which is what ADR-0003 and ADR-0005 avoid.
+                    pub outputs: _rt::Vec<Named>,
                 }
-                impl ::core::fmt::Debug for Resultado {
+                impl ::core::fmt::Debug for StepResult {
                     fn fmt(
                         &self,
                         f: &mut ::core::fmt::Formatter<'_>,
                     ) -> ::core::fmt::Result {
-                        f.debug_struct("Resultado")
-                            .field("estado", &self.estado)
-                            .field("mensaje", &self.mensaje)
-                            .field("valor-medido", &self.valor_medido)
-                            .field("salidas", &self.salidas)
+                        f.debug_struct("StepResult")
+                            .field("status", &self.status)
+                            .field("message", &self.message)
+                            .field("measured-value", &self.measured_value)
+                            .field("outputs", &self.outputs)
                             .finish()
                     }
                 }
@@ -141,7 +144,7 @@ pub mod exports {
                                             .cast::<f64>();
                                         l5
                                     };
-                                    Valor::Numero(e10)
+                                    Value::Number(e10)
                                 }
                                 1 => {
                                     let e10 = {
@@ -159,7 +162,7 @@ pub mod exports {
                                         );
                                         _rt::string_lift(bytes8)
                                     };
-                                    Valor::Texto(e10)
+                                    Value::Text(e10)
                                 }
                                 n => {
                                     debug_assert_eq!(n, 2, "invalid enum discriminant");
@@ -171,12 +174,12 @@ pub mod exports {
                                         );
                                         _rt::bool_lift(l9 as u8)
                                     };
-                                    Valor::Booleano(e10)
+                                    Value::Boolean(e10)
                                 }
                             };
-                            Nombrado {
-                                nombre: _rt::string_lift(bytes3),
-                                valor: v10,
+                            Named {
+                                name: _rt::string_lift(bytes3),
+                                value: v10,
                             }
                         };
                         result11.push(e11);
@@ -188,19 +191,19 @@ pub mod exports {
                     );
                     let result12 = T::run(_rt::string_lift(bytes0), arg2, result11);
                     let ptr13 = (&raw mut _RET_AREA.0).cast::<u8>();
-                    let Resultado {
-                        estado: estado14,
-                        mensaje: mensaje14,
-                        valor_medido: valor_medido14,
-                        salidas: salidas14,
+                    let StepResult {
+                        status: status14,
+                        message: message14,
+                        measured_value: measured_value14,
+                        outputs: outputs14,
                     } = result12;
-                    let vec15 = (estado14.into_bytes()).into_boxed_slice();
+                    let vec15 = (status14.into_bytes()).into_boxed_slice();
                     let ptr15 = vec15.as_ptr().cast::<u8>();
                     let len15 = vec15.len();
                     ::core::mem::forget(vec15);
                     *ptr13.add(::core::mem::size_of::<*const u8>()).cast::<usize>() = len15;
                     *ptr13.add(0).cast::<*mut u8>() = ptr15.cast_mut();
-                    let vec16 = (mensaje14.into_bytes()).into_boxed_slice();
+                    let vec16 = (message14.into_bytes()).into_boxed_slice();
                     let ptr16 = vec16.as_ptr().cast::<u8>();
                     let len16 = vec16.len();
                     ::core::mem::forget(vec16);
@@ -210,7 +213,7 @@ pub mod exports {
                     *ptr13
                         .add(2 * ::core::mem::size_of::<*const u8>())
                         .cast::<*mut u8>() = ptr16.cast_mut();
-                    match valor_medido14 {
+                    match measured_value14 {
                         Some(e) => {
                             *ptr13
                                 .add(4 * ::core::mem::size_of::<*const u8>())
@@ -225,7 +228,7 @@ pub mod exports {
                                 .cast::<u8>() = (0i32) as u8;
                         }
                     };
-                    let vec20 = salidas14;
+                    let vec20 = outputs14;
                     let len20 = vec20.len();
                     let layout20 = _rt::alloc::Layout::from_size_align_unchecked(
                         vec20.len() * (8 + 4 * ::core::mem::size_of::<*const u8>()),
@@ -244,8 +247,8 @@ pub mod exports {
                         let base = result20
                             .add(i * (8 + 4 * ::core::mem::size_of::<*const u8>()));
                         {
-                            let Nombrado { nombre: nombre17, valor: valor17 } = e;
-                            let vec18 = (nombre17.into_bytes()).into_boxed_slice();
+                            let Named { name: name17, value: value17 } = e;
+                            let vec18 = (name17.into_bytes()).into_boxed_slice();
                             let ptr18 = vec18.as_ptr().cast::<u8>();
                             let len18 = vec18.len();
                             ::core::mem::forget(vec18);
@@ -253,8 +256,8 @@ pub mod exports {
                                 .add(::core::mem::size_of::<*const u8>())
                                 .cast::<usize>() = len18;
                             *base.add(0).cast::<*mut u8>() = ptr18.cast_mut();
-                            match valor17 {
-                                Valor::Numero(e) => {
+                            match value17 {
+                                Value::Number(e) => {
                                     *base
                                         .add(2 * ::core::mem::size_of::<*const u8>())
                                         .cast::<u8>() = (0i32) as u8;
@@ -262,7 +265,7 @@ pub mod exports {
                                         .add(8 + 2 * ::core::mem::size_of::<*const u8>())
                                         .cast::<f64>() = _rt::as_f64(e);
                                 }
-                                Valor::Texto(e) => {
+                                Value::Text(e) => {
                                     *base
                                         .add(2 * ::core::mem::size_of::<*const u8>())
                                         .cast::<u8>() = (1i32) as u8;
@@ -277,7 +280,7 @@ pub mod exports {
                                         .add(8 + 2 * ::core::mem::size_of::<*const u8>())
                                         .cast::<*mut u8>() = ptr19.cast_mut();
                                 }
-                                Valor::Booleano(e) => {
+                                Value::Boolean(e) => {
                                     *base
                                         .add(2 * ::core::mem::size_of::<*const u8>())
                                         .cast::<u8>() = (2i32) as u8;
@@ -358,31 +361,32 @@ pub mod exports {
                     );
                 }
                 pub trait Guest {
-                    /// Los `parametros` llegan **ya evaluados**: el motor resuelve las
-                    /// expresiones `${...}` del YAML contra su entorno antes de llamar
-                    /// (ADR-0009). El paso no ve `locals` ni `file_globals`; se le pasa un valor.
+                    /// `inputs` arrive **already evaluated**: the engine resolves the `${...}`
+                    /// expressions of the YAML against its environment before calling
+                    /// (ADR-0009). The step never sees `locals` or `file_globals`; it is handed
+                    /// values.
                     fn run(
-                        nombre: _rt::String,
-                        intento: i32,
-                        parametros: _rt::Vec<Nombrado>,
-                    ) -> Resultado;
+                        name: _rt::String,
+                        attempt: i32,
+                        inputs: _rt::Vec<Named>,
+                    ) -> StepResult;
                 }
                 #[doc(hidden)]
-                macro_rules! __export_anvil_paso_paso_0_2_0_cabi {
+                macro_rules! __export_anvil_step_step_0_3_0_cabi {
                     ($ty:ident with_types_in $($path_to_types:tt)*) => {
                         const _ : () = { #[unsafe (export_name =
-                        "anvil:paso/paso@0.2.0#run")] unsafe extern "C" fn
+                        "anvil:step/step@0.3.0#run")] unsafe extern "C" fn
                         export_run(arg0 : * mut u8, arg1 : usize, arg2 : i32, arg3 : *
                         mut u8, arg4 : usize,) -> * mut u8 { unsafe {
                         $($path_to_types)*:: _export_run_cabi::<$ty > (arg0, arg1, arg2,
                         arg3, arg4) } } #[unsafe (export_name =
-                        "cabi_post_anvil:paso/paso@0.2.0#run")] unsafe extern "C" fn
+                        "cabi_post_anvil:step/step@0.3.0#run")] unsafe extern "C" fn
                         _post_return_run(arg0 : * mut u8,) { unsafe {
                         $($path_to_types)*:: __post_return_run::<$ty > (arg0) } } };
                     };
                 }
                 #[doc(hidden)]
-                pub(crate) use __export_anvil_paso_paso_0_2_0_cabi;
+                pub(crate) use __export_anvil_step_step_0_3_0_cabi;
                 #[repr(align(8))]
                 struct _RetArea(
                     [::core::mem::MaybeUninit<
@@ -469,33 +473,33 @@ mod _rt {
 /// ```
 #[allow(unused_macros)]
 #[doc(hidden)]
-macro_rules! __export_anvil_paso_impl {
+macro_rules! __export_anvil_step_impl {
     ($ty:ident) => {
         self::export!($ty with_types_in self);
     };
     ($ty:ident with_types_in $($path_to_types_root:tt)*) => {
         $($path_to_types_root)*::
-        exports::anvil::paso::paso::__export_anvil_paso_paso_0_2_0_cabi!($ty
-        with_types_in $($path_to_types_root)*:: exports::anvil::paso::paso);
+        exports::anvil::step::step::__export_anvil_step_step_0_3_0_cabi!($ty
+        with_types_in $($path_to_types_root)*:: exports::anvil::step::step);
     };
 }
 #[doc(inline)]
-pub(crate) use __export_anvil_paso_impl as export;
+pub(crate) use __export_anvil_step_impl as export;
 #[cfg(target_arch = "wasm32")]
 #[unsafe(
-    link_section = "component-type:wit-bindgen:0.41.0:anvil:paso@0.2.0:anvil-paso:encoded world"
+    link_section = "component-type:wit-bindgen:0.41.0:anvil:step@0.3.0:anvil-step:encoded world"
 )]
 #[doc(hidden)]
 #[allow(clippy::octal_escapes)]
-pub static __WIT_BINDGEN_COMPONENT_TYPE: [u8; 379] = *b"\
-\0asm\x0d\0\x01\0\0\x19\x16wit-component-encoding\x04\0\x07\xfa\x01\x01A\x02\x01\
-A\x02\x01B\x0a\x01q\x03\x06numero\x01u\0\x05texto\x01s\0\x08booleano\x01\x7f\0\x04\
-\0\x05valor\x03\0\0\x01r\x02\x06nombres\x05valor\x01\x04\0\x08nombrado\x03\0\x02\
-\x01ku\x01p\x03\x01r\x04\x06estados\x07mensajes\x0cvalor-medido\x04\x07salidas\x05\
-\x04\0\x09resultado\x03\0\x06\x01@\x03\x06nombres\x07intentoz\x0aparametros\x05\0\
-\x07\x04\0\x03run\x01\x08\x04\0\x15anvil:paso/paso@0.2.0\x05\0\x04\0\x1banvil:pa\
-so/anvil-paso@0.2.0\x04\0\x0b\x10\x01\0\x0aanvil-paso\x03\0\0\0G\x09producers\x01\
-\x0cprocessed-by\x02\x0dwit-component\x070.227.1\x10wit-bindgen-rust\x060.41.0";
+pub static __WIT_BINDGEN_COMPONENT_TYPE: [u8; 370] = *b"\
+\0asm\x0d\0\x01\0\0\x19\x16wit-component-encoding\x04\0\x07\xf1\x01\x01A\x02\x01\
+A\x02\x01B\x0a\x01q\x03\x06number\x01u\0\x04text\x01s\0\x07boolean\x01\x7f\0\x04\
+\0\x05value\x03\0\0\x01r\x02\x04names\x05value\x01\x04\0\x05named\x03\0\x02\x01k\
+u\x01p\x03\x01r\x04\x06statuss\x07messages\x0emeasured-value\x04\x07outputs\x05\x04\
+\0\x0bstep-result\x03\0\x06\x01@\x03\x04names\x07attemptz\x06inputs\x05\0\x07\x04\
+\0\x03run\x01\x08\x04\0\x15anvil:step/step@0.3.0\x05\0\x04\0\x1banvil:step/anvil\
+-step@0.3.0\x04\0\x0b\x10\x01\0\x0aanvil-step\x03\0\0\0G\x09producers\x01\x0cpro\
+cessed-by\x02\x0dwit-component\x070.227.1\x10wit-bindgen-rust\x060.41.0";
 #[inline(never)]
 #[doc(hidden)]
 pub fn __link_custom_section_describing_imports() {

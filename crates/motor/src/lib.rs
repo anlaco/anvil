@@ -15,7 +15,7 @@
 
 mod entorno;
 
-use modelo::proto::{PeticionPaso, ResultadoPasoProto, Valor as ProtoValor, CONTRATO, RUTA_INVOCA};
+use modelo::proto::{StepRequest, StepResult, Value as ProtoValue, CONTRATO, RUTA_INVOCA};
 use modelo::{
     Asignacion, DefinicionEjecutor, DefinicionPaso, DefinicionSecuencia, EntradaPaso, Fase, Limite,
     Programa, ResultSink, ResultadoSecuencia, ResultadoStep, TipoEjecutor, TipoPaso,
@@ -177,21 +177,21 @@ impl Motor {
         parametros: &[(String, Value)],
     ) -> Result<ResultadoStep, Error> {
         let endpoint = Self::resolver_endpoint(def, programa)?;
-        let peticion = PeticionPaso {
-            nombre: def.nombre.clone(),
-            intento,
-            parametros: parametros
+        let peticion = StepRequest {
+            name: def.nombre.clone(),
+            attempt: intento,
+            inputs: parametros
                 .iter()
-                .filter_map(|(n, v)| ProtoValor::desde_value(n, v))
+                .filter_map(|(n, v)| ProtoValue::desde_value(n, v))
                 .collect(),
-            contrato: CONTRATO,
+            contract: CONTRATO,
         };
         let cliente = self
             .conexiones
             .get_mut(endpoint)
             .ok_or_else(|| Error::EjecutorNoConectado(endpoint.to_string()))?;
         let bytes = cliente.unaria(RUTA_INVOCA, &peticion.encode_to_vec())?;
-        let respuesta = ResultadoPasoProto::decode(&bytes[..])?;
+        let respuesta = StepResult::decode(&bytes[..])?;
 
         // El eco (ADR-0020 §4b). Un campo aditivo es «compatible» sólo en el
         // sentido de que el mensaje decodifica: un ejecutor de contrato 1
@@ -203,7 +203,7 @@ impl Motor {
         // parámetros ni lee salidas, un ejecutor de contrato 1 sigue siendo
         // válido y no cambia nada — que es lo que mantiene vivo lo que ya
         // funciona.
-        if let Some(r) = veredicto_del_eco(def, endpoint, respuesta.contrato) {
+        if let Some(r) = veredicto_del_eco(def, endpoint, respuesta.contract) {
             return Ok(r);
         }
 
@@ -269,7 +269,7 @@ impl Motor {
     /// El motor dispara el lifecycle del `ResultSink` (`on_inicio_secuencia`
     /// → `on_inicio_paso`/`on_resultado`/`on_fin_paso` por paso →
     /// `on_fin_secuencia`), **incluido los pasos saltados** (estado
-    /// `"saltado"`), para que el lifecycle sea uniforme.
+    /// `"skipped"`), para que el lifecycle sea uniforme.
     ///
     /// Si `ejecuta_con_reintentos` propaga un `Error` (red rota), la
     /// secuencia se interrumpe y **no** se dispara `on_fin_paso` ni
@@ -520,7 +520,7 @@ fn ejecuta_secuencia_interna<I: InvocaPasos>(
     let mut setup_ok = true;
     for p in &def.pasos_setup {
         let r = corre_un_paso(inv, p, &mut entorno, sink, &ctx(Fase::Setup))?;
-        let fallo = !r.paso() && r.estado != "saltado";
+        let fallo = !r.paso() && r.estado != "skipped";
         secuencia.registra(r.clone());
         if fallo {
             setup_ok = false;
@@ -538,8 +538,8 @@ fn ejecuta_secuencia_interna<I: InvocaPasos>(
     if setup_ok {
         for p in &def.pasos_main {
             let r = corre_un_paso(inv, p, &mut entorno, sink, &ctx(Fase::Main))?;
-            let fallo = !r.paso() && r.estado != "saltado";
-            if p.tipo == TipoPaso::PassFail && r.estado != "saltado" {
+            let fallo = !r.paso() && r.estado != "skipped";
+            if p.tipo == TipoPaso::PassFail && r.estado != "skipped" {
                 veredicto_evaluado = true;
             }
             secuencia.registra(r.clone());
@@ -612,7 +612,7 @@ fn corre_un_paso<I: InvocaPasos>(
 
     // (a) disable: se salta sin invocar ni evaluar nada.
     if p.disable {
-        let r = sella(ResultadoStep::nuevo(&p.nombre, "saltado", "disable"));
+        let r = sella(ResultadoStep::nuevo(&p.nombre, "skipped", "disable"));
         sink.on_resultado(&r);
         sink.on_fin_paso(p);
         return Ok(r);
@@ -637,7 +637,7 @@ fn corre_un_paso<I: InvocaPasos>(
     // aquí mismo (ADR-0019, Regla 2): es el único punto por el que pasa todo
     // resultado gRPC, mock de test incluido. Los otros tres tipos los produce
     // el motor, que no se equivoca de vocabulario — y el `sequence_call`
-    // devuelve además `"inconcluso"`, que es agregado legítimo y no estado de
+    // devuelve además `"inconclusive"`, que es agregado legítimo y no estado de
     // ejecutor.
     let mut r = match p.tipo {
         TipoPaso::Statement => ejecuta_statement_puro(p.statement.as_deref(), &p.nombre, ent),
@@ -823,7 +823,7 @@ fn ejecuta_sequence_call<I: InvocaPasos>(
 }
 
 /// Veredicto de la precondición: continuar o saltar (con el `ResultadoStep`
-/// a registrar, ya sea `"saltado"` o `"error"`).
+/// a registrar, ya sea `"skipped"` o `"error"`).
 enum VeredictoPre {
     Continua,
     // `Box` porque `ResultadoStep` creció con `parametros` y `salidas`
@@ -841,7 +841,7 @@ fn evalua_precondicion(pre: &Expresion, ent: &mut EntornoMotor, nombre: &str) ->
         Ok(Value::Bool(true)) => VeredictoPre::Continua,
         Ok(Value::Bool(false)) => VeredictoPre::Salta(Box::new(ResultadoStep::nuevo(
             nombre,
-            "saltado",
+            "skipped",
             "precondición falsa",
         ))),
         Ok(v) => VeredictoPre::Salta(Box::new(ResultadoStep::nuevo(
@@ -869,7 +869,7 @@ fn ejecuta_statement_puro(
         return ResultadoStep::nuevo(nombre, "error", "statement sin sentencia");
     };
     match eval_sentencias(stmts, ent) {
-        Ok(()) => ResultadoStep::nuevo(nombre, "paso", "statement ok"),
+        Ok(()) => ResultadoStep::nuevo(nombre, "pass", "statement ok"),
         Err(e) => ResultadoStep::nuevo(nombre, "error", format!("statement: {e}")),
     }
 }
@@ -898,8 +898,8 @@ fn evalua_pass_fail(
     // Un `pass_fail` no tiene `resultado.*` propio: lee variables de scopes.
     ent.limpia_resultado();
     match eval(cond, ent) {
-        Ok(Value::Bool(true)) => ResultadoStep::nuevo(nombre, "paso", "condición cumplida"),
-        Ok(Value::Bool(false)) => ResultadoStep::nuevo(nombre, "fallo", "condición no cumplida"),
+        Ok(Value::Bool(true)) => ResultadoStep::nuevo(nombre, "pass", "condición cumplida"),
+        Ok(Value::Bool(false)) => ResultadoStep::nuevo(nombre, "fail", "condición no cumplida"),
         Ok(v) => ResultadoStep::nuevo(
             nombre,
             "error",
@@ -1008,8 +1008,8 @@ pub(crate) fn aplicar_limite(def: &DefinicionPaso, mut r: ResultadoStep) -> Resu
 
     // El límite solo puede empeorar un `paso` a `fallo`: nunca toca un
     // `fallo`/`error` que el paso haya emitido por sí mismo.
-    if r.estado == "paso" && lim.evalua(valor) == "fallo" {
-        r.estado = "fallo".into();
+    if r.estado == "pass" && lim.evalua(valor) == "fail" {
+        r.estado = "fail".into();
         r.mensaje = match lim {
             Limite::Rango { min, max } => format!("{valor} fuera de rango [{min}, {max}]"),
             Limite::Comparacion { op, esperado } => {
@@ -1029,7 +1029,7 @@ mod tests {
     use super::*;
     use modelo::{DefinicionPaso, Limite, Operador, ResultadoStep};
 
-    /// Un paso que midió `valor` y devuelve `estado` ("paso"/"fallo"/"error"),
+    /// Un paso que midió `valor` y devuelve `estado` ("pass"/"fail"/"error"),
     /// sin conocer el umbral: es lo que produce un paso de *limit test* en M3.
     fn paso_medido(valor: f64, estado: &str) -> ResultadoStep {
         ResultadoStep::medido_valor("medir_voltaje", estado, "medido", valor)
@@ -1038,8 +1038,8 @@ mod tests {
     #[test]
     fn rango_dentro_deja_paso_y_rellena_campos() {
         let def = DefinicionPaso::con_limite("m", 1, Limite::Rango { min: 4.5, max: 5.5 });
-        let r = aplicar_limite(&def, paso_medido(5.0, "paso"));
-        assert_eq!(r.estado, "paso");
+        let r = aplicar_limite(&def, paso_medido(5.0, "pass"));
+        assert_eq!(r.estado, "pass");
         assert_eq!(r.limite_min, Some(4.5));
         assert_eq!(r.limite_max, Some(5.5));
         assert_eq!(
@@ -1051,8 +1051,8 @@ mod tests {
     #[test]
     fn rango_fuera_convierte_paso_a_fallo_y_reescribe_mensaje() {
         let def = DefinicionPaso::con_limite("m", 1, Limite::Rango { min: 4.5, max: 5.5 });
-        let r = aplicar_limite(&def, paso_medido(4.2, "paso"));
-        assert_eq!(r.estado, "fallo");
+        let r = aplicar_limite(&def, paso_medido(4.2, "pass"));
+        assert_eq!(r.estado, "fail");
         assert_eq!(r.limite_min, Some(4.5));
         assert_eq!(r.limite_max, Some(5.5));
         assert_eq!(r.mensaje, "4.2 fuera de rango [4.5, 5.5]");
@@ -1068,8 +1068,8 @@ mod tests {
                 esperado: 1000.0,
             },
         );
-        let r = aplicar_limite(&def, paso_medido(999.0, "paso"));
-        assert_eq!(r.estado, "fallo");
+        let r = aplicar_limite(&def, paso_medido(999.0, "pass"));
+        assert_eq!(r.estado, "fail");
         assert_eq!(r.operador, Some(Operador::Ge));
         assert_eq!(r.valor_esperado, Some(1000.0));
         assert_eq!(r.mensaje, "999 >= 1000 no cumplido");
@@ -1079,11 +1079,8 @@ mod tests {
     fn el_paso_que_ya_fallo_no_se_mejora_solo_se_rellena_el_limite() {
         // El paso sabe algo que el límite no: su fallo se respeta.
         let def = DefinicionPaso::con_limite("m", 1, Limite::Rango { min: 4.5, max: 5.5 });
-        let r = aplicar_limite(&def, paso_medido(5.0, "fallo"));
-        assert_eq!(
-            r.estado, "fallo",
-            "el paso ya falló: el límite no lo mejora"
-        );
+        let r = aplicar_limite(&def, paso_medido(5.0, "fail"));
+        assert_eq!(r.estado, "fail", "el paso ya falló: el límite no lo mejora");
         assert_eq!(
             r.limite_min,
             Some(4.5),
@@ -1102,8 +1099,8 @@ mod tests {
     #[test]
     fn paso_sin_limite_no_cambia() {
         let def = DefinicionPaso::nuevo("m", 1);
-        let r = aplicar_limite(&def, paso_medido(4.2, "paso"));
-        assert_eq!(r.estado, "paso");
+        let r = aplicar_limite(&def, paso_medido(4.2, "pass"));
+        assert_eq!(r.estado, "pass");
         assert_eq!(r.limite_min, None);
     }
 
@@ -1112,8 +1109,8 @@ mod tests {
         // Un pass/fail con un límite declarado (mal uso) no debe pánico: sin
         // valor_medido el límite no aplica, todo se queda igual.
         let def = DefinicionPaso::con_limite("m", 1, Limite::Rango { min: 4.5, max: 5.5 });
-        let r = aplicar_limite(&def, ResultadoStep::nuevo("m", "paso", "sin medida"));
-        assert_eq!(r.estado, "paso");
+        let r = aplicar_limite(&def, ResultadoStep::nuevo("m", "pass", "sin medida"));
+        assert_eq!(r.estado, "pass");
         assert_eq!(r.limite_min, None, "sin medida no se rellena el límite");
     }
 
@@ -1148,7 +1145,7 @@ mod tests {
             VeredictoPre::Salta(r) => r,
             _ => panic!("debe saltar"),
         };
-        assert_eq!(r.estado, "saltado");
+        assert_eq!(r.estado, "skipped");
         assert_eq!(r.nombre, "medir");
         assert!(r.mensaje.contains("precondición falsa"));
     }
@@ -1171,7 +1168,7 @@ mod tests {
         let mut env = entorno_con_locals(&[("v", ValorDefinicion::Numero(5.0))]);
         let cond = expr::parse_expresion("locals.v > 4.9 && locals.v < 5.1").unwrap();
         let r = evalua_pass_fail(Some(&cond), "verificar_dut", &mut env);
-        assert_eq!(r.estado, "paso");
+        assert_eq!(r.estado, "pass");
         assert_eq!(r.nombre, "verificar_dut");
     }
 
@@ -1181,7 +1178,7 @@ mod tests {
         let mut env = entorno_con_locals(&[("v", ValorDefinicion::Numero(4.2))]);
         let cond = expr::parse_expresion("locals.v > 4.9").unwrap();
         let r = evalua_pass_fail(Some(&cond), "verificar_dut", &mut env);
-        assert_eq!(r.estado, "fallo", "un veredicto falso falla el paso");
+        assert_eq!(r.estado, "fail", "un veredicto falso falla el paso");
         assert!(r.mensaje.contains("condición no cumplida"));
     }
 
@@ -1208,7 +1205,7 @@ mod tests {
         let mut env = entorno_con_locals(&[("ok", ValorDefinicion::Bool(true))]);
         let stmts = expr::parse_sentencias("locals.ok = false").unwrap();
         let r = ejecuta_statement_puro(Some(&stmts), "init", &mut env);
-        assert_eq!(r.estado, "paso");
+        assert_eq!(r.estado, "pass");
         assert_eq!(env.locals().get("ok"), Some(&expr::Value::Bool(false)));
     }
 
@@ -1225,20 +1222,20 @@ mod tests {
     #[test]
     fn asigna_vuelca_resultado_a_locals() {
         let mut env = entorno_con_locals(&[("voltaje", ValorDefinicion::Numero(0.0))]);
-        let res = ResultadoStep::medido_valor("m", "paso", "ok", 4.2);
+        let res = ResultadoStep::medido_valor("m", "pass", "ok", 4.2);
         let asignaciones = vec![modelo::Asignacion {
             var: "voltaje".into(),
             expr: expr::parse_expresion("result.measured_value").unwrap(),
         }];
         let r = aplica_asigna(&asignaciones, res, &mut env);
-        assert_eq!(r.estado, "paso", "el paso ya pasó; la asigna no falla");
+        assert_eq!(r.estado, "pass", "el paso ya pasó; la asigna no falla");
         assert_eq!(env.locals().get("voltaje"), Some(&expr::Value::Numero(4.2)));
     }
 
     #[test]
     fn asigna_que_falla_convierte_el_paso_en_error() {
         let mut env = entorno_con_locals(&[("x", ValorDefinicion::Numero(0.0))]);
-        let res = ResultadoStep::medido_valor("m", "paso", "ok", 4.2);
+        let res = ResultadoStep::medido_valor("m", "pass", "ok", 4.2);
         // Leer un local no declarado es error de evaluación (lectura estricta
         // de `locals`), así que la asigna falla.
         let asignaciones = vec![modelo::Asignacion {
@@ -1260,7 +1257,7 @@ mod tests {
     #[test]
     fn asigna_desde_un_campo_inexistente_de_resultado_es_error() {
         let mut env = entorno_con_locals(&[("x", ValorDefinicion::Numero(0.0))]);
-        let res = ResultadoStep::medido_valor("m", "paso", "ok", 4.2);
+        let res = ResultadoStep::medido_valor("m", "pass", "ok", 4.2);
         let asignaciones = vec![modelo::Asignacion {
             var: "x".into(),
             expr: expr::parse_expresion("result.measured_valu").unwrap(),
@@ -1317,7 +1314,7 @@ mod tests {
             assert_eq!(r.estado, e);
             assert_eq!(r.mensaje, "tal cual");
         }
-        let r = normaliza_estado_de_ejecutor(ResultadoStep::nuevo("p", "inconcluso", "m"));
+        let r = normaliza_estado_de_ejecutor(ResultadoStep::nuevo("p", "inconclusive", "m"));
         assert_eq!(
             r.estado, "error",
             "un ejecutor no puede declararse a sí mismo no concluyente"
@@ -1458,14 +1455,14 @@ mod tests {
             ) -> Result<ResultadoStep, Error> {
                 Ok(ResultadoStep::medido_valor(
                     &def.nombre,
-                    "paso",
+                    "pass",
                     "medido: 4.2 V",
                     4.2,
                 ))
             }
         }
         let (s, env) = corre_con(&mut InvocadorQueMide, &def);
-        assert_eq!(s.estado(), "paso");
+        assert_eq!(s.estado(), "pass");
         assert_eq!(env.locals().get("valor"), Some(&expr::Value::Numero(4.2)));
     }
 
@@ -1492,14 +1489,14 @@ mod tests {
             ) -> Result<ResultadoStep, Error> {
                 Ok(ResultadoStep::medido_valor(
                     &def.nombre,
-                    "fallo",
+                    "fail",
                     "fuera de rango",
                     6.1,
                 ))
             }
         }
         let (s, env) = corre_con(&mut InvocadorQueFalla, &def);
-        assert_eq!(s.estado(), "fallo");
+        assert_eq!(s.estado(), "fail");
         assert_eq!(env.locals().get("valor"), Some(&expr::Value::Numero(6.1)));
     }
 
@@ -1587,7 +1584,7 @@ mod tests {
 
         // El call pasa (la subsecuencia pasa) y anida sus pasos.
         let r = &sec.pasos[0];
-        assert_eq!(r.estado, "paso");
+        assert_eq!(r.estado, "pass");
         assert_eq!(r.sub_pasos.as_ref().unwrap().len(), 1);
         assert_eq!(r.sub_pasos.as_ref().unwrap()[0].nombre, "comprobar");
     }
@@ -1634,7 +1631,7 @@ mod tests {
         )
         .unwrap();
 
-        assert_eq!(sec.pasos[0].estado, "paso");
+        assert_eq!(sec.pasos[0].estado, "pass");
         // La salida by-reference: locals.listo pasó de false a true.
         assert_eq!(
             env.locals().get("listo"),
@@ -1651,7 +1648,7 @@ mod tests {
         // pero la subsecuencia misma "pasa" (un statement no falla). Para
         // forzar un fallo agregado, la subsecuencia lleva un paso grpc mock
         // que falle… como el mock pánico, usamos otro camino: un paso
-        // statement cuyo `estado` es "paso"; el agregado de la sub es "paso".
+        // statement cuyo `estado` es "pass"; el agregado de la sub es "pass".
         // Verificamos en cambio el caso de error: una subsecuencia cuyo
         // statement tiene error de tipo.
         let mut sub = DefinicionSecuencia {
@@ -1755,7 +1752,7 @@ mod tests {
         )
         .unwrap();
 
-        assert_eq!(sec.pasos[0].estado, "paso");
+        assert_eq!(sec.pasos[0].estado, "pass");
         // La hija hizo canal + 1.0 = 2.0; by-reference lo devuelve a locals.canal.
         assert_eq!(env.locals().get("canal"), Some(&Value::Numero(2.0)));
     }
@@ -1924,7 +1921,7 @@ mod tests {
                 None => "embebido",
                 Some(n) => n,
             };
-            Ok(ResultadoStep::nuevo(&def.nombre, "paso", mensaje))
+            Ok(ResultadoStep::nuevo(&def.nombre, "pass", mensaje))
         }
     }
 
@@ -2075,8 +2072,8 @@ mod tests {
         .unwrap();
 
         assert_eq!(sec.pasos.len(), 1, "Main corta en el pass_fail falso");
-        assert_eq!(sec.pasos[0].estado, "fallo");
-        assert_eq!(sec.estado(), "fallo", "el agregado ya no miente");
+        assert_eq!(sec.pasos[0].estado, "fail");
+        assert_eq!(sec.estado(), "fail", "el agregado ya no miente");
         assert_eq!(
             env.locals().get("v"),
             Some(&expr::Value::Numero(4.2)),
@@ -2123,7 +2120,7 @@ mod tests {
         .unwrap();
 
         assert_eq!(sec.pasos.len(), 2);
-        assert_eq!(sec.estado(), "paso");
+        assert_eq!(sec.estado(), "pass");
         assert!(
             !sec.veredicto_sin_evaluar,
             "el veredicto se evaluó: nada que declarar"
@@ -2173,13 +2170,13 @@ mod tests {
         .unwrap();
 
         assert_eq!(
-            sec.pasos[1].estado, "saltado",
+            sec.pasos[1].estado, "skipped",
             "el paso se sigue reportando como lo que fue"
         );
         assert!(sec.veredicto_sin_evaluar);
         assert_eq!(
             sec.estado(),
-            "inconcluso",
+            "inconclusive",
             "el veredicto no se evaluó: la secuencia no puede afirmar `paso`"
         );
     }
@@ -2218,7 +2215,7 @@ mod tests {
         )
         .unwrap();
 
-        assert_eq!(sec.estado(), "inconcluso");
+        assert_eq!(sec.estado(), "inconclusive");
     }
 
     /// La otra mitad de la Regla 1, y la que evita una regresión masiva: una
@@ -2264,9 +2261,9 @@ mod tests {
         )
         .unwrap();
 
-        assert_eq!(sec.pasos[1].estado, "saltado");
+        assert_eq!(sec.pasos[1].estado, "skipped");
         assert!(!sec.veredicto_sin_evaluar);
-        assert_eq!(sec.estado(), "paso", "el criterio eran los límites");
+        assert_eq!(sec.estado(), "pass", "el criterio eran los límites");
     }
 
     /// Un `fallo` presente manda sobre el `inconcluso`: si el Setup se rompe,
@@ -2311,7 +2308,7 @@ mod tests {
             sec.veredicto_sin_evaluar,
             "el Main no corrió: el veredicto no se evaluó"
         );
-        assert_eq!(sec.estado(), "fallo", "pero el fallo del Setup manda");
+        assert_eq!(sec.estado(), "fail", "pero el fallo del Setup manda");
     }
 
     // --- Fase del paso en el resultado (DIAG-3, #8) ---
@@ -2347,7 +2344,7 @@ mod tests {
         def.pasos_setup = vec![stmt("conectar")];
         def.pasos_main = vec![stmt("medir"), {
             // Un `disable` también sale sellado: se emite sin invocar nada.
-            let mut p = stmt("saltado");
+            let mut p = stmt("skipped");
             p.disable = true;
             p
         }];
@@ -2382,7 +2379,7 @@ mod tests {
             vec![
                 ("conectar", Fase::Setup),
                 ("medir", Fase::Main),
-                ("saltado", Fase::Main),
+                ("skipped", Fase::Main),
                 ("apagar", Fase::Cleanup),
             ]
         );
@@ -2394,7 +2391,7 @@ mod tests {
         vec![
             ("conectar".into(), Fase::Setup),
             ("medir".into(), Fase::Main),
-            ("saltado".into(), Fase::Main),
+            ("skipped".into(), Fase::Main),
             ("apagar".into(), Fase::Cleanup),
         ]
     }
@@ -2522,6 +2519,24 @@ mod tests_adr0020 {
     fn un_paso_sin_parametros_sigue_valiendo_con_contrato_1() {
         let viejo = DefinicionPaso::nuevo("verificar_led", 1);
         assert!(veredicto_del_eco(&viejo, EMBEDIDO, 0).is_none());
+    }
+
+    /// El caso que estrena el contrato 3: un ejecutor que entiende el 2 —el
+    /// contrato en castellano, con `parametros` y `salidas`— ya no vale para
+    /// un paso que manda `inputs`. No es un detalle de nombres: los campos
+    /// cambiaron de tag y de tipo, así que ese ejecutor leería basura.
+    ///
+    /// Visto en rojo devolviendo `CONTRATO` como eco.
+    #[test]
+    fn un_ejecutor_del_contrato_anterior_tampoco_vale() {
+        let r = veredicto_del_eco(&paso_con_parametros(), EMBEDIDO, CONTRATO - 1)
+            .expect("el contrato anterior ya no basta");
+        assert_eq!(r.estado, "error");
+        assert!(
+            r.mensaje.contains(&(CONTRATO - 1).to_string()),
+            "nombra el contrato que entiende: {}",
+            r.mensaje
+        );
     }
 
     #[test]

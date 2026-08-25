@@ -1,0 +1,72 @@
+// The version lives in the package name and travels with the artifact:
+// wasmtime refuses to instantiate a component that does not match. **There is
+// no compatibility shim in the bridge: the rule is to recompile**
+// (ADR-0020 §4d, the answer to issue #39). The bridge is the only translator,
+// and therefore the only one that knows which contract number goes with which
+// WIT version — so it is the bridge that answers the gRPC echo. A component
+// knows nothing about gRPC, protobuf or contract versions (ADR-0015).
+package anvil:step@0.3.0;
+
+interface step {
+  /// A typed value crossing the component boundary. The three types are the
+  /// same as the `oneof Value` of `paso.proto` and of `expr::Value`: no lists
+  /// and no maps (a parameter that needs structure is a badly cut step,
+  /// ADR-0020 §2).
+  variant value {
+    number(f64),
+    text(string),
+    boolean(bool),
+  }
+
+  /// A `value` with its name. Named rather than positional: sequences are
+  /// written and reviewed by hand, and reordering two parameters must not
+  /// change what the bench measures.
+  record named {
+    name: string,
+    value: value,
+  }
+
+  /// `step-result` y no `result`: `result` es palabra reservada de WIT. Es
+  /// una concesión al lenguaje, no al idioma — igual que `type` en Rust.
+  record step-result {
+    /// The step's verdict. It is text because that is how it travels in
+    /// `paso.proto` and a step may be written in any language, but the
+    /// vocabulary is **closed**: exactly one of these four literals, lowercase.
+    ///
+    ///   "pass"     the step met its criterion
+    ///   "fail"     the unit does not comply — information about the DUT
+    ///   "error"    could not be judged — information about the bench or step
+    ///   "skipped"  did not run (set by the engine; a step never returns it)
+    ///
+    /// Any other string —"Pass", "PASS", "ok", and also "inconclusive", which
+    /// only the engine produces when aggregating— turns the step into "error",
+    /// with a message naming the value received. A status Anvil cannot read
+    /// says nothing about the unit (ADR-0019, Rule 2).
+    status: string,
+    /// Free text for the report: what the step did, or why it could not.
+    message: string,
+    /// The measurement, if the step measures. The **threshold does not belong
+    /// to the step**: the engine evaluates the `limit` declared in the
+    /// sequence against it (ADR-0008).
+    measured-value: option<f64>,
+    /// Named values the step returns **besides** the measurement: a context
+    /// temperature, a serial number read off the unit, a coefficient. They
+    /// take no part in the verdict; `assign` reads them as
+    /// `result.outputs.<name>` (ADR-0020 §3).
+    ///
+    /// No `inout`: in through `inputs`, out through `outputs`, and there is no
+    /// third path. Giving one would hand the step a reference to the engine's
+    /// environment, which is what ADR-0003 and ADR-0005 avoid.
+    outputs: list<named>,
+  }
+
+  /// `inputs` arrive **already evaluated**: the engine resolves the `${...}`
+  /// expressions of the YAML against its environment before calling
+  /// (ADR-0009). The step never sees `locals` or `file_globals`; it is handed
+  /// values.
+  run: func(name: string, attempt: s32, inputs: list<named>) -> step-result;
+}
+
+world anvil-step {
+  export step;
+}

@@ -2,7 +2,7 @@
 """Ejecutor de pasos en Python (ADR-0012) — módulo distribuido de Anvil.
 
 Servidor gRPC que habla el contrato `paso.proto` (service EjecutorPasos,
-ruta /EjecutorPasos/Invoca). El motor de Anvil lo ve como un endpoint más:
+ruta /StepExecutor/Invoke). El motor de Anvil lo ve como un endpoint más:
 despacha por nombre→endpoint y no sabe que detrás hay Python.
 
 Este ejecutor demuestra la pieza clave del escenario legacy: el paso que
@@ -45,7 +45,7 @@ SIMULADOR_DEFECTO = ("127.0.0.1", 4000)
 #
 # Si subes el contrato en el core y te olvidas de aquí, este ejecutor deja de
 # poder correr pasos con parámetros — que es el fallo ruidoso y correcto.
-CONTRATO = 2
+CONTRATO = 3
 
 
 def valor_a_python(v):
@@ -66,11 +66,11 @@ def parametros_de(request):
     """Los parámetros de la petición como `dict`, o `(None, nombre)` si uno
     llegó sin tipo."""
     fuera = {}
-    for v in request.parametros:
+    for v in request.inputs:
         valor = valor_a_python(v)
         if valor is None:
-            return None, v.nombre
-        fuera[v.nombre] = valor
+            return None, v.name
+        fuera[v.name] = valor
     return fuera, None
 
 
@@ -81,20 +81,20 @@ def resultado(nombre, estado, mensaje, valor_medido=None, salidas=None):
     puntos de retorno, olvidarse en uno solo sería un ejecutor que a veces
     dice que entiende el contrato y a veces no.
     """
-    r = paso_pb2.ResultadoPasoProto(
-        nombre=nombre, estado=estado, mensaje=mensaje, contrato=CONTRATO,
+    r = paso_pb2.StepResult(
+        name=nombre, status=estado, message=mensaje, contract=CONTRATO,
     )
     if valor_medido is not None:
-        r.valor_medido = str(valor_medido)
+        r.measured_value = str(valor_medido)
     for n, v in (salidas or {}).items():
-        s = r.salidas.add()
-        s.nombre = n
+        s = r.outputs.add()
+        s.name = n
         if isinstance(v, bool):
-            s.booleano = v
+            s.boolean = v
         elif isinstance(v, (int, float)):
-            s.numero = float(v)
+            s.number = float(v)
         else:
-            s.texto = str(v)
+            s.text = str(v)
     return r
 
 
@@ -113,7 +113,7 @@ def lee_simulador(host, puerto, comando, timeout=2.0):
     return linea
 
 
-class EjecutorPasosServicer(paso_pb2_grpc.EjecutorPasosServicer):
+class StepExecutorServicer(paso_pb2_grpc.StepExecutorServicer):
     """Despacho por nombre: el único punto donde el nombre del cable se ata
     a una función de este ejecutor (igual que pasos_demo en el ejecutor
     WASM). Un nombre desconocido es `error`, no excepción (RF-12).
@@ -122,7 +122,7 @@ class EjecutorPasosServicer(paso_pb2_grpc.EjecutorPasosServicer):
     def __init__(self, simulador):
         self.simulador = simulador
 
-    def Invoca(self, request, context):
+    def Invoke(self, request, context):
         nombre = request.nombre
         intento = request.intento
         params, sin_tipo = parametros_de(request)
@@ -148,7 +148,7 @@ class EjecutorPasosServicer(paso_pb2_grpc.EjecutorPasosServicer):
                     nombre, "error", f"no se pudo hablar con el simulador: {e}")
             if linea.lower().startswith("medida:"):
                 return resultado(
-                    nombre, "paso", f"simulador respondió {linea}",
+                    nombre, "pass", f"simulador respondió {linea}",
                     valor_medido=linea.split(":", 1)[1].strip(),
                     # El canal usado vuelve como salida con nombre: es la
                     # condición en la que se midió, y ahora queda en el
@@ -164,13 +164,13 @@ class EjecutorPasosServicer(paso_pb2_grpc.EjecutorPasosServicer):
             # al paso).
             if intento == 1:
                 return resultado(
-                    nombre, "fallo",
+                    nombre, "fail",
                     "handshake del simulador perdido (transitorio)")
-            return resultado(nombre, "paso", "conectado")
+            return resultado(nombre, "pass", "conectado")
 
         if nombre == "verificar_led":
             # Pass/fail sin medida (built-in de ejemplo en Python).
-            return resultado(nombre, "paso", "led encendido")
+            return resultado(nombre, "pass", "led encendido")
 
         return resultado(
             nombre, "error",
@@ -190,8 +190,8 @@ def main():
         simulador = (host, int(puerto))
 
     server = grpc.server(futures.ThreadPoolExecutor(max_workers=4))
-    paso_pb2_grpc.add_EjecutorPasosServicer_to_server(
-        EjecutorPasosServicer(simulador), server)
+    paso_pb2_grpc.add_StepExecutorServicer_to_server(
+        StepExecutorServicer(simulador), server)
     server.add_insecure_port(f"{HOST}:{args.puerto}")
     server.start()
     print(f"ejecutor python escuchando en {HOST}:{args.puerto} "

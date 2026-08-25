@@ -9,7 +9,7 @@ use prost::Message;
 
 /// La ruta del método gRPC. Sin `package` en el `.proto`, así que es
 /// directamente `/<servicio>/<método>`.
-pub const RUTA_INVOCA: &str = "/EjecutorPasos/Invoca";
+pub const RUTA_INVOCA: &str = "/StepExecutor/Invoke";
 
 /// La versión de contrato que habla este binario (ADR-0020 §4).
 ///
@@ -21,22 +21,22 @@ pub const RUTA_INVOCA: &str = "/EjecutorPasos/Invoca";
 /// Sube todo cambio en el que **el silencio de un par antiguo pueda alterar un
 /// veredicto**. Lo que un par puede ignorar sin que la afirmación sobre la
 /// unidad cambie (un campo informativo, una traza), no lo sube.
-pub const CONTRATO: i32 = 2;
+pub const CONTRATO: i32 = 3;
 
 /// Un valor con nombre y tipo, tal y como viaja por el cable.
 ///
 /// El `oneof` es `Option` porque proto3 permite que no venga ninguna rama —
 /// y eso es exactamente lo que hay que poder detectar: **un `oneof` sin rama
-/// es error, no un cero** (ADR-0020 §2). Ver `Valor::a_value`.
+/// es error, no un cero** (ADR-0020 §2). Ver `Value::a_value`.
 #[derive(Clone, PartialEq, Message)]
-pub struct Valor {
+pub struct Value {
     #[prost(string, tag = "1")]
-    pub nombre: String,
-    #[prost(oneof = "valor::Dato", tags = "2, 3, 4")]
-    pub dato: Option<valor::Dato>,
+    pub name: String,
+    #[prost(oneof = "value::Dato", tags = "2, 3, 4")]
+    pub dato: Option<value::Dato>,
 }
 
-pub mod valor {
+pub mod value {
     /// Las tres ramas del `oneof`, en el mismo orden que el `.proto`. Son los
     /// tres tipos de `expr::Value` que tienen valor (todos menos `Nulo`).
     #[derive(Clone, PartialEq, ::prost::Oneof)]
@@ -50,21 +50,21 @@ pub mod valor {
     }
 }
 
-impl Valor {
-    /// Construye un `Valor` de cable desde un `expr::Value` ya evaluado.
+impl Value {
+    /// Construye un `Value` de cable desde un `expr::Value` ya evaluado.
     ///
     /// `Value::Nulo` **no tiene representación**: devuelve `None`. Un nulo no
     /// se manda como `oneof` vacío —eso es justo lo que el receptor tiene que
     /// poder rechazar— así que quien llame decide qué hacer con la ausencia.
-    pub fn desde_value(nombre: &str, v: &expr::Value) -> Option<Valor> {
+    pub fn desde_value(nombre: &str, v: &expr::Value) -> Option<Value> {
         let dato = match v {
-            expr::Value::Numero(x) => valor::Dato::Numero(*x),
-            expr::Value::Texto(s) => valor::Dato::Texto(s.clone()),
-            expr::Value::Bool(b) => valor::Dato::Booleano(*b),
+            expr::Value::Numero(x) => value::Dato::Numero(*x),
+            expr::Value::Texto(s) => value::Dato::Texto(s.clone()),
+            expr::Value::Bool(b) => value::Dato::Booleano(*b),
             expr::Value::Nulo => return None,
         };
-        Some(Valor {
-            nombre: nombre.to_string(),
+        Some(Value {
+            name: nombre.to_string(),
             dato: Some(dato),
         })
     }
@@ -76,52 +76,52 @@ impl Valor {
     /// qué tipo es, y el receptor tiene que tratarlo como error.
     pub fn a_value(&self) -> Option<expr::Value> {
         match self.dato.as_ref()? {
-            valor::Dato::Numero(x) => Some(expr::Value::Numero(*x)),
-            valor::Dato::Texto(s) => Some(expr::Value::Texto(s.clone())),
-            valor::Dato::Booleano(b) => Some(expr::Value::Bool(*b)),
+            value::Dato::Numero(x) => Some(expr::Value::Numero(*x)),
+            value::Dato::Texto(s) => Some(expr::Value::Texto(s.clone())),
+            value::Dato::Booleano(b) => Some(expr::Value::Bool(*b)),
         }
     }
 }
 
 #[derive(Clone, PartialEq, Message)]
-pub struct PeticionPaso {
+pub struct StepRequest {
     #[prost(string, tag = "1")]
-    pub nombre: String,
+    pub name: String,
     /// Número de intento, empezando en 1. Los pasos lo reciben para poder
     /// simular fallos transitorios (ver `pasos_demo`).
     #[prost(int32, tag = "2")]
-    pub intento: i32,
+    pub attempt: i32,
     /// Los parámetros de esta invocación, ya evaluados (ADR-0020 §1).
     #[prost(message, repeated, tag = "3")]
-    pub parametros: Vec<Valor>,
+    pub inputs: Vec<Value>,
     /// La versión de contrato que habla el motor. Ver [`CONTRATO`].
     #[prost(int32, tag = "4")]
-    pub contrato: i32,
+    pub contract: i32,
 }
 
 #[derive(Clone, PartialEq, Message)]
-pub struct ResultadoPasoProto {
+pub struct StepResult {
     #[prost(string, tag = "1")]
-    pub nombre: String,
+    pub name: String,
     #[prost(string, tag = "2")]
-    pub estado: String,
+    pub status: String,
     #[prost(string, tag = "3")]
-    pub mensaje: String,
+    pub message: String,
     #[prost(string, tag = "4")]
-    pub valor_medido: String,
+    pub measured_value: String,
     #[prost(string, tag = "5")]
-    pub limite_min: String,
+    pub limit_min: String,
     #[prost(string, tag = "6")]
-    pub limite_max: String,
+    pub limit_max: String,
     /// Valores con nombre que devuelve el paso además de la medida. **No
     /// participan en el veredicto** (ADR-0008: el motor juzga `valor_medido`
     /// contra el `limite` de la secuencia, y nada más).
     #[prost(message, repeated, tag = "7")]
-    pub salidas: Vec<Valor>,
+    pub outputs: Vec<Value>,
     /// El eco: la versión de contrato que el ejecutor ha entendido. Ver
     /// [`CONTRATO`] y ADR-0020 §4b.
     #[prost(int32, tag = "8")]
-    pub contrato: i32,
+    pub contract: i32,
 }
 
 /// Un `f64` opcional al texto que viaja por el cable: vacío si no hay
@@ -146,25 +146,25 @@ fn de_texto(s: &str) -> Option<f64> {
     }
 }
 
-impl From<&crate::ResultadoStep> for ResultadoPasoProto {
+impl From<&crate::ResultadoStep> for StepResult {
     fn from(r: &crate::ResultadoStep) -> Self {
-        ResultadoPasoProto {
-            nombre: r.nombre.clone(),
-            estado: r.estado.clone(),
-            mensaje: r.mensaje.clone(),
-            valor_medido: a_texto(r.valor_medido),
-            limite_min: a_texto(r.limite_min),
-            limite_max: a_texto(r.limite_max),
+        StepResult {
+            name: r.nombre.clone(),
+            status: r.estado.clone(),
+            message: r.mensaje.clone(),
+            measured_value: a_texto(r.valor_medido),
+            limit_min: a_texto(r.limite_min),
+            limit_max: a_texto(r.limite_max),
             // Un `Value::Nulo` no tiene representación en el cable y se
             // descarta: mandarlo como `oneof` vacío sería mandar justo lo que
             // el receptor debe rechazar. Una salida nula es una salida que no
             // se devuelve.
-            salidas: r
+            outputs: r
                 .salidas
                 .iter()
-                .filter_map(|(n, v)| Valor::desde_value(n, v))
+                .filter_map(|(n, v)| Value::desde_value(n, v))
                 .collect(),
-            contrato: CONTRATO,
+            contract: CONTRATO,
         }
     }
 }
@@ -198,20 +198,20 @@ impl std::fmt::Display for SalidaSinTipo {
 
 impl std::error::Error for SalidaSinTipo {}
 
-impl ResultadoPasoProto {
+impl StepResult {
     /// Traduce el mensaje del cable al modelo, **validando las salidas**.
     ///
     /// Sustituye al `From` que había: una conversión infalible no puede
     /// expresar que una salida llegue sin tipo, y ese caso no se puede
     /// descartar en silencio.
     pub fn a_resultado(self) -> Result<crate::ResultadoStep, SalidaSinTipo> {
-        let mut salidas = Vec::with_capacity(self.salidas.len());
-        for v in &self.salidas {
+        let mut salidas = Vec::with_capacity(self.outputs.len());
+        for v in &self.outputs {
             match v.a_value() {
-                Some(valor) => salidas.push((v.nombre.clone(), valor)),
+                Some(valor) => salidas.push((v.name.clone(), valor)),
                 None => {
                     return Err(SalidaSinTipo {
-                        nombre: v.nombre.clone(),
+                        nombre: v.name.clone(),
                     })
                 }
             }
@@ -222,20 +222,20 @@ impl ResultadoPasoProto {
     }
 }
 
-impl From<ResultadoPasoProto> for crate::ResultadoStep {
+impl From<StepResult> for crate::ResultadoStep {
     /// Conversión **sin** las salidas: las rellena `a_resultado`, que es la
     /// que puede fallar. No la uses directamente para leer del cable.
-    fn from(p: ResultadoPasoProto) -> Self {
+    fn from(p: StepResult) -> Self {
         // `valor_esperado` y `operador` **no** vienen del cable: el contrato no
         // lleva límites (ADR-0008). Llegan `None` y los rellena el motor desde
         // el `Limite` del YAML tras la invocación.
         crate::ResultadoStep {
-            nombre: p.nombre,
-            estado: p.estado,
-            mensaje: p.mensaje,
-            valor_medido: de_texto(&p.valor_medido),
-            limite_min: de_texto(&p.limite_min),
-            limite_max: de_texto(&p.limite_max),
+            nombre: p.name,
+            estado: p.status,
+            mensaje: p.message,
+            valor_medido: de_texto(&p.measured_value),
+            limite_min: de_texto(&p.limit_min),
+            limite_max: de_texto(&p.limit_max),
             valor_esperado: None,
             operador: None,
             // `sub_pasos` no viaja en el cable: sequence call es motor-side
@@ -260,19 +260,19 @@ mod tests {
 
     #[test]
     fn ida_y_vuelta_con_medida() {
-        let r = ResultadoStep::medido("medir_voltaje", "fallo", "fuera", 4.2, 4.5, 5.5);
-        let p: ResultadoPasoProto = (&r).into();
-        assert_eq!(p.valor_medido, "4.2");
-        assert_eq!(p.limite_min, "4.5");
-        assert_eq!(p.limite_max, "5.5");
+        let r = ResultadoStep::medido("medir_voltaje", "fail", "fuera", 4.2, 4.5, 5.5);
+        let p: StepResult = (&r).into();
+        assert_eq!(p.measured_value, "4.2");
+        assert_eq!(p.limit_min, "4.5");
+        assert_eq!(p.limit_max, "5.5");
         assert_eq!(ResultadoStep::from(p), r);
     }
 
     #[test]
     fn ida_y_vuelta_sin_medida() {
-        let r = ResultadoStep::nuevo("verificar_led", "paso", "led encendido");
-        let p: ResultadoPasoProto = (&r).into();
-        assert!(p.valor_medido.is_empty());
+        let r = ResultadoStep::nuevo("verificar_led", "pass", "led encendido");
+        let p: StepResult = (&r).into();
+        assert!(p.measured_value.is_empty());
         assert_eq!(ResultadoStep::from(p), r);
     }
 
@@ -280,10 +280,10 @@ mod tests {
     fn campos_vacios_no_viajan() {
         // proto3: un string vacío no se serializa, así que un resultado
         // sin medida solo viaja con los tres primeros campos.
-        let r = ResultadoStep::nuevo("x", "paso", "ok");
-        let p: ResultadoPasoProto = (&r).into();
+        let r = ResultadoStep::nuevo("x", "pass", "ok");
+        let p: StepResult = (&r).into();
         let bytes = p.encode_to_vec();
-        let redecodificado = ResultadoPasoProto::decode(&bytes[..]).unwrap();
+        let redecodificado = StepResult::decode(&bytes[..]).unwrap();
         assert_eq!(redecodificado, p);
         // nombre + estado + mensaje y nada más.
         assert!(
@@ -299,10 +299,10 @@ mod tests {
             expr::Value::Texto("banco-3".into()),
             expr::Value::Bool(true),
         ] {
-            let cable = Valor::desde_value("p", &v).expect("los tres tipos viajan");
+            let cable = Value::desde_value("p", &v).expect("los tres tipos viajan");
             let bytes = cable.encode_to_vec();
-            let vuelta = Valor::decode(&bytes[..]).unwrap();
-            assert_eq!(vuelta.nombre, "p");
+            let vuelta = Value::decode(&bytes[..]).unwrap();
+            assert_eq!(vuelta.name, "p");
             assert_eq!(vuelta.a_value(), Some(v));
         }
     }
@@ -311,7 +311,7 @@ mod tests {
     fn un_nulo_no_viaja() {
         // No tiene representación en el cable, y mandarlo como `oneof` vacío
         // sería mandar justo lo que el receptor tiene que rechazar.
-        assert_eq!(Valor::desde_value("p", &expr::Value::Nulo), None);
+        assert_eq!(Value::desde_value("p", &expr::Value::Nulo), None);
     }
 
     #[test]
@@ -319,11 +319,11 @@ mod tests {
         // Regla 2 de ADR-0019 en el cable de vuelta: un `oneof` sin rama no
         // dice de qué tipo es el valor. Tragárselo sería inventarse un dato
         // sobre la unidad bajo test.
-        let p = ResultadoPasoProto {
-            nombre: "medir".into(),
-            estado: "paso".into(),
-            salidas: vec![Valor {
-                nombre: "tension".into(),
+        let p = StepResult {
+            name: "medir".into(),
+            status: "pass".into(),
+            outputs: vec![Value {
+                name: "tension".into(),
                 dato: None,
             }],
             ..Default::default()
@@ -338,12 +338,12 @@ mod tests {
 
     #[test]
     fn las_salidas_llegan_al_modelo_con_su_tipo() {
-        let p = ResultadoPasoProto {
-            nombre: "medir".into(),
-            estado: "paso".into(),
-            salidas: vec![
-                Valor::desde_value("serie", &expr::Value::Texto("A7".into())).unwrap(),
-                Valor::desde_value("temp", &expr::Value::Numero(21.5)).unwrap(),
+        let p = StepResult {
+            name: "medir".into(),
+            status: "pass".into(),
+            outputs: vec![
+                Value::desde_value("serie", &expr::Value::Texto("A7".into())).unwrap(),
+                Value::desde_value("temp", &expr::Value::Numero(21.5)).unwrap(),
             ],
             ..Default::default()
         };
@@ -362,14 +362,14 @@ mod tests {
         // Lo que delata a un par antiguo: no conoce el tag 8, así que proto3
         // lo deja en el default. Es la base de la comprobación del eco que
         // hace el motor (ADR-0020 §4b).
-        let viejo = ResultadoPasoProto {
-            nombre: "verificar_led".into(),
-            estado: "paso".into(),
-            mensaje: "led encendido".into(),
+        let viejo = StepResult {
+            name: "verificar_led".into(),
+            status: "pass".into(),
+            message: "led encendido".into(),
             ..Default::default()
         };
         let bytes = viejo.encode_to_vec();
-        let eco = ResultadoPasoProto::decode(&bytes[..]).unwrap().contrato;
+        let eco = StepResult::decode(&bytes[..]).unwrap().contract;
         assert_eq!(eco, 0, "el default de proto3 es lo que delata al par viejo");
         assert!(
             eco < CONTRATO,
@@ -383,14 +383,14 @@ mod tests {
         // El ADR dice que no se tocan, y desincronizar tags entre las cuatro
         // copias del contrato deja de ser un fallo de compilación para pasar
         // a ser un eco que miente.
-        let r = ResultadoStep::medido("m", "paso", "ok", 4.2, 4.5, 5.5);
-        let p: ResultadoPasoProto = (&r).into();
+        let r = ResultadoStep::medido("m", "pass", "ok", 4.2, 4.5, 5.5);
+        let p: StepResult = (&r).into();
         let bytes = p.encode_to_vec();
-        let vuelta = ResultadoPasoProto::decode(&bytes[..]).unwrap();
-        assert_eq!(vuelta.valor_medido, "4.2");
-        assert_eq!(vuelta.limite_min, "4.5");
-        assert_eq!(vuelta.limite_max, "5.5");
-        assert_eq!(vuelta.contrato, CONTRATO);
+        let vuelta = StepResult::decode(&bytes[..]).unwrap();
+        assert_eq!(vuelta.measured_value, "4.2");
+        assert_eq!(vuelta.limit_min, "4.5");
+        assert_eq!(vuelta.limit_max, "5.5");
+        assert_eq!(vuelta.contract, CONTRATO);
     }
 
     #[test]

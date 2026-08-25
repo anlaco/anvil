@@ -1,7 +1,7 @@
 # Demo del cargador de `.wasm` por path host-side (M5-ext.2, ADR-0015).
 #
 # Sin Docker, sin Python, sin clonar el repo: el `.wasm` es un **componente
-# WASM** que exporta la función `run` (interfaz `anvil:paso`). El usuario
+# WASM** que exporta la función `run` (interfaz `anvil:step`). El usuario
 # escribe el paso en Rust, lo compila a `.wasm`, lo referencia por path
 # (modelo `.vi` de TestStand) y Anvil lo ejecuta. No sabe de gRPC ni de
 # protobuf — el host lo puentea (ADR-0015).

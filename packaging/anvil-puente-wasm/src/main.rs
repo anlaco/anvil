@@ -36,9 +36,9 @@ pub mod pb {
     tonic::include_proto!("_");
 }
 
-use exports::anvil::paso::paso::Nombrado;
-use pb::ejecutor_pasos_server::{EjecutorPasos, EjecutorPasosServer};
-use pb::{PeticionPaso, ResultadoPasoProto};
+use exports::anvil::step::step::Named;
+use pb::step_executor_server::{StepExecutor, StepExecutorServer};
+use pb::{StepRequest, StepResult};
 
 /// La versión de contrato que habla este puente (ADR-0020 §4).
 ///
@@ -53,13 +53,13 @@ use pb::{PeticionPaso, ResultadoPasoProto};
 /// alguien sube el contrato en `modelo` y se olvida de aquí, ese test se pone
 /// rojo — que es la diferencia entre un fallo de compilación y **un eco que
 /// miente**.
-const CONTRATO: i32 = 2;
+const CONTRATO: i32 = 3;
 
 // Bindings del WIT `anvil:paso` (el `wit/` de este crate es la fuente de
 // verdad del contrato; el autor del componente usa el mismo fichero).
 bindgen!({
     path: "wit",
-    world: "anvil-paso",
+    world: "anvil-step",
 });
 
 /// Estado del componente: contexto WASI (vacío: el componente es una
@@ -83,7 +83,7 @@ impl WasiView for State {
 /// llamadas: 1 Store, N llamadas.
 struct ComponenteCargado {
     store: Store<State>,
-    paso: AnvilPaso,
+    paso: AnvilStep,
 }
 
 /// Distingue, mirando los 8 bytes de cabecera, los dos fallos que wasmtime
@@ -131,7 +131,7 @@ impl ComponenteCargado {
         let mut store = Store::new(engine, state);
         let component = Component::from_binary(engine, bytes)
             .map_err(|e| format!("componente inválido: {e}"))?;
-        let paso = AnvilPaso::instantiate(&mut store, &component, &linker)
+        let paso = AnvilStep::instantiate(&mut store, &component, &linker)
             .map_err(|e| format!("no se pudo instanciar: {e}"))?;
         Ok(ComponenteCargado { store, paso })
     }
@@ -149,29 +149,29 @@ impl ComponenteCargado {
         &mut self,
         nombre: &str,
         intento: i32,
-        parametros: &[Nombrado],
-    ) -> Result<ResultadoPasoProto, Status> {
+        parametros: &[Named],
+    ) -> Result<StepResult, Status> {
         let r = self
             .paso
-            .anvil_paso_paso()
+            .anvil_step_step()
             .call_run(&mut self.store, nombre, intento, parametros)
             .map_err(|e| Status::internal(format!("el paso '{nombre}' falló: {e}")))?;
-        Ok(ResultadoPasoProto {
-            nombre: nombre.to_string(),
-            estado: r.estado,
-            mensaje: r.mensaje,
-            valor_medido: r.valor_medido.map(|v| v.to_string()).unwrap_or_default(),
-            limite_min: String::new(),
-            limite_max: String::new(),
-            salidas: r.salidas.iter().map(nombrado_a_proto).collect(),
+        Ok(StepResult {
+            name: nombre.to_string(),
+            status: r.status,
+            message: r.message,
+            measured_value: r.measured_value.map(|v| v.to_string()).unwrap_or_default(),
+            limit_min: String::new(),
+            limit_max: String::new(),
+            outputs: r.outputs.iter().map(nombrado_a_proto).collect(),
             // **El puente responde el eco por el componente** (ADR-0020 §4d).
             // Un componente no sabe de gRPC, de protobuf ni de versiones de
             // contrato (ADR-0015); el puente es el único que traduce, y por
             // tanto el único que sabe qué número de contrato corresponde a
             // qué versión del WIT. Si llegó hasta aquí es que el `.wasm`
-            // casaba con `anvil:paso@0.2.0` —wasmtime falla al instanciar si
+            // casaba con `anvil:step@0.3.0` —wasmtime falla al instanciar si
             // no— así que habla el contrato de este binario.
-            contrato: CONTRATO,
+            contract: CONTRATO,
         })
     }
 }
@@ -188,17 +188,14 @@ struct ServicioEjecutor {
 }
 
 #[tonic::async_trait]
-impl EjecutorPasos for ServicioEjecutor {
-    async fn invoca(
-        &self,
-        request: Request<PeticionPaso>,
-    ) -> Result<Response<ResultadoPasoProto>, Status> {
+impl StepExecutor for ServicioEjecutor {
+    async fn invoke(&self, request: Request<StepRequest>) -> Result<Response<StepResult>, Status> {
         let pet = request.into_inner();
         // Un parámetro cuyo `oneof` llegó sin rama no dice de qué tipo es. No
         // se puede pasar al componente ni omitirlo en silencio: omitirlo sería
         // que el paso midiera sin él y nadie se enterase (ADR-0019, Regla 2).
         let parametros = pet
-            .parametros
+            .inputs
             .iter()
             .map(proto_a_nombrado)
             .collect::<Result<Vec<_>, _>>()
@@ -211,7 +208,7 @@ impl EjecutorPasos for ServicioEjecutor {
             .componente
             .lock()
             .map_err(|_| Status::internal("componente en uso"))?;
-        let respuesta = comp.llamar(&pet.nombre, pet.intento, &parametros)?;
+        let respuesta = comp.llamar(&pet.name, pet.attempt, &parametros)?;
         Ok(Response::new(respuesta))
     }
 }
@@ -297,7 +294,7 @@ fn main() {
     };
 
     let servidor = Server::builder()
-        .add_service(EjecutorPasosServer::new(servicio))
+        .add_service(StepExecutorServer::new(servicio))
         .serve(addr);
 
     eprintln!("anvil-puente-wasm: cargado '{}'", ruta_wasm.display());
@@ -365,36 +362,36 @@ mod tests {
     }
 }
 
-/// Un `Nombrado` del WIT al `Valor` del protobuf (la salida del componente).
-fn nombrado_a_proto(n: &Nombrado) -> pb::Valor {
-    use exports::anvil::paso::paso::Valor as ValorWit;
-    let dato = match &n.valor {
-        ValorWit::Numero(x) => pb::valor::Valor::Numero(*x),
-        ValorWit::Texto(s) => pb::valor::Valor::Texto(s.clone()),
-        ValorWit::Booleano(b) => pb::valor::Valor::Booleano(*b),
+/// Un `Named` del WIT al `Valor` del protobuf (la salida del componente).
+fn nombrado_a_proto(n: &Named) -> pb::Value {
+    use exports::anvil::step::step::Value as ValueWit;
+    let dato = match &n.value {
+        ValueWit::Number(x) => pb::value::Value::Number(*x),
+        ValueWit::Text(s) => pb::value::Value::Text(s.clone()),
+        ValueWit::Boolean(b) => pb::value::Value::Boolean(*b),
     };
-    pb::Valor {
-        nombre: n.nombre.clone(),
-        valor: Some(dato),
+    pb::Value {
+        name: n.name.clone(),
+        value: Some(dato),
     }
 }
 
-/// Un `Valor` del protobuf al `Nombrado` del WIT (el parámetro de entrada).
+/// Un `Valor` del protobuf al `Named` del WIT (el parámetro de entrada).
 ///
 /// `Err(nombre)` si el `oneof` llegó vacío: no hay forma de construir el
 /// `variant` del WIT sin saber de qué tipo es, y no la hay a propósito — el
 /// WIT no tiene rama «desconocido», que es lo que hace imposible pasarle al
 /// componente un parámetro que nadie sabe interpretar.
-fn proto_a_nombrado(v: &pb::Valor) -> Result<Nombrado, String> {
-    use exports::anvil::paso::paso::Valor as ValorWit;
-    let valor = match v.valor.as_ref().ok_or_else(|| v.nombre.clone())? {
-        pb::valor::Valor::Numero(x) => ValorWit::Numero(*x),
-        pb::valor::Valor::Texto(s) => ValorWit::Texto(s.clone()),
-        pb::valor::Valor::Booleano(b) => ValorWit::Booleano(*b),
+fn proto_a_nombrado(v: &pb::Value) -> Result<Named, String> {
+    use exports::anvil::step::step::Value as ValueWit;
+    let valor = match v.value.as_ref().ok_or_else(|| v.name.clone())? {
+        pb::value::Value::Number(x) => ValueWit::Number(*x),
+        pb::value::Value::Text(s) => ValueWit::Text(s.clone()),
+        pb::value::Value::Boolean(b) => ValueWit::Boolean(*b),
     };
-    Ok(Nombrado {
-        nombre: v.nombre.clone(),
-        valor,
+    Ok(Named {
+        name: v.name.clone(),
+        value: valor,
     })
 }
 
@@ -420,28 +417,28 @@ mod tests_contrato {
     fn un_parametro_sin_tipo_no_llega_al_componente() {
         // Regla 2 de ADR-0019 en la frontera del puente. Si esto empezara a
         // devolver `Ok`, un paso mediría sin un parámetro que le mandaron.
-        let v = pb::Valor {
-            nombre: "canal".into(),
-            valor: None,
+        let v = pb::Value {
+            name: "channel".into(),
+            value: None,
         };
-        assert_eq!(proto_a_nombrado(&v).unwrap_err(), "canal");
+        assert_eq!(proto_a_nombrado(&v).unwrap_err(), "channel");
     }
 
     #[test]
     fn los_tres_tipos_cruzan_la_frontera_en_los_dos_sentidos() {
-        use exports::anvil::paso::paso::Valor as ValorWit;
+        use exports::anvil::step::step::Value as ValueWit;
         for wit in [
-            ValorWit::Numero(4.2),
-            ValorWit::Texto("banco-3".into()),
-            ValorWit::Booleano(true),
+            ValueWit::Number(4.2),
+            ValueWit::Text("banco-3".into()),
+            ValueWit::Boolean(true),
         ] {
-            let n = Nombrado {
-                nombre: "p".into(),
-                valor: wit,
+            let n = Named {
+                name: "p".into(),
+                value: wit,
             };
             let ida = nombrado_a_proto(&n);
             let vuelta = proto_a_nombrado(&ida).expect("un valor con tipo siempre vuelve");
-            assert_eq!(vuelta.nombre, "p");
+            assert_eq!(vuelta.name, "p");
             assert_eq!(nombrado_a_proto(&vuelta), ida);
         }
     }

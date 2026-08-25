@@ -151,7 +151,7 @@ mod tests {
         let mut s = ResultadoSecuencia::nueva("basica");
         s.registra(ResultadoStep::medido(
             "medir_voltaje",
-            "fallo",
+            "fail",
             "fuera de rango",
             4.2,
             4.5,
@@ -159,7 +159,7 @@ mod tests {
         ));
         s.registra(ResultadoStep::nuevo(
             "verificar_led",
-            "paso",
+            "pass",
             "led encendido",
         ));
         s
@@ -173,7 +173,7 @@ mod tests {
 
         let doc: Value = serde_json::from_slice(&sink.salida).unwrap();
         assert_eq!(doc["secuencia"], "basica");
-        assert_eq!(doc["estado"], "fallo");
+        assert_eq!(doc["estado"], "fail");
         assert_eq!(doc["pasos"].as_array().unwrap().len(), 2);
     }
 
@@ -185,7 +185,7 @@ mod tests {
         let mut s = ResultadoSecuencia::nueva("b31");
         s.registra(ResultadoStep::nuevo(
             "verdict",
-            "saltado",
+            "skipped",
             "precondición falsa",
         ));
         s.veredicto_sin_evaluar = true;
@@ -194,9 +194,9 @@ mod tests {
         sink.on_fin_secuencia(&s);
 
         let doc: Value = serde_json::from_slice(&sink.salida).unwrap();
-        assert_eq!(doc["estado"], "inconcluso");
+        assert_eq!(doc["estado"], "inconclusive");
         assert_eq!(
-            doc["pasos"][0]["estado"], "saltado",
+            doc["pasos"][0]["estado"], "skipped",
             "el paso conserva lo que fue; lo que cambia es el agregado"
         );
     }
@@ -228,7 +228,7 @@ mod tests {
         let mut s = ResultadoSecuencia::nueva("s");
         let mut r = ResultadoStep::medido_valor(
             "verificar_frecuencia",
-            "fallo",
+            "fail",
             "990 >= 1000 no cumplido",
             990.0,
         );
@@ -251,10 +251,10 @@ mod tests {
     fn sequence_call_anida_sub_pasos_en_json() {
         // Un sequence call (M4b) produce un ResultadoStep con sub_pasos; el
         // JSON los anida como array de objetos.
-        let mut call = ResultadoStep::nuevo("test_fuentes", "fallo", "sequence call → fallo");
+        let mut call = ResultadoStep::nuevo("test_fuentes", "fail", "sequence call → fallo");
         call.sub_pasos = Some(vec![
-            ResultadoStep::nuevo("medir_canal_1", "paso", "ok"),
-            ResultadoStep::nuevo("medir_canal_2", "fallo", "fuera de rango"),
+            ResultadoStep::nuevo("medir_canal_1", "pass", "ok"),
+            ResultadoStep::nuevo("medir_canal_2", "fail", "fuera de rango"),
         ]);
         let mut s = ResultadoSecuencia::nueva("basica");
         s.registra(call);
@@ -264,13 +264,13 @@ mod tests {
         let doc: Value = serde_json::from_slice(&sink.salida).unwrap();
         let paso = &doc["pasos"][0];
         assert_eq!(paso["nombre"], "test_fuentes");
-        assert_eq!(paso["estado"], "fallo");
+        assert_eq!(paso["estado"], "fail");
         let sub = paso["sub_pasos"].as_array().unwrap();
         assert_eq!(sub.len(), 2);
         assert_eq!(sub[0]["nombre"], "medir_canal_1");
-        assert_eq!(sub[0]["estado"], "paso");
+        assert_eq!(sub[0]["estado"], "pass");
         assert_eq!(sub[1]["nombre"], "medir_canal_2");
-        assert_eq!(sub[1]["estado"], "fallo");
+        assert_eq!(sub[1]["estado"], "fail");
         // Un paso sin sub_pasos no lleva la clave (un paso común del test).
         assert!(doc["pasos"].as_array().unwrap().len() == 1 || true);
     }
@@ -280,21 +280,21 @@ mod tests {
         use modelo::Fase;
         // Un verde que no corrió la mitad de la secuencia debe poder
         // distinguirse al post-procesar (#13).
-        let mut call = ResultadoStep::nuevo("test_uut", "paso", "sequence call → paso");
+        let mut call = ResultadoStep::nuevo("test_uut", "pass", "sequence call → paso");
         call.fase = Fase::Main;
         call.sub_pasos = Some(vec![ResultadoStep::nuevo(
             "medir",
-            "saltado",
+            "skipped",
             "precondición falsa",
         )]);
         let mut s = ResultadoSecuencia::nueva("basica");
-        s.registra(ResultadoStep::nuevo("preparar", "saltado", "disable"));
+        s.registra(ResultadoStep::nuevo("preparar", "skipped", "disable"));
         s.registra(call);
 
         let mut sink = SinkJson::nuevo(Vec::new());
         sink.on_fin_secuencia(&s);
         let doc: Value = serde_json::from_slice(&sink.salida).unwrap();
-        assert_eq!(doc["estado"], "paso", "el agregado no cambia (RF-33/34)");
+        assert_eq!(doc["estado"], "pass", "el agregado no cambia (RF-33/34)");
         assert_eq!(doc["pasos_saltados"], 2, "cuenta también los anidados");
         assert_eq!(doc["pasos_totales"], 3);
     }
@@ -304,9 +304,9 @@ mod tests {
         use modelo::Fase;
         // La fase la sella el motor; el sink la emite tal cual, y también en
         // los sub_pasos de un sequence call (DIAG-3, #8).
-        let mut hijo = ResultadoStep::nuevo("apagar_fuente", "paso", "ok");
+        let mut hijo = ResultadoStep::nuevo("apagar_fuente", "pass", "ok");
         hijo.fase = Fase::Cleanup;
-        let mut call = ResultadoStep::nuevo("test_uut", "paso", "sequence call → paso");
+        let mut call = ResultadoStep::nuevo("test_uut", "pass", "sequence call → paso");
         call.fase = Fase::Setup;
         call.sub_pasos = Some(vec![hijo]);
 
@@ -332,7 +332,7 @@ mod tests {
         // Con PM, `secuencia` es el nombre del PM y la del operador va aparte
         // (#9): así el resultado archivado registra qué test se corrió.
         let mut pm = ResultadoSecuencia::nueva("sequential");
-        pm.registra(ResultadoStep::nuevo("identificar_uut", "paso", "UUT-001"));
+        pm.registra(ResultadoStep::nuevo("identificar_uut", "pass", "UUT-001"));
         let mut sink = SinkJson::nuevo(Vec::new()).con_secuencia_usuario("ejemplos/basica.yaml");
         sink.on_fin_secuencia(&pm);
         let doc: Value = serde_json::from_slice(&sink.salida).unwrap();
@@ -347,7 +347,7 @@ mod tests {
     /// Visto en rojo escribiendo todos los valores con `json!(v.to_string())`.
     #[test]
     fn los_parametros_y_las_salidas_conservan_su_tipo() {
-        let mut p = ResultadoStep::medido_valor("medir", "paso", "ok", 4.4);
+        let mut p = ResultadoStep::medido_valor("medir", "pass", "ok", 4.4);
         p.parametros = vec![
             ("canal".into(), expr::Value::Numero(3.0)),
             ("etiqueta".into(), expr::Value::Texto("banco-3".into())),
@@ -375,7 +375,7 @@ mod tests {
     #[test]
     fn sin_parametros_es_un_objeto_vacio_y_no_null() {
         let mut s = ResultadoSecuencia::nueva("c");
-        s.registra(ResultadoStep::nuevo("p", "paso", "ok"));
+        s.registra(ResultadoStep::nuevo("p", "pass", "ok"));
         let mut sink = SinkJson::nuevo(Vec::new());
         sink.on_fin_secuencia(&s);
         let doc: Value = serde_json::from_slice(&sink.salida).unwrap();

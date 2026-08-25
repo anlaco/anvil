@@ -30,7 +30,7 @@ fn addr() -> String {
 
 /// Medición de voltaje real por SCPI/TCP contra `addr`. Conecta, envía
 /// `MEASURE:VOLTAGE?\n`, lee la respuesta y la parsea como `f64`. Devuelve
-/// `ResultadoStep::medido_valor` con `estado="paso"` si la medición fue
+/// `ResultadoStep::medido_valor` con `estado="pass"` si la medición fue
 /// bien; `estado="error"` si la conexión, la E/S o el parseo fallan. El
 /// `intento` se ignora: una medición puntual SCPI es idempotente, y los
 /// reintentos los orquesta el motor (no el paso).
@@ -74,7 +74,7 @@ pub fn medir_voltaje_scpi_en(addr: &str, _intento: i32) -> ResultadoStep {
     match texto.parse::<f64>() {
         Ok(v) => ResultadoStep::medido_valor(
             "medir_voltaje_scpi",
-            "paso",
+            "pass",
             format!("SCPI medido: {v} V"),
             v,
         ),
@@ -138,7 +138,7 @@ mod tests {
         let (addr, h) = mock_scpi("4.8\n");
         let r = medir_voltaje_scpi_en(&addr, 1);
         h.join().unwrap();
-        assert_eq!(r.estado, "paso");
+        assert_eq!(r.estado, "pass");
         assert_eq!(r.valor_medido, Some(4.8));
         assert_eq!(r.nombre, "medir_voltaje_scpi");
     }

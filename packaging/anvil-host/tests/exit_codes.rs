@@ -135,11 +135,11 @@ fn una_secuencia_cuyo_veredicto_no_se_evalua_sale_con_uno() {
         String::from_utf8_lossy(&s.stderr)
     );
     assert!(
-        stdout.contains("=== exit_inconcluso: inconcluso ==="),
+        stdout.contains("=== exit_inconcluso: inconclusive ==="),
         "el 1 tiene que venir del veredicto, no de un error de carga. stdout:\n{stdout}"
     );
     assert!(
-        stdout.contains("[saltado] verdict"),
+        stdout.contains("[skipped] verdict"),
         "el paso se sigue reportando como lo que fue. stdout:\n{stdout}"
     );
 }
@@ -158,7 +158,7 @@ fn una_asigna_tras_un_error_no_borra_la_variable_que_lee_el_cleanup() {
         "el paso inexistente deja la secuencia en `error`. stdout:\n{stdout}"
     );
     assert!(
-        stdout.contains("[paso] check_valor: condición cumplida"),
+        stdout.contains("[pass] check_valor: condición cumplida"),
         "la variable que el cleanup va a usar no se toca si el paso dio error. stdout:\n{stdout}"
     );
 }

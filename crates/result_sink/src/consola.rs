@@ -40,7 +40,7 @@ mod tests {
         let mut s = ResultadoSecuencia::nueva("basica");
         s.registra(ResultadoStep::medido(
             "medir_voltaje",
-            "fallo",
+            "fail",
             "voltaje fuera de rango",
             4.2,
             4.5,
@@ -48,7 +48,7 @@ mod tests {
         ));
         s.registra(ResultadoStep::nuevo(
             "verificar_led",
-            "paso",
+            "pass",
             "led encendido",
         ));
 
@@ -56,9 +56,9 @@ mod tests {
         sink.on_fin_secuencia(&s);
 
         let esperado = "\
-=== basica: fallo ===
-  [fallo] medir_voltaje: voltaje fuera de rango
-  [paso] verificar_led: led encendido
+=== basica: fail ===
+  [fail] medir_voltaje: voltaje fuera de rango
+  [pass] verificar_led: led encendido
 ";
         assert_eq!(String::from_utf8(sink.salida).unwrap(), esperado);
     }

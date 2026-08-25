@@ -613,8 +613,8 @@ mod tests {
             parse_expresion("true").unwrap(),
             Expresion::Lit(Value::Bool(true))
         ));
-        let e = parse_expresion("\"paso\"").unwrap();
-        assert_eq!(e, Expresion::Lit(Value::Texto("paso".into())));
+        let e = parse_expresion("\"pass\"").unwrap();
+        assert_eq!(e, Expresion::Lit(Value::Texto("pass".into())));
     }
 
     #[test]
