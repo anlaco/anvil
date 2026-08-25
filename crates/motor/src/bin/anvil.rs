@@ -324,8 +324,8 @@ fn main() {
     // no «el veredicto es negativo»—, así que una secuencia en rojo salía 0 y
     // `anvil secuencia.yaml && desplegar` desplegaba con el DUT suspendido.
     //
-    // Se niega `"paso"` en vez de enumerar `"fallo"|"error"` para que un
-    // estado nuevo no se cuele como éxito. `"saltado"` no aparece porque
+    // Se niega `"pass"` en vez de enumerar `"fail"|"error"` para que un
+    // estado nuevo no se cuele como éxito. `"skipped"` no aparece porque
     // `ResultadoSecuencia::estado()` lo trata como neutral (RF-33/34), igual
     // que el bucle de fases en `motor::ejecuta_secuencia_interna`.
     //
@@ -339,7 +339,7 @@ fn main() {
     // Los sinks ya escribieron: `on_fin_secuencia` se dispara dentro de
     // `ejecuta_programa`, y JSON/CSV van a un `File` sin bufferear, así que
     // este `exit` (que no corre destructores) no pierde nada.
-    if resultado.estado() != "paso" {
+    if resultado.estado() != "pass" {
         std::process::exit(1);
     }
 }

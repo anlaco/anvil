@@ -19,7 +19,7 @@ pub enum TokKind {
     /// Palabra clave `nothing` (ausencia, como en Julia).
     Nothing,
     Ident(String),
-    /// Literal de texto entre comillas dobles (`"paso"`).
+    /// Literal de texto entre comillas dobles (`"pass"`).
     Texto(String),
     // Lógicos (sintaxis Julia: `&&`, `||`, `!`).
     AndAnd,

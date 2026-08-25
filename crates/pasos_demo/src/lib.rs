@@ -28,13 +28,13 @@ pub fn conectar(intento: i32) -> ResultadoStep {
     if intento < 2 {
         ResultadoStep::nuevo(
             "conectar_equipo",
-            "fallo",
+            "fail",
             format!("el equipo no respondió (intento {intento})"),
         )
     } else {
         ResultadoStep::nuevo(
             "conectar_equipo",
-            "paso",
+            "pass",
             format!("equipo conectado (intento {intento})"),
         )
     }
@@ -73,7 +73,7 @@ pub fn medir_voltaje(_intento: i32, parametros: &[(String, Value)]) -> Resultado
     let valor = 4.2 + (canal - 1.0) * 0.1 + offset;
     let mut r = ResultadoStep::medido_valor(
         "medir_voltaje",
-        "paso",
+        "pass",
         format!("medido: {valor} V (canal {canal})"),
         valor,
     );
@@ -87,18 +87,18 @@ pub fn medir_voltaje(_intento: i32, parametros: &[(String, Value)]) -> Resultado
 /// Pass/fail (RF-25): hace algo y reporta `paso`/`fallo` **sin medida**. El
 /// caso más simple de step type built-in.
 pub fn verificar_led(_intento: i32) -> ResultadoStep {
-    ResultadoStep::nuevo("verificar_led", "paso", "led encendido")
+    ResultadoStep::nuevo("verificar_led", "pass", "led encendido")
 }
 
 /// Action (RF-27): ejecuta una acción (abrir un relé) y su estado es `paso`
 /// si no hubo `error` — sin criterio de aceptación, solo éxito técnico. Aquí
 /// siempre pasa; en hardware real devolvería `error` si el relé no responde.
 pub fn abrir_rele(_intento: i32) -> ResultadoStep {
-    ResultadoStep::nuevo("abrir_rele", "paso", "relé abierto")
+    ResultadoStep::nuevo("abrir_rele", "pass", "relé abierto")
 }
 
 pub fn desconectar(_intento: i32) -> ResultadoStep {
-    ResultadoStep::nuevo("desconectar_equipo", "paso", "equipo desconectado")
+    ResultadoStep::nuevo("desconectar_equipo", "pass", "equipo desconectado")
 }
 
 /// Plug-in del process model Sequential (M5, RF-38): identifica el UUT.
@@ -107,7 +107,7 @@ pub fn desconectar(_intento: i32) -> ResultadoStep {
 /// del PM vuelca a `locals.uut_id`. Es un paso `grpc` despachado por el
 /// ejecutor, no un callback motor-side — así el PM es datos (ADR-0005).
 pub fn identificar_uut(_intento: i32) -> ResultadoStep {
-    ResultadoStep::nuevo("identificar_uut", "paso", "UUT-DEMO-001")
+    ResultadoStep::nuevo("identificar_uut", "pass", "UUT-DEMO-001")
 }
 
 /// Plug-in del process model Sequential (M5, RF-38): notifica el
@@ -116,7 +116,7 @@ pub fn identificar_uut(_intento: i32) -> ResultadoStep {
 /// usuario, así el `asigna` del call ya dejó en `locals.estado_usuario`
 /// el agregado de la secuencia del usuario.
 pub fn notificar_resultado(_intento: i32) -> ResultadoStep {
-    ResultadoStep::nuevo("notificar_resultado", "paso", "UUT notificado")
+    ResultadoStep::nuevo("notificar_resultado", "pass", "UUT notificado")
 }
 
 /// Despacho por nombre: el motor invoca los pasos por su nombre, nunca con
@@ -154,8 +154,8 @@ mod tests {
 
     #[test]
     fn conectar_falla_el_primero_y_pasa_el_segundo() {
-        assert_eq!(conectar(1).estado, "fallo");
-        assert_eq!(conectar(2).estado, "paso");
+        assert_eq!(conectar(1).estado, "fail");
+        assert_eq!(conectar(2).estado, "pass");
         assert_eq!(conectar(2).mensaje, "equipo conectado (intento 2)");
     }
 
@@ -165,7 +165,7 @@ mod tests {
         // evalúa el límite del YAML. El paso no trae límites embebidos.
         let r = medir_voltaje(1, SIN_PARAMETROS);
         assert_eq!(
-            r.estado, "paso",
+            r.estado, "pass",
             "el paso solo mide: la regla la aplica el motor"
         );
         assert_eq!(r.valor_medido, Some(4.2));
@@ -213,7 +213,7 @@ mod tests {
     #[test]
     fn action_abrir_rele_pasa_sin_medida() {
         let r = abrir_rele(1);
-        assert_eq!(r.estado, "paso");
+        assert_eq!(r.estado, "pass");
         assert_eq!(r.valor_medido, None, "un action no mide");
     }
 
@@ -230,17 +230,17 @@ mod tests {
             despacha("verificar_led", 1, SIN_PARAMETROS).nombre,
             "verificar_led"
         );
-        assert_eq!(despacha("abrir_rele", 1, SIN_PARAMETROS).estado, "paso");
+        assert_eq!(despacha("abrir_rele", 1, SIN_PARAMETROS).estado, "pass");
         assert_eq!(
             despacha("desconectar_equipo", 1, SIN_PARAMETROS).estado,
-            "paso"
+            "pass"
         );
     }
 
     #[test]
     fn identificar_uut_devuelve_serial_demo() {
         let r = identificar_uut(1);
-        assert_eq!(r.estado, "paso");
+        assert_eq!(r.estado, "pass");
         assert_eq!(r.mensaje, "UUT-DEMO-001");
         assert_eq!(r.nombre, "identificar_uut");
     }
@@ -248,7 +248,7 @@ mod tests {
     #[test]
     fn notificar_resultado_pasa() {
         let r = notificar_resultado(1);
-        assert_eq!(r.estado, "paso");
+        assert_eq!(r.estado, "pass");
         assert_eq!(r.nombre, "notificar_resultado");
     }
 
@@ -260,7 +260,7 @@ mod tests {
         );
         assert_eq!(
             despacha("notificar_resultado", 1, SIN_PARAMETROS).estado,
-            "paso"
+            "pass"
         );
     }
 }

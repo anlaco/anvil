@@ -14,65 +14,65 @@ si se toca uno, hay que tocar el otro.
 ```proto
 syntax = "proto3";
 
-message Valor {
-  string nombre = 1;
-  oneof valor {              // sin rama puesta = error, no un cero
-    double numero   = 2;
-    string texto    = 3;
-    bool   booleano = 4;
+message Value {
+  string name = 1;
+  oneof value {              // sin rama puesta = error, no un cero
+    double number  = 2;
+    string text    = 3;
+    bool   boolean = 4;
   }
 }
 
-message PeticionPaso {
-  string nombre = 1;   // el paso a invocar (despacho por nombre, ADR-0003)
-  int32  intento = 2;  // nº de intento, desde 1 (para simular fallos transitorios)
-  repeated Valor parametros = 3;  // ya evaluados por el motor (ADR-0020)
-  int32  contrato = 4;            // la versión que habla el motor
+message StepRequest {
+  string name = 1;     // el paso a invocar (despacho por nombre, ADR-0003)
+  int32  attempt = 2;  // nº de intento, desde 1 (para simular fallos transitorios)
+  repeated Value inputs = 3;  // ya evaluados por el motor (ADR-0020)
+  int32  contract = 4;            // la versión que habla el motor
 }
 
-message ResultadoPasoProto {
+message StepResult {
   string nombre = 1;
-  string estado = 2;     // "paso" | "fallo" | "error"  (texto, no enum)
-  string mensaje = 3;
-  string valor_medido = 4;   // medida: como string
-  string limite_min = 5;
-  string limite_max = 6;
-  repeated Valor salidas = 7;  // valores con nombre, aparte de la medida
-  int32  contrato = 8;         // el eco: la versión que el ejecutor entendió
+  string status = 2;     // "pass" | "fail" | "error" | "skipped"
+  string message = 3;
+  string measured_value = 4; // medida: como string
+  string limit_min = 5;
+  string limit_max = 6;
+  repeated Value outputs = 7;  // valores con nombre, aparte de la medida
+  int32  contract = 8;         // el eco: la versión que el ejecutor entendió
 }
 
-service EjecutorPasos {
-  rpc Invoca(PeticionPaso) returns (ResultadoPasoProto);
+service StepExecutor {
+  rpc Invoke(StepRequest) returns (StepResult);
 }
 ```
 
 - **Sin `package`** en el `.proto`, así que la ruta del método es
-  directamente `/EjecutorPasos/Invoca` (constante `RUTA_INVOCA` en `proto.rs`).
+  directamente `/StepExecutor/Invoke` (constante `RUTA_INVOCA` en `proto.rs`).
 - **Un método, unaria** (unary RPC): una petición → una respuesta. Sin
   streaming en el MVP.
 
 ## Semántica de campos
 
-### `PeticionPaso`
+### `StepRequest`
 
 | Campo | Tipo | Significado |
 |---|---|---|
-| `nombre` | string | El paso a invocar. El ejecutor lo ata a una función en `despacha`; desconocido → `error` (RF-12). |
-| `intento` | int32 | Número de intento **desde 1**. Llega al paso para simular fallos transitorios (ver `pasos_demo::conectar`: falla el 1, pasa el 2+). |
-| `parametros` | repeated Valor | Los parámetros del paso, **ya evaluados**: el motor resuelve las expresiones `${...}` del YAML contra su entorno antes de llamar (ADR-0009). El paso no ve `locals`; se le pasan valores. Un `oneof` sin rama es `error` (ADR-0019, Regla 2). |
-| `contrato` | int32 | La versión de contrato que habla el motor. Ver «Versionado» más abajo. |
+| `name` | string | El paso a invocar. El ejecutor lo ata a una función en `despacha`; desconocido → `error` (RF-12). |
+| `attempt` | int32 | Número de intento **desde 1**. Llega al paso para simular fallos transitorios (ver `pasos_demo::conectar`: falla el 1, pasa el 2+). |
+| `inputs` | repeated Valor | Los parámetros del paso, **ya evaluados**: el motor resuelve las expresiones `${...}` del YAML contra su entorno antes de llamar (ADR-0009). El paso no ve `locals`; se le pasan valores. Un `oneof` sin rama es `error` (ADR-0019, Regla 2). |
+| `contract` | int32 | La versión de contrato que habla el motor. Ver «Versionado» más abajo. |
 
-### `ResultadoPasoProto`
+### `StepResult`
 
 | Campo | Tipo | Significado |
 |---|---|---|
-| `nombre` | string | Nombre del paso (devuelto por el paso). |
-| `estado` | string | `"paso"` / `"fallo"` / `"error"`. **Texto, no enum**: viaja así y admite pasos en cualquier lenguaje (RF-10). El motor solo interpreta esto para el agregado. |
+| `name` | string | Nombre del paso (devuelto por el paso). |
+| `status` | string | `"pass"` / `"fail"` / `"error"`. **Texto, no enum**: viaja así y admite pasos en cualquier lenguaje (RF-10). El motor solo interpreta esto para el agregado. |
 | `mensaje` | string | Texto humano del resultado. |
-| `valor_medido` | string | La medida, como texto. **Vacío** si el paso no mide (Pass/Fail). |
-| `limite_min` / `limite_max` | string | Límites high/low, como texto. Vacíos si no aplican. |
-| `salidas` | repeated Valor | Valores con nombre que devuelve el paso **además** de la medida. No participan en el veredicto: `asigna` los lee como `resultado.salidas.<nombre>`. |
-| `contrato` | int32 | **El eco**: la versión que el ejecutor ha entendido. Ver «Versionado». |
+| `measured_value` | string | La medida, como texto. **Vacío** si el paso no mide (Pass/Fail). |
+| `limit_min` / `limit_max` | string | Límites high/low, como texto. Vacíos si no aplican. |
+| `outputs` | repeated Valor | Valores con nombre que devuelve el paso **además** de la medida. No participan en el veredicto: `asigna` los lee como `resultado.salidas.<nombre>`. |
+| `contract` | int32 | **El eco**: la versión que el ejecutor ha entendido. Ver «Versionado». |
 
 ## Versionado del contrato (ADR-0020 §4)
 
@@ -84,6 +84,7 @@ versionadas ni RPC de saludo: dos mecanismos para lo mismo divergen.
 |---|---|
 | 1 | El contrato original: `PeticionPaso{nombre, intento}`. Un ejecutor de contrato 1 no conoce el tag 8 y devuelve `0` por el default de proto3 — así es como se le reconoce. |
 | 2 | Parámetros de entrada y salidas con nombre. |
+| 3 | El contrato en inglés: `StepRequest`/`StepResult`, `inputs`/`outputs`, y los estados `pass`/`fail`/`skipped`. |
 
 **Por qué hace falta el eco.** Un campo aditivo es «compatible» sólo en el
 sentido de que el mensaje decodifica. Un ejecutor de contrato 1 ignora
@@ -91,7 +92,7 @@ sentido de que el mensaje decodifica. Un ejecutor de contrato 1 ignora
 verde falso no lo delata ninguna otra señal. Por eso:
 
 > Si el paso declaró `parametros` (o su `asigna` lee `salidas`) y el eco es
-> menor que 2, el paso es **`error`**, nombrando el endpoint y las dos
+> menor que 3, el paso es **`error`**, nombrando el endpoint y las dos
 > versiones. Nunca `fallo`, y nunca se ejecuta con los parámetros perdidos.
 
 Y su recíproco, que es lo que mantiene vivo lo que ya funciona: si el paso
@@ -108,7 +109,7 @@ Retirar o renombrar un tag exige ADR, entrada *breaking* en el CHANGELOG y
 `reserved` sobre el tag: **un tag no se reutiliza jamás**.
 
 **Los pasos WASM no ven este número.** El WIT se versiona por recompilación
-(`anvil:paso@0.2.0`) y **es el puente quien responde el eco** por ellos: un
+(`anvil:step@0.3.0`) y **es el puente quien responde el eco** por ellos: un
 componente no sabe de gRPC ni de versiones (ADR-0015).
 
 ## Codificación de medidas

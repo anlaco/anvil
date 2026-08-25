@@ -298,10 +298,10 @@ mod tests {
     fn resultado_estado_y_valor_medido_se_exponen_tras_set() {
         let def = secuencia_con(&[]);
         let mut env = EntornoMotor::desde_definicion(&def);
-        env.set_resultado(ResultadoStep::medido_valor("m", "paso", "ok", 4.2));
+        env.set_resultado(ResultadoStep::medido_valor("m", "pass", "ok", 4.2));
         assert_eq!(
             eval(&expr::parse_expresion("result.status").unwrap(), &env).unwrap(),
-            Value::Texto("paso".into())
+            Value::Texto("pass".into())
         );
         assert_eq!(
             eval(
@@ -320,7 +320,7 @@ mod tests {
     fn leer_un_campo_inexistente_de_resultado_es_error() {
         let def = secuencia_con(&[]);
         let mut env = EntornoMotor::desde_definicion(&def);
-        env.set_resultado(ResultadoStep::medido_valor("m", "paso", "ok", 4.2));
+        env.set_resultado(ResultadoStep::medido_valor("m", "pass", "ok", 4.2));
         let e = expr::parse_expresion("result.measured_valu").unwrap();
         let err = eval(&e, &env).expect_err("un typo no es un dato ausente");
         let msg = err.to_string();
@@ -335,7 +335,7 @@ mod tests {
     fn los_tres_campos_de_resultado_se_leen_siempre() {
         let def = secuencia_con(&[]);
         let mut env = EntornoMotor::desde_definicion(&def);
-        env.set_resultado(ResultadoStep::nuevo("m", "paso", "sin medida"));
+        env.set_resultado(ResultadoStep::nuevo("m", "pass", "sin medida"));
         for campo in modelo::CAMPOS_RESULTADO {
             let e = expr::parse_expresion(&format!("result.{campo}")).unwrap();
             eval(&e, &env).unwrap_or_else(|_| panic!("'resultado.{campo}' debe ser legible"));
@@ -350,7 +350,7 @@ mod tests {
     fn asigna_escribe_en_locals() {
         let def = secuencia_con(&[("x", ValorDefinicion::Numero(0.0))]);
         let mut env = EntornoMotor::desde_definicion(&def);
-        env.set_resultado(ResultadoStep::medido_valor("m", "paso", "ok", 4.2));
+        env.set_resultado(ResultadoStep::medido_valor("m", "pass", "ok", 4.2));
         let stmts = vec![Sentencia::Assign {
             scope: Scope::Locals,
             campo: "x".into(),

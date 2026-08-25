@@ -129,11 +129,14 @@ el contrato miente.
 
 ### WIT
 
+`step-result` y no `result`, y `type` con `#[serde(rename)]` en Rust: las dos
+son concesiones a palabras reservadas del lenguaje, no al idioma.
+
 | Antes | Ahora |
 |---|---|
 | `anvil:paso@0.2.0` | `anvil:step@0.3.0` |
 | `run(nombre, intento, parametros)` | `run(name, attempt, inputs)` |
-| `record resultado` | `record result` |
+| `record resultado` | `record step-result` |
 | `record nombrado` | `record named` |
 | `variant valor` | `variant value` |
 | `valor-medido` | `measured-value` |

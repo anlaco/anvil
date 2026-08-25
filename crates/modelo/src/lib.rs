@@ -83,22 +83,22 @@ pub enum Limite {
 }
 
 impl Limite {
-    /// Evalúa un valor contra el límite → `"paso"` o `"fallo"`. Lógica pura,
+    /// Evalúa un valor contra el límite → `"pass"` o `"fail"`. Lógica pura,
     /// sin gRPC ni IO: el motor la reutiliza, los tests la prueban directa.
     pub fn evalua(&self, valor: f64) -> &'static str {
         match self {
             Limite::Rango { min, max } => {
                 if valor >= *min && valor <= *max {
-                    "paso"
+                    "pass"
                 } else {
-                    "fallo"
+                    "fail"
                 }
             }
             Limite::Comparacion { op, esperado } => {
                 if op.aplica(valor, *esperado) {
-                    "paso"
+                    "pass"
                 } else {
-                    "fallo"
+                    "fail"
                 }
             }
         }
@@ -110,10 +110,10 @@ impl Limite {
 /// convierte el motor en `"error"`: un estado que Anvil no entiende no dice
 /// nada sobre la unidad.
 ///
-/// `"inconcluso"` **no** está aquí a propósito: lo produce el motor al agregar
+/// `"inconclusive"` **no** está aquí a propósito: lo produce el motor al agregar
 /// una secuencia, y un ejecutor que lo devuelva cae bajo la misma regla que
 /// cualquier otro valor no reconocido (ADR-0019, «Recortes»).
-pub const ESTADOS_DE_EJECUTOR: [&str; 4] = ["paso", "fallo", "error", "saltado"];
+pub const ESTADOS_DE_EJECUTOR: [&str; 4] = ["pass", "fail", "error", "skipped"];
 
 /// Los campos que expone `resultado.*` a una expresión `asigna`, y los únicos
 /// (ADR-0019, regla de detección, issue #27). Son tres y conocidos, así que un
@@ -163,22 +163,22 @@ impl Severidad {
     pub fn de(estado: &str) -> Severidad {
         match estado {
             "error" => Severidad::Error,
-            "fallo" => Severidad::Fallo,
-            "inconcluso" => Severidad::Inconcluso,
+            "fail" => Severidad::Fallo,
+            "inconclusive" => Severidad::Inconcluso,
             // Neutrales: `paso` afirma, `saltado` no mueve el veredicto.
-            "paso" | "saltado" => Severidad::Paso,
+            "pass" | "skipped" => Severidad::Paso,
             // Lo que no se reconoce no se juzga (Regla 2).
             _ => Severidad::Error,
         }
     }
 
-    /// La severidad como estado agregado: `"paso"`, `"inconcluso"`, `"fallo"`,
-    /// `"error"`. Nunca `"saltado"`: una secuencia no se salta.
+    /// La severidad como estado agregado: `"pass"`, `"inconclusive"`, `"fail"`,
+    /// `"error"`. Nunca `"skipped"`: una secuencia no se salta.
     pub fn como_texto(&self) -> &'static str {
         match self {
-            Severidad::Paso => "paso",
-            Severidad::Inconcluso => "inconcluso",
-            Severidad::Fallo => "fallo",
+            Severidad::Paso => "pass",
+            Severidad::Inconcluso => "inconclusive",
+            Severidad::Fallo => "fail",
             Severidad::Error => "error",
         }
     }
@@ -213,10 +213,10 @@ impl Fase {
 
 /// Lo que un paso YA corrido devolvió.
 ///
-/// `estado` es uno de `"paso"`, `"fallo"`, `"error"` o `"saltado"` (este
+/// `estado` es uno de `"pass"`, `"fail"`, `"error"` o `"skipped"` (este
 /// último lo pone el motor, no el ejecutor) — se mantiene como texto (y no
 /// como enum) porque viaja así en `paso.proto` y porque el contrato admite
-/// pasos escritos en cualquier lenguaje. **Nunca `"inconcluso"`**: ése sólo
+/// pasos escritos en cualquier lenguaje. **Nunca `"inconclusive"`**: ése sólo
 /// existe como agregado de una secuencia (ADR-0019). Ver `Severidad` para lo
 /// que cada uno pesa en el veredicto.
 ///
@@ -322,7 +322,7 @@ impl ResultadoStep {
     }
 
     pub fn paso(&self) -> bool {
-        self.estado == "paso"
+        self.estado == "pass"
     }
 }
 
@@ -368,7 +368,7 @@ impl ResultadoSecuencia {
         fn cuenta(pasos: &[ResultadoStep], saltados: &mut usize, total: &mut usize) {
             for p in pasos {
                 *total += 1;
-                if p.estado == "saltado" {
+                if p.estado == "skipped" {
                     *saltados += 1;
                 }
                 if let Some(sub) = &p.sub_pasos {
@@ -417,7 +417,7 @@ impl ResultadoSecuencia {
     /// los tests) no se acoplen a stdout. `reporte()` (la API pública
     /// congelada) delega aquí con `stdout` y produce los mismos bytes que
     /// el `println!` original.
-    /// Extensión aditiva de RNF-08 (como el `"saltado"` de M4 y el anidamiento
+    /// Extensión aditiva de RNF-08 (como el `"skipped"` de M4 y el anidamiento
     /// de M4b): si algún paso se saltó, se cierra con una línea de recuento.
     /// Una corrida sin saltos produce exactamente los bytes de siempre, y las
     /// líneas de paso no cambian; lo que se añade es una línea que antes no
@@ -609,7 +609,7 @@ pub struct DefinicionPaso {
     /// produce el estado final; el paso no conoce el umbral (ADR-0008).
     /// `None` = el paso decide por sí mismo (pass/fail, action sin límite).
     pub limite: Option<Limite>,
-    /// RF-34: si `true`, el motor registra el paso como saltado (`"saltado"`)
+    /// RF-34: si `true`, el motor registra el paso como saltado (`"skipped"`)
     /// sin invocarlo. Default `false`.
     pub disable: bool,
     /// RF-34: si `true` y el paso falla, el motor detiene la fase en curso
@@ -751,13 +751,13 @@ mod tests {
     #[test]
     fn estado_agregado() {
         let mut s = ResultadoSecuencia::nueva("s");
-        assert_eq!(s.estado(), "paso", "una secuencia vacía pasa");
+        assert_eq!(s.estado(), "pass", "una secuencia vacía pasa");
 
-        s.registra(ResultadoStep::nuevo("a", "paso", "ok"));
-        assert_eq!(s.estado(), "paso");
+        s.registra(ResultadoStep::nuevo("a", "pass", "ok"));
+        assert_eq!(s.estado(), "pass");
 
-        s.registra(ResultadoStep::nuevo("b", "fallo", "mal"));
-        assert_eq!(s.estado(), "fallo");
+        s.registra(ResultadoStep::nuevo("b", "fail", "mal"));
+        assert_eq!(s.estado(), "fail");
 
         // error manda sobre fallo, aunque llegue después.
         s.registra(ResultadoStep::nuevo("c", "error", "peor"));
@@ -768,7 +768,7 @@ mod tests {
     fn error_manda_aunque_llegue_antes() {
         let mut s = ResultadoSecuencia::nueva("s");
         s.registra(ResultadoStep::nuevo("a", "error", "peor"));
-        s.registra(ResultadoStep::nuevo("b", "fallo", "mal"));
+        s.registra(ResultadoStep::nuevo("b", "fail", "mal"));
         assert_eq!(s.estado(), "error");
     }
 
@@ -785,8 +785,8 @@ mod tests {
     /// `saltado` es neutral (RF-33/34) y no entra en la escala.
     #[test]
     fn saltado_es_neutral_en_la_escala() {
-        assert_eq!(Severidad::de("saltado"), Severidad::Paso);
-        assert_eq!(Severidad::de("paso"), Severidad::Paso);
+        assert_eq!(Severidad::de("skipped"), Severidad::Paso);
+        assert_eq!(Severidad::de("pass"), Severidad::Paso);
     }
 
     /// ADR-0019, Regla 2 (issue #28): un estado que nadie reconoce es `Error`,
@@ -803,7 +803,7 @@ mod tests {
         // Un ejecutor tampoco puede declararse a sí mismo no concluyente: eso
         // lo produce el motor al agregar (ADR-0019, «Recortes»). Como cadena
         // suelta sí es un agregado legítimo, y por eso no cae en la rama `_`.
-        assert_eq!(Severidad::de("inconcluso"), Severidad::Inconcluso);
+        assert_eq!(Severidad::de("inconclusive"), Severidad::Inconcluso);
     }
 
     /// Una secuencia no se pone verde porque un ejecutor escribiera mal el
@@ -840,18 +840,18 @@ mod tests {
     #[test]
     fn un_veredicto_sin_evaluar_deja_la_secuencia_inconclusa() {
         let mut s = ResultadoSecuencia::nueva("s");
-        s.registra(ResultadoStep::nuevo("init", "paso", "ok"));
+        s.registra(ResultadoStep::nuevo("init", "pass", "ok"));
         s.registra(ResultadoStep::nuevo(
             "verdict",
-            "saltado",
+            "skipped",
             "precondición falsa",
         ));
-        assert_eq!(s.estado(), "paso", "sin el sello del motor, nada cambia");
+        assert_eq!(s.estado(), "pass", "sin el sello del motor, nada cambia");
 
         s.veredicto_sin_evaluar = true;
         assert_eq!(
             s.estado(),
-            "inconcluso",
+            "inconclusive",
             "una unidad que nadie midió no puede salir aprobada"
         );
     }
@@ -863,14 +863,14 @@ mod tests {
     #[test]
     fn inconcluso_no_tapa_un_fallo() {
         let mut s = ResultadoSecuencia::nueva("s");
-        s.registra(ResultadoStep::nuevo("a", "fallo", "fuera de rango"));
+        s.registra(ResultadoStep::nuevo("a", "fail", "fuera de rango"));
         s.registra(ResultadoStep::nuevo(
             "verdict",
-            "saltado",
+            "skipped",
             "precondición falsa",
         ));
         s.veredicto_sin_evaluar = true;
-        assert_eq!(s.estado(), "fallo");
+        assert_eq!(s.estado(), "fail");
     }
 
     #[test]
@@ -879,7 +879,7 @@ mod tests {
         s.registra(ResultadoStep::nuevo("a", "error", "el banco no responde"));
         s.registra(ResultadoStep::nuevo(
             "verdict",
-            "saltado",
+            "skipped",
             "precondición falsa",
         ));
         s.veredicto_sin_evaluar = true;
@@ -893,28 +893,28 @@ mod tests {
     #[test]
     fn el_inconcluso_de_una_subsecuencia_sube_al_padre() {
         let mut s = ResultadoSecuencia::nueva("padre");
-        s.registra(ResultadoStep::nuevo("a", "paso", "ok"));
-        let mut call = ResultadoStep::nuevo("sub", "inconcluso", "sequence call → inconcluso");
+        s.registra(ResultadoStep::nuevo("a", "pass", "ok"));
+        let mut call = ResultadoStep::nuevo("sub", "inconclusive", "sequence call → inconcluso");
         call.sub_pasos = Some(vec![ResultadoStep::nuevo(
             "verdict",
-            "saltado",
+            "skipped",
             "precondición falsa",
         )]);
         s.registra(call);
-        assert_eq!(s.estado(), "inconcluso");
+        assert_eq!(s.estado(), "inconclusive");
     }
 
     /// RNF-08 es «el formato textual no se cambia sin querer», no «no se añaden
     /// estados» (M4 ya añadió `saltado` como extensión aditiva). Lo único que
     /// cambia en el texto es la cabecera; el paso se sigue reportando
-    /// `[saltado]`, que es lo que ocurrió.
+    /// `[skipped]`, que es lo que ocurrió.
     #[test]
     fn el_reporte_de_una_secuencia_inconclusa() {
         let mut s = ResultadoSecuencia::nueva("b31");
-        s.registra(ResultadoStep::nuevo("init", "paso", "statement ok"));
+        s.registra(ResultadoStep::nuevo("init", "pass", "statement ok"));
         s.registra(ResultadoStep::nuevo(
             "verdict",
-            "saltado",
+            "skipped",
             "precondición falsa",
         ));
         s.veredicto_sin_evaluar = true;
@@ -923,9 +923,9 @@ mod tests {
         s.reporte_a(&mut buf).unwrap();
         assert_eq!(
             String::from_utf8(buf).unwrap(),
-            "=== b31: inconcluso ===\n  \
-             [paso] init: statement ok\n  \
-             [saltado] verdict: precondición falsa\n  \
+            "=== b31: inconclusive ===\n  \
+             [pass] init: statement ok\n  \
+             [skipped] verdict: precondición falsa\n  \
              (1 de 2 pasos saltados)\n"
         );
     }
@@ -938,7 +938,7 @@ mod tests {
         let mut s = ResultadoSecuencia::nueva("basica");
         s.registra(ResultadoStep::medido(
             "medir_voltaje",
-            "fallo",
+            "fail",
             "voltaje fuera de rango",
             4.2,
             4.5,
@@ -946,7 +946,7 @@ mod tests {
         ));
         s.registra(ResultadoStep::nuevo(
             "verificar_led",
-            "paso",
+            "pass",
             "led encendido",
         ));
 
@@ -954,9 +954,9 @@ mod tests {
         s.reporte_a(&mut out).unwrap();
 
         let esperado = "\
-=== basica: fallo ===
-  [fallo] medir_voltaje: voltaje fuera de rango
-  [paso] verificar_led: led encendido
+=== basica: fail ===
+  [fail] medir_voltaje: voltaje fuera de rango
+  [pass] verificar_led: led encendido
 ";
         assert_eq!(String::from_utf8(out).unwrap(), esperado);
     }
@@ -964,12 +964,12 @@ mod tests {
     #[test]
     fn limite_rango_dentro_fuera_y_fronteras() {
         let r = Limite::Rango { min: 4.5, max: 5.5 };
-        assert_eq!(r.evalua(5.0), "paso", "dentro del rango");
-        assert_eq!(r.evalua(4.2), "fallo", "por debajo");
-        assert_eq!(r.evalua(6.0), "fallo", "por encima");
+        assert_eq!(r.evalua(5.0), "pass", "dentro del rango");
+        assert_eq!(r.evalua(4.2), "fail", "por debajo");
+        assert_eq!(r.evalua(6.0), "fail", "por encima");
         // Fronteras inclusivas.
-        assert_eq!(r.evalua(4.5), "paso", "min incluido");
-        assert_eq!(r.evalua(5.5), "paso", "max incluido");
+        assert_eq!(r.evalua(4.5), "pass", "min incluido");
+        assert_eq!(r.evalua(5.5), "pass", "max incluido");
     }
 
     #[test]
@@ -981,7 +981,7 @@ mod tests {
                 esperado: 1000.0
             }
             .evalua(1000.0),
-            "paso"
+            "pass"
         );
         assert_eq!(
             Limite::Comparacion {
@@ -989,7 +989,7 @@ mod tests {
                 esperado: 1000.0
             }
             .evalua(999.0),
-            "fallo"
+            "fail"
         );
         assert_eq!(
             Limite::Comparacion {
@@ -997,7 +997,7 @@ mod tests {
                 esperado: 1000.0
             }
             .evalua(999.0),
-            "paso"
+            "pass"
         );
         assert_eq!(
             Limite::Comparacion {
@@ -1005,7 +1005,7 @@ mod tests {
                 esperado: 1000.0
             }
             .evalua(999.0),
-            "paso"
+            "pass"
         );
         assert_eq!(
             Limite::Comparacion {
@@ -1013,7 +1013,7 @@ mod tests {
                 esperado: 1000.0
             }
             .evalua(1000.0),
-            "fallo",
+            "fail",
             "lt excluye el igual"
         );
         assert_eq!(
@@ -1022,7 +1022,7 @@ mod tests {
                 esperado: 1000.0
             }
             .evalua(1000.0),
-            "paso",
+            "pass",
             "le incluye el igual"
         );
         assert_eq!(
@@ -1031,7 +1031,7 @@ mod tests {
                 esperado: 1000.0
             }
             .evalua(1001.0),
-            "paso"
+            "pass"
         );
         assert_eq!(
             Limite::Comparacion {
@@ -1039,7 +1039,7 @@ mod tests {
                 esperado: 1000.0
             }
             .evalua(1000.0),
-            "paso"
+            "pass"
         );
     }
 
@@ -1087,7 +1087,7 @@ mod tests {
     fn medido_valor_deja_limites_vacios() {
         // Un paso que mide sin conocer el umbral: el motor rellena los
         // campos de límite después, desde el YAML (ADR-0008).
-        let r = ResultadoStep::medido_valor("medir_voltaje", "paso", "medido: 4.2 V", 4.2);
+        let r = ResultadoStep::medido_valor("medir_voltaje", "pass", "medido: 4.2 V", 4.2);
         assert_eq!(r.valor_medido, Some(4.2));
         assert_eq!(r.limite_min, None);
         assert_eq!(r.limite_max, None);
@@ -1101,21 +1101,21 @@ mod tests {
     #[test]
     fn saltado_no_cuenta_como_fallo_ni_error() {
         let mut s = ResultadoSecuencia::nueva("s");
-        s.registra(ResultadoStep::nuevo("a", "saltado", "disable"));
-        assert_eq!(s.estado(), "paso");
+        s.registra(ResultadoStep::nuevo("a", "skipped", "disable"));
+        assert_eq!(s.estado(), "pass");
         // Un saltado junto a un fallo: manda el fallo, no se anula.
-        s.registra(ResultadoStep::nuevo("b", "fallo", "mal"));
-        assert_eq!(s.estado(), "fallo");
+        s.registra(ResultadoStep::nuevo("b", "fail", "mal"));
+        assert_eq!(s.estado(), "fail");
     }
 
-    /// RNF-08 (extensión aditiva de M4): el estado `"saltado"` aparece en el
+    /// RNF-08 (extensión aditiva de M4): el estado `"skipped"` aparece en el
     /// reporte textual congelado. El formato de línea no cambia; sólo se
     /// añade un nuevo *valor* de estado.
     #[test]
     fn reporte_incluye_estado_saltado() {
         let mut s = ResultadoSecuencia::nueva("variables");
-        s.registra(ResultadoStep::nuevo("init_log", "paso", "statement ok"));
-        s.registra(ResultadoStep::nuevo("paso_obsoleto", "saltado", "disable"));
+        s.registra(ResultadoStep::nuevo("init_log", "pass", "statement ok"));
+        s.registra(ResultadoStep::nuevo("paso_obsoleto", "skipped", "disable"));
 
         let mut out = Vec::new();
         s.reporte_a(&mut out).unwrap();
@@ -1123,9 +1123,9 @@ mod tests {
         // La línea de recuento la añade #13: un verde que se salta la mitad
         // de la secuencia tiene que decirlo en consola.
         let esperado = "\
-=== variables: paso ===
-  [paso] init_log: statement ok
-  [saltado] paso_obsoleto: disable
+=== variables: pass ===
+  [pass] init_log: statement ok
+  [skipped] paso_obsoleto: disable
   (1 de 2 pasos saltados)
 ";
         assert_eq!(String::from_utf8(out).unwrap(), esperado);
@@ -1136,13 +1136,13 @@ mod tests {
     #[test]
     fn reporte_sin_saltados_no_lleva_linea_de_recuento() {
         let mut s = ResultadoSecuencia::nueva("basica");
-        s.registra(ResultadoStep::nuevo("medir", "paso", "ok"));
+        s.registra(ResultadoStep::nuevo("medir", "pass", "ok"));
 
         let mut out = Vec::new();
         s.reporte_a(&mut out).unwrap();
         assert_eq!(
             String::from_utf8(out).unwrap(),
-            "=== basica: paso ===\n  [paso] medir: ok\n"
+            "=== basica: pass ===\n  [pass] medir: ok\n"
         );
     }
 
@@ -1150,19 +1150,19 @@ mod tests {
     fn saltados_cuenta_el_arbol_entero() {
         // Un sequence call cuyos hijos se saltan: lo que importa al triar es
         // cuántos pasos no corrieron, en cualquier nivel.
-        let mut call = ResultadoStep::nuevo("test_uut", "paso", "sequence call → paso");
+        let mut call = ResultadoStep::nuevo("test_uut", "pass", "sequence call → paso");
         call.sub_pasos = Some(vec![
-            ResultadoStep::nuevo("medir_1", "saltado", "precondición falsa"),
-            ResultadoStep::nuevo("medir_2", "paso", "ok"),
+            ResultadoStep::nuevo("medir_1", "skipped", "precondición falsa"),
+            ResultadoStep::nuevo("medir_2", "pass", "ok"),
         ]);
         let mut s = ResultadoSecuencia::nueva("raiz");
-        s.registra(ResultadoStep::nuevo("preparar", "saltado", "disable"));
+        s.registra(ResultadoStep::nuevo("preparar", "skipped", "disable"));
         s.registra(call);
 
         // 4 pasos en el árbol (preparar, el call y sus dos hijos), 2 saltados.
         assert_eq!(s.saltados(), (2, 4));
         // Y el agregado sigue siendo `paso`: la neutralidad no cambia (RF-33/34).
-        assert_eq!(s.estado(), "paso");
+        assert_eq!(s.estado(), "pass");
     }
 
     /// Los defaults de `DefinicionPaso::nuevo` preservan el comportamiento de
@@ -1185,9 +1185,9 @@ mod tests {
     /// `sub_pasos: None`; un sequence call lo rellena con `Some(...)`.
     #[test]
     fn resultado_step_nuevo_tiene_sub_pasos_none() {
-        let r = ResultadoStep::nuevo("p", "paso", "ok");
+        let r = ResultadoStep::nuevo("p", "pass", "ok");
         assert_eq!(r.sub_pasos, None);
-        let m = ResultadoStep::medido_valor("m", "paso", "ok", 4.2);
+        let m = ResultadoStep::medido_valor("m", "pass", "ok", 4.2);
         assert_eq!(m.sub_pasos, None);
     }
 
@@ -1196,16 +1196,16 @@ mod tests {
     /// `p.estado` del call (que ya es el agregado), sin descender.
     #[test]
     fn estado_agregado_con_sequence_call_anidado() {
-        let mut call = ResultadoStep::nuevo("test_fuentes", "fallo", "sequence call → fallo");
+        let mut call = ResultadoStep::nuevo("test_fuentes", "fail", "sequence call → fallo");
         call.sub_pasos = Some(vec![
-            ResultadoStep::nuevo("medir_canal_1", "paso", "ok"),
-            ResultadoStep::nuevo("medir_canal_2", "fallo", "fuera de rango"),
+            ResultadoStep::nuevo("medir_canal_1", "pass", "ok"),
+            ResultadoStep::nuevo("medir_canal_2", "fail", "fuera de rango"),
         ]);
         let mut s = ResultadoSecuencia::nueva("basica");
         s.registra(call);
-        // El call ya trae "fallo" (agregado de la sub); la secuencia padre
+        // El call ya trae "fail" (agregado de la sub); la secuencia padre
         // lo ve sin descender a sub_pasos.
-        assert_eq!(s.estado(), "fallo");
+        assert_eq!(s.estado(), "fail");
     }
 
     /// RNF-08 (extensión aditiva de M4b): el reporte textual anida los
@@ -1215,13 +1215,13 @@ mod tests {
     fn reporte_anida_sub_pasos() {
         let mut call = ResultadoStep::nuevo(
             "test_fuentes",
-            "fallo",
+            "fail",
             "sequence call './medir_fuentes.yaml' → fallo",
         );
         call.sub_pasos = Some(vec![
-            ResultadoStep::nuevo("medir_canal_1", "paso", "ok"),
-            ResultadoStep::nuevo("medir_canal_2", "fallo", "fuera de rango"),
-            ResultadoStep::nuevo("desconectar", "paso", "ok"),
+            ResultadoStep::nuevo("medir_canal_1", "pass", "ok"),
+            ResultadoStep::nuevo("medir_canal_2", "fail", "fuera de rango"),
+            ResultadoStep::nuevo("desconectar", "pass", "ok"),
         ]);
         let mut s = ResultadoSecuencia::nueva("basica");
         s.registra(call);
@@ -1230,11 +1230,11 @@ mod tests {
         s.reporte_a(&mut out).unwrap();
 
         let esperado = "\
-=== basica: fallo ===
-  [fallo] test_fuentes: sequence call './medir_fuentes.yaml' → fallo
-    [paso] medir_canal_1: ok
-    [fallo] medir_canal_2: fuera de rango
-    [paso] desconectar: ok
+=== basica: fail ===
+  [fail] test_fuentes: sequence call './medir_fuentes.yaml' → fallo
+    [pass] medir_canal_1: ok
+    [fail] medir_canal_2: fuera de rango
+    [pass] desconectar: ok
 ";
         assert_eq!(String::from_utf8(out).unwrap(), esperado);
     }

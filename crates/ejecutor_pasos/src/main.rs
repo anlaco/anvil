@@ -7,7 +7,7 @@
 //!     target/wasm32-wasip2/debug/ejecutor_pasos.wasm
 
 use expr::Value;
-use modelo::proto::{PeticionPaso, ResultadoPasoProto, RUTA_INVOCA};
+use modelo::proto::{StepRequest, StepResult, RUTA_INVOCA};
 use modelo::ResultadoStep;
 use prost::Message;
 use wasi_grpc::grpc::Servidor;
@@ -40,13 +40,13 @@ fn despacha(nombre: &str, intento: i32, parametros: &[(String, Value)]) -> Resul
 /// `Err(nombre)` si uno llegó con el `oneof` sin rama: no se puede saber de
 /// qué tipo es, y un paso que mide sin un parámetro que le mandaron mide otra
 /// cosa. Devuelve el nombre para poder nombrarlo en el error.
-fn parametros_de(pet: &PeticionPaso) -> Result<Vec<(String, Value)>, String> {
-    pet.parametros
+fn parametros_de(pet: &StepRequest) -> Result<Vec<(String, Value)>, String> {
+    pet.inputs
         .iter()
         .map(|v| {
             v.a_value()
-                .map(|valor| (v.nombre.clone(), valor))
-                .ok_or_else(|| v.nombre.clone())
+                .map(|valor| (v.name.clone(), valor))
+                .ok_or_else(|| v.name.clone())
         })
         .collect()
 }
@@ -98,23 +98,23 @@ fn main() {
                 continue;
             }
 
-            let pet = match PeticionPaso::decode(&peticion.cuerpo[..]) {
+            let pet = match StepRequest::decode(&peticion.cuerpo[..]) {
                 Ok(p) => p,
                 Err(e) => {
                     eprintln!("petición ilegible: {e}");
                     continue;
                 }
             };
-            eprintln!("paso pedido: {} intento={}", pet.nombre, pet.intento);
+            eprintln!("paso pedido: {} intento={}", pet.name, pet.attempt);
 
             // ADR-0020: los parámetros llegan tipados y ya evaluados. Uno con
             // el `oneof` sin rama no dice de qué tipo es, y ejecutar el paso
             // sin él sería medir otra cosa en silencio: es `error` (Regla 2
             // de ADR-0019), no un valor por defecto.
             let resultado = match parametros_de(&pet) {
-                Ok(parametros) => despacha(&pet.nombre, pet.intento, &parametros),
+                Ok(parametros) => despacha(&pet.name, pet.attempt, &parametros),
                 Err(nombre) => ResultadoStep::nuevo(
-                    &pet.nombre,
+                    &pet.name,
                     "error",
                     format!(
                         "el parámetro '{nombre}' llegó sin tipo (ninguna de las ramas numero/\
@@ -125,7 +125,7 @@ fn main() {
             // El eco lo pone `From<&ResultadoStep>`: este ejecutor entiende el
             // contrato de `modelo::proto::CONTRATO`, y decirlo es lo que
             // permite al motor detectar a un par que no lo entiende.
-            let respuesta: ResultadoPasoProto = (&resultado).into();
+            let respuesta: StepResult = (&resultado).into();
 
             if let Err(e) = conn.responder(peticion.stream, &respuesta.encode_to_vec()) {
                 eprintln!("error respondiendo: {e}");

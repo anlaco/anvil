@@ -188,7 +188,7 @@ mod tests {
         let mut s = ResultadoSecuencia::nueva("basica");
         s.registra(ResultadoStep::medido(
             "medir_voltaje",
-            "fallo",
+            "fail",
             "fuera de rango",
             4.2,
             4.5,
@@ -196,7 +196,7 @@ mod tests {
         ));
         s.registra(ResultadoStep::nuevo(
             "verificar_led",
-            "paso",
+            "pass",
             "led encendido",
         ));
         s
@@ -215,12 +215,12 @@ mod tests {
         // primer campo = nombre de la secuencia (DEF-2), segundo = su estado agregado.
         assert_eq!(
             lineas[1],
-            "basica,fallo,medir_voltaje,fallo,fuera de rango,4.2,4.5,5.5,,,main,,"
+            "basica,fail,medir_voltaje,fail,fuera de rango,4.2,4.5,5.5,,,main,,"
         );
         // sin medida ni límite: valor_medido..operador vacíos, y la fase al final.
         assert_eq!(
             lineas[2],
-            "basica,fallo,verificar_led,paso,led encendido,,,,,,main,,"
+            "basica,fail,verificar_led,pass,led encendido,,,,,,main,,"
         );
         assert!(lineas[3].is_empty(), "termina en CRLF");
     }
@@ -233,7 +233,7 @@ mod tests {
         let mut s = ResultadoSecuencia::nueva("b31");
         s.registra(ResultadoStep::nuevo(
             "verdict",
-            "saltado",
+            "skipped",
             "precondición falsa",
         ));
         s.veredicto_sin_evaluar = true;
@@ -243,7 +243,7 @@ mod tests {
         let out = String::from_utf8(sink.salida).unwrap();
         assert_eq!(
             out.split("\r\n").nth(1).unwrap(),
-            "b31,inconcluso,verdict,saltado,precondición falsa,,,,,,main,,"
+            "b31,inconclusive,verdict,skipped,precondición falsa,,,,,,main,,"
         );
     }
 
@@ -253,7 +253,7 @@ mod tests {
         let mut s = ResultadoSecuencia::nueva("s");
         let mut r = ResultadoStep::medido_valor(
             "verificar_frecuencia",
-            "fallo",
+            "fail",
             "990 >= 1000 no cumplido",
             990.0,
         );
@@ -275,7 +275,7 @@ mod tests {
     #[test]
     fn cita_campos_con_coma_comilla_y_salto() {
         let mut s = ResultadoSecuencia::nueva("s");
-        s.registra(ResultadoStep::nuevo("p", "paso", "hola, \"mundo\"\ny tal"));
+        s.registra(ResultadoStep::nuevo("p", "pass", "hola, \"mundo\"\ny tal"));
         let mut sink = SinkCsv::nuevo(Vec::new());
         sink.on_fin_secuencia(&s);
 
@@ -290,7 +290,7 @@ mod tests {
     #[test]
     fn enteros_sin_decimales() {
         let mut s = ResultadoSecuencia::nueva("s");
-        s.registra(ResultadoStep::medido("p", "paso", "ok", 5.0, 0.0, 10.0));
+        s.registra(ResultadoStep::medido("p", "pass", "ok", 5.0, 0.0, 10.0));
         let mut sink = SinkCsv::nuevo(Vec::new());
         sink.on_fin_secuencia(&s);
         let out = String::from_utf8(sink.salida).unwrap();
@@ -306,10 +306,10 @@ mod tests {
         // Un sequence call (M4b): el call se emite con su nombre, y cada
         // sub-paso como fila extra con `nombre_paso = call/hijo`. El
         // aplanado no añade columnas propias.
-        let mut call = ResultadoStep::nuevo("test_fuentes", "fallo", "sequence call → fallo");
+        let mut call = ResultadoStep::nuevo("test_fuentes", "fail", "sequence call → fallo");
         call.sub_pasos = Some(vec![
-            ResultadoStep::nuevo("medir_canal_1", "paso", "ok"),
-            ResultadoStep::nuevo("medir_canal_2", "fallo", "fuera de rango"),
+            ResultadoStep::nuevo("medir_canal_1", "pass", "ok"),
+            ResultadoStep::nuevo("medir_canal_2", "fail", "fuera de rango"),
         ]);
         let mut s = ResultadoSecuencia::nueva("basica");
         s.registra(call);
@@ -324,18 +324,18 @@ mod tests {
         // Call. Primer campo = nombre de secuencia, segundo = estado agregado
         // (fallo, el mismo en las tres filas).
         assert!(
-            lineas[1].contains("basica,fallo,test_fuentes,fallo,"),
+            lineas[1].contains("basica,fail,test_fuentes,fail,"),
             "fila del call: {}",
             lineas[1]
         );
         // Sub-pasos aplanados con prefijo.
         assert!(
-            lineas[2].contains("basica,fallo,test_fuentes/medir_canal_1,paso,ok,"),
+            lineas[2].contains("basica,fail,test_fuentes/medir_canal_1,pass,ok,"),
             "sub-paso 1: {}",
             lineas[2]
         );
         assert!(
-            lineas[3].contains("basica,fallo,test_fuentes/medir_canal_2,fallo,fuera de rango,"),
+            lineas[3].contains("basica,fail,test_fuentes/medir_canal_2,fail,fuera de rango,"),
             "sub-paso 2: {}",
             lineas[3]
         );
@@ -352,7 +352,7 @@ mod tests {
             ("medir_voltaje", Fase::Main),
             ("apagar_fuente", Fase::Cleanup),
         ] {
-            let mut r = ResultadoStep::nuevo(nombre, "paso", "ok");
+            let mut r = ResultadoStep::nuevo(nombre, "pass", "ok");
             r.fase = fase;
             s.registra(r);
         }
@@ -372,7 +372,7 @@ mod tests {
     /// dos celdas salen vacías y el CSV vuelve a no distinguir las corridas.
     #[test]
     fn los_parametros_y_las_salidas_van_a_su_celda() {
-        let mut p = ResultadoStep::medido_valor("medir", "paso", "ok", 4.4);
+        let mut p = ResultadoStep::medido_valor("medir", "pass", "ok", 4.4);
         p.parametros = vec![
             ("canal".into(), expr::Value::Numero(3.0)),
             ("etiqueta".into(), expr::Value::Texto("banco-3".into())),
@@ -398,7 +398,7 @@ mod tests {
     #[test]
     fn dos_corridas_con_distinto_canal_ya_no_dan_el_mismo_csv() {
         let csv_de = |canal: f64| {
-            let mut p = ResultadoStep::medido_valor("medir", "paso", "ok", 4.2);
+            let mut p = ResultadoStep::medido_valor("medir", "pass", "ok", 4.2);
             p.parametros = vec![("canal".into(), expr::Value::Numero(canal))];
             let mut s = ResultadoSecuencia::nueva("c");
             s.registra(p);
