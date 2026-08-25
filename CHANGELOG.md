@@ -10,6 +10,75 @@ minors, con el cambio anotado aquí.
 
 ## [No publicado]
 
+**La interfaz de Anvil pasa a inglés.** El formato de secuencia aspira a ser
+un estándar, y ninguno de los que lo son —HTML, ODF, OOXML— se escribió en
+otra lengua. El vocabulario de este dominio (*pass*, *fail*, *limit*, *step*,
+*setup*, *cleanup*) ya está en inglés en la cabeza de quien viene de TestStand
+o de OpenTAP: escribirlo en castellano no ahorraba una traducción, la añadía.
+
+Y el formato ya estaba a medias: `main`, `setup`, `cleanup`, `locals`,
+`file_globals`, `disable`, `pause_on_fail` y `statement` conviviendo con
+`nombre`, `limite`, `precondicion` y `asigna`.
+
+La traducción completa está en [`GLOSSARY.md`](GLOSSARY.md), y la regla de
+qué va en cada idioma, en [`CONTRIBUTING.md`](CONTRIBUTING.md): **lo que ve
+quien usa Anvil, en inglés; el código, los comentarios y los ADRs, en
+español.**
+
+**Ninguna secuencia escrita hasta hoy carga, y ningún ejecutor o componente
+anterior sirve.** Es una rotura limpia y deliberada: no hay capa de
+compatibilidad ni alias, porque no existe ningún consumidor externo.
+Un fichero viejo no falla con un error opaco — el cargador reconoce los
+nombres del schema anterior y responde «¿querías `name`?».
+
+### Cambiado
+
+- **BREAKING — las claves del YAML.** `nombre`→`name`,
+  `reintentos`→`retries`, `limite`→`limit`, `tipo`→`type`,
+  `precondicion`→`precondition`, `asigna`→`assign`, `condicion`→`condition`,
+  `secuencia`→`sequence`, `ejecutor(es)`→`executor(s)`,
+  `subsecuencias`→`subsequences`, `puerto`→`port`, `esperado`→`expected`.
+  Valores: `rango`→`range`, `comparacion`→`comparison`,
+  `embebido`→`embedded`. El sidecar de `--limits` usa el mismo schema.
+- **BREAKING — `parametros` se parte en dos**, y esto no es una traducción
+  sino una decisión que la traducción obligó a tomar. Significaba dos cosas
+  —by-value en un paso `grpc` (ADR-0020) y by-reference en un `sequence_call`
+  (ADR-0010)— y chocaba además con el scope `parameters` de la secuencia.
+  Pasan a ser **`inputs`** y **`args`**. Con nombres distintos, copiar un
+  bloque de un sitio al otro deja de poder cambiar el significado en
+  silencio: da error de campo desconocido.
+- **BREAKING — el lenguaje de expresiones.** El scope `resultado`→`result` y
+  sus campos: `estado`→`status`, `mensaje`→`message`,
+  `valor_medido`→`measured_value`, `salidas`→`outputs`.
+- **BREAKING — los estados.** `paso`→`pass`, `fallo`→`fail`,
+  `saltado`→`skipped`, `inconcluso`→`inconclusive`. `error` no cambia.
+  Afecta a lo que devuelve un ejecutor, al reporte de texto y a los informes.
+- **BREAKING — el contrato gRPC sube a 3.** `PeticionPaso`→`StepRequest`,
+  `ResultadoPasoProto`→`StepResult`, `Valor`→`Value`, y el servicio
+  `EjecutorPasos/Invoca`→`StepExecutor/Invoke` (la ruta pasa a
+  `/StepExecutor/Invoke`). No es cosmético y por eso sube el número: un
+  ejecutor que hable el 2 leería tags con otro tipo, no sólo con otro
+  nombre, y el eco lo rechaza.
+- **BREAKING — el WIT pasa a `anvil:step@0.3.0`**, con `run(name, attempt,
+  inputs)`. Cambia el nombre del paquete además de la versión, así que hay
+  que **recompilar todo componente**. `record step-result` y no `result`
+  porque `result` es palabra reservada de WIT.
+- **BREAKING — los informes.** JSON: `secuencia`→`sequence`,
+  `pasos`→`steps`, `sub_pasos`→`sub_steps`, `pasos_saltados`→`skipped_steps`,
+  `pasos_totales`→`total_steps`, `secuencia_usuario`→`user_sequence`, y los
+  campos de cada paso. CSV: las trece columnas, **en el mismo orden** — quien
+  leyera por índice sigue igual, quien leyera por nombre no.
+- **BREAKING — los flags.** `--ejecutor`→`--executor`,
+  `--solo-loopback`→`--loopback-only`.
+
+### Sin cambios
+
+Los **mensajes de error y el reporte de texto** siguen en español, y se irán
+traduciendo por la regla del *Boy Scout*. Los **ADRs y los informes de beta**
+tampoco se tocan: son registro fechado, y reescribir sus ejemplos los haría
+mentir sobre lo que se decidió entonces.
+
+
 **Un paso ya puede recibir parámetros y devolver valores con nombre**
 (ADR-0020, issue #46). Hasta ahora un paso sólo recibía su nombre y el número
 de intento, así que todo lo que necesitaba para medir iba grabado dentro: un
