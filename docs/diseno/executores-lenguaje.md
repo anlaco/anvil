@@ -74,9 +74,9 @@ main:
     executor: python
 ```
 
-Override por CLI: `--ejecutor python=192.168.1.50:9101` (patrón `--limits`).
+Override por CLI: `--executor python=192.168.1.50:9101` (patrón `--limits`).
 IPs no-loopback solo si se declaran (relajación acotada del loopback,
-ADR-0011); flag `--solo-loopback` en el host para rechazarlas.
+ADR-0011); flag `--loopback-only` en el host para rechazarlas.
 
 ### Cargador de `.wasm` por path (modelo `.vi`, M5-ext.2, implementado)
 
@@ -108,7 +108,7 @@ executors:
   → un puente). Preload al arrancar, readiness por polling, puerto efímero
   (`bind 127.0.0.1:0`).
 - **El motor nunca ejecuta `Wasm`** (ADR-0014/0015): el host compone un
-  override `--ejecutor nombre=127.0.0.1:<puerto>` sintético (M5-ext.1, que
+  override `--executor nombre=127.0.0.1:<puerto>` sintético (M5-ext.1, que
   ya convierte `wasm` → `grpc`), así el motor sólo ve `embebido`/`grpc`,
   como siempre. Correr `anvil.wasm` suelto con wasmtime CLI (sin host)
   contra un ejecutor `wasm` da `Error::EjecutorWasmSinHost` con mensaje
@@ -192,7 +192,7 @@ Patrón embebido primero, sidecar después (igual que los límites, RF-30):
    Y cada paso referencia su ejecutor: `ejecutor: python` en
    `DefinicionPaso` (o un ejecutor por defecto si no se declara).
 
-2. **Override por flag CLI** (MVP): `--ejecutor python=192.168.1.50:9100`
+2. **Override por flag CLI** (MVP): `--executor python=192.168.1.50:9100`
    para apuntar un ejecutor a otro endpoint sin tocar el YAML (R&D vs.
    fábrica), como ya hace `--limits`.
 

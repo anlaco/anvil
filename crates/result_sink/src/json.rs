@@ -49,17 +49,17 @@ impl<W: Write> ResultSink for SinkJson<W> {
         // par un verde no distingue «el DUT pasó» de «el test no corrió».
         let (saltados, total) = secuencia.saltados();
         let mut doc = json!({
-            "secuencia": secuencia.nombre,
-            "estado": secuencia.estado(),
-            "pasos_saltados": saltados,
-            "pasos_totales": total,
-            "pasos": secuencia.pasos.iter().map(paso_a_json).collect::<Vec<_>>(),
+            "sequence": secuencia.nombre,
+            "status": secuencia.estado(),
+            "skipped_steps": saltados,
+            "total_steps": total,
+            "steps": secuencia.pasos.iter().map(paso_a_json).collect::<Vec<_>>(),
         });
         // Sin process model no hay secuencia de operador: la clave se omite
         // (no va como `null`) porque el concepto no existe en esa corrida.
         if let Some(nombre) = &self.secuencia_usuario {
             if let Some(obj) = doc.as_object_mut() {
-                obj.insert("secuencia_usuario".into(), json!(nombre));
+                obj.insert("user_sequence".into(), json!(nombre));
             }
         }
         let texto = serde_json::to_string_pretty(&doc).unwrap_or_default();
@@ -76,27 +76,27 @@ impl<W: Write> ResultSink for SinkJson<W> {
 /// anida `sub_pasos` con la misma estructura, recursivamente.
 fn paso_a_json(p: &ResultadoStep) -> Value {
     let base = json!({
-        "nombre": p.nombre,
-        "estado": p.estado,
-        "fase": p.fase.como_texto(),
-        "mensaje": p.mensaje,
-        "valor_medido": opt_num(p.valor_medido),
-        "limite_min": opt_num(p.limite_min),
-        "limite_max": opt_num(p.limite_max),
-        "valor_esperado": opt_num(p.valor_esperado),
-        "operador": p.operador.map(|op| json!(op.simbolo())).unwrap_or(Value::Null),
+        "name": p.nombre,
+        "status": p.estado,
+        "phase": p.fase.como_texto(),
+        "message": p.mensaje,
+        "measured_value": opt_num(p.valor_medido),
+        "limit_min": opt_num(p.limite_min),
+        "limit_max": opt_num(p.limite_max),
+        "expected_value": opt_num(p.valor_esperado),
+        "operator": p.operador.map(|op| json!(op.simbolo())).unwrap_or(Value::Null),
         // ADR-0020 + Regla 3 de ADR-0019: **la condición en la que se midió
         // queda escrita**. Hasta ahora dos corridas de la misma secuencia con
         // distinto canal producían informes idénticos, porque el canal iba
         // grabado dentro del paso y no viajaba a ningún sitio.
-        "parametros": nombrados_a_json(&p.parametros),
-        "salidas": nombrados_a_json(&p.salidas),
+        "inputs": nombrados_a_json(&p.parametros),
+        "outputs": nombrados_a_json(&p.salidas),
     });
     match &p.sub_pasos {
         Some(sub) => {
             let mut obj = base.as_object().unwrap().clone();
             obj.insert(
-                "sub_pasos".into(),
+                "sub_steps".into(),
                 Value::Array(sub.iter().map(paso_a_json).collect()),
             );
             Value::Object(obj)
@@ -172,9 +172,9 @@ mod tests {
         sink.on_fin_secuencia(&s);
 
         let doc: Value = serde_json::from_slice(&sink.salida).unwrap();
-        assert_eq!(doc["secuencia"], "basica");
-        assert_eq!(doc["estado"], "fail");
-        assert_eq!(doc["pasos"].as_array().unwrap().len(), 2);
+        assert_eq!(doc["sequence"], "basica");
+        assert_eq!(doc["status"], "fail");
+        assert_eq!(doc["steps"].as_array().unwrap().len(), 2);
     }
 
     /// ADR-0019, Regla 1: quien consuma el JSON tiene que contar con un estado
@@ -194,9 +194,9 @@ mod tests {
         sink.on_fin_secuencia(&s);
 
         let doc: Value = serde_json::from_slice(&sink.salida).unwrap();
-        assert_eq!(doc["estado"], "inconclusive");
+        assert_eq!(doc["status"], "inconclusive");
         assert_eq!(
-            doc["pasos"][0]["estado"], "skipped",
+            doc["steps"][0]["status"], "skipped",
             "el paso conserva lo que fue; lo que cambia es el agregado"
         );
     }
@@ -209,15 +209,15 @@ mod tests {
         let doc: Value = serde_json::from_slice(&sink.salida).unwrap();
 
         // medir_voltaje: medida presente como número.
-        let paso0 = &doc["pasos"][0];
-        assert_eq!(paso0["valor_medido"], 4.2, "valor_medido como número");
-        assert_eq!(paso0["limite_min"], 4.5);
-        assert_eq!(paso0["limite_max"], 5.5);
+        let paso0 = &doc["steps"][0];
+        assert_eq!(paso0["measured_value"], 4.2, "valor_medido como número");
+        assert_eq!(paso0["limit_min"], 4.5);
+        assert_eq!(paso0["limit_max"], 5.5);
 
         // verificar_led: sin medida → null (no string).
-        let paso1 = &doc["pasos"][1];
-        assert!(paso1["valor_medido"].is_null(), "sin medida → null");
-        assert!(paso1["limite_min"].is_null());
+        let paso1 = &doc["steps"][1];
+        assert!(paso1["measured_value"].is_null(), "sin medida → null");
+        assert!(paso1["limit_min"].is_null());
     }
 
     #[test]
@@ -239,12 +239,12 @@ mod tests {
         let mut sink = SinkJson::nuevo(Vec::new());
         sink.on_fin_secuencia(&s);
         let doc: Value = serde_json::from_slice(&sink.salida).unwrap();
-        let paso = &doc["pasos"][0];
-        assert_eq!(paso["valor_esperado"], 1000.0);
-        assert_eq!(paso["operador"], ">=");
+        let paso = &doc["steps"][0];
+        assert_eq!(paso["expected_value"], 1000.0);
+        assert_eq!(paso["operator"], ">=");
         // Sin rango → null.
-        assert!(paso["limite_min"].is_null());
-        assert!(paso["limite_max"].is_null());
+        assert!(paso["limit_min"].is_null());
+        assert!(paso["limit_max"].is_null());
     }
 
     #[test]
@@ -262,17 +262,17 @@ mod tests {
         let mut sink = SinkJson::nuevo(Vec::new());
         sink.on_fin_secuencia(&s);
         let doc: Value = serde_json::from_slice(&sink.salida).unwrap();
-        let paso = &doc["pasos"][0];
-        assert_eq!(paso["nombre"], "test_fuentes");
-        assert_eq!(paso["estado"], "fail");
-        let sub = paso["sub_pasos"].as_array().unwrap();
+        let paso = &doc["steps"][0];
+        assert_eq!(paso["name"], "test_fuentes");
+        assert_eq!(paso["status"], "fail");
+        let sub = paso["sub_steps"].as_array().unwrap();
         assert_eq!(sub.len(), 2);
-        assert_eq!(sub[0]["nombre"], "medir_canal_1");
-        assert_eq!(sub[0]["estado"], "pass");
-        assert_eq!(sub[1]["nombre"], "medir_canal_2");
-        assert_eq!(sub[1]["estado"], "fail");
+        assert_eq!(sub[0]["name"], "medir_canal_1");
+        assert_eq!(sub[0]["status"], "pass");
+        assert_eq!(sub[1]["name"], "medir_canal_2");
+        assert_eq!(sub[1]["status"], "fail");
         // Un paso sin sub_pasos no lleva la clave (un paso común del test).
-        assert!(doc["pasos"].as_array().unwrap().len() == 1 || true);
+        assert!(doc["steps"].as_array().unwrap().len() == 1 || true);
     }
 
     #[test]
@@ -294,9 +294,9 @@ mod tests {
         let mut sink = SinkJson::nuevo(Vec::new());
         sink.on_fin_secuencia(&s);
         let doc: Value = serde_json::from_slice(&sink.salida).unwrap();
-        assert_eq!(doc["estado"], "pass", "el agregado no cambia (RF-33/34)");
-        assert_eq!(doc["pasos_saltados"], 2, "cuenta también los anidados");
-        assert_eq!(doc["pasos_totales"], 3);
+        assert_eq!(doc["status"], "pass", "el agregado no cambia (RF-33/34)");
+        assert_eq!(doc["skipped_steps"], 2, "cuenta también los anidados");
+        assert_eq!(doc["total_steps"], 3);
     }
 
     #[test]
@@ -316,8 +316,8 @@ mod tests {
         sink.on_fin_secuencia(&s);
 
         let doc: Value = serde_json::from_slice(&sink.salida).unwrap();
-        assert_eq!(doc["pasos"][0]["fase"], "setup");
-        assert_eq!(doc["pasos"][0]["sub_pasos"][0]["fase"], "cleanup");
+        assert_eq!(doc["steps"][0]["phase"], "setup");
+        assert_eq!(doc["steps"][0]["sub_steps"][0]["phase"], "cleanup");
     }
 
     #[test]
@@ -336,8 +336,8 @@ mod tests {
         let mut sink = SinkJson::nuevo(Vec::new()).con_secuencia_usuario("ejemplos/basica.yaml");
         sink.on_fin_secuencia(&pm);
         let doc: Value = serde_json::from_slice(&sink.salida).unwrap();
-        assert_eq!(doc["secuencia"], "sequential");
-        assert_eq!(doc["secuencia_usuario"], "ejemplos/basica.yaml");
+        assert_eq!(doc["sequence"], "sequential");
+        assert_eq!(doc["user_sequence"], "ejemplos/basica.yaml");
     }
     /// ADR-0020: los parámetros y las salidas van al JSON **con su tipo**.
     /// Aplanarlos a texto perdería justo lo que este ADR fue a ganar: que
@@ -360,14 +360,14 @@ mod tests {
         let mut sink = SinkJson::nuevo(Vec::new());
         sink.on_fin_secuencia(&s);
         let doc: Value = serde_json::from_slice(&sink.salida).unwrap();
-        let paso = &doc["pasos"][0];
+        let paso = &doc["steps"][0];
 
-        assert_eq!(paso["parametros"]["canal"], 3.0, "número, no cadena");
-        assert!(paso["parametros"]["canal"].is_number());
-        assert_eq!(paso["parametros"]["etiqueta"], "banco-3");
-        assert_eq!(paso["parametros"]["promediar"], true);
-        assert!(paso["parametros"]["promediar"].is_boolean());
-        assert_eq!(paso["salidas"]["temperatura"], 21.5);
+        assert_eq!(paso["inputs"]["canal"], 3.0, "número, no cadena");
+        assert!(paso["inputs"]["canal"].is_number());
+        assert_eq!(paso["inputs"]["etiqueta"], "banco-3");
+        assert_eq!(paso["inputs"]["promediar"], true);
+        assert!(paso["inputs"]["promediar"].is_boolean());
+        assert_eq!(paso["outputs"]["temperatura"], 21.5);
     }
 
     /// Sin parámetros, un objeto vacío y no `null`: quien consuma el JSON no
@@ -379,7 +379,7 @@ mod tests {
         let mut sink = SinkJson::nuevo(Vec::new());
         sink.on_fin_secuencia(&s);
         let doc: Value = serde_json::from_slice(&sink.salida).unwrap();
-        assert_eq!(doc["pasos"][0]["parametros"], json!({}));
-        assert_eq!(doc["pasos"][0]["salidas"], json!({}));
+        assert_eq!(doc["steps"][0]["inputs"], json!({}));
+        assert_eq!(doc["steps"][0]["outputs"], json!({}));
     }
 }

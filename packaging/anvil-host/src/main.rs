@@ -8,7 +8,7 @@
 //! ./anvil <secuencia.yaml> [--json <ruta>] [--csv <ruta>] [--limits <ruta>]
 //! ```
 //!
-//! El host no parsea la línea de comandos (salvo `--solo-loopback`, que es
+//! El host no parsea la línea de comandos (salvo `--loopback-only`, que es
 //! suyo): la pasa al guest motor (`inherit_args`), que la parsea como hoy.
 //! El host sólo:
 //!  1. Lee el YAML de la secuencia (M5-ext.1/2) para recolectar los
@@ -108,7 +108,7 @@ const FLAGS_CON_VALOR: [&str; 6] = [
     "--json",
     "--csv",
     "--limits",
-    "--ejecutor",
+    "--executor",
     "--port",
 ];
 
@@ -368,14 +368,14 @@ fn esperar_ejecutor(puerto: u16) {
 }
 
 fn main() {
-    // El host parsea un único flag propio: `--solo-loopback` (rechaza
+    // El host parsea un único flag propio: `--loopback-only` (rechaza
     // cualquier `grpc` no-loopback declarado, para CI/paranoia). El resto de
     // la línea de comandos se pasa tal cual al guest motor.
     let args: Vec<String> = std::env::args().skip(1).collect();
-    let solo_loopback = args.iter().any(|a| a == "--solo-loopback");
+    let solo_loopback = args.iter().any(|a| a == "--loopback-only");
     let args_motor: Vec<String> = args
         .iter()
-        .filter(|a| *a != "--solo-loopback")
+        .filter(|a| *a != "--loopback-only")
         .cloned()
         .collect();
 
@@ -397,7 +397,7 @@ fn main() {
                     let lista: Vec<String> =
                         ips_no_loopback.iter().map(|i| i.to_string()).collect();
                     eprintln!(
-                        "--solo-loopback: la secuencia declara ejecutores en IPs no-loopback ({})",
+                        "--loopback-only: la secuencia declara ejecutores en IPs no-loopback ({})",
                         lista.join(", ")
                     );
                     std::process::exit(1);
@@ -425,10 +425,10 @@ fn main() {
     let engine = Engine::default();
 
     // --- M5-ext.2: instanciar los ejecutores `tipo: wasm` declarados en el
-    // --- YAML y exponerlos al motor como overrides `--ejecutor` sintéticos.
+    // --- YAML y exponerlos al motor como overrides `--executor` sintéticos.
     // --- El guest motor re-parsea el YAML él mismo (ADR-0005: el motor no
     // --- recibe un `Programa` en memoria), así que el host no puede
-    // --- reescribirle el modelo: compone `--ejecutor nombre=127.0.0.1:puerto`
+    // --- reescribirle el modelo: compone `--executor nombre=127.0.0.1:puerto`
     // --- (M5-ext.1, que ya convierte `wasm` → `grpc` al aplicarlo).
     let ruta_yaml = ruta_secuencia.clone().unwrap_or_default();
     let dir_yaml = Path::new(&ruta_yaml)
@@ -438,9 +438,9 @@ fn main() {
     let mut ejecutores_wasm: Vec<EjecutorWasm> = Vec::new();
     let mut overrides_motor: Vec<String> = Vec::new();
     let mut args_motor_final: Vec<String> = args_motor;
-    // Se calcula sobre `args_motor` (todavía sin los `--ejecutor` sintéticos,
+    // Se calcula sobre `args_motor` (todavía sin los `--executor` sintéticos,
     // que es justo lo que este bloque produce). Da lo mismo que calcularlo
-    // sobre `args_motor_final`: el guard salta `--ejecutor` y su valor por
+    // sobre `args_motor_final`: el guard salta `--executor` y su valor por
     // `FLAGS_CON_VALOR`.
     let va_a_ejecutar = va_a_ejecutar_pasos(&args_motor_final) && !yaml_invalido;
     if va_a_ejecutar {
@@ -491,7 +491,7 @@ fn main() {
         }
     }
     for o in &overrides_motor {
-        args_motor_final.push("--ejecutor".into());
+        args_motor_final.push("--executor".into());
         args_motor_final.push(o.clone());
     }
 

@@ -56,7 +56,7 @@ struct Cli {
     json: Option<String>,
     csv: Option<String>,
     limits: Option<String>,
-    /// Overrides `nombre=host:puerto` de `--ejecutor` (RF-36.3), acumulables.
+    /// Overrides `nombre=host:puerto` de `--executor` (RF-36.3), acumulables.
     ejecutores: Vec<String>,
     port: u16,
     validate: bool,
@@ -70,7 +70,7 @@ fn usage() {
 --json <ruta>           vuelca el reporte a JSON\n  \
 --csv <ruta>            vuelca el reporte a CSV\n  \
 --limits <ruta>         sidecar de límites (RF-30)\n  \
---ejecutor n=host:puerto  re-apunta un ejecutor declarado (RF-36.3)\n  \
+--executor n=host:puerto  re-apunta un ejecutor declarado (RF-36.3)\n  \
 --port <n>              puerto del ejecutor embebido (default {PUERTO_DEFAULT})\n  \
 --validate              carga y valida sin ejecutar ni conectar\n  \
 --quiet                 silencia el reporte de consola y logs stderr\n  \
@@ -102,7 +102,7 @@ fn parse_cli(args: Vec<String>) -> Result<Cli, AccionEarlyExit> {
             "--version" | "-V" => return Err(AccionEarlyExit::Version),
             "--validate" => cli.validate = true,
             "--quiet" => cli.quiet = true,
-            "--process-model" | "--json" | "--csv" | "--limits" | "--ejecutor" | "--port" => {
+            "--process-model" | "--json" | "--csv" | "--limits" | "--executor" | "--port" => {
                 let valor = match args.next() {
                     Some(v) => v,
                     None => {
@@ -116,7 +116,7 @@ fn parse_cli(args: Vec<String>) -> Result<Cli, AccionEarlyExit> {
                     "--json" => cli.json = Some(valor),
                     "--csv" => cli.csv = Some(valor),
                     "--limits" => cli.limits = Some(valor),
-                    "--ejecutor" => cli.ejecutores.push(valor),
+                    "--executor" => cli.ejecutores.push(valor),
                     "--port" => {
                         cli.port = valor.parse().map_err(|_| {
                             AccionEarlyExit::Uso(format!("--port inválido: {valor}"))

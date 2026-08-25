@@ -135,10 +135,10 @@ Lo que ya existe en el repo:
 
 - **Routing nombre→endpoint** (RF-36.1, RF-36.3): `ejecutores:` en el YAML
   (embebido/wasm/grpc), `ejecutor:` por paso, tabla de conexiones en el
-  motor (`Motor::desde_programa`), override CLI `--ejecutor nombre=host:puerto`.
+  motor (`Motor::desde_programa`), override CLI `--executor nombre=host:puerto`.
 - **Relajación acotada del loopback** (ADR-0011): IPs no-loopback solo si se
   declaran en `ejecutores:`; sin declaración, loopback-only. Flag
-  `--solo-loopback` en el host.
+  `--loopback-only` en el host.
 - **`TipoEjecutor::Wasm` definido y validado al cargar** (el path debe
   existir); la instanciación llegó con M5-ext.2 (ADR-0014).
 - Demo `ejemplos/demo_ejecutores.yaml`: embebido + ejecutor Python en
@@ -159,7 +159,7 @@ Lo que ya existe en el repo:
   sin `modelo`, sin `ANVIL_PORT`, sin clonar el repo. El puente (nativo:
   wasmtime + tonic + wit-bindgen) traduce gRPC↔función; sandbox WASI vacío
   (el componente es una función pura). `paso.proto` no cambia (RNF-05).
-- **El motor nunca ejecuta `Wasm`**: el host compone overrides `--ejecutor`
+- **El motor nunca ejecuta `Wasm`**: el host compone overrides `--executor`
   sintéticos (M5-ext.1), así el motor sólo ve `embebido`/`grpc`. AOT
   precompile a `.cwasm` + `StoreLimitsBuilder` + lazy loading + modo Debug
   + pooling/async: **post-M5-ext.2**, si la medición de 50+ Stores lo pide.
