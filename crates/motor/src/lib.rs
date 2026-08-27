@@ -13,9 +13,10 @@
 //! datos, y el contrato `paso.proto` no cambia (ADR-0008, extendido por
 //! ADR-0009).
 
+mod catalogo;
 mod entorno;
 
-use modelo::proto::{StepRequest, StepResult, Value as ProtoValue, CONTRATO, RUTA_INVOCA};
+use modelo::proto::{StepRequest, StepResult, Value as ProtoValue, CONTRACT, ROUTE_INVOKE};
 use modelo::{
     Asignacion, DefinicionEjecutor, DefinicionPaso, DefinicionSecuencia, EntradaPaso, Fase, Limite,
     Programa, ResultSink, ResultadoSecuencia, ResultadoStep, TipoEjecutor, TipoPaso,
@@ -24,6 +25,9 @@ use prost::Message;
 use wasi_grpc::grpc::Cliente;
 use wasi_grpc::net;
 
+pub use catalogo::{
+    comprueba_programa, Catalogos, Descripcion, Hallazgo, Informe as InformeFirmas, SinComprobar,
+};
 pub use entorno::EntornoMotor;
 use expr::{eval, eval_sentencias, Entorno, Expresion, Scope, Sentencia, Value};
 use std::collections::HashMap;
@@ -142,7 +146,7 @@ impl Motor {
     /// declarado → embebido; `Embebido` declarado → embebido; `Grpc` →
     /// su nombre (clave de `conexiones`); `Wasm` → error (M5-ext.2: el motor
     /// no ejecuta `Wasm`; el host lo traduce a `grpc` antes de llegar aquí).
-    fn resolver_endpoint<'a>(
+    pub(crate) fn resolver_endpoint<'a>(
         def: &'a DefinicionPaso,
         programa: &'a Programa,
     ) -> Result<&'a str, Error> {
@@ -184,13 +188,13 @@ impl Motor {
                 .iter()
                 .filter_map(|(n, v)| ProtoValue::desde_value(n, v))
                 .collect(),
-            contract: CONTRATO,
+            contract: CONTRACT,
         };
         let cliente = self
             .conexiones
             .get_mut(endpoint)
             .ok_or_else(|| Error::EjecutorNoConectado(endpoint.to_string()))?;
-        let bytes = cliente.unaria(RUTA_INVOCA, &peticion.encode_to_vec())?;
+        let bytes = cliente.unaria(ROUTE_INVOKE, &peticion.encode_to_vec())?;
         let respuesta = StepResult::decode(&bytes[..])?;
 
         // El eco (ADR-0020 §4b). Un campo aditivo es «compatible» sólo en el
@@ -398,7 +402,7 @@ fn evalua_entradas(
 /// Cómo se nombra un endpoint en un mensaje para el usuario. `EMBEDIDO` es
 /// una clave interna que no se puede declarar en el YAML, así que enseñarla
 /// tal cual sería enseñar un detalle de implementación.
-fn nombre_visible(endpoint: &str) -> &str {
+pub(crate) fn nombre_visible(endpoint: &str) -> &str {
     if endpoint == EMBEDIDO {
         "embebido"
     } else {
@@ -425,7 +429,7 @@ pub(crate) fn veredicto_del_eco(
     endpoint: &str,
     eco: i32,
 ) -> Option<ResultadoStep> {
-    if !necesita_contrato_2(def) || eco >= CONTRATO {
+    if !necesita_contrato_2(def) || eco >= CONTRACT {
         return None;
     }
     // Un ejecutor de contrato 1 no conoce el tag del eco y devuelve `0` por
@@ -440,7 +444,7 @@ pub(crate) fn veredicto_del_eco(
         &def.nombre,
         "error",
         format!(
-            "el ejecutor '{}' entiende el contrato {cual} y este paso necesita el {CONTRATO}: \
+            "el ejecutor '{}' entiende el contrato {cual} y este paso necesita el {CONTRACT}: \
              sus 'parametros' se habrían perdido sin aviso y habría medido otra cosa. \
              Recompila o actualiza ese ejecutor.",
             nombre_visible(endpoint),
@@ -2475,7 +2479,7 @@ mod tests_adr0020 {
     /// contrato 1 que recibe un paso con `parametros` tiene que salir
     /// `error`, nunca `paso` ni `fallo`.
     ///
-    /// Visto en rojo devolviendo `CONTRATO` en vez de `0` como eco: el paso
+    /// Visto en rojo devolviendo `CONTRACT` en vez de `0` como eco: el paso
     /// sale `paso`, que es exactamente el verde falso que esto impide. Un
     /// test de eco que sólo recorre el camino feliz no protege de nada.
     #[test]
@@ -2497,7 +2501,7 @@ mod tests_adr0020 {
             r.mensaje
         );
         assert!(
-            r.mensaje.contains(&CONTRATO.to_string()),
+            r.mensaje.contains(&CONTRACT.to_string()),
             "y el que hacía falta"
         );
     }
@@ -2526,14 +2530,14 @@ mod tests_adr0020 {
     /// un paso que manda `inputs`. No es un detalle de nombres: los campos
     /// cambiaron de tag y de tipo, así que ese ejecutor leería basura.
     ///
-    /// Visto en rojo devolviendo `CONTRATO` como eco.
+    /// Visto en rojo devolviendo `CONTRACT` como eco.
     #[test]
     fn un_ejecutor_del_contrato_anterior_tampoco_vale() {
-        let r = veredicto_del_eco(&paso_con_parametros(), EMBEDIDO, CONTRATO - 1)
+        let r = veredicto_del_eco(&paso_con_parametros(), EMBEDIDO, CONTRACT - 1)
             .expect("el contrato anterior ya no basta");
         assert_eq!(r.estado, "error");
         assert!(
-            r.mensaje.contains(&(CONTRATO - 1).to_string()),
+            r.mensaje.contains(&(CONTRACT - 1).to_string()),
             "nombra el contrato que entiende: {}",
             r.mensaje
         );
@@ -2541,7 +2545,7 @@ mod tests_adr0020 {
 
     #[test]
     fn con_el_eco_correcto_no_hay_veredicto() {
-        assert!(veredicto_del_eco(&paso_con_parametros(), EMBEDIDO, CONTRATO).is_none());
+        assert!(veredicto_del_eco(&paso_con_parametros(), EMBEDIDO, CONTRACT).is_none());
     }
 
     /// `lee_salidas` recorre el AST entero: la lectura puede estar dentro de

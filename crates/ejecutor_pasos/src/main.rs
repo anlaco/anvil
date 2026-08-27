@@ -7,7 +7,7 @@
 //!     target/wasm32-wasip2/debug/ejecutor_pasos.wasm
 
 use expr::Value;
-use modelo::proto::{StepRequest, StepResult, RUTA_INVOCA};
+use modelo::proto::{Catalog, StepRequest, StepResult, ROUTE_DESCRIBE, ROUTE_INVOKE};
 use modelo::ResultadoStep;
 use prost::Message;
 use wasi_grpc::grpc::Servidor;
@@ -33,6 +33,19 @@ fn despacha(nombre: &str, intento: i32, parametros: &[(String, Value)]) -> Resul
         return r;
     }
     pasos_demo::despacha(nombre, intento, parametros)
+}
+
+/// The catalog of this executor: what both dispatchers publish, in the same
+/// order they are consulted (ADR-0021).
+///
+/// It is the composition of the same two modules `despacha` composes, so a
+/// step this executor runs is a step it describes. `describes = true` is the
+/// positive statement: this executor knows its own catalog, and Anvil may
+/// check every sequence against it.
+fn catalogo() -> Catalog {
+    let mut pasos = pasos_scpi::catalogo();
+    pasos.extend(pasos_demo::catalogo());
+    Catalog::descrito(pasos)
 }
 
 /// Traduce los parámetros del cable a valores del motor (ADR-0020).
@@ -93,8 +106,25 @@ fn main() {
         // Un error al leer es normalmente el motor cerrando la conexión al
         // acabar la secuencia: se sale del bucle sin ruido.
         while let Ok(peticion) = conn.siguiente_peticion() {
-            if peticion.path != RUTA_INVOCA {
+            // The catalog RPC (ADR-0021). It is answered before `Invoke`
+            // because the engine asks it once, at start-up, and never again.
+            if peticion.path == ROUTE_DESCRIBE {
+                eprintln!("catálogo pedido");
+                if let Err(e) = conn.responder(peticion.stream, &catalogo().encode_to_vec()) {
+                    eprintln!("error respondiendo al catálogo: {e}");
+                    break;
+                }
+                continue;
+            }
+
+            if peticion.path != ROUTE_INVOKE {
+                // An empty answer, not silence. Leaving the stream open would
+                // hang the caller forever: wasi-grpc v0.1 has no deadline, so
+                // a route this executor does not know has to be *answered*.
+                // An empty body decodes to `describes = false` and to a result
+                // with no status, both of which the engine already handles.
                 eprintln!("ruta desconocida: {}", peticion.path);
+                let _ = conn.responder(peticion.stream, &[]);
                 continue;
             }
 
@@ -123,7 +153,7 @@ fn main() {
                 ),
             };
             // El eco lo pone `From<&ResultadoStep>`: este ejecutor entiende el
-            // contrato de `modelo::proto::CONTRATO`, y decirlo es lo que
+            // contrato de `modelo::proto::CONTRACT`, y decirlo es lo que
             // permite al motor detectar a un par que no lo entiende.
             let respuesta: StepResult = (&resultado).into();
 

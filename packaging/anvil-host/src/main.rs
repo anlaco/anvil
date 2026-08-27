@@ -170,11 +170,21 @@ fn reservar_puerto() -> Result<u16, String> {
 /// hace `EjecutorYaml::a_definicion` en el cargador, es una comprobación de
 /// fichero y no requiere instanciar wasmtime ni abrir nada.
 fn va_a_ejecutar_pasos(args: &[String]) -> bool {
+    // ADR-0021: `--validate --with-executors` no ejecuta un solo paso, pero sí
+    // **pregunta** a los ejecutores qué pasos ofrecen, y para preguntar hay que
+    // conectar. Es la única excepción, y es explícita: la pide quien la escribe
+    // en la línea de comandos. Sin el flag, `--validate` sigue sin levantar
+    // nada (issue #22).
+    let pregunta_catalogos = args.iter().any(|a| a == "--with-executors");
     let mut it = args.iter();
     let mut hay_ruta = false;
     while let Some(a) = it.next() {
         match a.as_str() {
-            "--help" | "-h" | "--version" | "-V" | "--validate" => return false,
+            "--help" | "-h" | "--version" | "-V" => return false,
+            "--validate" if !pregunta_catalogos => return false,
+            // `--validate --with-executors` no sale por aquí: sigue contando la
+            // ruta como cualquier corrida.
+            "--validate" => {}
             f if FLAGS_CON_VALOR.contains(&f) => {
                 it.next();
             }

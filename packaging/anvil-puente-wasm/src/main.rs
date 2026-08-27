@@ -38,7 +38,7 @@ pub mod pb {
 
 use exports::anvil::step::step::Named;
 use pb::step_executor_server::{StepExecutor, StepExecutorServer};
-use pb::{StepRequest, StepResult};
+use pb::{Catalog, CatalogRequest, StepRequest, StepResult};
 
 /// La versión de contrato que habla este puente (ADR-0020 §4).
 ///
@@ -53,7 +53,7 @@ use pb::{StepRequest, StepResult};
 /// alguien sube el contrato en `modelo` y se olvida de aquí, ese test se pone
 /// rojo — que es la diferencia entre un fallo de compilación y **un eco que
 /// miente**.
-const CONTRATO: i32 = 3;
+const CONTRACT: i32 = 3;
 
 // Bindings del WIT `anvil:paso` (el `wit/` de este crate es la fuente de
 // verdad del contrato; el autor del componente usa el mismo fichero).
@@ -171,7 +171,7 @@ impl ComponenteCargado {
             // qué versión del WIT. Si llegó hasta aquí es que el `.wasm`
             // casaba con `anvil:step@0.3.0` —wasmtime falla al instanciar si
             // no— así que habla el contrato de este binario.
-            contract: CONTRATO,
+            contract: CONTRACT,
         })
     }
 }
@@ -210,6 +210,26 @@ impl StepExecutor for ServicioEjecutor {
             .map_err(|_| Status::internal("componente en uso"))?;
         let respuesta = comp.llamar(&pet.name, pet.attempt, &parametros)?;
         Ok(Response::new(respuesta))
+    }
+
+    /// The bridge **cannot** describe the component it serves, and says so
+    /// (ADR-0021 §4).
+    ///
+    /// `anvil:step@0.3.0` exports a single `run(name, attempt, inputs)`: the
+    /// component dispatches by name inside itself, so from out here there is no
+    /// list of names to publish and no signature to read. The WIT embedded in
+    /// the `.wasm` does not help either — it would say *"there is a `run` that
+    /// takes a name and a list"*, which is true and useless. It is the bill for
+    /// dispatching by name (ADR-0003), the decision that makes Anvil
+    /// language-agnostic.
+    ///
+    /// So it answers `describes = false`: those steps come out as unchecked in
+    /// `--validate`, which is the honest answer. Making them describable means
+    /// adding an introspection function to the WIT — a new version of the
+    /// interface and a recompile of every component (ADR-0020 §4d), and that is
+    /// the decision issue #39 is waiting on, not this one.
+    async fn describe(&self, _r: Request<CatalogRequest>) -> Result<Response<Catalog>, Status> {
+        Ok(Response::new(Catalog::default()))
     }
 }
 
@@ -399,15 +419,15 @@ fn proto_a_nombrado(v: &pb::Value) -> Result<Named, String> {
 mod tests_contrato {
     use super::*;
 
-    /// La red que sostiene el `const CONTRATO` copiado a mano. Ver su
+    /// La red que sostiene el `const CONTRACT` copiado a mano. Ver su
     /// comentario: el puente no puede linkar `modelo` en el binario, así que
     /// la única forma de que las dos copias no se separen es compararlas en
     /// un test.
     #[test]
     fn el_contrato_del_puente_es_el_de_modelo() {
         assert_eq!(
-            CONTRATO,
-            modelo::proto::CONTRATO,
+            CONTRACT,
+            modelo::proto::CONTRACT,
             "el puente responde el eco por los componentes WASM: si su número \
              se queda atrás, dice que entiende un contrato que no entiende"
         );

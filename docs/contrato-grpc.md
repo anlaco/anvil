@@ -158,44 +158,65 @@ El `estado` es `string`, no un `enum` protobuf. Es deliberado (ADR-0005):
   describe este documento. El campo `contrato`, los parámetros y las salidas
   son el contrato 2 y llegan cuando se implemente ADR-0020.
 
-## Extensión futura: introspección de firma del paso (post-MVP)
+## Introspección de firma: `Describe` (ADR-0021, implementada)
 
-> **No implementada**, y desde ADR-0020 ya no es sólo cosa del editor visual
-> ([diseno/ui-vs-headless.md](diseno/ui-vs-headless.md)): es
-> [issue #45](https://github.com/anlaco/anvil/issues/45).
->
-> El motivo nuevo: `resultado.salidas.<nombre>` **no es validable al cargar**,
-> porque el cargador no sabe qué devuelve un paso. Un nombre equivocado es
-> `error` de ejecución, no de carga — la única excepción a la regla de
-> detección de ADR-0019 en el repo. La introspección es lo que le devolvería
-> ese terreno a `--validate`.
+> Era la «extensión futura» de este documento y el
+> [issue #45](https://github.com/anlaco/anvil/issues/45). Se decidió e
+> implementó el 27/08/2026 en
+> [ADR-0021](adr/0021-el-ejecutor-describe-su-catalogo.md); lo que sigue
+> describe lo que hay, no lo que se propone.
 
-El contrato describe *cómo invocar* (`PeticionPaso`) y *qué devuelve*
-(`ResultadoPasoProto`), y desde ADR-0020 los parámetros y las salidas viajan
-tipados — pero **no describe la firma del paso**: ni qué parámetros admite,
-ni cuáles son obligatorios, ni qué salidas produce. Para que un editor
-visual (drag-and-drop del archivo del code module) pueda, como TestStand,
-**auto-descubrir y actualizar los parámetros y el valor de retorno** del
-paso, hace falta que el paso **exponga metadatos de su firma**.
+`Invoke` dice *cómo invocar* y *qué devuelve* a nivel de mensaje, pero no qué
+pasos existen ni qué acepta cada uno. Eso lo dice un RPC aparte, en el mismo
+servicio:
 
-**Propuesta de extensión (a confirmar con ADR):**
+```proto
+rpc Describe(CatalogRequest) returns (Catalog);
+```
 
-- Un mecanismo de **descripción de paso**: p. ej. un nuevo RPC de
-  introspección en `EjecutorPasos` (p. ej. `rpc Describe(DescribePaso) returns
-  (FirmaPaso)`) o un sidecar de metadatos, que devuelva parámetros (nombre,
-  tipo, dirección in/out) y tipo de retorno para un `nombre` dado.
-- Esto permitiría al editor arrastrar un `.vi`/`.dll`/`.py`/`.scilab` y
-  auto-poblar la tabla de parámetros del paso, igual que TestStand.
+`Catalog` trae un `StepSpec` por paso servido: nombre, entradas (nombre, tipo,
+obligatorio, valor por defecto), salidas y una línea de documentación. Los
+tipos son **los tres de siempre** (número, texto, booleano): esto describe el
+cable, no inventa un sistema de tipos.
 
-**Un segundo motivo, desde [ADR-0020](adr/0020-parametros-del-paso-en-la-peticion.md):**
-no es sólo cosa del editor. Sin firma introspeccionable, el cargador no puede
-validar los nombres de `parametros` ni de `resultado.salidas.*`, y esas
-comprobaciones caen a tiempo de ejecución en vez de a `--validate`.
+**Cuándo se pregunta.** Una vez por endpoint, al arrancar, antes del primer
+paso. Nunca paso a paso: enterarse en el paso 47 de que un nombre está mal deja
+la unidad medio probada, y un catálogo que cambiara a mitad de corrida haría el
+informe irreconstruible.
 
-**Tensión a resolver:** la firma introspeccionable vive en el lado del paso
-(el ejecutor la provee), no en el motor. El motor sigue siendo genérico
-(ADR-0005); solo el editor y el ejecutor necesitan entender la firma. Es un
-**extensión del lado del ejecutor**, no del núcleo.
+**Qué se comprueba con eso.** Que el paso exista en el ejecutor al que se
+despacha; que sus `inputs` sean parámetros que el paso admite; que no falte
+ninguno obligatorio; que un literal sea del tipo declarado; y que
+`assign: result.outputs.<nombre>` lea una salida que el paso devuelve — que era
+justamente la excepción declarada en ADR-0020 §3 a la regla de detección de
+ADR-0019. Un hallazgo detiene la corrida antes del primer paso.
+
+**No contestar está permitido, y se nota.** Un ejecutor de terceros puede no
+implementarlo; entonces sus pasos salen como *sin comprobar*, con el motivo y el
+recuento. Ni error (cerraría la puerta a terceros) ni silencio (sería el verde
+falso de ADR-0019). Para que «no describo» no se confunda con «no sirvo ningún
+paso», `Catalog` lleva un booleano `describes`: el default `false` de proto3
+hace que **todo silencio caiga del lado seguro**. Es el mismo truco que el eco
+de contrato.
+
+**El puente WASM contesta que no describe.** `anvil:step` exporta un único
+`run(name, attempt, inputs)` y el componente despacha por nombre dentro de sí
+mismo: desde fuera no hay lista que publicar. Es la factura del despacho por
+nombre (ADR-0003), y hacerlo describible exige tocar el WIT — la decisión que
+espera el issue #39.
+
+**Añadir este RPC no sube `contrato`.** Un ejecutor que no describe su catálogo
+mide exactamente lo mismo: su silencio no puede alterar un veredicto, que es la
+regla de ADR-0020 §4c.
+
+**Y sigue sin ser del núcleo.** La firma vive en el lado del ejecutor, que es
+quien la provee; el motor sólo pregunta y compara nombres. Sigue sin saber qué
+mide un paso (ADR-0005).
+
+Con esto, el editor visual de
+[diseno/ui-vs-headless.md](diseno/ui-vs-headless.md) tiene ya la mitad que le
+faltaba: arrastrar un code module y auto-poblar su tabla de parámetros es leer
+este catálogo.
 
 ## Lo que NO es el contrato
 

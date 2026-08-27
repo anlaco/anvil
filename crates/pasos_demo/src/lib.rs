@@ -5,6 +5,7 @@
 //! uniforme que necesita el despacho por nombre.
 
 use expr::Value;
+use modelo::proto::{OutputSpec, ParameterSpec, StepSpec, ValueType};
 use modelo::ResultadoStep;
 
 /// Busca un parámetro por nombre entre los que mandó el motor (ADR-0020).
@@ -119,21 +120,133 @@ pub fn notificar_resultado(_intento: i32) -> ResultadoStep {
     ResultadoStep::nuevo("notificar_resultado", "pass", "UUT notificado")
 }
 
+/// One step of this module: the name the wire uses, the function that runs it,
+/// and the signature it publishes.
+///
+/// **One table, read by both [`despacha`] and [`catalogo`].** That is the whole
+/// reason it exists: with a `match` for dispatch and a separate list for the
+/// catalog, adding a step in one and forgetting the other would produce an
+/// executor that describes a step it cannot run, or runs one it denies having
+/// — and a catalog that lies is worse than no catalog, because Anvil would
+/// then reject a correct sequence, or approve a wrong one.
+struct Registro {
+    nombre: &'static str,
+    ejecuta: fn(i32, &[(String, Value)]) -> ResultadoStep,
+    firma: fn() -> StepSpec,
+}
+
+const PASOS: &[Registro] = &[
+    Registro {
+        nombre: "conectar_equipo",
+        ejecuta: |intento, _| conectar(intento),
+        firma: || {
+            firma(
+                "conectar_equipo",
+                "Connects to the instrument; fails the first attempt, passes from the second.",
+            )
+        },
+    },
+    Registro {
+        nombre: "medir_voltaje",
+        ejecuta: medir_voltaje,
+        firma: || StepSpec {
+            name: "medir_voltaje".into(),
+            inputs: vec![
+                ParameterSpec::optional("canal", ValueType::Number, Value::Numero(1.0))
+                    .con_doc("which channel is measured; without it, channel 1"),
+                ParameterSpec::optional("offset", ValueType::Number, Value::Numero(0.0))
+                    .con_doc("calibration correction, added to the measurement (V)"),
+            ],
+            outputs: vec![
+                OutputSpec::nueva(
+                    "canal_usado",
+                    ValueType::Number,
+                    "the channel it measured on",
+                ),
+                OutputSpec::nueva("temperatura", ValueType::Number, "context temperature (C)"),
+            ],
+            doc: "Measures voltage and returns the reading; the engine judges the threshold."
+                .into(),
+        },
+    },
+    Registro {
+        nombre: "verificar_led",
+        ejecuta: |intento, _| verificar_led(intento),
+        firma: || {
+            firma(
+                "verificar_led",
+                "Pass/fail with no measurement: checks the led is lit.",
+            )
+        },
+    },
+    Registro {
+        nombre: "abrir_rele",
+        ejecuta: |intento, _| abrir_rele(intento),
+        firma: || {
+            firma(
+                "abrir_rele",
+                "Action: opens a relay; its status is technical success, not a criterion.",
+            )
+        },
+    },
+    Registro {
+        nombre: "desconectar_equipo",
+        ejecuta: |intento, _| desconectar(intento),
+        firma: || {
+            firma(
+                "desconectar_equipo",
+                "Closes the connection with the instrument.",
+            )
+        },
+    },
+    Registro {
+        nombre: "identificar_uut",
+        ejecuta: |intento, _| identificar_uut(intento),
+        firma: || {
+            firma(
+                "identificar_uut",
+                "Process model plug-in: identifies the unit under test.",
+            )
+        },
+    },
+    Registro {
+        nombre: "notificar_resultado",
+        ejecuta: |intento, _| notificar_resultado(intento),
+        firma: || {
+            firma(
+                "notificar_resultado",
+                "Process model plug-in: notifies the verdict.",
+            )
+        },
+    },
+];
+
+/// The signature of a step with no inputs and no outputs, which is most of
+/// these.
+fn firma(nombre: &str, doc: &str) -> StepSpec {
+    StepSpec {
+        name: nombre.to_string(),
+        inputs: Vec::new(),
+        outputs: Vec::new(),
+        doc: doc.to_string(),
+    }
+}
+
 /// Despacho por nombre: el motor invoca los pasos por su nombre, nunca con
 /// una llamada directa, así que este es el único punto donde el nombre del
 /// cable se ata a una función. Un nombre desconocido es `error`, no pánico:
 /// una secuencia mal escrita no debe tumbar el ejecutor.
 pub fn despacha(nombre: &str, intento: i32, parametros: &[(String, Value)]) -> ResultadoStep {
-    match nombre {
-        "conectar_equipo" => conectar(intento),
-        "medir_voltaje" => medir_voltaje(intento, parametros),
-        "verificar_led" => verificar_led(intento),
-        "abrir_rele" => abrir_rele(intento),
-        "desconectar_equipo" => desconectar(intento),
-        "identificar_uut" => identificar_uut(intento),
-        "notificar_resultado" => notificar_resultado(intento),
-        _ => ResultadoStep::nuevo("desconocido", "error", "paso no reconocido"),
+    match PASOS.iter().find(|p| p.nombre == nombre) {
+        Some(p) => (p.ejecuta)(intento, parametros),
+        None => ResultadoStep::nuevo("desconocido", "error", "paso no reconocido"),
     }
+}
+
+/// The signatures of every step in this module, so the executor can answer
+/// `Describe` (ADR-0021). They come out of the same table as the dispatch.
+pub fn catalogo() -> Vec<StepSpec> {
+    PASOS.iter().map(|p| (p.firma)()).collect()
 }
 
 #[cfg(test)]
@@ -262,5 +375,57 @@ mod tests {
             despacha("notificar_resultado", 1, SIN_PARAMETROS).estado,
             "pass"
         );
+    }
+
+    /// ADR-0021: the catalog and the dispatch cannot name different steps.
+    ///
+    /// A catalog that lies is worse than no catalog — Anvil would reject a
+    /// correct sequence, or approve a wrong one — and the failure mode is
+    /// mundane: adding a step to the `match` and forgetting the list. Both now
+    /// read `PASOS`, and this is what says so.
+    ///
+    /// Seen failing by adding a name to the catalog that the dispatch does not
+    /// serve.
+    #[test]
+    fn el_catalogo_describe_exactamente_lo_que_se_despacha() {
+        for spec in catalogo() {
+            let r = despacha(&spec.name, 1, SIN_PARAMETROS);
+            assert_ne!(
+                r.nombre, "desconocido",
+                "el catálogo anuncia '{}' y el despacho no lo sirve",
+                spec.name
+            );
+        }
+        assert_eq!(
+            catalogo().len(),
+            PASOS.len(),
+            "una firma por paso servido, ni una más"
+        );
+        // Y al revés: un nombre que no está en la tabla no se sirve ni se
+        // describe. Es la otra mitad, y la que hace que la primera no se
+        // pueda satisfacer describiéndolo todo.
+        assert!(catalogo().iter().all(|s| s.name != "no_existe"));
+        assert_eq!(despacha("no_existe", 1, SIN_PARAMETROS).estado, "error");
+    }
+
+    /// The signature of `medir_voltaje` has to say what the function actually
+    /// reads, or `--validate` would approve a `canal` the step ignores.
+    #[test]
+    fn la_firma_de_medir_voltaje_declara_sus_dos_parametros_y_sus_dos_salidas() {
+        let spec = catalogo()
+            .into_iter()
+            .find(|s| s.name == "medir_voltaje")
+            .expect("está en el catálogo");
+        let canal = spec.input("canal").expect("declara canal");
+        assert_eq!(canal.value_type(), ValueType::Number);
+        assert!(!canal.required, "sin canal se mide el 1: es opcional");
+        assert!(spec.input("offset").is_some());
+        // Las mismas salidas que el paso pone en `r.salidas`: si una de las
+        // dos desapareciera del código, `asigna` la seguiría dando por buena.
+        let salidas: Vec<&str> = spec.outputs.iter().map(|o| o.name.as_str()).collect();
+        assert_eq!(salidas, vec!["canal_usado", "temperatura"]);
+        let r = medir_voltaje(1, SIN_PARAMETROS);
+        let devueltas: Vec<&str> = r.salidas.iter().map(|(n, _)| n.as_str()).collect();
+        assert_eq!(devueltas, salidas, "el catálogo miente sobre las salidas");
     }
 }

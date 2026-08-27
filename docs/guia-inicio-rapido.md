@@ -13,7 +13,7 @@ Descarga el binario `anvil` y corre:
 ```sh
 ./anvil <secuencia.yaml> [--process-model <pm.yaml>] [--json <ruta>] \
   [--csv <ruta>] [--limits <ruta>] [--executor nombre=host:puerto] \
-  [--port <n>] [--validate] [--quiet]
+  [--port <n>] [--validate [--with-executors]] [--quiet]
 ```
 
 Ejemplos (con los del repo en `ejemplos/` y `process_models/`):
@@ -30,6 +30,9 @@ Ejemplos (con los del repo en `ejemplos/` y `process_models/`):
 ./anvil ejemplos/basica.yaml --process-model process_models/sequential.yaml
 # Validar sin ejecutar ni tocar hardware (CI):
 ./anvil ejemplos/subsecuencia.yaml --validate
+# Y con los ejecutores levantados, comprobar además nombres de paso, de
+# parámetro y de salida contra lo que cada ejecutor dice servir (ADR-0021):
+./anvil ejemplos/demo_ejecutores.yaml --validate --with-executors
 ```
 
 La consola imprime el reporte textual por **stdout** (los diagnósticos van a
@@ -44,7 +47,12 @@ dependencias que instalar.
 > ejecutor Python en `127.0.0.1:9101` (arranca `simulador_tcp.py` y
 > `server.py` de `executores/python/` en otras dos terminales). El flag
 > `--executor nombre=host:puerto` re-apunta un ejecutor sin tocar el YAML
-> (patrón `--limits`). Sin `ejecutores:` declarado, todo va al embebido.
+> (patrón `--limits`). Sin `executors:` declarado, todo va al embebido.
+>
+> **Escribir un paso propio en Python** no exige tocar el ejecutor: se decora
+> una función con `@step` y se deja el fichero donde apunte `--steps`
+> ([ADR-0021](adr/0021-el-ejecutor-describe-su-catalogo.md); el cómo, en
+> [`executores/python/README.md`](../executores/python/README.md)).
 
 ## Para desarrolladores (build desde source)
 
@@ -165,7 +173,7 @@ unitario: `cargo test -p motor sequence_call_by_reference`.
 ```
 anvil <secuencia.yaml> [--process-model <pm.yaml>] [--json <ruta>] [--csv <ruta>]
       [--limits <ruta>] [--executor nombre=host:puerto] [--port <n>]
-      [--validate] [--quiet] [--help] [--version]
+      [--validate [--with-executors]] [--quiet] [--help] [--version]
 ```
 
 - La secuencia es el primer argumento posicional (obligatorio).
@@ -178,6 +186,18 @@ anvil <secuencia.yaml> [--process-model <pm.yaml>] [--json <ruta>] [--csv <ruta>
   nombre no declarado, escribir en `file_globals`, o escribir en `parameters`
   desde la raíz, son errores de carga. Los **tipos** no: no son decidibles sin
   evaluar.
+- `--with-executors` (sólo con `--validate`) añade lo que **sí** exige conectar:
+  le pregunta a cada ejecutor qué pasos sirve y con qué firma
+  ([ADR-0021](adr/0021-el-ejecutor-describe-su-catalogo.md)), y comprueba que
+  el paso exista, que sus `inputs` sean parámetros que admite, que no falte
+  ninguno obligatorio, que un literal sea del tipo declarado, y que
+  `assign: result.outputs.<nombre>` lea una salida que devuelve. Es un opt-in
+  porque rompería la promesa de `--validate` a secas, que es correr en CI sin
+  hardware. **Al correr de verdad, esto se comprueba siempre**, una vez por
+  ejecutor y antes del primer paso: un hallazgo detiene la corrida sin tocar la
+  unidad. Un ejecutor que no sepa describirse —hoy, el puente de un paso
+  `.wasm`— deja sus pasos como *sin comprobar*, y lo avisa por stderr: ni error
+  ni silencio.
 - `--port` fija el puerto del ejecutor embebido — el del ejecutor **y** el que
   el motor busca. Sin él, el host toma un puerto **efímero** por proceso, así
   que varios `anvil` pueden correr a la vez (#15).
