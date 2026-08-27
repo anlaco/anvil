@@ -31,9 +31,10 @@ Esa excepción es la que se cierra aquí. Y no es teórica: verificado el
 `assign: result.outputs.temperaturaa` cargaba sin una sola queja y sólo se
 rompía —o peor, medía otra cosa— con la unidad ya en el banco.
 
-Hay un segundo hueco, y es el del `#54`. La [decisión 0011 de
-dirección](../../../00-DIRECCION/decisiones/0011-los-ejecutores-de-lenguaje-son-producto-descargable.md)
-fija que un ejecutor de lenguaje es **producto descargable**: quien quiera pasos
+Hay un segundo hueco, y es el del `#54`. La decisión 0011 de dirección —interna,
+no publicada— fija que un ejecutor de lenguaje es **producto descargable**, en la
+línea de lo que [ADR-0012](0012-executores-de-lenguaje-como-modulos.md) ya decide
+aquí: quien quiera pasos
 en Python lo descarga, pone sus pasos donde diga la documentación, y no edita ni
 una línea de nuestro código. `executors/python/server.py` no lo cumplía:
 despachaba con un `if/elif` de tres casos escritos a mano, así que aportar un

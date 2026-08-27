@@ -259,6 +259,67 @@ contaminaban los datos de la propia campaña:
 Con la trazabilidad cerrada, `docs/qa/regresion/run.sh` sale **entero en
 verde** (13 casos, 0 fallos).
 
+## Distribución de los ejecutores de lenguaje — **decisión pendiente**
+
+Anotado el 2026-08-27, sin decidir.
+[ADR-0012](adr/0012-executores-de-lenguaje-como-modulos.md) fija que un ejecutor
+de lenguaje es un **módulo distribuido y adoptable**, y hoy no lo es:
+para usar el de Python hay que clonar el repo entero, copiar dos ficheros a
+mano y generar los stubs de protobuf con una herramienta de compilación. La
+[quickstart pública](https://anlaco.github.io/quickstart.html) lo confiesa en
+letra pequeña. **Cuatro comandos que deberían ser uno.**
+
+Hay además una fragilidad medida: la guía acopla el **binario de un release**
+con el **código de `main`**. Si el contrato se moviera entre medias no
+casarían. No produciría un resultado equivocado —el eco de contrato de
+ADR-0020 §4b lo convierte en `error` ruidoso— pero es una trampa que la
+versión de un paquete elimina de raíz.
+
+### Las tres formas, y a quién sirve cada una
+
+| | Qué es | Para quién |
+|---|---|---|
+| **A. Paquete en PyPI** (`pip install anvil-step`) | El canal estándar de Python. Stubs pregenerados, versión que casa con el contrato. | Quien **escribe** pasos: portátil moderno, con Python y con red. |
+| **B. Bundle autocontenido** (con el intérprete dentro, en GitHub Releases) | Descomprimir y ejecutar. Sin Python, sin `pip`, sin red. | Quien **despliega** en un banco. |
+| **C. Índice propio** (al estilo de los fabricantes) | Servir nuestro propio repositorio de paquetes. | — |
+
+**No son excluyentes, y probablemente hagan falta las dos primeras**, porque
+sirven a personas distintas. Anvil ya hace exactamente eso consigo mismo: un
+binario autocontenido en Releases *y* el código en GitHub.
+
+**B es la que encaja con la tesis del producto.** El escenario que justifica
+que exista el ejecutor de Python (§ADR-0012) es un banco secuestrado por su SO:
+Windows 7/10, drivers del fabricante, sin internet y con un departamento de
+sistemas que no deja instalar nada. Exigir `pip install` **ahí** contradice la
+premisa por la que existe la pieza. Y es coherente con ADR-0011, que ya decidió
+lo mismo para el binario: *«un binario, sin instalar nada»*.
+
+**C conviene mirarla con desconfianza.** Los fabricantes sirven su propio
+índice porque venden un ecosistema con licencias y derechos de uso que
+controlar. Para un módulo Apache-2.0, PyPI **es** el canal: montar índice
+propio añade alojamiento, TLS y disponibilidad, y obliga al usuario a
+configurar `pip` para confiar en un tercero — que es justo lo que un
+departamento de sistemas bloquea antes que PyPI. Salvo que aparezca una razón
+que hoy no está escrita, no compra nada.
+
+### El coste real de B, que es donde está la trampa
+
+Un bundle es **por sistema operativo y arquitectura**, y el caso que importa es
+**Windows**, que es donde vive el escenario legacy. Toda la CI de este repo es
+`ubuntu-latest`: hoy no hay forma de construir ni de verificar ese artefacto.
+Eso, y no el empaquetado, es el trabajo de verdad.
+
+### Qué haría falta decidir antes
+
+1. **Si el ejecutor sigue viviendo en este repo** o se saca a uno propio: cambia
+   desde dónde se publica. (Lo hablado el 27/08: quedarse, porque lo único que
+   comparten todos los ejecutores es `paso.proto`, y separarlo es donde más se
+   desincroniza.)
+2. **Cómo se versiona respecto al contrato**: el número de contrato ya existe y
+   ya se comprueba en el cable; el del paquete tendría que ser legible al lado.
+3. **Que lo subido a PyPI no se borra.** Se puede retirar de la vista, no
+   deshacer. Una versión mala se arregla publicando otra.
+
 ## Post-MVP (explícitamente fuera de v1)
 
 - **Paralelismo** (Parallel/Batch) con **cancelación jerárquica**
