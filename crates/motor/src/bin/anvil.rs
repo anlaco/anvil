@@ -281,7 +281,15 @@ fn main() {
     let mut motor = match conecta_con_reintento(&programa, "127.0.0.1", cli.port, cli.quiet) {
         Ok(m) => m,
         Err(e) => {
-            eprintln!("no se pudo conectar a los ejecutores de pasos: {e}");
+            // El endpoint va en el mensaje (#52): sin él, un `connection-refused`
+            // no dice contra qué puerto se intentó, y el puerto es justamente el
+            // dato que distingue «el ejecutor no llegó a tiempo» de «nadie
+            // arrancó un ejecutor y el motor cayó al 9100 por defecto».
+            eprintln!(
+                "no se pudo conectar a los ejecutores de pasos \
+                 (embebido en 127.0.0.1:{}): {e}",
+                cli.port
+            );
             std::process::exit(1);
         }
     };

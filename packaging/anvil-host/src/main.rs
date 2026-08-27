@@ -15,8 +15,13 @@
 //!     `ejecutores:` — las IPs no-loopback declaradas (relajación acotada
 //!     del loopback de ADR-0011: sólo se permiten las declaradas) y, en
 //!     M5-ext.2, los `.wasm` por path a cargar.
-//!  2. Arranca el ejecutor (thread) que bindea `127.0.0.1:9100` en su sandbox
-//!     (loopback-only, sin relajación).
+//!  2. Arranca el ejecutor (thread) que bindea `127.0.0.1:<puerto>` en su
+//!     sandbox (loopback-only, sin relajación). El puerto es efímero por
+//!     proceso salvo que el usuario lo fije con `--port` (#15), y el host se
+//!     lo pasa al motor para que las dos puntas coincidan. Esa decisión sale
+//!     **sólo de los argumentos**: si el paso 1 no pudo leer el YAML, el
+//!     ejecutor arranca igual — el host no predice el veredicto del guest
+//!     (#52).
 //!  3. Espera a que escuche (un `connect` de prueba; el ejecutor lo descarta).
 //!  4. **M5-ext.2 (ADR-0015):** instancia cada ejecutor `tipo: wasm` del
 //!     YAML spawneando el **puente** `anvil-puente-wasm` (embebido en este
@@ -385,9 +390,6 @@ fn main() {
     // nada que pre-escanear y el guest motor se encarga.
     let mut ips_no_loopback: HashSet<IpAddr> = HashSet::new();
     let mut programa: Option<modelo::Programa> = None;
-    // El YAML no pasa el esquema, así que el guest tampoco va a poder
-    // cargarlo: no hace falta abrirle el ejecutor embebido.
-    let mut yaml_invalido = false;
     let ruta_secuencia = ruta_de_secuencia(&args_motor);
     if let Some(ruta) = ruta_secuencia.as_ref() {
         match cargador::cargar_programa_de_archivo(ruta) {
@@ -414,11 +416,13 @@ fn main() {
             Err(e @ cargador::ErrorCarga::Lectura(_)) => {
                 eprintln!("aviso: no se pudo leer '{ruta}' para los ejecutores: {e}");
             }
-            // Sintaxis/validación dependen sólo del contenido del fichero, que
-            // es el mismo para los dos, así que el veredicto no puede diferir.
-            // Un fallo de *lectura* sí (sandboxes distintos), y por eso queda
-            // arriba sin marcar nada.
-            Err(_) => yaml_invalido = true,
+            // Sintaxis/validación: el guest va a reparsear el mismo fichero y
+            // reportarlo con su redacción buena, así que aquí no se dice nada.
+            // Lo que **no** se hace es deducir de esto que el guest tampoco va
+            // a poder cargarlo (#52): esa deducción sólo vale mientras host y
+            // guest compartan cargador, y cuando no lo comparten el precio es
+            // un `connection-refused` sin autor. Ver `arranca_ejecutor`.
+            Err(_) => {}
         }
     }
 
@@ -442,7 +446,15 @@ fn main() {
     // que es justo lo que este bloque produce). Da lo mismo que calcularlo
     // sobre `args_motor_final`: el guard salta `--executor` y su valor por
     // `FLAGS_CON_VALOR`.
-    let va_a_ejecutar = va_a_ejecutar_pasos(&args_motor_final) && !yaml_invalido;
+    //
+    // Decide **sólo con los argumentos** (#52). Antes también exigía que el
+    // host hubiera podido parsear el YAML, lo cual daba por hecho que un YAML
+    // que el host rechaza el guest lo va a rechazar igual. En cuanto host y
+    // guest dejan de compartir cargador —un build a medias basta— la premisa
+    // es falsa: el guest carga la secuencia, nadie ha arrancado el ejecutor
+    // embebido, y el usuario ve `connection-refused` contra el 9100 sin una
+    // sola línea que diga por qué. El host no predice el veredicto del guest.
+    let va_a_ejecutar = va_a_ejecutar_pasos(&args_motor_final);
     if va_a_ejecutar {
         if let Some(p) = programa.as_ref() {
             // Deduplicar por path (dos ejecutores con el mismo `.wasm` → un Store).

@@ -281,6 +281,60 @@ fn validate_no_levanta_el_puente_wasm() {
     assert_eq!(codigo(&s), 0, "stderr:\n{err}");
 }
 
+// --- El ejecutor embebido y el pre-escaneo del host (issue #52) -----------
+
+/// Issue #52, el test del arreglo.
+///
+/// El host pre-escanea el YAML por su cuenta (M5-ext.1) para recolectar los
+/// `ejecutores:` declarados. Cuando ese parseo fallaba por esquema, el host
+/// **además** daba por hecho que el guest tampoco iba a poder cargar la
+/// secuencia y se saltaba el ejecutor de pasos embebido —sin decir nada.
+///
+/// La deducción sólo vale mientras host y guest compartan cargador. En cuanto
+/// dejan de compartirlo (basta un build a medias: el host es un workspace
+/// aparte y los guests van embebidos), el guest carga la secuencia, no hay
+/// ejecutor escuchando, y el motor cae al `9100` por defecto —el host tampoco
+/// le pasa `--port` en esa rama— y muere con un `connection-refused` que no
+/// nombra ni la causa ni a nadie. Cuarenta segundos para no decir nada.
+///
+/// Lo que se fija aquí es que **el host no predice el veredicto del guest**:
+/// si los argumentos dicen que se van a correr pasos, el ejecutor arranca,
+/// aunque el pre-escaneo del host haya rechazado el fichero.
+///
+/// Al reintroducir el `&& !yaml_invalido` en `va_a_ejecutar` este test se pone
+/// rojo: la línea del ejecutor desaparece de stderr.
+#[test]
+fn el_ejecutor_embebido_arranca_aunque_el_host_no_sepa_leer_el_yaml() {
+    let s = corre_con_reporte("packaging/anvil-host/tests/fixtures/esquema_invalido.yaml");
+    let err = String::from_utf8_lossy(&s.stderr);
+    assert!(
+        err.contains("ejecutor de pasos escuchando en"),
+        "el ejecutor embebido tiene que arrancar igual: que el host no sepa \
+         parsear el YAML no dice nada de si el guest podrá. stderr:\n{err}"
+    );
+    // Blinda la intención: el fixture tiene que ser rechazado por **esquema**.
+    // Si degenerara en un fichero que carga bien, el test seguiría verde sin
+    // haber ejercitado la rama que importa.
+    assert_eq!(codigo(&s), 1, "stderr:\n{err}");
+    assert!(
+        err.contains("no se pudo cargar la secuencia"),
+        "el fixture debe fallar al cargar, no al ejecutar. stderr:\n{err}"
+    );
+}
+
+/// El contrapunto del anterior: el guard por argumentos sigue en pie. Un
+/// `--validate` no levanta nada, y eso no lo puede aflojar el arreglo de #52
+/// (issue #22 lo compró caro).
+#[test]
+fn validate_sigue_sin_levantar_el_ejecutor_embebido() {
+    let s = valida("packaging/anvil-host/tests/fixtures/esquema_invalido.yaml");
+    let err = String::from_utf8_lossy(&s.stderr);
+    assert!(
+        !err.contains("ejecutor de pasos escuchando en"),
+        "--validate no levanta el ejecutor, pase lo que pase con el YAML. stderr:\n{err}"
+    );
+}
+
 /// El contrapunto: no instanciar no es quedarse ciego. Que el `.wasm` exista
 /// es una comprobación de fichero, la hace el cargador, y sigue corriendo.
 #[test]

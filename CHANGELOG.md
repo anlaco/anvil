@@ -10,6 +10,27 @@ minors, con el cambio anotado aquí.
 
 ## [No publicado]
 
+### Arreglado
+
+- **El binario no ejecutaba ninguna secuencia si el host y el motor no
+  compartían cargador** (issue #52). El host pre-escanea el YAML por su cuenta
+  para recolectar los `executors:` declarados; cuando ese parseo fallaba por
+  esquema, además **deducía** que el motor tampoco iba a poder cargarlo y se
+  saltaba el ejecutor de pasos embebido. La deducción sólo vale mientras las
+  dos mitades compartan cargador —y el host es un workspace aparte con los
+  guests embebidos, así que un build a medias basta para romperlo—. Cuando no
+  lo compartían, el motor cargaba la secuencia, no encontraba a nadie
+  escuchando, caía al puerto `9100` por defecto (el host tampoco le pasaba
+  `--port` en esa rama) y moría con un `connection-refused` que no nombraba ni
+  la causa ni el puerto. Cuarenta segundos para no decir nada. Ahora la
+  decisión de arrancar el ejecutor sale **sólo de los argumentos**: el host no
+  predice el veredicto del motor. Un YAML inválido paga el arranque del
+  ejecutor (medido: +6 s en debug, sub-segundo en release), que es lo que
+  cuesta no volver a tener este fallo.
+- **El error de conexión del motor ya dice contra qué endpoint lo intentó.**
+  Sin el puerto en el mensaje, un `connection-refused` no distingue «el
+  ejecutor no llegó a tiempo» de «nadie arrancó un ejecutor».
+
 **La interfaz de Anvil pasa a inglés.** El formato de secuencia aspira a ser
 un estándar, y ninguno de los que lo son —HTML, ODF, OOXML— se escribió en
 otra lengua. El vocabulario de este dominio (*pass*, *fail*, *limit*, *step*,
