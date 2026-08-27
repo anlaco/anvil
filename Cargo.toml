@@ -15,7 +15,7 @@ members = [
 # `cargo build` / `cargo test` no arrastren wasmtime (decisión ADR-0011).
 
 [workspace.package]
-version = "0.2.0"
+version = "0.3.0"
 edition = "2021"
 # anvil es el producto: se usa, no se linka. AGPL protege frente a que
 # alguien lo cierre y lo revenda, sin afectar a las secuencias de test de

@@ -8,7 +8,7 @@ Anvil está en 0.x: la superficie pública —el formato de secuencia YAML, el
 contrato `paso.proto` y el reporte textual (RNF-08)— puede cambiar entre
 minors, con el cambio anotado aquí.
 
-## [No publicado]
+## [0.3.0] — 2026-08-27
 
 ### Añadido
 
@@ -457,5 +457,6 @@ primera campaña de betatesting externa.
 - *Private vulnerability reporting* no puede activarse mientras el
   repositorio sea privado; hasta entonces vale el correo de `SECURITY.md`.
 
+[0.3.0]: https://github.com/anlaco/anvil/releases/tag/v0.3.0
 [0.2.0]: https://github.com/anlaco/anvil/releases/tag/v0.2.0
 [0.1.0]: https://github.com/anlaco/anvil/releases/tag/v0.1.0
