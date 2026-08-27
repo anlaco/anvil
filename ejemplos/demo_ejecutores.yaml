@@ -8,8 +8,9 @@
 # Arranque:
 #   # terminal 1: simulador TCP (stand-in del equipo del simulador)
 #   python3 executores/python/simulador_tcp.py
-#   # terminal 2: ejecutor Python en loopback (127.0.0.1:9101)
-#   python3 executores/python/server.py
+#   # terminal 2: ejecutor Python en loopback (127.0.0.1:9101). Sus pasos
+#   # viven en executores/python/steps/, no dentro de server.py (ADR-0021).
+#   cd executores/python && python3 server.py
 #   # terminal 3: Anvil (host embebido, ADR-0011)
 #   ./anvil ejemplos/demo_ejecutores.yaml --json /tmp/out.json
 #
@@ -17,8 +18,12 @@
 #  ya levantado en 9100 — ver guia-inicio-rapido.md.)
 #
 # Variante con override de ejecutor (R&D vs. fábrica, patrón --limits):
-#   ./anvil ejemplos/demo_ejecutores.yaml --ejecutor python=127.0.0.1:9200
-#   (con otro server.py en --puerto 9200; el YAML no se toca)
+#   ./anvil ejemplos/demo_ejecutores.yaml --executor python=127.0.0.1:9200
+#   (con otro server.py en --port 9200; el YAML no se toca)
+#
+# Comprobar que la secuencia casa con lo que ofrecen los ejecutores, sin
+# ejecutar un solo paso (ADR-0021):
+#   ./anvil ejemplos/demo_ejecutores.yaml --validate --with-executors
 
 name: demo_ejecutores
 executors:

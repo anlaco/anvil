@@ -10,8 +10,68 @@ minors, con el cambio anotado aquí.
 
 ## [No publicado]
 
+### Añadido
+
+- **Un ejecutor sabe decir qué pasos ofrece y con qué firma** (issue #45,
+  [ADR-0021](docs/adr/0021-el-ejecutor-describe-su-catalogo.md)). `paso.proto`
+  gana un RPC, `Describe(CatalogRequest) → Catalog`, que devuelve el catálogo
+  entero del ejecutor: nombre de cada paso, entradas (nombre, tipo,
+  obligatorio, valor por defecto) y salidas. Anvil lo pregunta **una vez por
+  endpoint al arrancar**, nunca antes de cada paso, y comprueba contra él:
+  - que el paso exista en el ejecutor al que se despacha;
+  - que sus `inputs` sean parámetros que el paso admite, y que no falte
+    ninguno obligatorio;
+  - que un literal sea del tipo declarado;
+  - que `assign: result.outputs.<nombre>` lea una salida que el paso devuelve.
+
+  Esa última era **la excepción declarada en ADR-0020 §3** a la regla de
+  detección de ADR-0019: un `result.outputs.tensionn` sólo se notaba
+  ejecutando, con la unidad ya en el banco. Ahora un hallazgo detiene la
+  corrida **antes del primer paso**, con exit 1.
+- **`--validate --with-executors`**: comprueba las firmas conectando a los
+  ejecutores, sin ejecutar un solo paso. `--validate` a secas sigue sin
+  conectar —es su razón de existir en CI sin hardware—, así que esto es un
+  opt-in explícito de quien los tiene levantados. Fuera de `--validate` es un
+  error de uso: al correr, las firmas se comprueban siempre.
+- **Un ejecutor puede no describirse, y se nota.** Un ejecutor de terceros que
+  no implemente `Describe` deja sus pasos como *sin comprobar*, con el motivo y
+  el recuento (`aviso: 2 step(s) unchecked on 'python': …`). Ni error —cerraría
+  la puerta a terceros— ni silencio, que sería el verde falso de ADR-0019. El
+  puente WASM es hoy el caso real: `anvil:step` exporta un único `run`, así que
+  desde fuera no hay lista de nombres que publicar (issue #39).
+- **El ejecutor Python: un paso propio ya no exige editar `server.py`**
+  (issue #54). Se escribe una función, se decora con `@step` y se deja el
+  fichero donde apunte `--steps PATH` (o `ANVIL_PYTHON_STEPS`, o `./steps`).
+  **La firma es el catálogo**: nombres, tipos y obligatoriedad salen de la
+  propia función, así que no se escriben dos veces y no pueden divergir. Los
+  tres pasos que venían de serie se han mudado a `executores/python/steps/` y
+  se descubren como los de cualquiera. Trae además `--list` (ver el catálogo
+  sin levantar un banco), `--option clave=valor` (configuración de despliegue,
+  vía `ctx.options`) y tests que **no necesitan gRPC** (`make test-executores`).
+
+**Añadir `Describe` no sube el número de contrato** (sigue en 3), y el cambio
+de `paso.proto` es **aditivo**: ningún tag se mueve. Un ejecutor que no conozca
+el RPC funciona exactamente igual que antes — la regla de ADR-0020 §4c es que
+sube el contrato lo que pueda alterar un veredicto en silencio, y no describirse
+no altera ninguno.
+
 ### Arreglado
 
+- **El ejecutor Python estaba roto desde la traducción al inglés** (`579f468`):
+  leía `request.nombre` y `request.intento`, campos que el contrato ya no
+  tiene, así que toda invocación moría. Reproducido con
+  `ejemplos/demo_ejecutores.yaml` antes de tocar nada. Que pasara inadvertido
+  es el mejor argumento de ADR-0021: un ejecutor que no se puede interrogar
+  tampoco se puede comprobar.
+- **`ejemplos/variables.yaml` llamaba a un paso que no existe**
+  (`verificar_frecuencia`). Nunca dio guerra porque Main corta en el primer
+  fallo y no se llegaba a invocar — hasta que alguien tocase el límite del paso
+  anterior. Lo encontró la comprobación de catálogos el día que se escribió,
+  que es justamente para lo que está.
+- **El ejecutor embebido dejaba colgado al motor ante una ruta gRPC
+  desconocida**: la ignoraba sin responder, y `wasi-grpc` v0.1 no tiene
+  deadline, así que el cliente esperaba para siempre. Ahora contesta con un
+  cuerpo vacío.
 - **El binario no ejecutaba ninguna secuencia si el host y el motor no
   compartían cargador** (issue #52). El host pre-escanea el YAML por su cuenta
   para recolectar los `executors:` declarados; cuando ese parseo fallaba por
@@ -54,6 +114,9 @@ nombres del schema anterior y responde «¿querías `name`?».
 
 ### Cambiado
 
+- `--validate --with-executors` es la única situación en la que el host levanta
+  el ejecutor embebido sin ir a ejecutar pasos (excepción explícita al issue
+  #22, que sigue valiendo para `--validate` a secas).
 - **BREAKING — las claves del YAML.** `nombre`→`name`,
   `reintentos`→`retries`, `limite`→`limit`, `tipo`→`type`,
   `precondicion`→`precondition`, `asigna`→`assign`, `condicion`→`condition`,
