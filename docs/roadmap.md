@@ -296,11 +296,11 @@ verde** (13 casos, 0 fallos).
 - `MAINTAINERS.md`, `.github/CODEOWNERS`: hasta >1 mantenedor.
   (`CHANGELOG.md` ya existe desde v0.1.0.)
 - **Activar *private vulnerability reporting*** (Settings → Code security):
-  sólo existe en repos **públicos**, así que no puede activarse mientras Anvil
-  sea privado. `SECURITY.md` ya lo da como vía preferente (#11), así que esto
-  hay que pulsarlo **al hacer público el repo** y comprobar que la pestaña
-  *Security* ofrece «Report a vulnerability». Hasta entonces queda el correo
-  de respaldo.
+  sólo existe en repos **públicos**, y esa era la razón para no tenerlo.
+  **Anvil ya es público**, así que es un botón pendiente de pulsar, no un
+  bloqueo: hay que activarlo y comprobar que la pestaña *Security* ofrece
+  «Report a vulnerability». `SECURITY.md` ya lo da como vía preferente (#11)
+  y mientras tanto vale el correo de respaldo.
 
 ## Cómo se gestiona el alcance
 

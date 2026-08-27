@@ -337,12 +337,15 @@ check` (fmt + clippy de los tres workspaces), los tests del core, `make
 release`, los tests del host y la regresión de la beta (informativa mientras
 queden defectos abiertos).
 
-Lo único que no es evidente es el acceso al repo hermano. Como la CI necesita
-clonar `wasi-grpc` —privado— y el `GITHUB_TOKEN` que GitHub da a cada job
-sólo cubre el propio repositorio, el workflow usa una **deploy key de sólo
-lectura**: la pública está instalada en `wasi-grpc` («anvil CI»), la privada
-es el secret `WASI_GRPC_DEPLOY_KEY` de este repo. Es la credencial más
-acotada que sirve: da lectura de ese repo y de nada más.
+Lo único que no es evidente es cómo la CI consigue el repo hermano. El
+workflow usa una **deploy key de sólo lectura** (la pública instalada en
+`wasi-grpc` como «anvil CI», la privada en el secret `WASI_GRPC_DEPLOY_KEY`
+de este repo), que hacía falta cuando `wasi-grpc` era privado: el
+`GITHUB_TOKEN` que GitHub da a cada job sólo cubre el propio repositorio.
+
+**`wasi-grpc` ya es público**, así que la clave sobra y un checkout normal
+bastaría. Se deja porque funciona y quitarla es tocar la CI sin necesidad;
+cuando se toque por otra cosa, se simplifica.
 
 El job reproduce el layout de hermanos con dos checkouts (`path: anvil` y
 `path: wasi-grpc`), porque la dependencia es por ruta relativa.
