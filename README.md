@@ -133,17 +133,21 @@ tocarlas:
   — un equipo que se quedó encendido es peor que una secuencia que falló.
 - **Reintentos por paso.** Cada paso declara cuántos intentos admite. El
   número de intento llega al paso, que puede usarlo.
-- **Tres estados:** `paso`, `fallo`, `error`. En el agregado de la secuencia,
-  un `error` manda sobre un `fallo`.
-- **El contrato** está en `crates/modelo/paso.proto`: `PeticionPaso`,
-  `ResultadoPasoProto`, `service EjecutorPasos { rpc Invoca }`. Es la fuente
-  de verdad; los structs `prost` de `crates/modelo/src/proto.rs` lo espejan a
-  mano (wasi-grpc v0.1 no trae codegen).
+- **Un vocabulario cerrado de estados:** `pass`, `fail`, `error` y `skipped`.
+  En el agregado de la secuencia un `error` manda sobre un `fail`, y el motor
+  puede añadir `inconclusive` cuando no ha podido juzgar (ADR-0019).
+- **El contrato** está en `crates/modelo/paso.proto`: `StepRequest`,
+  `StepResult` y `service StepExecutor { rpc Invoke, rpc Describe }`. Es la
+  fuente de verdad; los structs `prost` de `crates/modelo/src/proto.rs` lo
+  espejan a mano (wasi-grpc v0.1 no trae codegen). `Describe` devuelve el
+  catálogo del ejecutor —qué pasos sirve y con qué firma— y es lo que permite
+  a `--validate --with-executors` cazar un nombre mal escrito sin ejecutar
+  nada (ADR-0021).
 
 ## Verificar
 
 ```sh
-make test               # 201 tests del core + 7 del host
+make test               # 342 tests del core + 26 del host + los del ejecutor Python
 make check              # clippy de los tres workspaces
 ```
 
