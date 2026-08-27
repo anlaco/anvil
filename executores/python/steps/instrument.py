@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 ANLACO
 """The steps this executor ships with — and the example of how to write yours.
 
 Nothing here is privileged. This file lives under `steps/`, is discovered like

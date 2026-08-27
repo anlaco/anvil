@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 ANLACO
 """Write a step for Anvil in Python: decorate a function and drop the file in.
 
 This is the whole authoring surface of the Python executor (ADR-0021). You

@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 ANLACO
 """Tests for the Python executor's step SDK (issues #54 and #45).
 
 They use `unittest` from the standard library and **do not import grpc**: the
