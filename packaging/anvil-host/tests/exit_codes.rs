@@ -147,15 +147,20 @@ fn una_secuencia_cuyo_veredicto_no_se_evalua_sale_con_uno() {
 #[test]
 fn una_asigna_tras_un_error_no_borra_la_variable_que_lee_el_cleanup() {
     // Issue #27 / ADR-0019, Regla 2. El exit code aquí no distingue nada (el
-    // `error` del paso inexistente ya sale 1 con o sin el arreglo): lo que se
-    // mide es el reporte, donde el `pass_fail` de `cleanup` dice si
+    // `error` del paso que no pudo medir ya sale 1 con o sin el arreglo): lo
+    // que se mide es el reporte, donde el `pass_fail` de `cleanup` dice si
     // `locals.valor` conservó su 99.0 o se lo llevó por delante un `nothing`.
+    //
+    // El fixture usa un paso **real que falla midiendo** (SCPI sin
+    // instrumento) y no un nombre inventado: desde ADR-0021 un paso que el
+    // ejecutor no sirve detiene la corrida antes del primer paso, así que un
+    // nombre inexistente ya no llegaría a ejercitar la `asigna`.
     let s = corre_con_reporte("packaging/anvil-host/tests/fixtures/asigna_tras_error.yaml");
     let stdout = String::from_utf8_lossy(&s.stdout);
     assert_eq!(
         codigo(&s),
         1,
-        "el paso inexistente deja la secuencia en `error`. stdout:\n{stdout}"
+        "el paso que no pudo medir deja la secuencia en `error`. stdout:\n{stdout}"
     );
     assert!(
         stdout.contains("[pass] check_valor: condición cumplida"),
@@ -343,4 +348,62 @@ fn validate_sigue_comprobando_que_el_wasm_existe() {
     let err = String::from_utf8_lossy(&s.stderr);
     assert_eq!(codigo(&s), 1, "stderr:\n{err}");
     assert!(err.contains("no existe"), "stderr:\n{err}");
+}
+
+/// ADR-0021 / issue #45: un parámetro y una salida mal escritos se cazan
+/// **preguntando al ejecutor**, sin ejecutar un solo paso.
+///
+/// Sin `--quiet` porque el exit 1 a secas no distingue esto de un error de
+/// carga: lo que se comprueba es que los dos nombres aparezcan nombrados. Y
+/// tiene que llegar a preguntar, así que este es el único caso en que
+/// `--validate` levanta el ejecutor embebido (excepción explícita al #22).
+///
+/// Visto en rojo escribiendo los dos nombres bien: sale 0 y sin hallazgos.
+#[test]
+fn validate_con_ejecutores_caza_los_nombres_mal_escritos() {
+    let s = Command::new(env!("CARGO_BIN_EXE_anvil"))
+        .current_dir(raiz_repo())
+        .args([
+            "packaging/anvil-host/tests/fixtures/firma_mal_escrita.yaml",
+            "--validate",
+            "--with-executors",
+        ])
+        .output()
+        .expect("lanzar anvil");
+    let stderr = String::from_utf8_lossy(&s.stderr);
+    assert_eq!(
+        codigo(&s),
+        1,
+        "una firma que no casa no puede salir 0. stderr:\n{stderr}"
+    );
+    assert!(
+        stderr.contains("canall"),
+        "nombra el parámetro mal escrito. stderr:\n{stderr}"
+    );
+    assert!(
+        stderr.contains("canal, offset"),
+        "y los que el paso sí toma, que es la respuesta. stderr:\n{stderr}"
+    );
+    assert!(
+        stderr.contains("temperaturaa"),
+        "y la salida mal escrita, que es la excepción que ADR-0020 §3 dejó \
+         abierta. stderr:\n{stderr}"
+    );
+}
+
+/// Y la corrida de verdad no llega a empezar: el catálogo se pregunta antes
+/// del primer paso, así que la unidad no se toca.
+///
+/// La aserción sobre stdout es la que importa. Sin ella el test daría verde
+/// con la corrida entera hecha y el 1 viniendo del veredicto, que es
+/// exactamente lo que ADR-0021 va a evitar.
+#[test]
+fn una_corrida_no_empieza_si_la_firma_no_casa() {
+    let s = corre_con_reporte("packaging/anvil-host/tests/fixtures/firma_mal_escrita.yaml");
+    let stdout = String::from_utf8_lossy(&s.stdout);
+    assert_eq!(codigo(&s), 1, "stdout:\n{stdout}");
+    assert!(
+        !stdout.contains("=== firma_mal_escrita:"),
+        "no puede haber reporte: la secuencia no llegó a correr. stdout:\n{stdout}"
+    );
 }

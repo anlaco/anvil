@@ -11,7 +11,7 @@
 #     [paso] init_log: statement ok
 #     [paso] medir_voltaje: 4.2 fuera de rango [4.5, 5.5]
 #     [saltado] paso_obsoleto: disable
-# Estado agregado: "fallo" (hay un fallo; saltado no cuenta). `verificar_frecuencia`
+# Estado agregado: "fallo" (hay un fallo; saltado no cuenta). `verificar_led`
 # no se invoca: Main corta en el primer fallo (pause_on_fail refuerza).
 
 name: variables_demo
@@ -60,7 +60,11 @@ main:
 
   # pause_on_fail (RF-34): si este paso fallara, Main se detendría. Aquí no se
   # llega: medir_voltaje falla antes y Main corta en el primer fallo.
-  - name: verificar_frecuencia
+  #
+  # Se llamaba `verificar_frecuencia`, que no lo sirve ningún ejecutor. Nunca
+  # dio guerra porque Main corta antes de llegar — hasta que alguien tocase el
+  # límite de arriba. Es justo el fallo latente que ADR-0021 caza al arrancar.
+  - name: verificar_led
     retries: 1
     pause_on_fail: true
 

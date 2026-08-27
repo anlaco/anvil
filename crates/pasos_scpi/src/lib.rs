@@ -11,6 +11,7 @@
 //! `diseno/integracion-instrumentos.md`: un paso que habla de verdad con un
 //! instrumento por TCP, en vez de un valor simulado en código.
 
+use modelo::proto::StepSpec;
 use modelo::ResultadoStep;
 use std::io::{Read, Write};
 use std::net::TcpStream;
@@ -92,14 +93,34 @@ pub fn medir_voltaje_scpi(intento: i32) -> ResultadoStep {
     medir_voltaje_scpi_en(&addr(), intento)
 }
 
+/// The one name this adapter serves. Dispatch and catalog both read it, so
+/// neither can name a step the other does not (ADR-0021).
+const MEDIR_VOLTAJE_SCPI: &str = "medir_voltaje_scpi";
+
 /// Despacho por nombre para el ejecutor. `None` = no es un paso SCPI (que
 /// el llamador pruebe otros despachadores, p. ej. `pasos_demo`). Así el
 /// ejecutor compone adaptadores sin que el motor se entere.
 pub fn despacha(nombre: &str, intento: i32) -> Option<ResultadoStep> {
     match nombre {
-        "medir_voltaje_scpi" => Some(medir_voltaje_scpi(intento)),
+        MEDIR_VOLTAJE_SCPI => Some(medir_voltaje_scpi(intento)),
         _ => None,
     }
+}
+
+/// The signatures this adapter publishes, so the executor can answer
+/// `Describe` (ADR-0021).
+///
+/// It takes **no inputs**, and that is a statement, not an omission: the
+/// instrument's address comes from `ANVIL_SCPI_ADDR`, which is deployment
+/// configuration and not a condition of the measurement. The day it becomes a
+/// parameter, it will be declared here and Anvil will check it.
+pub fn catalogo() -> Vec<StepSpec> {
+    vec![StepSpec {
+        name: MEDIR_VOLTAJE_SCPI.to_string(),
+        inputs: Vec::new(),
+        outputs: Vec::new(),
+        doc: "Measures voltage over SCPI/TCP against a real instrument.".to_string(),
+    }]
 }
 
 #[cfg(test)]

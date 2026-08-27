@@ -50,6 +50,88 @@ message StepResult {
   int32 contract = 8;
 }
 
+// ---------------------------------------------------------------------------
+// The catalog: what steps an executor serves, and with what signature.
+// ADR-0021. This is what TestStand reads off the VI connector pane — except
+// that here the executor is *asked*, never its artifact inspected.
+// ---------------------------------------------------------------------------
+
+// The type of a parameter or an output. Exactly the three of `Value`: this is
+// a description of the wire, not a type system of its own (ADR-0021 §5).
+//
+// `UNSPECIFIED` is the proto3 default, so **silence lands here**: an executor
+// that names a parameter without saying its type leaves it unchecked, and the
+// report says so. It is never read as "number" (ADR-0019, Rule 2).
+enum ValueType {
+  VALUE_TYPE_UNSPECIFIED = 0;
+  VALUE_TYPE_NUMBER = 1;
+  VALUE_TYPE_TEXT = 2;
+  VALUE_TYPE_BOOLEAN = 3;
+}
+
+// One input a step accepts.
+message ParameterSpec {
+  string name = 1;
+  ValueType type = 2;
+  // Whether the step needs it to measure. An optional one that is missing is
+  // the step's business (it has a default); a required one that is missing is
+  // a sequence Anvil can reject before touching the unit.
+  bool required = 3;
+  // The value used when an optional parameter is not sent. Purely
+  // informative — the engine sends nothing and the step applies it itself:
+  // a default applied in two places is a default that drifts.
+  Value default = 4;
+  // One line for a human: what it means, and its unit if it has one.
+  string doc = 5;
+}
+
+// One named output a step returns besides the measurement. Describing these
+// is what lets the loader check `assign: result.outputs.<name>`, the one
+// declared exception to the detection rule of ADR-0019 (ADR-0020 §3).
+message OutputSpec {
+  string name = 1;
+  ValueType type = 2;
+  string doc = 3;
+}
+
+message StepSpec {
+  string name = 1;
+  repeated ParameterSpec inputs = 2;
+  repeated OutputSpec outputs = 3;
+  string doc = 4;
+}
+
+message CatalogRequest {
+  // Contract version spoken by the engine, same as `StepRequest.contract`.
+  int32 contract = 1;
+}
+
+message Catalog {
+  repeated StepSpec steps = 1;
+  // **The whole point of this field**: an empty `steps` is ambiguous — it
+  // could mean "I serve nothing" or "I do not describe myself". proto3 makes
+  // `false` the default, so an executor that stays silent (an empty body, an
+  // old peer, a `UNIMPLEMENTED`) says *"do not check me"*, which is the safe
+  // reading. An executor that positively serves nothing sets it to `true`.
+  //
+  // Neither an error nor silence: `--validate` reports "N steps unchecked:
+  // the executor does not describe them" (ADR-0021 §4).
+  bool describes = 2;
+  // Echo of the contract version the executor understood, same as
+  // `StepResult.contract`.
+  int32 contract = 3;
+}
+
 service StepExecutor {
   rpc Invoke(StepRequest) returns (StepResult);
+  // Asked **once per endpoint at start-up**, never before each step: finding
+  // out at step 47 that a name is wrong leaves the unit half tested, and a
+  // catalog that changes mid-run makes the report impossible to reconstruct
+  // (ADR-0021 §3).
+  //
+  // Not implementing it is allowed: a third-party executor answers
+  // `UNIMPLEMENTED` and Anvil carries on with those steps unchecked. Adding
+  // this RPC therefore **does not raise `contract`** — an executor's silence
+  // here cannot change a verdict, which is the rule of ADR-0020 §4c.
+  rpc Describe(CatalogRequest) returns (Catalog);
 }

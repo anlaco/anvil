@@ -10,6 +10,8 @@
 //!   --limits <ruta>         sidecar de límites (RF-30, inyecta por nombre de paso)
 //!   --port <n>              puerto del ejecutor (default 9100)
 //!   --validate              carga y valida sin ejecutar ni conectar (dry-run)
+//!   --with-executors        con --validate: además pregunta a los ejecutores qué
+//!                           pasos ofrecen y comprueba las firmas (ADR-0021)
 //!   --quiet                 silencia el reporte de consola y los logs stderr
 //!   --help / --version      ayuda y versión
 //!
@@ -60,6 +62,12 @@ struct Cli {
     ejecutores: Vec<String>,
     port: u16,
     validate: bool,
+    /// ADR-0021: `--validate` promises "loads and validates without running or
+    /// connecting (CI with no hardware)", and asking an executor for its
+    /// signatures **requires connecting**. The two cannot both be had, so the
+    /// promise is not broken — it is opted out of, explicitly, by whoever has
+    /// the executors up.
+    with_executors: bool,
     quiet: bool,
 }
 
@@ -73,6 +81,7 @@ fn usage() {
 --executor n=host:puerto  re-apunta un ejecutor declarado (RF-36.3)\n  \
 --port <n>              puerto del ejecutor embebido (default {PUERTO_DEFAULT})\n  \
 --validate              carga y valida sin ejecutar ni conectar\n  \
+--with-executors        con --validate: conecta y comprueba las firmas contra los\n                          catálogos de los ejecutores (ADR-0021)\n  \
 --quiet                 silencia el reporte de consola y logs stderr\n  \
 -h, --help              muestra esta ayuda\n  \
 -V, --version           muestra la versión"
@@ -93,6 +102,7 @@ fn parse_cli(args: Vec<String>) -> Result<Cli, AccionEarlyExit> {
         ejecutores: Vec::new(),
         port: PUERTO_DEFAULT,
         validate: false,
+        with_executors: false,
         quiet: false,
     };
     let mut args = args.into_iter();
@@ -101,6 +111,7 @@ fn parse_cli(args: Vec<String>) -> Result<Cli, AccionEarlyExit> {
             "--help" | "-h" => return Err(AccionEarlyExit::Help),
             "--version" | "-V" => return Err(AccionEarlyExit::Version),
             "--validate" => cli.validate = true,
+            "--with-executors" => cli.with_executors = true,
             "--quiet" => cli.quiet = true,
             "--process-model" | "--json" | "--csv" | "--limits" | "--executor" | "--port" => {
                 let valor = match args.next() {
@@ -142,6 +153,17 @@ fn parse_cli(args: Vec<String>) -> Result<Cli, AccionEarlyExit> {
     }
     if cli.ruta.is_empty() {
         return Err(AccionEarlyExit::Uso("falta la secuencia YAML".into()));
+    }
+    // Checking against the catalogs happens on every run anyway, before the
+    // first step. The flag only means anything for `--validate`, which is the
+    // mode that otherwise refuses to connect: accepting it silently elsewhere
+    // would suggest it turns something on.
+    if cli.with_executors && !cli.validate {
+        return Err(AccionEarlyExit::Uso(
+            "--with-executors sólo tiene sentido con --validate: fuera de él, las \
+             firmas se comprueban siempre, al arrancar la corrida"
+                .into(),
+        ));
     }
     Ok(cli)
 }
@@ -259,6 +281,27 @@ fn main() {
                 programa.archivos.len()
             );
         }
+        // ADR-0021: signatures can only be checked against executors that are
+        // up, and `--validate` exists precisely so CI need not have them. So
+        // it is opted into, never assumed — and when it is, nothing is
+        // executed: `Describe` asks, it does not measure.
+        if cli.with_executors {
+            let mut motor = match conecta_con_reintento(&programa, "127.0.0.1", cli.port, cli.quiet)
+            {
+                Ok(m) => m,
+                Err(e) => {
+                    eprintln!(
+                        "--with-executors necesita los ejecutores levantados y no se pudo \
+                         conectar (embebido en 127.0.0.1:{}): {e}",
+                        cli.port
+                    );
+                    std::process::exit(1);
+                }
+            };
+            if !comprueba_firmas(&mut motor, &programa, cli.quiet) {
+                std::process::exit(1);
+            }
+        }
         std::process::exit(0);
     }
 
@@ -298,6 +341,14 @@ fn main() {
             "conectado a los ejecutores de pasos (embebido en 127.0.0.1:{})",
             cli.port
         );
+    }
+
+    // ADR-0021: se pregunta el catálogo **una vez por endpoint y antes del
+    // primer paso**. No por coste, sino porque enterarse en el paso 47 de que
+    // un nombre está mal deja la unidad medio probada — y porque un catálogo
+    // que cambia a mitad de corrida hace el informe irreconstruible.
+    if !comprueba_firmas(&mut motor, &programa, cli.quiet) {
+        std::process::exit(1);
     }
 
     // Sinks: consola salvo --quiet; JSON/CSV si se piden. El composite los
@@ -350,6 +401,49 @@ fn main() {
     if resultado.estado() != "pass" {
         std::process::exit(1);
     }
+}
+
+/// Asks every executor for its catalog and checks the program against it
+/// (ADR-0021). Returns `false` when the sequence contradicts a catalog, which
+/// is the caller's signal to stop before touching the unit.
+///
+/// The three outcomes are deliberately distinct, and mapping any two of them
+/// onto one is the mistake this exists to avoid:
+///
+/// - a **finding** stops the run: it is decidable without measuring, so
+///   measuring first would be testing a unit against a sequence already known
+///   to be wrong (ADR-0019, detection rule);
+/// - an **unchecked** step does not: an executor that declines to describe
+///   itself is allowed, and refusing to run would shut the door on third
+///   parties;
+/// - and unchecked is **never silent**, or it would be the false green that
+///   the same ADR forbids.
+fn comprueba_firmas(motor: &mut Motor, programa: &Programa, quiet: bool) -> bool {
+    let catalogos = motor.describe_ejecutores();
+    let informe = motor::comprueba_programa(programa, &catalogos);
+
+    // Los avisos salen **aunque haya `--quiet`**, igual que los del sidecar:
+    // `--quiet` silencia el reporte, no los avisos.
+    for linea in informe.resumen_sin_comprobar() {
+        eprintln!("aviso: {linea}");
+    }
+    if !quiet && informe.comprobados > 0 {
+        eprintln!(
+            "{} paso(s) comprobados contra el catálogo de su ejecutor",
+            informe.comprobados
+        );
+    }
+    if !informe.hay_hallazgos() {
+        return true;
+    }
+    eprintln!(
+        "la secuencia no casa con lo que ofrecen los ejecutores ({} problema(s)):",
+        informe.hallazgos.len()
+    );
+    for h in &informe.hallazgos {
+        eprintln!("  - {h}");
+    }
+    false
 }
 
 /// Carga el programa: con PM si `--process-model`, sin él en caso contrario
@@ -459,6 +553,24 @@ mod tests {
         let c = parse_cli(vec!["s.yaml".into(), "--validate".into(), "--quiet".into()]).unwrap();
         assert!(c.validate);
         assert!(c.quiet);
+    }
+
+    /// ADR-0021: fuera de `--validate` las firmas se comprueban siempre, así
+    /// que aceptar el flag ahí sugeriría que enciende algo. Es error de uso.
+    #[test]
+    fn parse_with_executors_exige_validate() {
+        let c = parse_cli(vec![
+            "s.yaml".into(),
+            "--validate".into(),
+            "--with-executors".into(),
+        ])
+        .unwrap();
+        assert!(c.validate && c.with_executors);
+
+        assert!(matches!(
+            parse_cli(vec!["s.yaml".into(), "--with-executors".into()]),
+            Err(AccionEarlyExit::Uso(ref m)) if m.contains("--validate")
+        ));
     }
 
     #[test]

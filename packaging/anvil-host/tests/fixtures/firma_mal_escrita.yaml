@@ -1,0 +1,22 @@
+# Fixture de `tests/exit_codes.rs`: ADR-0021 / issues #45 y #54 — un dedazo en
+# el nombre de un parámetro y otro en el de una salida.
+#
+# Los dos son del ejecutor embebido, que sí describe su catálogo:
+#   - `medir_voltaje` toma `canal` y `offset`; aquí pone `canall`.
+#   - devuelve `canal_usado` y `temperatura`; aquí lee `temperaturaa`.
+#
+# Hasta ADR-0021 esto cargaba sin una queja (ADR-0020 §3 lo dejó escrito como
+# la excepción a la regla de detección de ADR-0019) y sólo se notaba con la
+# unidad ya en el banco. Ahora sale 1 sin ejecutar un solo paso.
+
+name: firma_mal_escrita
+
+locals:
+  t: 0.0
+
+main:
+  - name: medir_voltaje
+    inputs:
+      canall: 3
+    assign:
+      t: result.outputs.temperaturaa

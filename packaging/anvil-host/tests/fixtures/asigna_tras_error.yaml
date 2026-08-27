@@ -1,18 +1,24 @@
 # Fixture de `tests/exit_codes.rs`: el issue #27, caso 2 — `asigna` no escribe
 # cuando el paso dio `error` (ADR-0019, Regla 2).
 #
-# `paso_inexistente` no existe en el ejecutor demo, que responde
-# `error: paso no reconocido`. Antes, la `asigna` corría igual: `resultado.*`
-# valía `nothing` y ese `nothing` machacaba `locals.valor`, que el `cleanup`
-# lee justo después para decidir. En un banco de verdad esa variable es la que
-# dice si hay que apagar una fuente.
+# `medir_voltaje_scpi` sí existe en el ejecutor, pero no hay instrumento
+# escuchando en el puerto SCPI, así que devuelve `error`. Antes, la `asigna`
+# corría igual: `result.*` valía `nothing` y ese `nothing` machacaba
+# `locals.valor`, que el `cleanup` lee justo después para decidir. En un banco
+# de verdad esa variable es la que dice si hay que apagar una fuente.
 #
 #   === exit_asigna_tras_error: error ===
-#     [error] desconocido: paso no reconocido
-#     [paso] check_valor: condición cumplida
+#     [error] medir_voltaje_scpi: SCPI connect … falló
+#     [pass] check_valor: condición cumplida
 #
-# El veredicto es `error` (exit 1) por el paso que no existe; lo que este
+# El veredicto es `error` (exit 1) por el paso que no pudo medir; lo que este
 # fixture vigila es la línea del `cleanup`.
+#
+# **Por qué es un paso real y no uno inventado**, que es lo que era hasta
+# ADR-0021: desde el catálogo, un paso que el ejecutor no sirve detiene la
+# corrida **antes del primer paso**, así que un nombre inexistente ya no llega
+# a ejecutarse y no puede ejercitar la `asigna`. Hace falta un paso que exista
+# y falle midiendo, que además es el caso realista.
 
 name: exit_asigna_tras_error
 
@@ -20,7 +26,7 @@ locals:
   valor: 99.0
 
 main:
-  - name: paso_inexistente
+  - name: medir_voltaje_scpi
     assign:
       valor: '${result.measured_value}'
 
