@@ -1,0 +1,11 @@
+# Fixture del issue #52: un YAML que el **cargador** rechaza por esquema
+# (no por lectura: el fichero está aquí y se lee perfectamente).
+#
+# Lo que se prueba con él no es el mensaje de error —de eso ya hay tests—,
+# sino que el host arranca igualmente el ejecutor de pasos embebido en vez de
+# deducir del rechazo que el guest tampoco va a poder cargarlo.
+name: esquema_invalido
+main:
+  - name: un_paso
+    retries: 1
+    campo_que_no_existe: 1
