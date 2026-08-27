@@ -99,7 +99,7 @@ que sea gRPC para pasos en cualquier lenguaje (ADR-0003).
 **M5-ext.1 (ADR-0013):** el ejecutor WASM embebido se mantiene como **de
 serie** (zero-install, ADR-0011); el motor despacha por **nombre→endpoint**
 (`ejecutores:` en el YAML + override `--executor`), con IPs no-loopback
-solo si se declaran. A su lado, **executores de lenguaje** (`executores/`,
+solo si se declaran. A su lado, **executores de lenguaje** (`executors/`,
 Apache-2.0) atienden pasos con gRPC nativo de su ecosistema.
 
 **M5-ext.2 (ADR-0014/0015):** el **cargador de módulos `.wasm` por path**

@@ -35,7 +35,7 @@ Hay un segundo hueco, y es el del `#54`. La [decisión 0011 de
 dirección](../../../00-DIRECCION/decisiones/0011-los-ejecutores-de-lenguaje-son-producto-descargable.md)
 fija que un ejecutor de lenguaje es **producto descargable**: quien quiera pasos
 en Python lo descarga, pone sus pasos donde diga la documentación, y no edita ni
-una línea de nuestro código. `executores/python/server.py` no lo cumplía:
+una línea de nuestro código. `executors/python/server.py` no lo cumplía:
 despachaba con un `if/elif` de tres casos escritos a mano, así que aportar un
 paso propio era editar ese fichero — «recompilar el adapter», que es justo el
 dolor de TestStand del que presume no tener ADR-0003.

@@ -35,7 +35,7 @@
 5. **WASM es la tesis, Python el añadido.** El cargador `.wasm` por path es
    la pieza central de Anvil (WASM es el lenguaje de serie; el modelo `.vi`
    de TestStand), no un extra. El ejecutor Python
-   (`executores/python/`) se mantiene como demo del routing multi-endpoint,
+   (`executors/python/`) se mantiene como demo del routing multi-endpoint,
    sin Docker.
 6. **Anvil es agnóstico al generador del `.wasm`.** Anvil expone un contrato
    (`paso.proto` por gRPC en loopback) y un mecanismo de carga (`.wasm` por

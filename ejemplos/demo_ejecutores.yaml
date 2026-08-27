@@ -7,10 +7,10 @@
 #
 # Arranque:
 #   # terminal 1: simulador TCP (stand-in del equipo del simulador)
-#   python3 executores/python/simulador_tcp.py
+#   python3 executors/python/simulador_tcp.py
 #   # terminal 2: ejecutor Python en loopback (127.0.0.1:9101). Sus pasos
-#   # viven en executores/python/steps/, no dentro de server.py (ADR-0021).
-#   cd executores/python && python3 server.py
+#   # viven en executors/python/steps/, no dentro de server.py (ADR-0021).
+#   cd executors/python && python3 server.py
 #   # terminal 3: Anvil (host embebido, ADR-0011)
 #   ./anvil ejemplos/demo_ejecutores.yaml --json /tmp/out.json
 #

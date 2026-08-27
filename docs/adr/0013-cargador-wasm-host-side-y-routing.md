@@ -140,7 +140,7 @@ Anvil deja la puerta abierta a **dos fases** (ver `docs/planes/m5-ext.md`):
   `paso.proto` reusado) se mantiene.
 - `Motor::conecta` (un único endpoint) se conserva como API legacy; el flujo
   real es `Motor::desde_programa` (tabla de conexiones).
-- El ejecutor Python (`executores/python/`) queda operativo como demo del
+- El ejecutor Python (`executors/python/`) queda operativo como demo del
   routing multi-endpoint en loopback, sin Docker.
 - El cargador `.wasm` host-side (M5-ext.2) es un incremental del host: el
   modelo, el cargador y el motor ya entienden `TipoEjecutor::Wasm`.

@@ -45,14 +45,14 @@ dependencias que instalar.
 > demuestra el despacho por nombre→endpoint: `verificar_led` lo atiende el
 > ejecutor embebido (de serie) y `medir_simulador`/`conectar_equipo` un
 > ejecutor Python en `127.0.0.1:9101` (arranca `simulador_tcp.py` y
-> `server.py` de `executores/python/` en otras dos terminales). El flag
+> `server.py` de `executors/python/` en otras dos terminales). El flag
 > `--executor nombre=host:puerto` re-apunta un ejecutor sin tocar el YAML
 > (patrón `--limits`). Sin `executors:` declarado, todo va al embebido.
 >
 > **Escribir un paso propio en Python** no exige tocar el ejecutor: se decora
 > una función con `@step` y se deja el fichero donde apunte `--steps`
 > ([ADR-0021](adr/0021-el-ejecutor-describe-su-catalogo.md); el cómo, en
-> [`executores/python/README.md`](../executores/python/README.md)).
+> [`executors/python/README.md`](../executors/python/README.md)).
 
 ## Para desarrolladores (build desde source)
 

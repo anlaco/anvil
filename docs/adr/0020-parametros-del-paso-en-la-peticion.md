@@ -39,7 +39,7 @@ grabárselo dentro**. En el propio repo, las tres salidas del hueco:
 |---|---|---|
 | `pasos_demo::medir_voltaje` | `let valor = 4.2;` en el código | recompilar para cambiar de canal |
 | `pasos_scpi` | variable de entorno `ANVIL_SCPI_ADDR`, con la nota de que *«el host aún no plumbea env vars al guest»* | configuración global, invisible en el informe |
-| `executores/python/server.py` | flag de proceso `--simulador 192.168.1.50:4000` | un ejecutor por configuración |
+| `executors/python/server.py` | flag de proceso `--simulador 192.168.1.50:4000` | un ejecutor por configuración |
 
 Ninguna de las tres viaja en el cable, y por tanto **ninguna de las tres queda
 escrita en el informe**. Dos ejecuciones de la misma secuencia con distinto
@@ -269,7 +269,7 @@ compilación para pasar a ser un eco que miente.
 - `pasos_demo`, `pasos_scpi`: no cambian. Su firma interna `fn(i32)` pasará a
   llevar los parámetros cuando se implemente, pero eso es despacho interno del
   ejecutor, no contrato.
-- `executores/python/server.py`: no cambia. Sus stubs están gitignoreados y se
+- `executors/python/server.py`: no cambia. Sus stubs están gitignoreados y se
   regeneran; hasta que alguien quiera parámetros, es un ejecutor de contrato 1
   perfectamente válido.
 
