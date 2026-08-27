@@ -7,7 +7,7 @@
 #
 #   make build     todo en debug
 #   make release   todo en release  ← el binario que se distribuye
-#   make test      tests del core y del host
+#   make test      tests del core, del host y del ejecutor Python
 #   make check     fmt + clippy de los tres workspaces (lo que exigirá la CI)
 #   make fmt       aplica el formato
 #   make run       corre el ejemplo básico con el binario debug
@@ -24,7 +24,7 @@ TARGET  := wasm32-wasip2
 ANVIL_DEBUG   := packaging/anvil-host/target/debug/anvil
 ANVIL_RELEASE := packaging/anvil-host/target/release/anvil
 
-.PHONY: all build release test test-core test-host test-puente check fmt run clean help
+.PHONY: all build release test test-core test-host test-puente test-executores check fmt run clean help
 
 all: build
 
@@ -43,7 +43,7 @@ release:
 	cargo build --release --manifest-path $(HOST)
 	@echo "listo → $(ANVIL_RELEASE)"
 
-test: test-core test-puente test-host
+test: test-core test-puente test-host test-executores
 
 ## Tests del workspace core (no necesitan red ni los guests compilados).
 test-core:
@@ -58,6 +58,17 @@ test-puente:
 ## que compilamos antes.
 test-host: build
 	cargo test --manifest-path $(HOST)
+
+## Tests del SDK de pasos del ejecutor Python (`anvil_step`). Sólo stdlib: no
+## necesitan `grpcio` ni los stubs generados, porque lo que prueban es la
+## superficie con la que se escribe un paso, no el cable. Si no hay python3, se
+## avisa y se sigue: el core no depende de él.
+test-executores:
+	@if command -v python3 >/dev/null 2>&1; then \
+		cd executores/python && python3 -m unittest discover -p 'test_*.py'; \
+	else \
+		echo "sin python3: tests del ejecutor Python saltados"; \
+	fi
 
 ## Formato y lints de los tres workspaces, tal como los exigirá la CI.
 ## Sin `rustfmt.toml`: el formato es el estilo oficial de Rust por defecto.

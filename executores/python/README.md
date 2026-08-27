@@ -6,14 +6,106 @@ como un endpoint más; no sabe que detrás hay Python. Es el primero de la
 familia `executores/` (LabVIEW, MATLAB, … futuros), licencia **Apache-2.0**
 (adoptable y extensible, [ADR-0012](../../docs/adr/0012-executores-de-lenguaje-como-modulos.md)).
 
-## Qué demuestra
+> **Para añadir un paso no se edita `server.py`.** Se escribe una función, se
+> decora con `@step` y se deja el fichero donde apunte `--steps`. El ejecutor
+> lo descubre, lo sirve y **se lo describe a Anvil**
+> ([ADR-0021](../../docs/adr/0021-el-ejecutor-describe-su-catalogo.md)).
 
-El escenario que motivó ADR-0012: un paso que toca hardware no tiene por qué
-vivir en el SO de Anvil. Aquí los pasos de instrumento hablan **por TCP con
-un simulador de instrumento**. En producción ese destino puede ser una caja
-con los drivers del fabricante en un Windows 7 (**LID**), una VM, o el
-simulador real que está desarrollando otro equipo — para Anvil todo es "un
-endpoint gRPC en una IP".
+## Escribir un paso
+
+Un paso es una función normal:
+
+```python
+# mis_pasos/resistencia.py
+from anvil_step import Context, Result, step
+
+
+@step(outputs={"serie": str})
+def medir_resistencia(ctx: Context, canal: float, escala: str = "auto") -> Result:
+    """Mide resistencia en un canal, con la escala indicada."""
+    ohmios = mi_instrumento.medir(canal, escala)
+    return Result.measured(ohmios, outputs={"serie": "R-007"})
+```
+
+Y se corre así:
+
+```sh
+python3 server.py --steps mis_pasos
+```
+
+**La firma es el catálogo.** El nombre de cada parámetro, su tipo y si es
+obligatorio salen de la propia función: no se escriben dos veces, así que no
+pueden divergir. Eso es lo que permite a Anvil comprobar una secuencia **sin
+ejecutarla** (`--validate --with-executors`) y decirte que escribiste `canall`
+en vez de `canal` antes de poner la unidad en el banco.
+
+Lo que Python no puede deducir lo toma el decorador:
+
+| | |
+|---|---|
+| `outputs={"nombre": tipo}` | Las salidas con nombre. Un `return` no lleva nombres, y son las que `assign: result.outputs.<nombre>` lee en la secuencia. |
+| `name="..."` | El nombre del paso en la secuencia, cuando no puede ser el de la función. |
+
+Los tipos son **los tres del contrato**: `float`/`int` → número, `str` → texto,
+`bool` → booleano. Un parámetro **sin anotar** se describe como *sin
+especificar* y Anvil lo deja sin comprobar, en vez de suponer que es un número.
+
+### Qué devuelve un paso
+
+`Result.measured(valor, …)` para una medida, `Result.passed(…)` /
+`Result.failed(…)` para un pass/fail, `Result.error(…)` cuando no se pudo
+juzgar. También valen atajos: devolver un número es una medida, un `bool` es
+pass/fail, y `None` es un `pass` sin medida.
+
+**El umbral no es cosa del paso**: devuelve la medida y el motor la juzga contra
+el `limit` de la secuencia ([ADR-0008](../../docs/adr/0008-limites-evaluados-por-el-motor.md)).
+
+Una **excepción** dentro de un paso se convierte en `error`, nunca en `fail`: un
+paso que revienta no dice nada de la unidad bajo test, y anotarla como unidad
+rechazada sería un rojo falso. El ejecutor no se cae (RF-12).
+
+### `ctx`, y por qué no es un parámetro
+
+Un paso recibe `ctx` **sólo si lo declara**, y `ctx` nunca aparece en el
+catálogo: es el ejecutor hablándole al paso, no un valor que salga de la
+secuencia.
+
+| | |
+|---|---|
+| `ctx.attempt` | El número de intento, desde 1 (RF-09). No lo pone la secuencia. |
+| `ctx.options` | Lo que se pasó con `--option clave=valor`: configuración de despliegue (la dirección de un instrumento, el id de un banco). |
+| `ctx.step_name` | El nombre con el que se le llamó, útil si una función sirve varios. |
+
+La distinción importa: lo que cambia **qué se mide** va en la secuencia, donde
+queda escrito en el informe ([ADR-0019](../../docs/adr/0019-que-hace-anvil-cuando-no-puede-juzgar.md),
+Regla 3). Lo que cambia **contra qué caja se habla** va en `--option`.
+
+### Dónde se ponen los pasos
+
+Por orden de precedencia:
+
+1. `--steps PATH` — repetible; una carpeta o un `.py` suelto.
+2. La variable de entorno `ANVIL_PYTHON_STEPS` (lista separada por `:`).
+3. `./steps` en el directorio de trabajo, si existe.
+
+De una carpeta se cargan sus `.py` de primer nivel y sus paquetes; los que
+empiezan por `_` se saltan, así un módulo de ayuda no se carga como si fuera de
+pasos. La carpeta entra en `sys.path`, de modo que tus pasos pueden importarse
+entre ellos.
+
+Una ruta que **no existe** es un fallo de arranque, no un aviso: un ejecutor que
+sirve el catálogo vacío por un dedazo en una ruta es un verde falso gratis.
+
+### Ver el catálogo sin levantar nada
+
+```sh
+$ python3 server.py --steps mis_pasos --list
+medir_resistencia(canal: number, escala: text = 'auto')
+    Mide resistencia en un canal, con la escala indicada.
+    outputs: serie: text
+```
+
+Es la misma información que Anvil obtiene por `Describe`.
 
 ## Requisitos
 
@@ -48,39 +140,61 @@ python3 -m grpc_tools.protoc \
 # terminal 1 — simulador TCP (stand-in del equipo del simulador)
 python3 simulador_tcp.py
 
-# terminal 2 — ejecutor de pasos en Python
-python3 server.py                 # 127.0.0.1:9101
+# terminal 2 — ejecutor de pasos en Python, con los pasos de ejemplo
+python3 server.py                 # ./steps, en 127.0.0.1:9101
 
 # (variante LID: apuntar el simulador a la caja legacy)
-python3 server.py --simulador 192.168.1.50:4000
+python3 server.py --option simulator=192.168.1.50:4000
 ```
 
-Pasos que atiende:
+Los pasos que vienen de serie viven en [`steps/instrument.py`](steps/instrument.py)
+y **no son especiales**: se descubren como los tuyos y podrías borrarlos sin
+tocar `server.py`.
 
 | Nombre | Qué hace |
 |---|---|
-| `conectar_equipo` | Fallo transitorio en el intento 1, pasa desde el 2 (RF-09: el `intento` llega al paso). |
-| `medir_simulador` | Mide contra el simulador por TCP; devuelve `valor_medido` (el límite lo evalúa el motor, ADR-0008). |
+| `conectar_equipo` | Fallo transitorio en el intento 1, pasa desde el 2 (RF-09: el `intento` llega al paso por `ctx`). |
+| `medir_simulador` | Mide contra el simulador por TCP; devuelve la medida y el canal usado (el límite lo evalúa el motor, ADR-0008). |
 | `verificar_led` | Pass/fail sin medida. |
 
-Un nombre desconocido devuelve `estado: error`, nunca una excepción (RF-12).
+Un nombre desconocido devuelve `status: error` con la lista de los que sí sirve,
+nunca una excepción (RF-12).
 
 ## Usarlo desde Anvil
 
-El motor despacha por **nombre→endpoint** (`ejecutores:` en el YAML, o el
-flag `--ejecutor nombre=host:puerto`). Ejemplo con el ejecutor embebido y
-este en la misma secuencia:
+El motor despacha por **nombre→endpoint** (`executors:` en el YAML, o el flag
+`--executor nombre=host:puerto`). Ejemplo con el ejecutor embebido y éste en la
+misma secuencia:
 
 ```yaml
-nombre: demo_ejecutores
-ejecutores:
-  - { nombre: embebido, tipo: embebido }
-  - { nombre: python, tipo: grpc, host: 127.0.0.1, puerto: 9101 }
+name: demo_ejecutores
+executors:
+  - { name: embebido, type: embedded }
+  - { name: python, type: grpc, host: 127.0.0.1, port: 9101 }
 main:
-  - nombre: verificar_led          # servido por el ejecutor WASM embebido
-  - nombre: medir_simulador, ejecutor: python
-    limite: { tipo: rango, min: 4.0, max: 5.0 }
-  - nombre: conectar_equipo, ejecutor: python
+  - name: verificar_led          # servido por el ejecutor WASM embebido
+  - name: medir_simulador
+    executor: python
+    limit: { type: range, min: 4.0, max: 5.0 }
+  - name: conectar_equipo
+    executor: python
+```
+
+Y para comprobar que la secuencia casa con lo que este ejecutor ofrece, **sin
+ejecutar ni un paso**:
+
+```sh
+./anvil secuencia.yaml --validate --with-executors
+```
+
+## Tests
+
+El SDK se prueba con la biblioteca estándar y **sin gRPC**: lo que se prueba es
+la superficie con la que se escribe un paso, no el cable.
+
+```sh
+cd executores/python && python3 -m unittest discover -p 'test_*.py'
+# o, desde la raíz del repo: make test-executores
 ```
 
 ## Notas
@@ -91,4 +205,7 @@ main:
   pila es solo para WASM ([ADR-0006](../../docs/adr/0006-wasi-grpc-propio.md)).
 - El contrato con el simulador es deliberadamente trivial (línea de texto).
   Cuando el equipo del simulador cierre su protocolo real, se sustituye
-  `lee_simulador()` en `server.py` sin tocar el resto del ejecutor.
+  `_ask_simulator()` en `steps/instrument.py` sin tocar el resto del ejecutor.
+- El código del ejecutor está en inglés (identificadores, comentarios,
+  mensajes); los **nombres de paso y de parámetro no se traducen**, porque son
+  datos de las secuencias ya escritas.
