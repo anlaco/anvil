@@ -43,8 +43,8 @@ binario de arriba.
 
 > **Antes de compilar: clona `wasi-grpc` al lado de este repo.** La pila gRPC
 > se referencia por ruta relativa y todavía no está publicada en crates.io, así
-> que sin ella `cargo` **no llega ni a leer el manifiesto**. Y es un repo
-> privado: si no tienes acceso, la vía es el binario del release.
+> que sin ella `cargo` **no llega ni a leer el manifiesto**. El repo es público
+> y Apache-2.0: clonarlo es todo lo que hace falta.
 >
 > ```sh
 > git clone https://github.com/anlaco/anvil

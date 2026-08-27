@@ -13,8 +13,9 @@ jobs:
   ci:
     runs-on: ubuntu-latest
     steps:
-      # `wasi-grpc` es un repo hermano privado y anvil lo referencia por
+      # `wasi-grpc` es un repo hermano y anvil lo referencia por
       # `path = "../wasi-grpc"` (dogfooding: los dos se desarrollan a la vez).
+      # Ya es público: la deploy key de abajo es de cuando no lo era, y sobra.
       # Sin él, cargo ni siquiera lee el workspace, así que el layout del
       # runner tiene que reproducir el del disco:
       #
@@ -31,7 +32,7 @@ jobs:
         with:
           path: anvil
 
-      - name: Checkout wasi-grpc (repo hermano privado)
+      - name: Checkout wasi-grpc (repo hermano)
         uses: actions/checkout@v4
         with:
           repository: anlaco/wasi-grpc

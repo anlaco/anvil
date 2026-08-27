@@ -42,7 +42,7 @@ noyalib = "0.0.18"
 # JSON se ensambla a mano (ver `crates/result_sink/src/json.rs`).
 serde_json = "1"
 
-# `wasi-grpc` es un proyecto aparte (github.com/anlaco/wasi-grpc, privado).
+# `wasi-grpc` es un proyecto aparte y público (github.com/anlaco/wasi-grpc).
 # Se referencia por ruta porque anvil lo dogfoodea: los dos repos se
 # desarrollan a la vez y un cambio en la pila se prueba aquí al momento.
 # Cuando wasi-grpc se estabilice y se publique, esto pasa a ser una versión.
