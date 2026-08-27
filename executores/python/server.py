@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 ANLACO
 """Anvil's Python step executor (ADR-0012) — a downloadable module.
 
 A gRPC server speaking the `paso.proto` contract (`service StepExecutor`).

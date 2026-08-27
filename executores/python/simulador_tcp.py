@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 ANLACO
 """Simulador de instrumento TCP mínimo (stand-in de desarrollo).
 
 Mientras el equipo del simulador real no cierra su contrato, este fake
