@@ -65,8 +65,12 @@ jobs:
           tar xzf /dist/*.tar.gz
           cd anvil-*/
           ./anvil ejemplos/subsecuencia.yaml --json ./out.json
-          grep -q '"secuencia": "basica"' out.json
-          grep -q '"estado": "paso"' out.json
+          # Las claves y el vocabulario del JSON están en inglés desde la
+          # v0.3.0. Este grep se quedó anclado a `"secuencia"` y `"paso"`, y
+          # por eso la primera verificación de la v0.3.0 salió en rojo con el
+          # binario funcionando bien: la prueba probaba la versión anterior.
+          grep -q '"sequence": "basica"' out.json
+          grep -q '"status": "pass"' out.json
           echo "OK: corre y produce el JSON"
 
           # Control negativo: `subsecuencia.yaml` llama a `medir_fuentes.yaml`
