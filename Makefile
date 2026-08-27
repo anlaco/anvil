@@ -24,7 +24,7 @@ TARGET  := wasm32-wasip2
 ANVIL_DEBUG   := packaging/anvil-host/target/debug/anvil
 ANVIL_RELEASE := packaging/anvil-host/target/release/anvil
 
-.PHONY: all build release test test-core test-host test-puente test-executores check fmt run clean help
+.PHONY: all build release test test-core test-host test-puente test-executors check fmt run clean help
 
 all: build
 
@@ -43,7 +43,7 @@ release:
 	cargo build --release --manifest-path $(HOST)
 	@echo "listo → $(ANVIL_RELEASE)"
 
-test: test-core test-puente test-host test-executores
+test: test-core test-puente test-host test-executors
 
 ## Tests del workspace core (no necesitan red ni los guests compilados).
 test-core:
@@ -63,9 +63,9 @@ test-host: build
 ## necesitan `grpcio` ni los stubs generados, porque lo que prueban es la
 ## superficie con la que se escribe un paso, no el cable. Si no hay python3, se
 ## avisa y se sigue: el core no depende de él.
-test-executores:
+test-executors:
 	@if command -v python3 >/dev/null 2>&1; then \
-		cd executores/python && python3 -m unittest discover -p 'test_*.py'; \
+		cd executors/python && python3 -m unittest discover -p 'test_*.py'; \
 	else \
 		echo "sin python3: tests del ejecutor Python saltados"; \
 	fi

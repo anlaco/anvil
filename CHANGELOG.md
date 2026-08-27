@@ -8,6 +8,16 @@ Anvil está en 0.x: la superficie pública —el formato de secuencia YAML, el
 contrato `paso.proto` y el reporte textual (RNF-08)— puede cambiar entre
 minors, con el cambio anotado aquí.
 
+## [No publicado]
+
+### Cambiado
+
+- **`executores/` pasa a llamarse `executors/`.** No era palabra en ningún
+  idioma: en castellano es *ejecutores* y en inglés *executors*. Con el código
+  ya en inglés, el híbrido sólo confundía. El target del Makefile pasa de
+  `make test-executores` a `make test-executors`. Nada del contenido cambia —
+  ni rutas dentro del ejecutor, ni el contrato, ni las secuencias.
+
 ## [0.3.0] — 2026-08-27
 
 ### Añadido
@@ -44,10 +54,11 @@ minors, con el cambio anotado aquí.
   fichero donde apunte `--steps PATH` (o `ANVIL_PYTHON_STEPS`, o `./steps`).
   **La firma es el catálogo**: nombres, tipos y obligatoriedad salen de la
   propia función, así que no se escriben dos veces y no pueden divergir. Los
-  tres pasos que venían de serie se han mudado a `executores/python/steps/` y
+  tres pasos que venían de serie se han mudado a `executors/python/steps/` y
   se descubren como los de cualquiera. Trae además `--list` (ver el catálogo
   sin levantar un banco), `--option clave=valor` (configuración de despliegue,
-  vía `ctx.options`) y tests que **no necesitan gRPC** (`make test-executores`).
+  vía `ctx.options`) y tests que **no necesitan gRPC** (`make test-executores`,
+  renombrado a `make test-executors` justo después de publicar la 0.3.0).
 
 **Añadir `Describe` no sube el número de contrato** (sigue en 3), y el cambio
 de `paso.proto` es **aditivo**: ningún tag se mueve. Un ejecutor que no conozca

@@ -3,7 +3,7 @@
 Módulo distribuido de Anvil: un **ejecutor de lenguaje** que habla el mismo
 contrato gRPC (`paso.proto`) que el ejecutor WASM embebido. El motor lo ve
 como un endpoint más; no sabe que detrás hay Python. Es el primero de la
-familia `executores/` (LabVIEW, MATLAB, … futuros), licencia **Apache-2.0**
+familia `executors/` (LabVIEW, MATLAB, … futuros), licencia **Apache-2.0**
 (adoptable y extensible, [ADR-0012](../../docs/adr/0012-executores-de-lenguaje-como-modulos.md)).
 
 > **Para añadir un paso no se edita `server.py`.** Se escribe una función, se
@@ -193,8 +193,8 @@ El SDK se prueba con la biblioteca estándar y **sin gRPC**: lo que se prueba es
 la superficie con la que se escribe un paso, no el cable.
 
 ```sh
-cd executores/python && python3 -m unittest discover -p 'test_*.py'
-# o, desde la raíz del repo: make test-executores
+cd executors/python && python3 -m unittest discover -p 'test_*.py'
+# o, desde la raíz del repo: make test-executors
 ```
 
 ## Notas

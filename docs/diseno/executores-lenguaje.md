@@ -129,13 +129,13 @@ executors:
 > varios pasos. Es el análogo del Run-Time Engine de TestStand: si un
 > generador produce ese formato, funciona sin nada especial.
 
-## Executores de lenguaje (`executores/`)
+## Executores de lenguaje (`executors/`)
 
 Módulos aparte, uno por sistema, distribuidos con Anvil, licencia
 **Apache-2.0** (adoptables, ADR-0012):
 
 ```
-executores/
+executors/
   python/    # gRPC server en Python (M5)
   labview/   # futuro
   matlab/    # futuro

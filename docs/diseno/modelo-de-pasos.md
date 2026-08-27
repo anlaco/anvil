@@ -17,7 +17,7 @@ mismo `.wasm` del ejecutor; el objetivo es que un paso pueda ser un
 **servidor gRPC en cualquier lenguaje**.
 
 **Materializado en M5-ext (ADR-0013/0014):** Anvil distribuye **executores de
-lenguaje** como módulos (`executores/`, primero Python) y el routing
+lenguaje** como módulos (`executors/`, primero Python) y el routing
 **nombre→endpoint** (M5-ext.1, hecho: `ejecutores:`/`ejecutor:` en el YAML +
 override `--executor`). El **cargador de `.wasm` por path** (modelo `.vi`:
 compilar y referenciar, sin recompilar) está **hecho (M5-ext.2)** y lo hace

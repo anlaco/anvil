@@ -45,7 +45,7 @@ esos ejecutores.
 1. **Executores de lenguaje como módulos distribuidos.** Anvil distribuye,
    junto al binario, **ejecutores de lenguaje** — un servidor gRPC por
    sistema (Python, LabVIEW, MATLAB, …) que habla el contrato `paso.proto`.
-   Viven como **módulos aparte** en el directorio `executores/`, licencia
+   Viven como **módulos aparte** en el directorio `executors/`, licencia
    **Apache-2.0** (como `wasi-grpc`/`wasi-visa`, [ADR-0004](0004-licencia-dual-agpl-apache.md)):
    son piezas adoptables y extensibles, no parte del núcleo AGPL. El primero
    es **Python** (M5); LabVIEW/MATLAB/… son futuros. Son **alternativas**: se
@@ -163,7 +163,7 @@ esos ejecutores.
 
 **Neutras:**
 
-- `executores/` convive con `crates/` (core Rust), `packaging/` (binario
+- `executors/` convive con `crates/` (core Rust), `packaging/` (binario
   nativo) y `ejemplos/` (secuencias): cada pieza en su sitio.
 - Los ejecutores de lenguaje usan **gRPC nativo de su ecosistema**
   (`grpcio`, `tonic`, …), no `wasi-grpc` (esa es solo para WASM, ADR-0006).
@@ -173,7 +173,7 @@ esos ejecutores.
 - **Pasarela/proxy como componente aparte** entre motor y ejecutores:
   innecesaria — el ejecutor de lenguaje ya es gRPC; un proxy añade un salto
   y un componente sin ganancia (ADR-0003 ya da el aislamiento).
-- **Mover el ejecutor WASM a `executores/`** (simetría de layout): rompe el
+- **Mover el ejecutor WASM a `executors/`** (simetría de layout): rompe el
   zero-install (habría que arrancar un ejecutor antes de que cualquier
   secuencia funcione) y devalúa WASM al nivel de "un lenguaje más" cuando es
   la apuesta de fondo (ADR-0001).

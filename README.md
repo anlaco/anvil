@@ -165,7 +165,7 @@ Las librerías sobre las que se apoya van deliberadamente **Apache-2.0**:
 |---|---|---|
 | Interfaces WIT | Apache-2.0 | Queremos que se adopten como referencia |
 | `wasi-grpc`, `wasi-visa` | Apache-2.0 | Se linkan en código ajeno |
-| `executores/` | Apache-2.0 | Su SDK entra en el código de tus pasos ([LICENSE propia](executores/LICENSE)) |
+| `executors/` | Apache-2.0 | Su SDK entra en el código de tus pasos ([LICENSE propia](executors/LICENSE)) |
 | anvil | AGPL-3.0 | Es el producto |
 
 Un paso de test se **linka** con las librerías, así que copyleft ahí

@@ -231,7 +231,7 @@ este catálogo.
 ## Reuso hacia ejecutores externos (ADR-0013)
 
 El contrato **no cambia** desde el punto de vista del motor: un paso lo
-atiende un **ejecutor de lenguaje** distribuido (`executores/`, p. ej.
+atiende un **ejecutor de lenguaje** distribuido (`executors/`, p. ej.
 Python), un **componente `.wasm` cargado por path** (M5-ext.2; lo carga el
 host, ADR-0015) o el ejecutor embebido — el motor siempre habla el mismo
 `paso.proto` por gRPC y solo añade routing **nombre→endpoint** en su lado

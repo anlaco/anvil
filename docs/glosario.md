@@ -82,7 +82,7 @@ término de TestStand no se replica igual en Anvil, se dice explícitamente.
   `crates/ejecutor_pasos` (binario que escucha en `127.0.0.1:9100`).
 
 - **Ejecutor de lenguaje.** Ejecutor de pasos distribuido como **módulo
-  aparte** (`executores/`), uno por sistema (Python, LabVIEW, MATLAB, …),
+  aparte** (`executors/`), uno por sistema (Python, LabVIEW, MATLAB, …),
   que habla el mismo `paso.proto` con gRPC nativo de su ecosistema. Son
   **alternativas opt-in** al ejecutor WASM embebido; pueden mezclarse en la
   misma secuencia. Licencia Apache-2.0. Ver

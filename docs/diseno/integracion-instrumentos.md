@@ -17,7 +17,7 @@ opaco al motor.
 
 **Dónde corre el paso (ADR-0013):** en el ejecutor WASM embebido (built-in,
 de serie, en loopback), o en un **ejecutor de lenguaje** distribuido
-(`executores/`, p. ej. Python) que puede correr en loopback (M5-ext.1,
+(`executors/`, p. ej. Python) que puede correr en loopback (M5-ext.1,
 routing `ejecutores:`/`ejecutor:`) o, en el futuro, en un **LID** (SO legacy
 con aislamiento declarado, aplazado a post-M5-ext) cuando las
 DLLs/drivers del fabricante lo exijan. Anvil solo ve endpoints gRPC; ver

@@ -6,7 +6,7 @@ They use `unittest` from the standard library and **do not import grpc**: the
 SDK is the authoring surface, and it has to be testable —by us and by whoever
 writes a step— without a gRPC stack, a bench, or a running executor.
 
-    python3 -m unittest discover executores/python
+    python3 -m unittest discover executors/python
 """
 
 import tempfile
