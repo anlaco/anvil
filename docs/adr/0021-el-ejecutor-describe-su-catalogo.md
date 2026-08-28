@@ -10,7 +10,7 @@
   ejecutando** el código de este repo (§Contexto); lo de la competencia viene de
   las fuentes que cita el `#45` y no se ha vuelto a contrastar aquí.
 - **Relaciona:** ADR-0003, ADR-0005, ADR-0012, ADR-0015, ADR-0019, ADR-0020,
-  issues #39, #45, #54, [contrato-grpc.md](../contrato-grpc.md),
+  issues #39, #45, #54, #55, [contrato-grpc.md](../contrato-grpc.md),
   [diseno/ui-vs-headless.md](../diseno/ui-vs-headless.md)
 - **Alcance:** decide **e implementa** el mecanismo de catálogo y el modo de
   descubrimiento del ejecutor Python. No diseña el editor visual, no toca el
@@ -148,6 +148,15 @@ comprueba lo que se va a invocar.
 o un texto hasta que la corrida lo diga; rechazarla sería inventarse un
 hallazgo. Se comprueba su **nombre**, que es lo que cuesta el dedazo. Lo demás
 —que sea del tipo que el paso pide— sigue siendo de ejecución, y está dicho.
+
+> **Matizado por [ADR-0022](0022-la-referencia-a-objeto-es-un-cuarto-tipo-y-nombra-una-ranura.md)
+> (2026-08-28):** esta renuncia es la razón de que el tipo `referencia` se
+> declare también **en la variable** (`locals:`) y no sólo en el valor. Con el
+> tipo declarado, comprobar que una referencia no se pasa a un paso servido por
+> **otro** ejecutor es local y no exige el análisis de flujo de datos que aquí se
+> declina — que habría que hacer a través de `assign`, de los `parameters` de las
+> subsecuencias y del process model. Lo decidido aquí no cambia: el tipo de una
+> expresión se sigue sin adivinar.
 
 ### 6 — `--validate` no rompe su promesa: se sale de ella a mano
 
