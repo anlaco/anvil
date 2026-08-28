@@ -22,13 +22,15 @@ pub const ROUTE_DESCRIBE: &str = "/StepExecutor/Describe";
 ///   and returns `0` by proto3 default, which is what gives it away.
 /// - **2** = named inputs and outputs.
 /// - **3** = the English contract (state vocabulary, field names).
+/// - **4** = the object reference: a fourth branch in `Value`'s `oneof`, a
+///   fourth `ValueType`, and `Catalog.lifetime` (ADR-0022).
 ///
 /// Raise it for every change where **an old peer's silence could alter a
 /// verdict**. What a peer can ignore without changing the claim made about
 /// the unit (an informative field, a trace) does not raise it — which is why
 /// `Describe` (ADR-0021) did *not*: an executor that declines to describe
 /// itself measures exactly the same thing.
-pub const CONTRACT: i32 = 3;
+pub const CONTRACT: i32 = 4;
 
 /// A named, typed value, exactly as it travels on the wire.
 ///
@@ -39,13 +41,13 @@ pub const CONTRACT: i32 = 3;
 pub struct Value {
     #[prost(string, tag = "1")]
     pub name: String,
-    #[prost(oneof = "value::Dato", tags = "2, 3, 4")]
+    #[prost(oneof = "value::Dato", tags = "2, 3, 4, 5")]
     pub dato: Option<value::Dato>,
 }
 
 pub mod value {
-    /// The three branches of the `oneof`, in the same order as the `.proto`.
-    /// They are the three `expr::Value` variants that carry a value (all but
+    /// The four branches of the `oneof`, in the same order as the `.proto`.
+    /// They are the four `expr::Value` variants that carry a value (all but
     /// `Nulo`).
     #[derive(Clone, PartialEq, ::prost::Oneof)]
     pub enum Dato {
@@ -55,6 +57,46 @@ pub mod value {
         Texto(String),
         #[prost(bool, tag = "4")]
         Booleano(bool),
+        #[prost(message, tag = "5")]
+        Reference(super::Reference),
+    }
+}
+
+/// A handle to an object the executor keeps, exactly as it travels
+/// (ADR-0022). The mirror of `expr::Reference`; see that type for who mints
+/// each of the three parts and why.
+///
+/// It is a message and not a formatted string on purpose: a string would put
+/// Anvil in the business of composing and splitting an identifier it has no
+/// right to read, and the first payload containing the separator would make it
+/// wrong.
+#[derive(Clone, PartialEq, Message)]
+pub struct Reference {
+    #[prost(string, tag = "1")]
+    pub executor: String,
+    #[prost(string, tag = "2")]
+    pub lifetime: String,
+    #[prost(string, tag = "3")]
+    pub payload: String,
+}
+
+impl Reference {
+    /// The wire form of a reference the engine holds.
+    pub fn desde_referencia(r: &expr::Reference) -> Self {
+        Reference {
+            executor: r.executor.clone(),
+            lifetime: r.lifetime.clone(),
+            payload: r.payload.clone(),
+        }
+    }
+
+    /// The engine's form of a reference off the wire.
+    pub fn a_referencia(&self) -> expr::Reference {
+        expr::Reference {
+            executor: self.executor.clone(),
+            lifetime: self.lifetime.clone(),
+            payload: self.payload.clone(),
+        }
     }
 }
 
@@ -69,6 +111,7 @@ impl Value {
             expr::Value::Numero(x) => value::Dato::Numero(*x),
             expr::Value::Texto(s) => value::Dato::Texto(s.clone()),
             expr::Value::Bool(b) => value::Dato::Booleano(*b),
+            expr::Value::Reference(r) => value::Dato::Reference(Reference::desde_referencia(r)),
             expr::Value::Nulo => return None,
         };
         Some(Value {
@@ -87,6 +130,17 @@ impl Value {
             value::Dato::Numero(x) => Some(expr::Value::Numero(*x)),
             value::Dato::Texto(s) => Some(expr::Value::Texto(s.clone())),
             value::Dato::Booleano(b) => Some(expr::Value::Bool(*b)),
+            value::Dato::Reference(r) => Some(expr::Value::Reference(r.a_referencia())),
+        }
+    }
+
+    /// The reference this value carries, or `None`. It is what lets the
+    /// engine stamp the executor's name on a reference coming back from a
+    /// step, and what lets the WASM bridge refuse one (ADR-0022 §8).
+    pub fn reference_mut(&mut self) -> Option<&mut Reference> {
+        match self.dato.as_mut() {
+            Some(value::Dato::Reference(r)) => Some(r),
+            _ => None,
         }
     }
 
@@ -99,6 +153,7 @@ impl Value {
             Some(value::Dato::Numero(_)) => ValueType::Number,
             Some(value::Dato::Texto(_)) => ValueType::Text,
             Some(value::Dato::Booleano(_)) => ValueType::Boolean,
+            Some(value::Dato::Reference(_)) => ValueType::Reference,
         }
     }
 }
@@ -132,6 +187,9 @@ pub enum ValueType {
     Number = 1,
     Text = 2,
     Boolean = 3,
+    /// A handle to an object the executor keeps (ADR-0022). **Flat**: it says
+    /// the parameter is a reference, not of what class.
+    Reference = 4,
 }
 
 impl ValueType {
@@ -144,6 +202,7 @@ impl ValueType {
             ValueType::Number => "number",
             ValueType::Text => "text",
             ValueType::Boolean => "boolean",
+            ValueType::Reference => "reference",
         }
     }
 }
@@ -276,15 +335,31 @@ pub struct Catalog {
     /// [`StepResult::contract`].
     #[prost(int32, tag = "3")]
     pub contract: i32,
+    /// The executor's **life**: an identifier it mints anew on every start
+    /// (ADR-0022 §6). Empty means it publishes none, and then liveness is
+    /// reported as unchecked rather than assumed (ADR-0019, Rule 2).
+    #[prost(string, tag = "4")]
+    pub lifetime: String,
 }
 
 impl Catalog {
-    /// The catalog of an executor that does describe itself.
+    /// The catalog of an executor that does describe itself and publishes no
+    /// lifetime — which is legitimate, and means references against it cannot
+    /// be checked for liveness.
     pub fn descrito(steps: Vec<StepSpec>) -> Self {
         Catalog {
             steps,
             describes: true,
             contract: CONTRACT,
+            lifetime: String::new(),
+        }
+    }
+
+    /// The catalog of an executor that also says which life it is on.
+    pub fn descrito_con_vida(steps: Vec<StepSpec>, lifetime: &str) -> Self {
+        Catalog {
+            lifetime: lifetime.to_string(),
+            ..Catalog::descrito(steps)
         }
     }
 
@@ -680,5 +755,45 @@ mod tests {
             .value_type(),
             ValueType::Unspecified
         );
+    }
+
+    /// La cuarta rama cruza el cable con sus tres partes intactas, y `Nulo`
+    /// sigue sin tener representación (ADR-0022).
+    #[test]
+    fn a_reference_round_trips_with_its_three_parts() {
+        let r = expr::Reference {
+            executor: "bench".into(),
+            lifetime: "v1".into(),
+            // Lo peor que un ejecutor puede acuñar: separadores del informe
+            // dentro del payload. Al motor le da igual — es opaco — y al cable
+            // también, porque es un mensaje y no una cadena formateada.
+            payload: "rack;canal=2/x".into(),
+        };
+        let cable = Value::desde_value("rack", &expr::Value::Reference(r.clone())).unwrap();
+        assert_eq!(cable.value_type(), ValueType::Reference);
+        let vuelta = Value::decode(&cable.encode_to_vec()[..]).unwrap();
+        assert_eq!(vuelta.a_value(), Some(expr::Value::Reference(r)));
+    }
+
+    /// El eco de contrato sube a 4, y el puente y el ejecutor Python tienen
+    /// que subir con él: el número está gateado por el entero, no por
+    /// funcionalidad (ADR-0020 §4a), así que es un flag day.
+    #[test]
+    fn the_reference_raised_the_contract() {
+        assert_eq!(CONTRACT, 4);
+    }
+
+    /// Un tipo que este binario no conoce sigue leyéndose como «sin
+    /// comprobar», que es lo que permitió que el cuarto tipo no rompiera a un
+    /// motor viejo por el lado de la descripción.
+    #[test]
+    fn a_catalog_says_which_life_it_is_on() {
+        let c = Catalog::descrito_con_vida(Vec::new(), "v7");
+        let vuelta = Catalog::decode(&c.encode_to_vec()[..]).unwrap();
+        assert_eq!(vuelta.lifetime, "v7");
+        // Y no publicarla es legítimo: significa «no se puede comprobar»,
+        // nunca «está viva» (ADR-0019, Regla 2).
+        assert!(Catalog::descrito(Vec::new()).lifetime.is_empty());
+        assert!(Catalog::decode(&[][..]).unwrap().lifetime.is_empty());
     }
 }

@@ -147,11 +147,39 @@ fn eval_bin(op: &BinOp, l: Value, r: Value) -> Result<Value, ErrorExpr> {
         BinOp::Ge => orden(&l, &r, |a, b| a >= b, ">="),
         // Igualdad: mismo tipo compara; tipos distintos → false/true (no error).
         // Nulo == Nulo → true; Nulo == otra cosa → false.
-        BinOp::Eq => Ok(Bool(iguales(&l, &r))),
-        BinOp::Ne => Ok(Bool(!iguales(&l, &r))),
+        //
+        // A reference is the one exception, and it is an error and not a
+        // `false`: comparing handles is an operation on a value the engine
+        // cannot read, and answering `false` to `locals.rack == locals.dmm`
+        // would be answering a question nobody can answer (ADR-0022 §1).
+        BinOp::Eq => sin_referencia(&l, &r, "==").map(|_| Bool(iguales(&l, &r))),
+        BinOp::Ne => sin_referencia(&l, &r, "!=").map(|_| Bool(!iguales(&l, &r))),
         // And/Or se gestionan por cortocircuito en `eval`; no llegan aquí.
         BinOp::And | BinOp::Or => unreachable!("and/or se cortocircuitan en eval"),
     }
+}
+
+/// Refuses an operator either of whose operands is a reference.
+///
+/// The refusal is the whole point of the type (ADR-0022 §1): a handle can be
+/// read out of a variable and handed to a step, and nothing else. Arithmetic
+/// and ordering already refuse it by demanding numbers; equality would not,
+/// which is why it is spelled out here.
+fn sin_referencia(l: &Value, r: &Value, op: &str) -> Result<(), ErrorExpr> {
+    for v in [l, r] {
+        if let Value::Reference(rf) = v {
+            return Err(ErrorExpr::tipo(
+                0,
+                format!(
+                    "'{op}' no se puede aplicar a una referencia ({}): una referencia \
+                     es opaca — se lee de una variable y se pasa a un paso, y no \
+                     admite ninguna otra operación",
+                    rf.mostrar()
+                ),
+            ));
+        }
+    }
+    Ok(())
 }
 
 fn num_num(l: &Value, r: &Value, op: &str) -> Result<(f64, f64), ErrorExpr> {
@@ -202,6 +230,8 @@ fn iguales(l: &Value, r: &Value) -> bool {
         (Bool(a), Bool(b)) => a == b,
         (Texto(a), Texto(b)) => a == b,
         (Nulo, Nulo) => true,
+        // References never reach here: `sin_referencia` refuses them before
+        // the comparison is attempted.
         // Tipos distintos (incl. Nulo vs otra cosa) → no iguales.
         _ => false,
     }
@@ -451,5 +481,92 @@ mod tests {
             valor: num(1.0),
         }];
         assert!(eval_sentencias(&stmts, &mut env).is_err());
+    }
+
+    fn referencia() -> Value {
+        Value::Reference(crate::Reference {
+            executor: "banco".into(),
+            lifetime: "l1".into(),
+            payload: "s1".into(),
+        })
+    }
+
+    /// **Criterio 3 del encargo**, en el sitio donde se decide: una referencia
+    /// no entra en ninguna operación (ADR-0022 §1).
+    ///
+    /// La aritmética y el orden ya la rechazaban por exigir números; la
+    /// igualdad **no**, y ésa es la que hay que sujetar a mano: `==` contestaba
+    /// `false` a tipos distintos, así que `locals.rack == 'abc'` habría dado un
+    /// booleano perfectamente utilizable como veredicto.
+    ///
+    /// Visto fallar quitando `sin_referencia` de `Eq`/`Ne`: los dos últimos
+    /// casos pasan a devolver `Ok(Bool(false))` y el test se pone rojo.
+    #[test]
+    fn una_referencia_no_entra_en_ninguna_operacion() {
+        let env = EntornoMock::new()
+            .set(Scope::Locals, "rack", referencia())
+            .set(Scope::Locals, "n", Value::Numero(2.0));
+        for (op, texto) in [
+            (BinOp::Add, "+"),
+            (BinOp::Sub, "-"),
+            (BinOp::Mul, "*"),
+            (BinOp::Div, "/"),
+            (BinOp::Lt, "<"),
+            (BinOp::Ge, ">="),
+            (BinOp::Eq, "=="),
+            (BinOp::Ne, "!="),
+        ] {
+            let e = Expresion::BinOp {
+                op,
+                izq: Box::new(var(Scope::Locals, "rack")),
+                der: Box::new(var(Scope::Locals, "n")),
+            };
+            let err = eval(&e, &env)
+                .expect_err(&format!("'{texto}' sobre una referencia tiene que fallar"))
+                .to_string();
+            assert!(
+                err.contains("referencia"),
+                "'{texto}': el error tiene que decir que es una referencia: {err}"
+            );
+        }
+    }
+
+    /// `not` y `and`/`or` la rechazan por exigir bool, y se comprueba para que
+    /// una referencia no pueda ser jamás el veredicto de un `pass_fail`.
+    #[test]
+    fn una_referencia_no_puede_ser_un_veredicto() {
+        let env = EntornoMock::new().set(Scope::Locals, "rack", referencia());
+        let no = Expresion::UnOp {
+            op: UnOp::Not,
+            operando: Box::new(var(Scope::Locals, "rack")),
+        };
+        assert!(eval(&no, &env).is_err());
+        let y = Expresion::BinOp {
+            op: BinOp::And,
+            izq: Box::new(var(Scope::Locals, "rack")),
+            der: Box::new(Expresion::Lit(Value::Bool(true))),
+        };
+        assert!(eval(&y, &env).is_err());
+    }
+
+    /// Leerla y copiarla **sí** funciona, y tiene que seguir funcionando: son
+    /// las dos cosas que hacen `assign` e `inputs` (ADR-0022 §1).
+    #[test]
+    fn una_referencia_se_lee_y_se_copia() {
+        let mut env = EntornoMock::new().set(Scope::Locals, "rack", referencia());
+        assert_eq!(
+            eval(&var(Scope::Locals, "rack"), &env).unwrap(),
+            referencia()
+        );
+        eval_sentencias(
+            &[Sentencia::Assign {
+                scope: Scope::Locals,
+                campo: "otro".into(),
+                valor: var(Scope::Locals, "rack"),
+            }],
+            &mut env,
+        )
+        .unwrap();
+        assert_eq!(env.lee(Scope::Locals, "otro").unwrap(), referencia());
     }
 }

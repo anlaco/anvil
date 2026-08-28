@@ -137,12 +137,63 @@ fn nombrados_a_csv(vs: &[(String, expr::Value)]) -> String {
                 expr::Value::Numero(x) => a_texto(Some(*x)),
                 expr::Value::Texto(s) => s.clone(),
                 expr::Value::Bool(b) => b.to_string(),
+                expr::Value::Reference(r) => referencia_a_token(r),
                 expr::Value::Nulo => String::new(),
             };
             format!("{n}={valor}")
         })
         .collect::<Vec<_>>()
         .join(";")
+}
+
+/// A reference in one CSV cell: `ref:<executor>/<lifetime>/<payload>`, each
+/// part percent-encoded (ADR-0022 left the form open).
+///
+/// **The encoding is the point, not the shape.** This cell packs several pairs
+/// as `name=value` joined by `;`, and [`csv_campo`] escapes only what RFC-4180
+/// asks of it — comma, quote, CR, LF. A payload carrying a `;` or an `=` would
+/// therefore split the cell into pairs that were never there, and it would do
+/// it **in silence**: the file still parses, and the row reads as if the bench
+/// had been something else. A payload is minted by the executor and opaque to
+/// Anvil, so there is no character it can be promised not to contain.
+///
+/// So the three parts are percent-encoded and the result carries no character
+/// that means anything to this format. `ref:` marks it as a reference rather
+/// than a text that happens to look like a path.
+///
+/// The same corruption is still reachable through a **text** output holding a
+/// `;` or an `=`, and this does not fix that: changing how texts are written
+/// would change files already being read (see issue on the CSV separator).
+fn referencia_a_token(r: &expr::Reference) -> String {
+    format!(
+        "ref:{}/{}/{}",
+        pct(modelo::nombre_visible_de_ejecutor(&r.executor)),
+        pct(&r.lifetime),
+        pct(&r.payload)
+    )
+}
+
+/// Percent-encodes everything this format gives a meaning to, plus `%` itself
+/// so the encoding is reversible, plus the control characters.
+///
+/// Deliberately not "everything but alphanumerics": a reference is meant to be
+/// read off a row by a person, and encoding a hyphen would make a plain
+/// `rack-1` unreadable for no gain.
+fn pct(s: &str) -> String {
+    let mut fuera = String::with_capacity(s.len());
+    for c in s.chars() {
+        // `%` first: it is the escape character and must be encoded, or the
+        // decoding is ambiguous. `;` and `=` split the cell, `/` separates the
+        // three parts, and `,` `"` CR LF are the CSV field's own.
+        if matches!(c, '%' | ';' | '=' | '/' | ',' | '"') || c.is_control() {
+            for b in c.to_string().bytes() {
+                fuera.push_str(&format!("%{b:02X}"));
+            }
+        } else {
+            fuera.push(c);
+        }
+    }
+    fuera
 }
 
 /// Escapa un campo según RFC-4180 y lo añade a `fila`: si contiene coma,
@@ -407,5 +458,73 @@ mod tests {
             String::from_utf8(sink.salida).unwrap()
         };
         assert_ne!(csv_de(1.0), csv_de(2.0));
+    }
+
+    /// **Criterio 5 del encargo.** Una carga opaca con `;` y `=` dentro no
+    /// corrompe la celda (ADR-0022, §Consecuencias: *«que no se corrompa nada
+    /// es requisito»*).
+    ///
+    /// La celda empaqueta varios pares `nombre=valor` unidos por `;`, y
+    /// `csv_campo` sólo escapa lo que le pide RFC-4180 —coma, comilla, CR,
+    /// LF—. Un payload con un `;` partiría la celda en pares que nunca
+    /// existieron, **y en silencio**: el fichero sigue siendo CSV válido y la
+    /// fila se lee como si el banco hubiera sido otro. Y no hay carácter que
+    /// se le pueda prohibir a un payload: lo acuña el ejecutor y es opaco.
+    ///
+    /// Visto fallar sustituyendo `pct` por la identidad: la celda pasa a
+    /// tener cuatro pares y a decir que el canal es `2` cuando nadie lo mandó.
+    #[test]
+    fn una_carga_opaca_con_punto_y_coma_no_corrompe_la_celda() {
+        let referencia = expr::Value::Reference(expr::Reference {
+            executor: "python".into(),
+            lifetime: "v1".into(),
+            payload: "rack;canal=2".into(),
+        });
+        let celda = nombrados_a_csv(&[
+            ("rack".into(), referencia),
+            ("canal".into(), expr::Value::Numero(7.0)),
+        ]);
+        // Dos pares y no cuatro: el `;` y el `=` del payload no separan nada.
+        let pares: Vec<&str> = celda.split(';').collect();
+        assert_eq!(pares.len(), 2, "la celda se partió: {celda}");
+        assert_eq!(pares[1], "canal=7");
+        assert!(
+            !pares[0].trim_start_matches("rack=").contains('='),
+            "el payload no puede traer un '=' suelto: {celda}"
+        );
+        // Y sigue siendo reversible: el payload original se recupera.
+        let payload = pares[0].rsplit('/').next().unwrap();
+        assert_eq!(descodifica(payload), "rack;canal=2");
+    }
+
+    /// La codificación es reversible, que es lo que la separa de «borrar los
+    /// caracteres molestos»: quien lea el informe tiene que poder recuperar el
+    /// identificador con el que se midió.
+    #[test]
+    fn la_codificacion_de_una_referencia_es_reversible() {
+        for crudo in ["s1", "a/b", "100%", "x=1;y=2", "con,coma", "con\"comilla"] {
+            assert_eq!(descodifica(&pct(crudo)), crudo, "roundtrip de {crudo:?}");
+        }
+        assert_eq!(pct("rack-1"), "rack-1", "lo legible se queda legible");
+    }
+
+    /// El decodificador del test, a propósito escrito aquí y no en el sink:
+    /// Anvil **escribe** referencias y no las lee de vuelta, así que tener un
+    /// decodificador en producción sería tener código que nadie ejerce.
+    fn descodifica(s: &str) -> String {
+        let bytes = s.as_bytes();
+        let mut fuera: Vec<u8> = Vec::with_capacity(bytes.len());
+        let mut i = 0;
+        while i < bytes.len() {
+            if bytes[i] == b'%' && i + 2 < bytes.len() {
+                let hex = std::str::from_utf8(&bytes[i + 1..i + 3]).unwrap();
+                fuera.push(u8::from_str_radix(hex, 16).unwrap());
+                i += 3;
+            } else {
+                fuera.push(bytes[i]);
+                i += 1;
+            }
+        }
+        String::from_utf8(fuera).unwrap()
     }
 }

@@ -124,11 +124,30 @@ fn nombrados_a_json(vs: &[(String, expr::Value)]) -> Value {
 
 /// Un `expr::Value` al JSON de su tipo. `Nulo` → `null`, aunque hoy no puede
 /// llegar (ni un parámetro ni una salida nula cruzan el cable).
+///
+/// **A reference is an object, and that is the whole decision** (ADR-0022 left
+/// the form open). Writing it as a string would put it back where the type
+/// took it from: indistinguishable from a text, concatenable by whoever
+/// post-processes the report, and needing a separator that the first payload
+/// containing it would break. An object cannot be confused with any of the
+/// three scalars, needs no escaping at all —`serde_json` quotes the three
+/// fields— and keeps the three parts apart, which is what lets a reader tell
+/// which bench a measurement was made against even after the run.
+///
+/// `type` is spelled out rather than implied by the shape: a consumer that
+/// only knows the three scalars sees an object with a name on it instead of a
+/// number it might have used.
 fn valor_a_json(v: &expr::Value) -> Value {
     match v {
         expr::Value::Numero(x) => json!(x),
         expr::Value::Texto(s) => json!(s),
         expr::Value::Bool(b) => json!(b),
+        expr::Value::Reference(r) => json!({
+            "type": "reference",
+            "executor": modelo::nombre_visible_de_ejecutor(&r.executor),
+            "lifetime": r.lifetime,
+            "payload": r.payload,
+        }),
         expr::Value::Nulo => Value::Null,
     }
 }
@@ -381,5 +400,43 @@ mod tests {
         let doc: Value = serde_json::from_slice(&sink.salida).unwrap();
         assert_eq!(doc["steps"][0]["inputs"], json!({}));
         assert_eq!(doc["steps"][0]["outputs"], json!({}));
+    }
+
+    /// **La forma de una referencia en el JSON** (ADR-0022 la dejó abierta):
+    /// un objeto, no una cadena.
+    ///
+    /// Una cadena la devolvería al sitio del que el tipo la sacó —
+    /// indistinguible de un texto, concatenable por quien post-procese el
+    /// informe, y necesitada de un separador que el primer payload que lo
+    /// contuviera rompería. Un objeto no se puede confundir con ninguno de los
+    /// tres escalares y no necesita escapado ninguno.
+    ///
+    /// Visto fallar escribiendo la referencia como `r.mostrar()`: el valor
+    /// pasa a ser una cadena y el `assert` del tipo se cae.
+    #[test]
+    fn una_referencia_va_como_objeto_y_no_como_cadena() {
+        let v = valor_a_json(&expr::Value::Reference(expr::Reference {
+            executor: "python".into(),
+            lifetime: "v1".into(),
+            payload: "rack;canal=2".into(),
+        }));
+        assert!(v.is_object(), "una referencia no es un escalar: {v}");
+        assert_eq!(v["type"], "reference");
+        assert_eq!(v["executor"], "python");
+        assert_eq!(v["lifetime"], "v1");
+        // El payload, tal cual: `serde_json` lo entrecomilla y no hay
+        // separador nuestro que se pueda romper.
+        assert_eq!(v["payload"], "rack;canal=2");
+    }
+
+    /// El nombre interno del ejecutor embebido es fontanería y no se enseña.
+    #[test]
+    fn el_ejecutor_embebido_sale_por_su_nombre_legible() {
+        let v = valor_a_json(&expr::Value::Reference(expr::Reference {
+            executor: modelo::EJECUTOR_EMBEBIDO.into(),
+            lifetime: String::new(),
+            payload: "s1".into(),
+        }));
+        assert_eq!(v["executor"], "embebido");
     }
 }

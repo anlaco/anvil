@@ -427,6 +427,21 @@ fn comprueba_firmas(motor: &mut Motor, programa: &Programa, quiet: bool) -> bool
     for linea in informe.resumen_sin_comprobar() {
         eprintln!("aviso: {linea}");
     }
+    // ADR-0022 §6: liveness is not typing, and an executor that does not
+    // publish a life cannot be asked whether it is still the same one. That is
+    // legitimate and does not stop the run — but it is said here, once, rather
+    // than assumed. Silence would be the false green the whole of ADR-0019 is
+    // about.
+    for endpoint in motor::endpoints_con_referencias(programa) {
+        if !motor.publica_vida(&endpoint) {
+            eprintln!(
+                "aviso: la secuencia declara referencias del ejecutor '{}', y no publica una \
+                 vida en su catálogo: si se reinicia a mitad de corrida, Anvil no lo va a \
+                 poder detectar (lo detectará el propio ejecutor al recibir la referencia)",
+                modelo::nombre_visible_de_ejecutor(&endpoint)
+            );
+        }
+    }
     if !quiet && informe.comprobados > 0 {
         eprintln!(
             "{} paso(s) comprobados contra el catálogo de su ejecutor",

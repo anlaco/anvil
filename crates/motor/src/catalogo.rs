@@ -23,7 +23,7 @@ use modelo::proto::{Catalog, ParameterSpec, StepSpec, ValueType};
 use modelo::{
     DefinicionPaso, DefinicionSecuencia, EntradaPaso, Programa, TipoPaso, ValorDefinicion,
 };
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use crate::{nombre_visible, Motor};
 
@@ -230,16 +230,35 @@ impl Motor {
     /// shape as several other harmless outcomes, and none of them is worth
     /// refusing to test over. If the connection really is broken, the first
     /// `Invoke` says so, loudly and in the right place.
+    /// It also records each executor's **life** (ADR-0022 §6), which travels
+    /// in the same `Catalog` and is the one thing this call is allowed to be
+    /// asked for again later: it is a fact about the process, not about the
+    /// signatures, so re-reading it does not make the report irreconstructible.
+    /// An executor that publishes none is simply not recorded, and references
+    /// against it stay unchecked for liveness.
     pub fn describe_ejecutores(&mut self) -> Catalogos {
         let endpoints: Vec<String> = self.conexiones.keys().cloned().collect();
         let mut fuera = BTreeMap::new();
         for endpoint in endpoints {
-            fuera.insert(endpoint.clone(), self.describe_uno(&endpoint));
+            let d = self.describe_uno(&endpoint);
+            if let Descripcion::Describe(c) = &d {
+                if !c.lifetime.is_empty() {
+                    self.vidas.insert(endpoint.clone(), c.lifetime.clone());
+                }
+            }
+            fuera.insert(endpoint.clone(), d);
         }
         fuera
     }
 
-    fn describe_uno(&mut self, endpoint: &str) -> Descripcion {
+    /// Whether this executor publishes a life, i.e. whether references against
+    /// it can be checked for liveness at all. Read by the CLI to say so out
+    /// loud instead of assuming (ADR-0019, Rule 2).
+    pub fn publica_vida(&self, endpoint: &str) -> bool {
+        self.vidas.contains_key(endpoint)
+    }
+
+    pub(crate) fn describe_uno(&mut self, endpoint: &str) -> Descripcion {
         use modelo::proto::{CatalogRequest, CONTRACT, ROUTE_DESCRIBE};
         use prost::Message;
 
@@ -262,6 +281,33 @@ impl Motor {
             Ok(c) => Descripcion::Describe(c),
             Err(e) => Descripcion::NoDescribe(format!("its catalog is unreadable ({e})")),
         }
+    }
+}
+
+/// Every endpoint the program declares a reference against (ADR-0022 §3),
+/// as routing keys.
+///
+/// It reads the **declarations** and not the run, which is the whole reason
+/// the type is on the variable: the answer is available by reading the file,
+/// with nothing connected and nothing measured.
+pub fn endpoints_con_referencias(programa: &Programa) -> BTreeSet<String> {
+    let mut fuera = BTreeSet::new();
+    recoge_endpoints(&programa.raiz, programa, &mut fuera);
+    for sec in programa.archivos.values() {
+        recoge_endpoints(sec, programa, &mut fuera);
+    }
+    fuera
+}
+
+fn recoge_endpoints(def: &DefinicionSecuencia, programa: &Programa, fuera: &mut BTreeSet<String>) {
+    for decl in def.locals.values() {
+        if let Some(ejecutor) = decl.ejecutor_de_referencia() {
+            let e = cargador::resolver_endpoint(Some(ejecutor), &programa.ejecutores);
+            fuera.insert(e.clave().to_string());
+        }
+    }
+    for sub in def.subsecuencias.values() {
+        recoge_endpoints(sub, programa, fuera);
     }
 }
 
@@ -417,6 +463,12 @@ fn comprueba_tipo(
         EntradaPaso::Literal(ValorDefinicion::Numero(_)) => ValueType::Number,
         EntradaPaso::Literal(ValorDefinicion::Texto(_)) => ValueType::Text,
         EntradaPaso::Literal(ValorDefinicion::Bool(_)) => ValueType::Boolean,
+        // Unreachable from a YAML: a reference has no literal form, and the
+        // loader refuses one written into `inputs:` (ADR-0022 §1). It is
+        // matched rather than lumped in with the expressions so that adding a
+        // literal syntax some day is a compile error here and not a silently
+        // unchecked parameter.
+        EntradaPaso::Literal(ValorDefinicion::Reference { .. }) => ValueType::Reference,
         EntradaPaso::Expresion(_) => return None,
     };
     (recibido != esperado).then(|| Hallazgo::TipoDeEntrada {
