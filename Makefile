@@ -17,7 +17,7 @@
 # wasmtime, ADR-0011), hence the `--manifest-path` calls.
 
 HOST    := packaging/anvil-host/Cargo.toml
-BRIDGE  := packaging/anvil-puente-wasm/Cargo.toml
+BRIDGE  := executors/wasm/Cargo.toml
 GUESTS  := -p motor -p ejecutor_pasos
 TARGET  := wasm32-wasip2
 
