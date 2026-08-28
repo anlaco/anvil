@@ -71,9 +71,9 @@ fn main() {
     for (name, subdir, dir, command) in &artifacts {
         let dst = out_dir.join(name);
         let path = |p: &str| repo_root.join(dir).join(subdir).join(p).join(name);
-        let src = if path(profile).exists() {
-            path(profile)
-        } else if path(fallback).exists() {
+        let src = if path(&profile).exists() {
+            path(&profile)
+        } else if path(&fallback).exists() {
             println!(
                 "cargo:warning=the host is being built in '{profile}' but '{name}' only exists \
                  in '{fallback}': that one gets embedded. For a coherent binary: {recipe}"
