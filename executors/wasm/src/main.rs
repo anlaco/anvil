@@ -440,9 +440,7 @@ fn proto_a_nombrado(v: &pb::Value) -> Result<Named, NoTraducible> {
         pb::value::Value::Number(x) => ValueWit::Number(*x),
         pb::value::Value::Text(s) => ValueWit::Text(s.clone()),
         pb::value::Value::Boolean(b) => ValueWit::Boolean(*b),
-        pb::value::Value::Reference(_) => {
-            return Err(NoTraducible::Referencia(v.name.clone()))
-        }
+        pb::value::Value::Reference(_) => return Err(NoTraducible::Referencia(v.name.clone())),
     };
     Ok(Named {
         name: v.name.clone(),
