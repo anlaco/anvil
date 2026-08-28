@@ -23,6 +23,25 @@ a sequence is not a valid Python identifier).
 What an executor cannot infer, it does not claim: an unannotated parameter is
 described as *unspecified*, and Anvil leaves it unchecked rather than guessing
 it is a number (ADR-0019, Rule 2).
+
+**Objects that stay here.** A bench, an instrument session, a connection: a
+thing with open sockets that cannot travel and must not be reopened per step.
+Keep it in ``ctx.objects`` and hand the sequence a ``Reference`` to it
+(ADR-0022)::
+
+    @step(outputs={"rack": Reference})
+    def open_bench(ctx, address: str) -> Result:
+        # Opens the bench and hands back a handle to it.
+        return Result.passed(outputs={"rack": ctx.objects.new(Bench(address))})
+
+    @step
+    def set_voltage(ctx, rack: Reference, volts: float) -> Result:
+        ctx.objects.get(rack).set_voltage(volts)
+        return Result.passed()
+
+The reference names a **slot**, so ``set_voltage`` answers no new handle: it
+changed the bench, not which bench. See `ObjectStore` for the two duties an
+executor owes here that no contract can check for it.
 """
 
 from __future__ import annotations
@@ -33,6 +52,9 @@ import inspect
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
+import itertools
+import threading
+import uuid
 from typing import Any, Callable, Dict, Iterable, List, Optional
 
 __all__ = [
@@ -46,19 +68,28 @@ __all__ = [
     "REGISTRY",
     "discover",
     "DiscoveryError",
+    "Reference",
+    "ObjectStore",
+    "LIFETIME",
 ]
 
-# The three types of the contract, and no more: a parameter that needs
+# The four types of the contract, and no more: a parameter that needs
 # structure is a badly cut step (ADR-0020 §2). `UNSPECIFIED` is what an
 # unannotated parameter gets — it means "unchecked", never "number".
 UNSPECIFIED = "unspecified"
 NUMBER = "number"
 TEXT = "text"
 BOOLEAN = "boolean"
+REFERENCE = "reference"
 
-# `bool` before `int`: in Python `bool` is a subclass of `int`, and a step
-# declaring `flag: bool` must not be described as taking a number.
-_TYPES = {bool: BOOLEAN, int: NUMBER, float: NUMBER, str: TEXT}
+#: This process's **life** (ADR-0022 §6). Minted once, at import, and published
+#: in the catalog so Anvil can find out that the process holding its references
+#: died and was born again — which is not a question a type system can answer.
+#:
+#: The executor owes two things the contract cannot verify (ADR-0022 §7): a
+#: different lifetime on every start, which this is, and never recycling a
+#: payload within one, which `ObjectStore` is.
+LIFETIME = uuid.uuid4().hex
 
 # The step's verdict vocabulary, closed and lowercase, exactly as `paso.proto`
 # defines it. "skipped" is not here: only the engine produces it.
@@ -74,6 +105,146 @@ class DiscoveryError(Exception):
     catalog served quietly means the bench runs whichever of the two steps
     happened to load last.
     """
+
+
+@dataclass(frozen=True)
+class Reference:
+    """A handle to an object this executor keeps for itself (ADR-0022).
+
+    The object never crosses the wire — it holds open sockets and vendor
+    driver locks — so what travels is this, and Anvil never looks inside it.
+
+    **It names a slot, not an object.** Mutating the state behind a reference
+    does not change its identity: a step that reconfigures the bench answers
+    with the very reference it was given. Mint a new one only when another
+    object was really born — deriving one configuration from another,
+    duplicating (ADR-0022 §5). Getting this wrong is not cosmetic: retries
+    re-send the *same* parameters on every attempt, so an attempt that handed
+    back a new handle would leave the next attempt holding one the executor
+    already considers spent.
+
+    You rarely build one by hand: ``ctx.objects.new(obj)`` mints it and
+    ``ctx.objects.get(ref)`` gives the object back.
+    """
+
+    #: Minted by this executor, and opaque to Anvil.
+    payload: str
+    #: The life this reference was born under. Defaults to this process's.
+    lifetime: str = ""
+    #: Stamped by **Anvil** on the way out, because the executor does not know
+    #: what the sequence called it (ADR-0022 §4). Steps can read it; nothing in
+    #: the executor should decide anything on it.
+    executor: str = ""
+
+
+class ObjectStore:
+    """The slots this executor keeps, and the two duties it owes (ADR-0022 §7).
+
+    A step opens a bench, hands back a reference, and later steps look the
+    bench up again by that reference::
+
+        @step(outputs={"rack": Reference})
+        def open_bench(ctx, address: str) -> Result:
+            return Result.passed(outputs={"rack": ctx.objects.new(Bench(address))})
+
+        @step
+        def set_voltage(ctx, rack: Reference, volts: float) -> Result:
+            ctx.objects.get(rack).set_voltage(volts)
+            return Result.passed()      # the same slot: no new reference
+
+    **Keys are never recycled**, not even after a slot is closed, and that is
+    the duty Anvil cannot check from outside: if a closed bench's key came back
+    for the next `open_bench`, an old reference would resolve cleanly to a
+    live, *different* object — same executor, same lifetime, everything green,
+    measuring against the wrong bench. A monotonic counter is what makes that
+    impossible, and it is why this is a counter and not a free list.
+
+    The store is thread-safe because ``server.py`` serves on a thread pool.
+    """
+
+    def __init__(self, lifetime: Optional[str] = None) -> None:
+        #: Without one, a fresh identity: two stores are never the same life,
+        #: which is what keeps a test store from being mistaken for the
+        #: process's own. `server.py` passes this process's `LIFETIME`.
+        self.lifetime = lifetime or uuid.uuid4().hex
+        self._slots: Dict[str, Any] = {}
+        self._closed: set = set()
+        self._next = itertools.count(1)
+        self._lock = threading.Lock()
+
+    def new(self, obj: Any) -> Reference:
+        """Puts an object in a **fresh** slot and returns its reference."""
+        with self._lock:
+            key = f"s{next(self._next)}"
+            self._slots[key] = obj
+            return Reference(payload=key, lifetime=self.lifetime)
+
+    def get(self, ref: Reference) -> Any:
+        """The object in that slot.
+
+        Raises ``KeyError`` for a reference of another life, a closed slot or
+        one that never existed. The executor is the one that knows this with
+        certainty — Anvil only knows by comparison — so it says so rather than
+        returning something plausible.
+        """
+        self._check(ref)
+        with self._lock:
+            return self._slots[ref.payload]
+
+    def replace(self, ref: Reference, obj: Any) -> Reference:
+        """Puts a different object **in the same slot**, and answers the same
+        reference.
+
+        This is what a by-value language needs. In LabVIEW a class is a value:
+        the VI receives a box with the bench and returns a different box. The
+        executor drops the new box in the same slot and answers the same
+        reference, so LabVIEW's by-value nature stays inside the executor,
+        which is where it does no harm (ADR-0022 §5).
+        """
+        self._check(ref)
+        with self._lock:
+            self._slots[ref.payload] = obj
+        return ref
+
+    def close(self, ref: Reference) -> Any:
+        """Empties the slot and returns what was in it. The key stays spent."""
+        self._check(ref)
+        with self._lock:
+            obj = self._slots.pop(ref.payload)
+            self._closed.add(ref.payload)
+            return obj
+
+    def _check(self, ref: Reference) -> None:
+        if not isinstance(ref, Reference):
+            raise KeyError(f"expected an object reference, got a {type(ref).__name__}")
+        # A reference of another life is rejected here, with certainty, and not
+        # only by Anvil's comparison (ADR-0022 §6). An executor that does not
+        # publish a lifetime leaves the check to nobody, so a reference that
+        # carries none is not waved through either.
+        if ref.lifetime != self.lifetime:
+            raise KeyError(
+                f"the reference '{ref.payload}' is from the life '{ref.lifetime}' and "
+                f"this executor is on '{self.lifetime}': it was minted by a process "
+                f"that no longer exists"
+            )
+        with self._lock:
+            if ref.payload in self._closed:
+                raise KeyError(f"the reference '{ref.payload}' names a slot already closed")
+            if ref.payload not in self._slots:
+                raise KeyError(f"the reference '{ref.payload}' names no slot of this executor")
+
+    def __len__(self) -> int:
+        with self._lock:
+            return len(self._slots)
+
+
+#: The store `server.py` hands to every step through `ctx.objects`. One per
+#: process, like the registry: slots and their lifetime are process state.
+OBJECTS = ObjectStore(LIFETIME)
+
+# `bool` before `int`: in Python `bool` is a subclass of `int`, and a step
+# declaring `flag: bool` must not be described as taking a number.
+_TYPES = {bool: BOOLEAN, int: NUMBER, float: NUMBER, str: TEXT, Reference: REFERENCE}
 
 
 @dataclass(frozen=True)
@@ -123,11 +294,18 @@ class Context:
       report (ADR-0019, Rule 3).
     - ``step_name``: the name the sequence used, useful when one function
       serves several names.
+    - ``objects``: this executor's slots (ADR-0022). ``objects.new(obj)`` mints
+      a reference the sequence can carry from step to step; ``objects.get(ref)``
+      gives the object back. It is here and not a parameter because the store
+      belongs to the **process**, not to the measurement: a step that could be
+      handed a different store would be a step that could be handed a different
+      bench without the sequence saying so.
     """
 
     attempt: int = 1
     options: Dict[str, str] = field(default_factory=dict)
     step_name: str = ""
+    objects: ObjectStore = field(default_factory=ObjectStore)
 
 
 @dataclass

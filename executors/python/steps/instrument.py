@@ -15,7 +15,7 @@ Anvil it is all "a gRPC endpoint on some IP".
 
 import socket
 
-from anvil_step import Context, Result, step
+from anvil_step import Context, Reference, Result, step
 
 #: Where the simulator listens if `--option simulator=host:port` says nothing.
 SIMULATOR_DEFAULT = ("127.0.0.1", 4000)
@@ -95,3 +95,105 @@ def check_led() -> Result:
     one if it asks for one.
     """
     return Result.passed("led lit")
+
+
+# ---------------------------------------------------------------------------
+# An object that stays here: the bench session (ADR-0022).
+#
+# `_ask_simulator` above opens a socket, asks and closes, every time. That is
+# fine for one shot and wrong for a bench: a real instrument session is opened
+# once, configured, measured against several times and closed — and it holds an
+# open socket and, in production, a vendor driver lock. **It cannot travel.**
+#
+# So it stays in this process and the sequence carries a `Reference` to it. The
+# steps below are the shape any executor's object steps take: one opens and
+# mints, several use, one closes.
+# ---------------------------------------------------------------------------
+
+
+class Bench:
+    """An open session with the bench: a live socket and the state set on it.
+
+    Nothing about it could be serialised and handed to Anvil, which is the
+    whole reason references exist.
+    """
+
+    def __init__(self, address, timeout=2.0):
+        self.address = address
+        self.sock = socket.create_connection(address, timeout=timeout)
+        self.channel = 1
+
+    def ask(self, command):
+        self.sock.sendall((command + "\n").encode("utf-8"))
+        return self.sock.recv(4096).decode("utf-8").strip()
+
+    def close(self):
+        self.sock.close()
+
+
+@step(name="open_bench", outputs={"bench": Reference})
+def open_bench(ctx: Context) -> Result:
+    """Opens a session with the bench and hands back a handle to it."""
+    try:
+        bench = Bench(_simulator_of(ctx))
+    except OSError as e:
+        # The bench, not the unit: `error`, never `fail` (ADR-0019, Rule 2).
+        return Result.error(f"could not open the bench: {e}")
+    ref = ctx.objects.new(bench)
+    return Result.passed(f"bench open at {bench.address}", outputs={"bench": ref})
+
+
+@step(name="configure_bench", outputs={"bench": Reference})
+def configure_bench(ctx: Context, bench: Reference, channel: float) -> Result:
+    """Sets the channel on an already open bench.
+
+    It answers **the same reference it was given**, and that is the point of
+    ADR-0022 §5: the state changed, the identity did not. Minting a new handle
+    here would break retries — the engine evaluates the parameters once and
+    re-sends the same ones on every attempt, so attempt 2 would go out with a
+    handle attempt 1 had already replaced.
+    """
+    try:
+        session = ctx.objects.get(bench)
+    except KeyError as e:
+        return Result.error(str(e))
+    session.channel = channel
+    return Result.passed(f"channel {channel}", outputs={"bench": bench})
+
+
+@step(name="measure_bench")
+def measure_bench(ctx: Context, bench: Reference) -> Result:
+    """Measures through the open session, on the channel it was configured for.
+
+    The threshold is not here: the engine judges the value against the
+    sequence's `limit` (ADR-0008).
+    """
+    try:
+        session = ctx.objects.get(bench)
+    except KeyError as e:
+        return Result.error(str(e))
+    try:
+        line = session.ask("medir")
+    except OSError as e:
+        return Result.error(f"the bench session broke: {e}")
+    if not line.lower().startswith("medida:"):
+        return Result.error(f"unreadable answer from the bench: {line!r}")
+    return Result.measured(
+        float(line.split(":", 1)[1].strip()),
+        message=f"channel {session.channel}",
+    )
+
+
+@step(name="close_bench")
+def close_bench(ctx: Context, bench: Reference) -> Result:
+    """Closes the session and spends the slot.
+
+    The key is never handed out again, not even to the next `open_bench`: an
+    old reference resolving to a live, different bench is the one failure Anvil
+    cannot see from outside (ADR-0022 §7). `ObjectStore` is what guarantees it.
+    """
+    try:
+        ctx.objects.close(bench).close()
+    except KeyError as e:
+        return Result.error(str(e))
+    return Result.passed("bench closed")

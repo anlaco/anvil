@@ -46,9 +46,10 @@ Lo que Python no puede deducir lo toma el decorador:
 | `outputs={"nombre": tipo}` | Las salidas con nombre. Un `return` no lleva nombres, y son las que `assign: result.outputs.<nombre>` lee en la secuencia. |
 | `name="..."` | El nombre del paso en la secuencia, cuando no puede ser el de la función. |
 
-Los tipos son **los tres del contrato**: `float`/`int` → número, `str` → texto,
-`bool` → booleano. Un parámetro **sin anotar** se describe como *sin
-especificar* y Anvil lo deja sin comprobar, en vez de suponer que es un número.
+Los tipos son **los cuatro del contrato**: `float`/`int` → número, `str` →
+texto, `bool` → booleano y `Reference` → referencia (ver más abajo). Un
+parámetro **sin anotar** se describe como *sin especificar* y Anvil lo deja sin
+comprobar, en vez de suponer que es un número.
 
 ### Qué devuelve un paso
 
@@ -64,6 +65,76 @@ Una **excepción** dentro de un paso se convierte en `error`, nunca en `fail`: u
 paso que revienta no dice nada de la unidad bajo test, y anotarla como unidad
 rechazada sería un rojo falso. El ejecutor no se cae (RF-12).
 
+### Objects that stay here: `Reference` and `ctx.objects`
+
+A bench session, an instrument connection, a driver handle: a thing with open
+sockets that **cannot cross the wire** and must not be reopened for every step.
+Keep it in this process and hand the sequence a handle to it
+([ADR-0022](../../docs/adr/0022-la-referencia-a-objeto-es-un-cuarto-tipo-y-nombra-una-ranura.md)):
+
+```python
+from anvil_step import Context, Reference, Result, step
+
+
+@step(outputs={"bench": Reference})
+def open_bench(ctx: Context, address: str) -> Result:
+    """Opens the session and hands back a handle to it."""
+    return Result.passed(outputs={"bench": ctx.objects.new(Bench(address))})
+
+
+@step(outputs={"bench": Reference})
+def set_channel(ctx: Context, bench: Reference, channel: float) -> Result:
+    ctx.objects.get(bench).channel = channel
+    return Result.passed(outputs={"bench": bench})   # the same handle
+
+
+@step
+def close_bench(ctx: Context, bench: Reference) -> Result:
+    ctx.objects.close(bench).close()
+    return Result.passed()
+```
+
+And in the sequence:
+
+```yaml
+locals:
+  bench: { type: reference, executor: python }
+setup:
+  - name: open_bench
+    executor: python
+    inputs: { address: '127.0.0.1:4000' }
+    assign: { bench: result.outputs.bench }
+main:
+  - name: measure_bench
+    executor: python
+    inputs: { bench: '${locals.bench}' }
+```
+
+**The reference names a slot, not an object.** Changing the bench's state does
+**not** change its identity: `set_channel` answers the very handle it was given.
+A new one is minted only when another object was really born — deriving one
+configuration from another, duplicating. This is not cosmetic: the engine
+evaluates a step's parameters **once** and re-sends the same ones on every
+retry, so an attempt that handed back a new handle would leave the next attempt
+holding one this executor already considers spent. If your language is
+by-value (LabVIEW), use `ctx.objects.replace(ref, new)`: new box, same slot,
+same handle.
+
+`ctx.objects` is an `ObjectStore`, and it takes care of the two duties **Anvil
+cannot check from outside**:
+
+- **it never recycles a key**, not even after a `close`. If a closed bench's key
+  came back for the next `open_bench`, an old reference would resolve cleanly to
+  a live, **different** object: same executor, same lifetime, everything green,
+  measuring against the wrong bench;
+- **it mints a new lifetime on every start** and publishes it in the catalog,
+  which is what lets Anvil find out that this process died and was born again
+  while holding its references.
+
+A reference from another lifetime, from a closed slot or from one that never
+existed raises `KeyError`, and the step returns it as `error`. This executor
+knows that with certainty; Anvil only by comparison.
+
 ### `ctx`, y por qué no es un parámetro
 
 Un paso recibe `ctx` **sólo si lo declara**, y `ctx` nunca aparece en el
@@ -75,6 +146,7 @@ secuencia.
 | `ctx.attempt` | El número de intento, desde 1 (RF-09). No lo pone la secuencia. |
 | `ctx.options` | Lo que se pasó con `--option clave=valor`: configuración de despliegue (la dirección de un instrumento, el id de un banco). |
 | `ctx.step_name` | El nombre con el que se le llamó, útil si una función sirve varios. |
+| `ctx.objects` | This executor's slots (see above). It is here and not in the signature because the store belongs to the **process**, not to the measurement. |
 
 La distinción importa: lo que cambia **qué se mide** va en la secuencia, donde
 queda escrito en el informe ([ADR-0019](../../docs/adr/0019-que-hace-anvil-cuando-no-puede-juzgar.md),
@@ -156,6 +228,7 @@ tocar `server.py`.
 | `conectar_equipo` | Fallo transitorio en el intento 1, pasa desde el 2 (RF-09: el `intento` llega al paso por `ctx`). |
 | `medir_simulador` | Mide contra el simulador por TCP; devuelve la medida y el canal usado (el límite lo evalúa el motor, ADR-0008). |
 | `verificar_led` | Pass/fail sin medida. |
+| `open_bench` / `configure_bench` / `measure_bench` / `close_bench` | El patrón de objeto de ADR-0022: uno abre y acuña, varios usan, uno cierra. Ver [`ejemplos/referencia.yaml`](../../ejemplos/referencia.yaml). |
 
 Un nombre desconocido devuelve `status: error` con la lista de los que sí sirve,
 nunca una excepción (RF-12).

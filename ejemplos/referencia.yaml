@@ -1,0 +1,66 @@
+# A bench that several steps share, and that stays inside the executor
+# (ADR-0022).
+#
+# The object —an open session with the instrument: a live socket, and in
+# production a vendor driver lock— cannot cross the wire and never will. What
+# crosses is a **reference** to it: the executor keeps the bench, Anvil carries
+# the handle from one step to the next, and the report records which bench each
+# measurement was made against.
+#
+# Running it:
+#   # terminal 1: the TCP simulator standing in for the instrument
+#   python3 executors/python/simulador_tcp.py
+#   # terminal 2: the Python executor (its steps live in executors/python/steps)
+#   cd executors/python && python3 server.py
+#   # terminal 3
+#   ./anvil ejemplos/referencia.yaml --json /tmp/r.json
+#
+# And to check the whole thing without measuring anything:
+#   ./anvil ejemplos/referencia.yaml --validate
+name: referencia
+
+executors:
+  - { name: python, type: grpc, host: 127.0.0.1, port: 9101 }
+
+locals:
+  # A reference is the one variable with no initial value: it has no literal
+  # form, so all the sequence can state is which executor its handle comes
+  # from. That declaration is what lets Anvil refuse, **before starting**, a
+  # handle passed to a step of another executor — where it would mean nothing.
+  bench: { type: reference, executor: python }
+
+setup:
+  # Opens the session and mints the handle. This is the only step that mints
+  # one: the ones below change the bench, not which bench.
+  - name: open_bench
+    executor: python
+    assign:
+      bench: result.outputs.bench
+
+main:
+  # Mutating the state does not change the identity: this step answers the very
+  # reference it was given (ADR-0022 §5), so the `assign` writes back what was
+  # already there. It is written out because that is the shape a step that
+  # *derives* a second object would have — and that one would mint a new handle.
+  - name: configure_bench
+    executor: python
+    inputs:
+      bench: '${locals.bench}'
+      channel: 2
+    assign:
+      bench: result.outputs.bench
+
+  # The measurement goes through the session opened in the setup. The threshold
+  # is the engine's business, from the `limit` below (ADR-0008).
+  - name: measure_bench
+    executor: python
+    inputs:
+      bench: '${locals.bench}'
+    limit: { type: range, min: 4.0, max: 5.0 }
+
+cleanup:
+  # Cleanup always runs, which is what closes the bench even on a failed run.
+  - name: close_bench
+    executor: python
+    inputs:
+      bench: '${locals.bench}'

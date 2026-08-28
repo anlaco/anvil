@@ -16,10 +16,13 @@ from pathlib import Path
 from anvil_step import (
     BOOLEAN,
     NUMBER,
+    REFERENCE,
     TEXT,
     UNSPECIFIED,
     Context,
     DiscoveryError,
+    ObjectStore,
+    Reference,
     Registry,
     Result,
     discover,
@@ -248,6 +251,120 @@ class Discovery(unittest.TestCase):
             )
             discover([d], registry=reg)
         self.assertEqual([s.name for s in reg.catalog()], ["alfa", "zeta"])
+
+
+class TestObjectStore(unittest.TestCase):
+    """The slots an executor keeps, and the two duties no contract can check
+    for it (ADR-0022 §7)."""
+
+    def test_a_reference_names_a_slot_and_not_an_object(self):
+        # Mutating what is in the slot does not change the handle: that is what
+        # keeps retries working, since the engine re-sends the parameters it
+        # evaluated once (ADR-0022 §5).
+        store = ObjectStore()
+        ref = store.new({"volts": 0})
+        store.get(ref)["volts"] = 5
+        self.assertEqual(store.get(ref)["volts"], 5)
+        # And a by-value language replaces the box in the same slot.
+        self.assertEqual(store.replace(ref, {"volts": 9}), ref)
+        self.assertEqual(store.get(ref)["volts"], 9)
+
+    def test_a_key_is_never_recycled_after_a_close(self):
+        """The duty Anvil cannot check from outside.
+
+        If a closed bench's key came back for the next `open_bench`, an old
+        reference would resolve cleanly to a live, **different** object: same
+        executor, same lifetime, everything green, measuring against the wrong
+        bench (ADR-0022 §7).
+
+        Seen failing by making `new` reuse the lowest free key: the second
+        assertion passes, the store hands back `s1`, and the stale reference
+        starts resolving.
+        """
+        store = ObjectStore()
+        primero = store.new("banco-A")
+        store.close(primero)
+        segundo = store.new("banco-B")
+        self.assertNotEqual(segundo.payload, primero.payload)
+        with self.assertRaises(KeyError) as e:
+            store.get(primero)
+        self.assertIn("closed", str(e.exception))
+
+    def test_a_reference_of_another_life_is_refused(self):
+        """The executor knows this with certainty; Anvil only by comparison
+        (ADR-0022 §6)."""
+        store = ObjectStore(lifetime="v2")
+        ajena = Reference(payload="s1", lifetime="v1")
+        with self.assertRaises(KeyError) as e:
+            store.get(ajena)
+        self.assertIn("v1", str(e.exception))
+        self.assertIn("v2", str(e.exception))
+
+    def test_an_unknown_slot_is_refused_and_not_answered_plausibly(self):
+        store = ObjectStore()
+        inventada = Reference(payload="s99", lifetime=store.lifetime)
+        with self.assertRaises(KeyError):
+            store.get(inventada)
+
+    def test_a_lifetime_is_never_the_same_twice(self):
+        # The other duty (ADR-0022 §7): a process that came back on the same
+        # lifetime would make its own restart undetectable, for Anvil and for
+        # itself. Two stores standing in for two starts.
+        self.assertNotEqual(ObjectStore().lifetime, ObjectStore().lifetime)
+
+
+class TestReferenceParameters(unittest.TestCase):
+    """A `Reference` annotation is described, and enforced, like any other."""
+
+    def test_a_reference_parameter_is_described_as_one(self):
+        reg = Registry()
+
+        @step(registry=reg, outputs={"bench": Reference})
+        def abrir(ctx, address: str) -> Result:
+            return Result.passed(outputs={"bench": ctx.objects.new(address)})
+
+        spec = reg.get("abrir").spec
+        self.assertEqual([p.type for p in spec.inputs], [TEXT])
+        self.assertEqual([(o.name, o.type) for o in spec.outputs], [("bench", REFERENCE)])
+
+    def test_a_number_where_a_reference_goes_is_an_error_and_not_a_measurement(self):
+        """The executor enforces its own catalog: a mismatch is `error`, never
+        `fail` and never a default."""
+        reg = Registry()
+
+        @step(registry=reg)
+        def medir(ctx, bench: Reference) -> Result:
+            return Result.measured(1.0)
+
+        r = reg.get("medir").invoke(Context(), {"bench": 4.2})
+        self.assertEqual(r.status, "error")
+        self.assertIsNone(r.measured_value)
+        self.assertIn("reference", r.message)
+
+    def test_a_step_carries_the_bench_across_invocations(self):
+        """The whole pattern, end to end and without a wire: one step mints,
+        another uses, a third closes."""
+        reg = Registry()
+        store = ObjectStore()
+        ctx = Context(objects=store)
+
+        @step(registry=reg, outputs={"bench": Reference})
+        def abrir(ctx) -> Result:
+            return Result.passed(outputs={"bench": ctx.objects.new({"volts": 0})})
+
+        @step(registry=reg, outputs={"bench": Reference})
+        def configurar(ctx, bench: Reference, volts: float) -> Result:
+            ctx.objects.get(bench)["volts"] = volts
+            return Result.passed(outputs={"bench": bench})
+
+        @step(registry=reg)
+        def leer(ctx, bench: Reference) -> Result:
+            return Result.measured(ctx.objects.get(bench)["volts"])
+
+        ref = reg.get("abrir").invoke(ctx, {}).outputs["bench"]
+        vuelta = reg.get("configurar").invoke(ctx, {"bench": ref, "volts": 5.0}).outputs["bench"]
+        self.assertEqual(vuelta, ref, "configurar cambia el banco, no cuál es el banco")
+        self.assertEqual(reg.get("leer").invoke(ctx, {"bench": ref}).measured_value, 5.0)
 
 
 if __name__ == "__main__":
