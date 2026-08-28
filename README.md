@@ -151,7 +151,7 @@ meaning to:
 ## Verify
 
 ```sh
-make test               # 342 core tests + 26 host tests + the Python executor's
+make test               # 369 core tests + 9 bridge + 26 host + the Python executor's
 make check              # clippy for the three workspaces
 ```
 

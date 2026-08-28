@@ -119,7 +119,7 @@ step-1 command.
 ### Tests (no network)
 
 ```sh
-make test                  # 201 core + 7 host
+make test                  # 369 core + 9 bridge + 26 host
 cargo test                 # core only: modelo, cargador, expr, motor, sinks
 cargo test -p motor        # sequence call with a mock (no gRPC)
 ```
