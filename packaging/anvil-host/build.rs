@@ -8,7 +8,7 @@
 //!
 //! ```sh
 //! cargo build --target wasm32-wasip2 -p motor -p ejecutor_pasos   # guests
-//! cargo build --manifest-path packaging/anvil-puente-wasm/Cargo.toml  # bridge
+//! cargo build --manifest-path executors/wasm/Cargo.toml              # bridge
 //! cargo build --manifest-path packaging/anvil-host/Cargo.toml        # host
 //! ```
 //!
@@ -48,8 +48,8 @@ fn main() {
         (
             "anvil-puente-wasm",
             "target",
-            "packaging/anvil-puente-wasm/",
-            "cargo build --manifest-path packaging/anvil-puente-wasm/Cargo.toml",
+            "executors/wasm/",
+            "cargo build --manifest-path executors/wasm/Cargo.toml",
         ),
     ];
 
@@ -96,8 +96,6 @@ fn main() {
     );
     println!(
         "cargo:rerun-if-changed={}",
-        repo_root
-            .join("packaging/anvil-puente-wasm/target")
-            .display()
+        repo_root.join("executors/wasm/target").display()
     );
 }

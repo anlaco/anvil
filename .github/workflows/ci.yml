@@ -56,7 +56,7 @@ jobs:
           workspaces: |
             anvil
             anvil/packaging/anvil-host
-            anvil/packaging/anvil-puente-wasm
+            anvil/executors/wasm
 
       # `check` depends on `build`: clippy over the host runs its `build.rs`,
       # which demands the guests and the bridge already compiled. That is why
