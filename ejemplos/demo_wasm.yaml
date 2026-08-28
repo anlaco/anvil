@@ -15,7 +15,7 @@
 #
 # Arranque (desde la raíz del repo):
 #   cargo build --target wasm32-wasip2 -p motor -p ejecutor_pasos
-#   cargo build --manifest-path packaging/anvil-puente-wasm/Cargo.toml
+#   cargo build --manifest-path executors/wasm/Cargo.toml
 #   cargo build --manifest-path packaging/anvil-host/Cargo.toml
 #   ./packaging/anvil-host/target/debug/anvil ejemplos/demo_wasm.yaml --json out.json
 #

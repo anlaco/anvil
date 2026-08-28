@@ -18,8 +18,11 @@ design, licensing and roadmap) lives in [`docs/`](docs/README.md). Start at
 ## Run the example
 
 **One binary** (`anvil`, ADR-0011) hosts wasmtime and the two WASM guests in
-a sandbox. It is statically linked against musl: it needs no Rust, no cargo,
-no glibc, nothing installed on the system.
+a sandbox. The package also carries `anvil-puente-wasm` next to it — the
+executor that serves your `.wasm` steps (ADR-0023) — which `anvil` looks up
+and spawns by itself when a sequence needs it. Both are statically linked
+against musl: they need no Rust, no cargo, no glibc, nothing installed on
+the system.
 
 ```sh
 curl -LO https://github.com/anlaco/anvil/releases/download/v0.3.0/anvil-v0.3.0-x86_64-linux-musl.tar.gz
@@ -117,9 +120,9 @@ packaging/
                    (its own workspace; the core drags no wasmtime)
 executors/
   python/          the Python executor: a downloadable module (ADR-0012)
-  wasm/            gRPC ↔ user's WASM component bridge (ADR-0015); it keeps
-                   its own workspace and goes embedded in `anvil`, extracted
-                   to temp at startup
+  wasm/            the WASM executor: the gRPC ↔ user's `.wasm` component
+                   bridge (ADR-0015); its own workspace, shipped as a file
+                   next to `anvil` (ADR-0023)
 ```
 
 The gRPC stack lives apart, in

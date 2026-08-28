@@ -99,8 +99,9 @@ executors:
   nothing about gRPC, protobuf or Anvil. The step's author writes a ~15-line
   Rust function with `wit-bindgen` (public, crates.io) and compiles it with
   `cargo component` — no `wasi-grpc`, no `modelo`, no cloning the repo.
-- **The host spawns the bridge `anvil-puente-wasm`** (embedded in the
-  `anvil` binary, extracted to temp) with `--wasm <path> --port <ephemeral>`.
+- **The host spawns the bridge `anvil-puente-wasm`** (a file next to the
+  `anvil` binary — ADR-0023; it used to be embedded) with
+  `--wasm <path> --port <ephemeral>`.
   The bridge (native: wasmtime + tonic + wit-bindgen) loads the component
   into a Store with an **empty** WASI sandbox (no files, no network: the
   component is a pure function — real isolation) and translates
@@ -117,10 +118,10 @@ executors:
   `embebido`/`grpc`, as always. Running `anvil.wasm` loose with the wasmtime
   CLI (no host) against a `wasm` executor gives `Error::EjecutorWasmSinHost`
   with a clear message.
-- **Remote case (Raspberry Pi, future)**: the same bridge gets distributed
-  loose and run with `--bind 0.0.0.0`; the YAML declares
-  `tipo: grpc, host: 192.168.x.y`. Anvil cannot tell: the internal bridge
-  and the Pi's are the same binary.
+- **Remote case (Raspberry Pi, ADR-0023)**: the bridge ships as a file next
+  to `anvil` and is run with `--bind 0.0.0.0`; the YAML declares
+  `tipo: grpc, host: 192.168.x.y`. Anvil cannot tell: the local bridge and
+  the Pi's are the same binary.
 - **Performance (50+ modules)**: wasmtime compiles **JIT to native** (it
   does not interpret). AOT precompile to `.cwasm` + `StoreLimitsBuilder`
   are **post-M5-ext.2** (once RSS is measured). Detail in
