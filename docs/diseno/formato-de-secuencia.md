@@ -87,7 +87,11 @@ Reglas:
 - Variables: `locals`, `parameters`, `file_globals` a nivel de secuencia
   (M4, RF-31, ver [variables-y-alcances.md](variables-y-alcances.md)). El tipo
   de cada variable se infiere del escalar YAML (`true`→bool, `4.5`→número,
-  `"A"`→texto). Los tres son **estrictos, y se comprueban al cargar** (no en
+  `"A"`→texto), con **una excepción**: una referencia a objeto no tiene forma
+  literal, así que se declara —y sólo en `locals:`— como
+  `rack: { type: reference, executor: <nombre> }` (ADR-0022). Es la única
+  variable sin valor inicial: hasta que un paso del ejecutor que dice ahí la
+  acuñe, no hay nada. Los tres son **estrictos, y se comprueban al cargar** (no en
   runtime): leer un nombre no declarado es error de carga en cualquier
   expresión (issue anlaco/Anvil-Test#19), y también lo es escribir donde no se
   puede (issue #17) — `file_globals` es de sólo lectura siempre, y
@@ -228,6 +232,12 @@ orquesta el motor contra su propio entorno; un paso gRPC no.
   `parameter` (DEF-3 del informe de beta: sin esto, un destino mal escrito o
   el nombre de un `parameter` creaba una `Local` nueva en silencio en vez de
   fallar). Ver [variables-y-alcances.md](variables-y-alcances.md).
+- **Las referencias a objeto se comprueban enteras al cargar** (ADR-0022): que
+  el ejecutor que declara la variable exista y no sea `type: wasm`; que ningún
+  paso de **otro** ejecutor reciba esa referencia ni la rellene; y que sólo la
+  escriba el `assign` de un paso de ejecutor, desde `result.outputs.<nombre>`.
+  Nada de eso necesita un ejecutor levantado, así que corre también en
+  `--validate` a secas.
 - Errores de schema → la secuencia no carga (fail-fast), no se ejecuta a
   medias.
 - El cargador produce `DefinicionSecuencia`; el motor la recorre (ADR-0005).

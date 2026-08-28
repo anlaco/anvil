@@ -14,12 +14,19 @@ si se toca uno, hay que tocar el otro.
 ```proto
 syntax = "proto3";
 
+message Reference {          // ADR-0022: un objeto que se queda en el ejecutor
+  string executor = 1;       // lo estampa Anvil
+  string lifetime = 2;       // la vida del ejecutor, de su Catalog
+  string payload  = 3;       // opaco: lo acuña el ejecutor, Anvil no lo lee
+}
+
 message Value {
   string name = 1;
   oneof value {              // sin rama puesta = error, no un cero
-    double number  = 2;
-    string text    = 3;
-    bool   boolean = 4;
+    double    number    = 2;
+    string    text      = 3;
+    bool      boolean   = 4;
+    Reference reference = 5;
   }
 }
 
@@ -85,6 +92,7 @@ versionadas ni RPC de saludo: dos mecanismos para lo mismo divergen.
 | 1 | El contrato original: `PeticionPaso{nombre, intento}`. Un ejecutor de contrato 1 no conoce el tag 8 y devuelve `0` por el default de proto3 — así es como se le reconoce. |
 | 2 | Parámetros de entrada y salidas con nombre. |
 | 3 | El contrato en inglés: `StepRequest`/`StepResult`, `inputs`/`outputs`, y los estados `pass`/`fail`/`skipped`. |
+| 4 | La **referencia a objeto**: una cuarta rama del `oneof`, un cuarto `ValueType` y `Catalog.lifetime` (ADR-0022). |
 
 **Por qué hace falta el eco.** Un campo aditivo es «compatible» sólo en el
 sentido de que el mensaje decodifica. Un ejecutor de contrato 1 ignora
@@ -111,6 +119,75 @@ Retirar o renombrar un tag exige ADR, entrada *breaking* en el CHANGELOG y
 **Los pasos WASM no ven este número.** El WIT se versiona por recompilación
 (`anvil:step@0.3.0`) y **es el puente quien responde el eco** por ellos: un
 componente no sabe de gRPC ni de versiones (ADR-0015).
+
+## The object reference (ADR-0022)
+
+A step sequence needs several steps to work on the same bench state — the
+*rack*. That object **cannot cross the wire**: it holds open sockets and vendor
+driver locks. So it stays in the executor, and what travels is a reference to
+it.
+
+### It names a slot, not an object
+
+Mutating the state behind a reference does not change its identity: a step that
+reconfigures the bench answers **the reference it was given**. A new one is
+minted only when another object was really born — deriving one configuration
+from another, duplicating.
+
+This is not a preference. `ejecuta_con_reintentos` evaluates a step's
+parameters **once** and re-sends the same ones on every attempt, so an attempt
+that handed back a new handle would leave the next attempt holding one the
+executor already considers spent. It also means a loop over two hundred units
+leaves nothing orphaned in the executor's map, and that forgetting an `assign`
+cannot quietly leave the following steps using the bench *before* it was
+configured.
+
+### Who mints what
+
+| Field | Minted by | Why |
+|---|---|---|
+| `executor` | **Anvil**, on receiving it | The process opposite does not know what the sequence called it: the names live in the YAML's `executors:`, which is also what the engine routes on (ADR-0013). |
+| `lifetime` | The **executor**, on start-up | It is published in `Catalog.lifetime` and is how a restart becomes detectable. Empty is legitimate and means "unchecked", never "fine". |
+| `payload` | The **executor** | Opaque. Anvil never interprets it, never composes one, and accepts none written by hand. |
+
+### Two duties the contract cannot verify
+
+An executor that breaks either is a broken executor, and Anvil cannot see it
+from outside:
+
+1. **Never recycle a payload within one lifetime.** If a closed bench's key
+   came back for the next open, an old reference would resolve cleanly to a
+   live, *different* object: same executor, same lifetime, everything green,
+   measuring against the wrong bench.
+2. **Mint a different lifetime on every start.**
+
+### What Anvil refuses, and when
+
+| Refusal | When | Needs the executor up? |
+|---|---|---|
+| A reference in an operation — arithmetic, comparison, a limit, a verdict | Evaluating the expression | no |
+| A reference literal written into the sequence | Loading | no |
+| A handle passed to a step of another executor, or filled by one | Loading | no |
+| A reference declared on a `type: wasm` executor | Loading | no |
+| A reference variable written by a `statement`, or from anything but `result.outputs.<name>` | Loading | no |
+| An executor that minted under a life its own catalog contradicts | On reading the result | — |
+| The executor restarted, or stopped answering | **Before invoking** the step that carries the handle | yes |
+
+The last one is the only one that costs a round trip, and only for a step that
+actually carries a handle to an executor that publishes a lifetime. `Describe`
+is asked again there and **only its lifetime is read** — the signatures are
+still checked exactly once, at start-up (ADR-0021 §3), so the report stays
+reconstructible. The verdict is a step in `error` and never an abort: a run
+that stops in its tracks does not run its `cleanup`, and that is precisely the
+moment Anvil most wants the step that closes the rack to run.
+
+### WASM does not carry one, and says so
+
+`anvil:step` is `run(name, attempt, inputs) -> step-result`: a function, with no
+resources and no state between calls (ADR-0020 §4d), so a component has nowhere
+to keep the map. A reference reaching one is an **explicit error and never a
+silence** — refused at load if the executor is declared `type: wasm`, and again
+at the bridge. Giving WASM state is a decision with its own ADR (ADR-0022 §8).
 
 ## Codificación de medidas
 
@@ -176,8 +253,19 @@ rpc Describe(CatalogRequest) returns (Catalog);
 
 `Catalog` trae un `StepSpec` por paso servido: nombre, entradas (nombre, tipo,
 obligatorio, valor por defecto), salidas y una línea de documentación. Los
-tipos son **los tres de siempre** (número, texto, booleano): esto describe el
-cable, no inventa un sistema de tipos.
+tipos son **los cuatro del cable** (número, texto, booleano, referencia): esto
+describe el cable, no inventa un sistema de tipos. El de referencia es **plano**
+—dice que es un handle, no de qué clase— porque un tipo por clase exigiría que
+Python, Java y LabVIEW se pusieran de acuerdo en cómo se escribe un nombre de
+clase, y eso es la IDL que ADR-0022 descarta.
+
+`Catalog` trae además **`lifetime`**: la vida que el ejecutor acuña al arrancar
+(ADR-0022 §6). Es lo que permite a Anvil enterarse de que el proceso que tiene
+sus referencias se murió y volvió a nacer — una pregunta sobre el mundo, no
+sobre la secuencia, que ningún sistema de tipos contesta. Vacío es legítimo y
+significa «no publico ninguna»: entonces Anvil **avisa** de que las referencias
+contra ese ejecutor no se pueden comprobar por vida, en vez de suponer que
+están bien.
 
 **Cuándo se pregunta.** Una vez por endpoint, al arrancar, antes del primer
 paso. Nunca paso a paso: enterarse en el paso 47 de que un nombre está mal deja

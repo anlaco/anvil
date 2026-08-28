@@ -10,7 +10,71 @@ minors, con el cambio anotado aquí.
 
 ## [No publicado]
 
+### Añadido
+
+- **The object reference: a fourth type, and it names a slot** (issue #55,
+  [ADR-0022](docs/adr/0022-la-referencia-a-objeto-es-un-cuarto-tipo-y-nombra-una-ranura.md)).
+  A test sequence needs several steps to work on the same bench state — the
+  *rack* of TestStand. That object cannot cross the wire: it carries open
+  sockets and vendor driver locks. So it stays in the executor and what travels
+  is a **reference** to it.
+
+  The mechanism already worked with the three types — a handle is opaque text.
+  What was missing was the type, and the type exists so the engine can
+  **refuse**:
+
+  - a reference in an arithmetic operation, a comparison, a limit or a verdict
+    is an error, not a `false`;
+  - there is no literal form, so one cannot be written into a sequence by hand;
+  - a handle passed to a step of **another** executor is rejected **before the
+    run starts**, with nothing connected — the check that TestStand cannot even
+    pose, because everything there is one process.
+
+  What is new on each side:
+
+  - **`locals:` can declare one**, and it is the only variable with no initial
+    value: `rack: { type: reference, executor: bench }`. The executor is part of
+    the declaration because it is what makes the cross-executor check decidable
+    without following the handle back through `assign`, subsequence `args` and
+    the process model.
+  - **The engine stamps the executor's name** on every reference a step mints;
+    the executor mints the opaque payload. Neither claims anything about the
+    other's half.
+  - **A reference names a slot, not an object**: mutating the bench does not
+    change its identity, so a step that reconfigures it answers the reference it
+    was given. This is what keeps retries working — the engine evaluates the
+    parameters once and re-sends the same ones on every attempt.
+  - **`Catalog` carries a lifetime**, minted by the executor on every start. If
+    the process holding the references dies and is born again mid-run, Anvil
+    finds out **before invoking** the next step that carries a handle, the step
+    does not measure, and it comes out `error` rather than aborting the run —
+    which is what lets the `cleanup` still close the rack. An executor that
+    publishes no lifetime is said to be unchecked, never assumed fine.
+  - **The report keeps it**: the JSON writes a reference as an object
+    (`{"type": "reference", "executor", "lifetime", "payload"}`), and the CSV as
+    a percent-encoded `ref:…` token, so an opaque payload carrying `;` or `=`
+    cannot silently split the cell.
+  - **The Python executor is the worked example**: `ctx.objects` keeps the
+    slots, `Reference` is a parameter type like any other, and `steps/instrument.py`
+    ships `open_bench` / `configure_bench` / `measure_bench` / `close_bench`.
+    See `ejemplos/referencia.yaml` and `docs/qa/referencia/run.sh`.
+
+  **Not covered**: a reference reaching a WASM component. `anvil:step` is a
+  function with no state between calls, so the component has nowhere to keep
+  the object. That is refused explicitly — at load if the executor is declared
+  `type: wasm`, and again at the bridge — and never in silence. Giving WASM
+  state is a decision with its own ADR.
+
 ### Cambiado
+
+- **`paso.proto` goes to contract 4, and this is a flag day.** `Value`'s
+  `oneof` gains a branch and `ValueType` a value (ADR-0022). The contract echo
+  is gated on the **integer**, not on functionality (ADR-0020 §4a), so **every
+  step with `inputs:` against an executor still speaking 3 becomes `error`,
+  whether it uses references or not**. Third-party executors have to be
+  updated; this repo's Python executor and the WASM bridge already speak 4.
+  It is accepted because Anvil is pre-v1 and promises no backward
+  compatibility — and it is said here in those words, not as a footnote.
 
 - **`executores/` pasa a llamarse `executors/`.** No era palabra en ningún
   idioma: en castellano es *ejecutores* y en inglés *executors*. Con el código
