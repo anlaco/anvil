@@ -573,26 +573,81 @@ pub enum EntradaPaso {
     Expresion(expr::Expresion),
 }
 
+/// The engine's internal key for the connection to the built-in WASM executor
+/// (ADR-0011).
+///
+/// It cannot be declared in a YAML — the loader rejects an executor with this
+/// name — and it lives here, in the lowest crate, because three of them need
+/// the same string and must not disagree: the loader (to reject it and to
+/// resolve routing), the engine (to key its connections) and the report sinks
+/// (to render a reference's executor without printing plumbing).
+pub const EJECUTOR_EMBEBIDO: &str = "__anvil_embebido__";
+
+/// How an executor's routing key is written for a human: the reserved key of
+/// the built-in one is plumbing and is shown by the name the docs use.
+pub fn nombre_visible_de_ejecutor(clave: &str) -> &str {
+    if clave == EJECUTOR_EMBEBIDO {
+        "embebido"
+    } else {
+        clave
+    }
+}
+
 /// El valor literal de una variable declarada en el YAML (scopes
 /// `locals`/`parameters`/`file_globals`). El tipo se infiere del escalar YAML:
 /// número, texto o booleano. Sin árbol de propiedades tipado recursivo de
 /// TestStand en el MVP (ver [variables-y-alcances.md](../../docs/diseno/variables-y-alcances.md)).
+///
+/// [`ValorDefinicion::Reference`] is the odd one out and deliberately so: it
+/// is a **declaration without a value**. A reference cannot be written by hand
+/// —that is one of the four refusals ADR-0022 §1 buys— so the only thing a
+/// sequence can say about a `locals:` entry that will hold a handle is what
+/// executor it will come from.
 #[derive(Debug, Clone, PartialEq)]
 pub enum ValorDefinicion {
     Numero(f64),
     Texto(String),
     Bool(bool),
+    /// `locals: { rack: { type: reference, executor: bench } }` (ADR-0022 §3).
+    ///
+    /// The executor is part of the declaration and not decoration: it is the
+    /// **only** thing that makes the cross-executor hand-off decidable without
+    /// data-flow analysis. `inputs: { rack: '${locals.rack}' }` is an
+    /// expression, and the type of an expression is not guessed (ADR-0021 §5);
+    /// following the handle back to the step that minted it would mean walking
+    /// `assign`, subsequence `args` and the process model, which is exactly the
+    /// analysis ADR-0021 declined. Declared on the variable, the check is one
+    /// lookup and it can be seen by reading the file.
+    Reference {
+        executor: String,
+    },
 }
 
 impl ValorDefinicion {
     /// Traduce un literal declarado en el YAML al `Value` del expression engine
     /// (`expr::Value`). Lo usa el motor al materializar el entorno al inicio
     /// de la secuencia.
+    ///
+    /// A [`ValorDefinicion::Reference`] materialises as `Nulo`: it declares
+    /// that the variable **will** hold a handle, and until a step mints one
+    /// there is nothing there. Reading it before then and handing it to a step
+    /// is refused where every other absent parameter is (`evalua_entradas`),
+    /// which is the same rule and not a new one.
     pub fn a_value(&self) -> expr::Value {
         match self {
             ValorDefinicion::Numero(x) => expr::Value::Numero(*x),
             ValorDefinicion::Texto(s) => expr::Value::Texto(s.clone()),
             ValorDefinicion::Bool(b) => expr::Value::Bool(*b),
+            ValorDefinicion::Reference { .. } => expr::Value::Nulo,
+        }
+    }
+
+    /// The executor a reference declaration is bound to, or `None` for the
+    /// three scalars.
+    pub fn ejecutor_de_referencia(&self) -> Option<&str> {
+        match self {
+            ValorDefinicion::Reference { executor } => Some(executor),
+            _ => None,
         }
     }
 }

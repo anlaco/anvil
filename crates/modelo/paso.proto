@@ -1,17 +1,53 @@
 syntax = "proto3";
 
-// A named, typed value. The three types are exactly those of `expr::Value` and
-// `modelo::ValorDefinicion`: no more (no lists, no maps — a parameter that
-// needs structure is a badly cut step, ADR-0020 §2) and no fewer.
+// A handle to an object the executor keeps for itself (ADR-0022).
+//
+// The object does not cross the wire and never will: it carries open sockets
+// and vendor driver locks. What crosses is this — an identifier the executor
+// can resolve back to the object, and that Anvil never interprets.
+//
+// **It names a slot, not an object** (ADR-0022 §5): mutating the state behind
+// it does not change its identity, so a step that reconfigures the bench
+// answers with the reference it was given. A new one is minted only when
+// another object was really born.
+//
+// The three fields are minted by different parties, and neither claims
+// anything about the other's (ADR-0022 §4).
+message Reference {
+  // Stamped by **Anvil**, on receiving the reference. The executor process
+  // does not know what the sequence called it: the names live in the YAML's
+  // `executors:`, which is also what the engine routes on (ADR-0013). An
+  // executor may leave this empty; Anvil fills it in.
+  string executor = 1;
+  // Minted by the **executor** when it starts, and published in
+  // `Catalog.lifetime`. It is what makes a restart detectable: no type system
+  // can say whether the process opposite died and was born again
+  // (ADR-0022 §6). Empty means "I do not publish one", and then Anvil says
+  // liveness is unchecked rather than assuming it (ADR-0019, Rule 2).
+  string lifetime = 2;
+  // Minted by the **executor**, and opaque to Anvil, which never interprets
+  // it, never composes one and never accepts one written by hand.
+  //
+  // The executor owes two things the contract cannot verify (ADR-0022 §7):
+  // never recycle a payload within one lifetime, and mint a different
+  // lifetime on every start. An executor that breaks either is broken.
+  string payload = 3;
+}
+
+// A named, typed value. The four types are exactly those of `expr::Value` and
+// `modelo::ValorDefinicion`, and exactly the four basic types of TestStand: no
+// more (no lists, no maps — a parameter that needs structure is a badly cut
+// step, ADR-0020 §2) and no fewer.
 //
 // A `oneof` with no branch set is an **error**, not a zero (ADR-0020 §2, which
 // is Rule 2 of ADR-0019 applied to the inbound wire).
 message Value {
   string name = 1;
   oneof value {
-    double number  = 2;
-    string text    = 3;
-    bool   boolean = 4;
+    double    number    = 2;
+    string    text      = 3;
+    bool      boolean   = 4;
+    Reference reference = 5;
   }
 }
 
@@ -56,17 +92,23 @@ message StepResult {
 // that here the executor is *asked*, never its artifact inspected.
 // ---------------------------------------------------------------------------
 
-// The type of a parameter or an output. Exactly the three of `Value`: this is
+// The type of a parameter or an output. Exactly the four of `Value`: this is
 // a description of the wire, not a type system of its own (ADR-0021 §5).
 //
 // `UNSPECIFIED` is the proto3 default, so **silence lands here**: an executor
 // that names a parameter without saying its type leaves it unchecked, and the
 // report says so. It is never read as "number" (ADR-0019, Rule 2).
+//
+// `REFERENCE` is **flat**: it says the parameter is a handle, not what class
+// of object is behind it. A type per class would make Python, Java and LabVIEW
+// agree on how a class name is spelled, which is the IDL ADR-0022 declines to
+// build. Class safety is the call site's job, and the executor's (ADR-0022 §2).
 enum ValueType {
   VALUE_TYPE_UNSPECIFIED = 0;
   VALUE_TYPE_NUMBER = 1;
   VALUE_TYPE_TEXT = 2;
   VALUE_TYPE_BOOLEAN = 3;
+  VALUE_TYPE_REFERENCE = 4;
 }
 
 // One input a step accepts.
@@ -120,6 +162,17 @@ message Catalog {
   // Echo of the contract version the executor understood, same as
   // `StepResult.contract`.
   int32 contract = 3;
+  // The executor's **life**: an identifier it mints anew on every start
+  // (ADR-0022 §6). It is how Anvil finds out that the process holding its
+  // references died and was born again — something no type system can answer,
+  // because it is not a fact about the sequence but about the world.
+  //
+  // Empty is legitimate and means "I do not publish one": Anvil then reports
+  // that references against this executor cannot be checked for liveness,
+  // rather than assuming they are fine (ADR-0019, Rule 2). It never turns a
+  // step into an error by itself — the executor is the one that knows with
+  // certainty, and rejects a foreign lifetime on its own account.
+  string lifetime = 4;
 }
 
 service StepExecutor {

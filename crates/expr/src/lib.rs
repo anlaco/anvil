@@ -34,4 +34,4 @@ pub use ast::{BinOp, Expresion, Scope, Sentencia, UnOp};
 pub use error::{ErrorExpr, ErrorKind};
 pub use eval::{eval, eval_sentencias, Entorno};
 pub use parser::{parse_expresion, parse_sentencias};
-pub use value::Value;
+pub use value::{Reference, Value};

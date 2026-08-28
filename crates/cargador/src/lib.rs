@@ -106,26 +106,142 @@ fn tipo_ejecutor_por_defecto() -> String {
     "embedded".into()
 }
 
-/// Un literal de variable declarado en el YAML (scopes de M4). El tipo se
-/// infiere del escalar YAML: `true`→bool, `4.5`→número, `"A-2026"`→texto.
-/// `untagged` prueba variantes en orden; `Bool` primero evita que `true` se
-/// intente como `f64`.
+/// A variable declared in a scope of M4 (`locals:`, `parameters:`,
+/// `file_globals:`).
+///
+/// Three of the four forms are a scalar and the type is read off it:
+/// `true`→bool, `4.5`→number, `"A-2026"`→text. `untagged` tries the variants
+/// in order; `Bool` first stops `true` being tried as an `f64`, and the map
+/// last because no scalar can match it.
+///
+/// The fourth is a **declaration with no value** (ADR-0022 §3):
+///
+/// ```yaml
+/// locals:
+///   rack: { type: reference, executor: bench }
+/// ```
+///
+/// A reference has no literal form — refusing one written by hand is one of
+/// the four things the type exists to buy (ADR-0022 §1) — so the only thing a
+/// sequence can state about the variable is which executor its handle will
+/// come from.
 #[derive(Debug, PartialEq, Clone, Deserialize)]
 #[serde(untagged)]
 enum ValorYaml {
     Bool(bool),
     Numero(f64),
     Texto(String),
+    Declaracion(DeclaracionYaml),
 }
 
+/// The `{ type: ..., executor: ... }` form of a variable declaration.
+///
+/// `deny_unknown_fields` is **not** used here, and that is deliberate: inside
+/// an `untagged` enum it would make a typo fall through every variant and
+/// surface as *"data did not match any variant"*, which names neither the
+/// field nor the file. Unknown keys are collected instead and reported by
+/// name, which is the diagnostic standard of the rest of this loader (#20).
+#[derive(Debug, PartialEq, Clone, Deserialize)]
+struct DeclaracionYaml {
+    /// `type` is a Rust keyword; the rename is for the language, not the
+    /// vocabulary — in the YAML the key is `type`, as everywhere else.
+    #[serde(default, rename = "type")]
+    kind: String,
+    #[serde(default)]
+    executor: Option<String>,
+    #[serde(flatten)]
+    otros: std::collections::BTreeMap<String, serde::de::IgnoredAny>,
+}
+
+/// The one `type` a declaration may state today. There is no `type: number`
+/// because a number is written as a number: adding a long form for what a
+/// scalar already says would be two ways to write one thing.
+const TIPO_REFERENCIA: &str = "reference";
+
 impl ValorYaml {
-    fn a_definicion(self) -> ValorDefinicion {
-        match self {
-            ValorYaml::Bool(b) => ValorDefinicion::Bool(b),
-            ValorYaml::Numero(x) => ValorDefinicion::Numero(x),
-            ValorYaml::Texto(s) => ValorDefinicion::Texto(s),
+    /// The model's form of this declaration.
+    ///
+    /// `scope` and `secuencia` are only for the error messages, and they earn
+    /// their place: "a reference cannot be declared here" is useless without
+    /// saying where *here* is.
+    fn a_definicion(
+        self,
+        nombre: &str,
+        scope: &str,
+        secuencia: &str,
+    ) -> Result<ValorDefinicion, ErrorCarga> {
+        let d = match self {
+            ValorYaml::Bool(b) => return Ok(ValorDefinicion::Bool(b)),
+            ValorYaml::Numero(x) => return Ok(ValorDefinicion::Numero(x)),
+            ValorYaml::Texto(s) => return Ok(ValorDefinicion::Texto(s)),
+            ValorYaml::Declaracion(d) => d,
+        };
+        if !d.otros.is_empty() {
+            let claves: Vec<&str> = d.otros.keys().map(|k| k.as_str()).collect();
+            return Err(ErrorCarga::Validacion(format!(
+                "la declaración de '{scope}.{nombre}' en la secuencia '{secuencia}' trae \
+                 campo(s) que no existen: {}. Una declaración de referencia es \
+                 '{{ type: {TIPO_REFERENCIA}, executor: <nombre> }}'",
+                claves.join(", ")
+            )));
         }
+        if d.kind != TIPO_REFERENCIA {
+            let dicho = if d.kind.is_empty() {
+                "no dice de qué tipo es".to_string()
+            } else {
+                format!("dice 'type: {}'", d.kind)
+            };
+            return Err(ErrorCarga::Validacion(format!(
+                "'{scope}.{nombre}' de la secuencia '{secuencia}' se declara como un mapa y \
+                 {dicho}. La única declaración que no es un escalar es \
+                 '{{ type: {TIPO_REFERENCIA}, executor: <nombre> }}'; un número, un texto o \
+                 un booleano se escriben como el escalar que son"
+            )));
+        }
+        // A reference lives in `locals:` and nowhere else, and each refusal is
+        // for its own reason. `file_globals` are the file's constants and the
+        // engine refuses to write them at all, so a handle declared there
+        // could never be filled in — a variable that is unusable by
+        // construction. `parameters` is the by-reference channel of a
+        // `sequence_call`, and handing a rack to a subsequence is a decision
+        // ADR-0022 does not take (its §Open leaves the process model's channel
+        // for a rack unresolved); allowing it here would be taking it by
+        // accident.
+        if scope != "locals" {
+            return Err(ErrorCarga::Validacion(format!(
+                "'{scope}.{nombre}' de la secuencia '{secuencia}' se declara de tipo \
+                 '{TIPO_REFERENCIA}', y una referencia sólo se puede declarar en 'locals:'. \
+                 En 'file_globals:' nunca se podría rellenar (son constantes del fichero y \
+                 el motor rechaza escribirlas), y pasar una referencia a una subsecuencia \
+                 por 'parameters:' no está decidido todavía (ADR-0022)"
+            )));
+        }
+        let executor = d.executor.ok_or_else(|| {
+            ErrorCarga::Validacion(format!(
+                "'locals.{nombre}' de la secuencia '{secuencia}' se declara de tipo \
+                 '{TIPO_REFERENCIA}' y no dice de qué ejecutor. El ejecutor es parte de la \
+                 declaración: es lo único que permite rechazar antes de arrancar una \
+                 referencia que se le pasa a un paso de otro ejecutor, donde no significa \
+                 nada (ADR-0022 §3)"
+            ))
+        })?;
+        Ok(ValorDefinicion::Reference { executor })
     }
+}
+
+/// One whole scope's declarations, translated with the scope's name in hand so
+/// a bad one can say where it is.
+fn declaraciones(
+    mapa: HashMap<String, ValorYaml>,
+    scope: &str,
+    secuencia: &str,
+) -> Result<HashMap<String, ValorDefinicion>, ErrorCarga> {
+    let mut fuera = HashMap::with_capacity(mapa.len());
+    for (k, v) in mapa {
+        let d = v.a_definicion(&k, scope, secuencia)?;
+        fuera.insert(k, d);
+    }
+    Ok(fuera)
 }
 
 /// Un paso como se lee del YAML. `reintentos` por defecto es 1 (un solo
@@ -290,7 +406,7 @@ impl LimiteYaml {
 
 /// Nombre de ejecutor reservado del motor (clave interna de la conexión al
 /// ejecutor embebido). No declarable en el YAML: el cargador lo rechaza.
-pub const NOMBRE_EMBEDIDO_RESERVADO: &str = "__anvil_embebido__";
+pub const NOMBRE_EMBEDIDO_RESERVADO: &str = modelo::EJECUTOR_EMBEBIDO;
 
 impl EjecutorYaml {
     /// Traduce a `modelo::DefinicionEjecutor`, validando la coherencia entre
@@ -733,21 +849,9 @@ fn secuencia_yaml_a_definicion(
         pasos_setup: traduce_pasos(y.setup)?,
         pasos_main: traduce_pasos(y.main)?,
         pasos_cleanup: traduce_pasos(y.cleanup)?,
-        locals: y
-            .locals
-            .into_iter()
-            .map(|(k, v)| (k, v.a_definicion()))
-            .collect(),
-        parameters: y
-            .parameters
-            .into_iter()
-            .map(|(k, v)| (k, v.a_definicion()))
-            .collect(),
-        file_globals: y
-            .file_globals
-            .into_iter()
-            .map(|(k, v)| (k, v.a_definicion()))
-            .collect(),
+        locals: declaraciones(y.locals, "locals", &nombre_secuencia)?,
+        parameters: declaraciones(y.parameters, "parameters", &nombre_secuencia)?,
+        file_globals: declaraciones(y.file_globals, "file_globals", &nombre_secuencia)?,
         subsecuencias,
     };
     validar_lvalues(&def)?;
@@ -1287,8 +1391,236 @@ pub fn cargar_programa_de_archivo(ruta: &str) -> Result<Programa, ErrorCarga> {
     let mut camino: Vec<String> = Vec::new();
     validar_parameters_de_la_raiz(&programa.raiz)?;
     visitar(&programa, &id_raiz, &programa.raiz, &mut camino)?;
+    validar_referencias(&programa)?;
 
     Ok(programa)
+}
+
+/// Where a step is dispatched, resolved from what the YAML declares.
+///
+/// It lives here and not in the engine because **two** things need the answer
+/// and they must not disagree: the engine, to open the right connection, and
+/// this loader, to refuse a reference handed to a step of another executor
+/// before anything is energised (ADR-0022 §3). Two copies of the routing rule
+/// is how the check and the dispatch drift apart, and the drift would show up
+/// as a sequence that validates and then measures against the wrong bench.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Endpoint<'a> {
+    /// The built-in WASM executor. **Every** `type: embedded` collapses here:
+    /// they are all the same process, whatever the sequence calls them.
+    Embebido,
+    /// A gRPC executor, keyed by the name the YAML gave it.
+    Grpc(&'a str),
+    /// A `type: wasm` executor. The engine never runs one — the host
+    /// translates it to `grpc` first (ADR-0014).
+    Wasm(&'a str),
+    /// A name no `executors:` entry declares.
+    NoDeclarado(&'a str),
+}
+
+impl<'a> Endpoint<'a> {
+    /// The routing key: what the engine keys its connections on, and what two
+    /// steps must share to be talking to the same process.
+    pub fn clave(&self) -> &'a str {
+        match self {
+            Endpoint::Embebido => NOMBRE_EMBEDIDO_RESERVADO,
+            Endpoint::Grpc(n) | Endpoint::Wasm(n) | Endpoint::NoDeclarado(n) => n,
+        }
+    }
+}
+
+/// Resolves a step's `executor:` (or its absence) against the program's table.
+pub fn resolver_endpoint<'a>(
+    ejecutor: Option<&'a str>,
+    ejecutores: &HashMap<String, DefinicionEjecutor>,
+) -> Endpoint<'a> {
+    let Some(nombre) = ejecutor else {
+        return Endpoint::Embebido;
+    };
+    match ejecutores.get(nombre).map(|e| &e.tipo) {
+        Some(TipoEjecutor::Embebido) => Endpoint::Embebido,
+        Some(TipoEjecutor::Grpc { .. }) => Endpoint::Grpc(nombre),
+        Some(TipoEjecutor::Wasm { .. }) => Endpoint::Wasm(nombre),
+        None => Endpoint::NoDeclarado(nombre),
+    }
+}
+
+/// How an endpoint is named to a human. `__anvil_embebido__` is an internal
+/// key nobody can declare, so printing it would be printing plumbing.
+pub fn nombre_visible_de_endpoint(clave: &str) -> &str {
+    modelo::nombre_visible_de_ejecutor(clave)
+}
+
+/// Everything about object references that can be decided by reading the files
+/// (ADR-0022 §3, and its §Consequences on `--validate`).
+///
+/// It runs over the **whole program** because that is the smallest unit that
+/// has both halves of the question: a `locals:` declaration lives in one
+/// sequence, and the `executors:` table it names lives in the root of the
+/// file. None of this needs an executor to be up, which is the point — the
+/// mode a person would name by default (`--validate`, no `--with-executors`)
+/// has no catalog, and these checks do not want one.
+///
+/// What it refuses, and why each one is worth a refusal:
+///
+/// 1. **A declaration naming an executor that does not exist.** A typo in the
+///    executor's name would otherwise make the cross-executor check below
+///    vacuous, and vacuously passing is worse than not checking.
+/// 2. **A reference from a `wasm` executor.** `anvil:step@0.3.0` is
+///    `run(name, attempt, inputs)` — a function, with no resources and no
+///    state between calls — so the component has nowhere to keep the map
+///    (ADR-0022 §8). Refusing here, at load, is the explicit error the ADR
+///    asks for; the bridge refuses again at run time, for the case that gets
+///    there another way.
+/// 3. **A handle handed to a step of another executor.** The one problem
+///    TestStand cannot even pose, because everything there is one process. It
+///    is checked on the two ends a handle has: the `inputs:` that spend it and
+///    the `assign` that fills it.
+/// 4. **A reference variable written by anything but an `assign` on a `grpc`
+///    step**, and from anything but `result.outputs.<name>`. Nothing else can
+///    produce a handle: a `statement` computes, and `result.measured_value` is
+///    a number. Allowing either would let a number end up in a variable the
+///    file says is a handle, and the type would be a label rather than a fact.
+fn validar_referencias(programa: &Programa) -> Result<(), ErrorCarga> {
+    validar_referencias_de(&programa.raiz, programa)?;
+    for sec in programa.archivos.values() {
+        validar_referencias_de(sec, programa)?;
+    }
+    Ok(())
+}
+
+fn validar_referencias_de(
+    def: &DefinicionSecuencia,
+    programa: &Programa,
+) -> Result<(), ErrorCarga> {
+    // (1) and (2): the declarations themselves.
+    for (nombre, decl) in &def.locals {
+        let Some(ejecutor) = decl.ejecutor_de_referencia() else {
+            continue;
+        };
+        match resolver_endpoint(Some(ejecutor), &programa.ejecutores) {
+            Endpoint::NoDeclarado(_) => {
+                return Err(ErrorCarga::Validacion(format!(
+                    "'locals.{nombre}' de la secuencia '{}' declara una referencia del \
+                     ejecutor '{ejecutor}', que no está en 'executors:' de la secuencia raíz",
+                    def.nombre
+                )))
+            }
+            Endpoint::Wasm(_) => {
+                return Err(ErrorCarga::Validacion(format!(
+                    "'locals.{nombre}' de la secuencia '{}' declara una referencia del \
+                     ejecutor '{ejecutor}', que es 'type: wasm'. Un componente WASM no puede \
+                     sostener una referencia: su interfaz es una función sin estado entre \
+                     llamadas (anvil:step, ADR-0020 §4d), así que no tiene dónde guardar el \
+                     objeto. Sírvelo como ejecutor 'grpc' (ADR-0022 §8)",
+                    def.nombre
+                )))
+            }
+            _ => {}
+        }
+    }
+
+    let refs = |campo: &str| -> Option<&str> {
+        def.locals
+            .get(campo)
+            .and_then(|d| d.ejecutor_de_referencia())
+    };
+
+    for p in def
+        .pasos_setup
+        .iter()
+        .chain(&def.pasos_main)
+        .chain(&def.pasos_cleanup)
+    {
+        let destino = resolver_endpoint(p.ejecutor.as_deref(), &programa.ejecutores);
+
+        // (3a) `inputs: { rack: '${locals.rack}' }` — the handle being spent.
+        for (entrada, valor) in p.entradas.iter().flatten() {
+            let EntradaPaso::Expresion(expr::Expresion::Var {
+                scope: expr::Scope::Locals,
+                campo,
+            }) = valor
+            else {
+                continue;
+            };
+            let Some(duenio) = refs(campo) else { continue };
+            let origen = resolver_endpoint(Some(duenio), &programa.ejecutores);
+            if origen.clave() != destino.clave() {
+                return Err(ErrorCarga::Validacion(format!(
+                    "el paso '{}' de la secuencia '{}' se despacha al ejecutor '{}' y le \
+                     pasa en '{entrada}' la referencia 'locals.{campo}', que es del ejecutor \
+                     '{duenio}'. Una referencia sólo significa algo dentro del ejecutor que \
+                     la acuñó: en cualquier otro no es más que una cadena que no casa \
+                     (ADR-0022 §3)",
+                    p.nombre,
+                    def.nombre,
+                    nombre_visible_de_endpoint(destino.clave()),
+                )));
+            }
+        }
+
+        // (3b) and (4): the `assign` that fills a reference variable.
+        for a in p.asigna.iter().flatten() {
+            let Some(duenio) = refs(&a.var) else { continue };
+            if p.tipo != TipoPaso::Grpc {
+                return Err(ErrorCarga::Validacion(format!(
+                    "el paso '{}' de la secuencia '{}' asigna a 'locals.{}', que se declara \
+                     como referencia, y no es un paso de ejecutor. Sólo un paso servido por \
+                     un ejecutor puede acuñar una referencia (ADR-0022 §4)",
+                    p.nombre, def.nombre, a.var
+                )));
+            }
+            let origen = resolver_endpoint(Some(duenio), &programa.ejecutores);
+            if origen.clave() != destino.clave() {
+                return Err(ErrorCarga::Validacion(format!(
+                    "el paso '{}' de la secuencia '{}' se despacha al ejecutor '{}' y su \
+                     'assign' escribe en 'locals.{}', declarada como referencia del ejecutor \
+                     '{duenio}'. La referencia que acuñe este paso sería del ejecutor \
+                     equivocado (ADR-0022 §3)",
+                    p.nombre,
+                    def.nombre,
+                    nombre_visible_de_endpoint(destino.clave()),
+                    a.var
+                )));
+            }
+            let es_salida = matches!(
+                &a.expr,
+                expr::Expresion::Var {
+                    scope: expr::Scope::Resultado,
+                    campo,
+                } if campo.strip_prefix(expr::CAMPO_SALIDAS).and_then(|r| r.strip_prefix('.')).is_some_and(|n| !n.is_empty())
+            );
+            if !es_salida {
+                return Err(ErrorCarga::Validacion(format!(
+                    "el paso '{}' de la secuencia '{}' escribe en 'locals.{}', declarada \
+                     como referencia, algo que no es una salida del paso. Una referencia \
+                     sólo la acuña el ejecutor y sólo llega por 'result.outputs.<nombre>': \
+                     cualquier otro campo de 'result' es un número o un texto, y acabaría en \
+                     una variable que el fichero dice que es una referencia (ADR-0022 §1)",
+                    p.nombre, def.nombre, a.var
+                )));
+            }
+        }
+
+        // (4, the other half): a `statement` cannot mint a handle either.
+        for s in p.statement.iter().flatten() {
+            let expr::Sentencia::Assign { scope, campo, .. } = s;
+            if *scope == expr::Scope::Locals && refs(campo).is_some() {
+                return Err(ErrorCarga::Validacion(format!(
+                    "el paso '{}' de la secuencia '{}' tiene un statement que escribe en \
+                     'locals.{campo}', declarada como referencia. Un statement calcula, y \
+                     una referencia no se calcula: sólo la acuña un ejecutor y sólo llega \
+                     por el 'assign' de un paso suyo (ADR-0022 §1)",
+                    p.nombre, def.nombre
+                )));
+            }
+        }
+    }
+
+    for sub in def.subsecuencias.values() {
+        validar_referencias_de(sub, programa)?;
+    }
+    Ok(())
 }
 
 /// Nombre reservado en la **raíz** de un process model para el
@@ -1410,6 +1742,7 @@ pub fn cargar_programa_con_pm(ruta_pm: &str, ruta_usuario: &str) -> Result<Progr
     // `sequence_call`, así que sus `parameters` son legítimamente mutables.
     validar_parameters_de_la_raiz(&programa.raiz)?;
     visitar(&programa, &id_pm, &programa.raiz, &mut camino)?;
+    validar_referencias(&programa)?;
 
     Ok(programa)
 }
@@ -2113,6 +2446,7 @@ fn describe_valor(v: &ValorYaml) -> String {
         ValorYaml::Bool(b) => format!("el booleano `{b}`"),
         ValorYaml::Numero(n) => format!("el número `{n}`"),
         ValorYaml::Texto(t) => format!("el texto `{t}`"),
+        ValorYaml::Declaracion(d) => format!("una declaración `type: {}`", d.kind),
     }
 }
 
@@ -2172,6 +2506,20 @@ fn entradas_de_paso(
                 } else {
                     EntradaPaso::Literal(ValorDefinicion::Texto(t.clone()))
                 }
+            }
+            // ADR-0022 §1: a reference has no literal form, and this is where
+            // that refusal is spent. A handle reaches a step by being read out
+            // of a variable —`'${locals.rack}'`, an expression— and never by
+            // being written into the sequence, which is what makes "the
+            // sequence can be read without running it" true of it.
+            ValorYaml::Declaracion(_) => {
+                return Err(ErrorCarga::Validacion(format!(
+                    "el parámetro '{nombre}' del paso '{paso}' se escribe como una \
+                     declaración, y un parámetro es un valor. Una referencia no se puede \
+                     escribir a mano: declárala en 'locals:' con \
+                     '{{ type: {TIPO_REFERENCIA}, executor: <nombre> }}', recógela con \
+                     'assign' del paso que la abre, y pásala como '${{locals.<nombre>}}'"
+                )));
             }
         };
         entradas.push((nombre, entrada));
@@ -4771,5 +5119,223 @@ main:
 ";
         let err = cargar_de_texto(yaml).unwrap_err();
         assert!(matches!(&err, ErrorCarga::Validacion(m) if m.contains("inputs")));
+    }
+
+    // ---------------------------------------------------------------------
+    // ADR-0022: the object reference. What can be refused by reading the
+    // files, with nothing connected and nothing measured.
+    // ---------------------------------------------------------------------
+
+    /// Writes a YAML into its own temp dir and loads it as a whole program,
+    /// which is the unit these checks need: the declaration lives in a
+    /// sequence and the `executors:` table it names lives in the root.
+    fn programa_de(caso: &str, yaml: &str) -> Result<Programa, ErrorCarga> {
+        let dir = std::env::temp_dir().join(format!("anvil_ref_{caso}"));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let y = dir.join("s.yaml");
+        std::fs::write(&y, yaml).unwrap();
+        cargar_programa_de_archivo(y.to_str().unwrap())
+    }
+
+    const EJECUTORES_DOS: &str = "\
+executors:
+  - { name: banco, type: grpc, host: 127.0.0.1, port: 9101 }
+  - { name: otro,  type: grpc, host: 127.0.0.1, port: 9102 }
+";
+
+    #[test]
+    fn una_referencia_se_declara_con_su_ejecutor() {
+        let prog = programa_de(
+            "decl",
+            &format!(
+                "name: s\n{EJECUTORES_DOS}locals:\n  rack: {{ type: reference, executor: banco }}\n\
+                 main:\n  - name: abrir\n    executor: banco\n    assign: {{ rack: result.outputs.rack }}\n"
+            ),
+        )
+        .unwrap();
+        assert_eq!(
+            prog.raiz.locals["rack"],
+            ValorDefinicion::Reference {
+                executor: "banco".into()
+            }
+        );
+        // Y no tiene valor: hasta que un paso la acuñe, ahí no hay nada.
+        assert_eq!(prog.raiz.locals["rack"].a_value(), expr::Value::Nulo);
+    }
+
+    /// **Criterio 2 del encargo.** Una referencia que se le pasa a un paso de
+    /// otro ejecutor se rechaza **antes de arrancar** — sin catálogo, sin red y
+    /// sin `--with-executors`, porque lo único que hace falta es lo declarado.
+    ///
+    /// Visto fallar cambiando el `executor:` del paso a `banco`: el error
+    /// desaparece, que es lo que dice que la comprobación mira a qué ejecutor
+    /// se despacha y no simplemente que haya una referencia por medio.
+    #[test]
+    fn una_referencia_a_un_paso_de_otro_ejecutor_se_rechaza_al_cargar() {
+        let yaml = format!(
+            "name: s\n{EJECUTORES_DOS}locals:\n  rack: {{ type: reference, executor: banco }}\n\
+             setup:\n  - name: abrir\n    executor: banco\n    assign: {{ rack: result.outputs.rack }}\n\
+             main:\n  - name: medir\n    executor: otro\n    inputs: {{ rack: '${{locals.rack}}' }}\n"
+        );
+        let err = programa_de("cruzado", &yaml).unwrap_err();
+        assert!(
+            matches!(&err, ErrorCarga::Validacion(m)
+                if m.contains("medir") && m.contains("'otro'") && m.contains("banco")),
+            "el error nombra el paso, el ejecutor al que se despacha y el dueño: {err}"
+        );
+
+        // El mismo YAML con el paso en su ejecutor carga sin queja.
+        let bueno = yaml.replace("executor: otro", "executor: banco");
+        programa_de("cruzado_ok", &bueno).expect("el mismo paso en su ejecutor es legítimo");
+    }
+
+    /// La otra punta de la referencia: el `assign` que la rellena tiene que
+    /// venir del ejecutor que la variable declara.
+    #[test]
+    fn un_assign_desde_otro_ejecutor_a_una_referencia_se_rechaza() {
+        let err = programa_de(
+            "assign_cruzado",
+            &format!(
+                "name: s\n{EJECUTORES_DOS}locals:\n  rack: {{ type: reference, executor: banco }}\n\
+                 main:\n  - name: abrir\n    executor: otro\n    assign: {{ rack: result.outputs.rack }}\n"
+            ),
+        )
+        .unwrap_err();
+        assert!(
+            matches!(&err, ErrorCarga::Validacion(m) if m.contains("abrir") && m.contains("banco")),
+            "{err}"
+        );
+    }
+
+    /// **Criterio 3 del encargo, la mitad que decide el cargador.** Nada que
+    /// no sea un ejecutor puede acuñar una referencia: ni un `statement`, que
+    /// calcula, ni un campo de `result` que no sea una salida.
+    ///
+    /// Visto fallar quitando cada rechazo por separado: sin el primero el YAML
+    /// carga y `locals.rack` acaba valiendo el número 1; sin el segundo, la
+    /// medida.
+    #[test]
+    fn una_referencia_no_se_calcula() {
+        let statement = programa_de(
+            "stmt",
+            &format!(
+                "name: s\n{EJECUTORES_DOS}locals:\n  rack: {{ type: reference, executor: banco }}\n\
+                 main:\n  - name: init\n    type: statement\n    statement: 'locals.rack = 1'\n"
+            ),
+        )
+        .unwrap_err();
+        assert!(
+            matches!(&statement, ErrorCarga::Validacion(m) if m.contains("statement") && m.contains("rack")),
+            "{statement}"
+        );
+
+        let medida = programa_de(
+            "medida",
+            &format!(
+                "name: s\n{EJECUTORES_DOS}locals:\n  rack: {{ type: reference, executor: banco }}\n\
+                 main:\n  - name: medir\n    executor: banco\n    assign: {{ rack: result.measured_value }}\n"
+            ),
+        )
+        .unwrap_err();
+        assert!(
+            matches!(&medida, ErrorCarga::Validacion(m) if m.contains("medir") && m.contains("rack")),
+            "{medida}"
+        );
+    }
+
+    /// Una referencia no tiene forma literal, y por ahí no se cuela ninguna.
+    #[test]
+    fn una_referencia_escrita_a_mano_en_inputs_se_rechaza() {
+        let err = programa_de(
+            "literal",
+            &format!(
+                "name: s\n{EJECUTORES_DOS}main:\n  - name: medir\n    executor: banco\n    inputs: {{ rack: {{ type: reference, executor: banco }} }}\n"
+            ),
+        )
+        .unwrap_err();
+        assert!(
+            matches!(&err, ErrorCarga::Validacion(m) if m.contains("rack") && m.contains("medir")),
+            "{err}"
+        );
+    }
+
+    /// Un componente WASM no tiene dónde guardar el objeto (ADR-0022 §8), y se
+    /// dice al cargar en vez de esperar a que el puente lo rechace en marcha.
+    #[test]
+    fn una_referencia_de_un_ejecutor_wasm_se_rechaza() {
+        let dir = std::env::temp_dir().join("anvil_ref_wasm");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("p.wasm"), b"\0asm\x0d\0\x01\0").unwrap();
+        let y = dir.join("s.yaml");
+        std::fs::write(
+            &y,
+            "name: s\nexecutors:\n  - { name: comp, type: wasm, path: ./p.wasm }\n\
+             locals:\n  rack: { type: reference, executor: comp }\n\
+             main:\n  - name: abrir\n    executor: comp\n    assign: { rack: result.outputs.rack }\n",
+        )
+        .unwrap();
+        let err = cargar_programa_de_archivo(y.to_str().unwrap()).unwrap_err();
+        assert!(
+            matches!(&err, ErrorCarga::Validacion(m) if m.contains("wasm") && m.contains("rack")),
+            "{err}"
+        );
+    }
+
+    /// Una referencia sólo se declara en `locals:`. En `file_globals:` no se
+    /// podría rellenar nunca (el motor rechaza escribirlas), y por
+    /// `parameters:` está sin decidir.
+    #[test]
+    fn una_referencia_fuera_de_locals_se_rechaza() {
+        for scope in ["file_globals", "parameters"] {
+            let err = cargar_de_texto(&format!(
+                "name: s\n{scope}:\n  rack: {{ type: reference, executor: banco }}\nmain:\n  - name: a\n"
+            ))
+            .unwrap_err();
+            assert!(
+                matches!(&err, ErrorCarga::Validacion(m) if m.contains(scope) && m.contains("locals")),
+                "{scope}: {err}"
+            );
+        }
+    }
+
+    /// Un ejecutor con un dedazo dejaría vacía la comprobación de arriba, y
+    /// pasar por vacío es peor que no comprobar.
+    #[test]
+    fn una_referencia_de_un_ejecutor_inexistente_se_rechaza() {
+        let err = programa_de(
+            "sin_ejecutor",
+            &format!(
+                "name: s\n{EJECUTORES_DOS}locals:\n  rack: {{ type: reference, executor: bancoo }}\nmain:\n  - name: a\n"
+            ),
+        )
+        .unwrap_err();
+        assert!(
+            matches!(&err, ErrorCarga::Validacion(m) if m.contains("bancoo")),
+            "{err}"
+        );
+    }
+
+    /// Una declaración mal escrita se diagnostica por su nombre, no como
+    /// «los datos no casan con ninguna variante» (#20).
+    #[test]
+    fn una_declaracion_mal_escrita_se_nombra() {
+        let err = cargar_de_texto(
+            "name: s\nlocals:\n  rack: { type: referencia, executor: banco }\nmain:\n  - name: a\n",
+        )
+        .unwrap_err();
+        assert!(
+            matches!(&err, ErrorCarga::Validacion(m) if m.contains("referencia") && m.contains("reference")),
+            "{err}"
+        );
+
+        let sin_ejecutor =
+            cargar_de_texto("name: s\nlocals:\n  rack: { type: reference }\nmain:\n  - name: a\n")
+                .unwrap_err();
+        assert!(
+            matches!(&sin_ejecutor, ErrorCarga::Validacion(m) if m.contains("ejecutor")),
+            "{sin_ejecutor}"
+        );
     }
 }

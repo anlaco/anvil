@@ -18,15 +18,16 @@ mod entorno;
 
 use modelo::proto::{StepRequest, StepResult, Value as ProtoValue, CONTRACT, ROUTE_INVOKE};
 use modelo::{
-    Asignacion, DefinicionEjecutor, DefinicionPaso, DefinicionSecuencia, EntradaPaso, Fase, Limite,
-    Programa, ResultSink, ResultadoSecuencia, ResultadoStep, TipoEjecutor, TipoPaso,
+    Asignacion, DefinicionPaso, DefinicionSecuencia, EntradaPaso, Fase, Limite, Programa,
+    ResultSink, ResultadoSecuencia, ResultadoStep, TipoEjecutor, TipoPaso,
 };
 use prost::Message;
 use wasi_grpc::grpc::Cliente;
 use wasi_grpc::net;
 
 pub use catalogo::{
-    comprueba_programa, Catalogos, Descripcion, Hallazgo, Informe as InformeFirmas, SinComprobar,
+    comprueba_programa, endpoints_con_referencias, Catalogos, Descripcion, Hallazgo,
+    Informe as InformeFirmas, SinComprobar,
 };
 pub use entorno::EntornoMotor;
 use expr::{eval, eval_sentencias, Entorno, Expresion, Scope, Sentencia, Value};
@@ -35,7 +36,7 @@ use std::collections::HashMap;
 /// Clave interna de la conexión al ejecutor embebido en `Motor.conexiones`.
 /// No es declarable en el YAML: el cargador rechaza un ejecutor con este
 /// nombre (ver `cargador::NOMBRE_EMBEDIDO_RESERVADO`).
-pub const EMBEDIDO: &str = "__anvil_embebido__";
+pub const EMBEDIDO: &str = modelo::EJECUTOR_EMBEBIDO;
 
 /// El motor: un cliente gRPC contra los ejecutores de pasos. M5-ext.1
 /// (RF-36.3): despacha cada paso al endpoint del ejecutor que declara su
@@ -49,6 +50,16 @@ pub struct Motor {
     /// (override `--executor`) antes de que llegue aquí; si llega sin
     /// traducir, `Error::EjecutorWasmSinHost`.
     conexiones: HashMap<String, Cliente>,
+    /// The life each executor was on when the run started, for the endpoints
+    /// that publish one (ADR-0022 §6). Filled by
+    /// [`Motor::describe_ejecutores`], which already asks every endpoint once
+    /// before the first step (ADR-0021 §3).
+    ///
+    /// An endpoint that is **absent** from this map publishes no lifetime, and
+    /// that is a legitimate answer: references against it are then reported as
+    /// unchecked for liveness and never asked about again. That is what keeps
+    /// the check free for everyone who does not use references.
+    vidas: HashMap<String, String>,
 }
 
 /// Qué salió mal al correr una secuencia. Un paso que *falla* no es un
@@ -116,7 +127,10 @@ impl Motor {
     pub fn conecta(host: &str, puerto: u16) -> Result<Self, Error> {
         let mut conexiones = HashMap::new();
         conexiones.insert(EMBEDIDO.into(), Cliente::conectar(host, puerto)?);
-        Ok(Motor { conexiones })
+        Ok(Motor {
+            conexiones,
+            vidas: HashMap::new(),
+        })
     }
 
     /// Conecta al embebido y abre una conexión por cada ejecutor `grpc`
@@ -146,27 +160,21 @@ impl Motor {
     /// declarado → embebido; `Embebido` declarado → embebido; `Grpc` →
     /// su nombre (clave de `conexiones`); `Wasm` → error (M5-ext.2: el motor
     /// no ejecuta `Wasm`; el host lo traduce a `grpc` antes de llegar aquí).
+    ///
+    /// La regla de routing vive en el cargador ([`cargador::resolver_endpoint`])
+    /// y aquí sólo se traduce a los errores del motor: el cargador la necesita
+    /// también, para rechazar antes de arrancar una referencia que se le pasa
+    /// a un paso de otro ejecutor (ADR-0022 §3), y dos copias de la regla es
+    /// como el chequeo y el despacho dejan de estar de acuerdo.
     pub(crate) fn resolver_endpoint<'a>(
         def: &'a DefinicionPaso,
         programa: &'a Programa,
     ) -> Result<&'a str, Error> {
-        match def.ejecutor.as_deref() {
-            None => Ok(EMBEDIDO),
-            Some(nombre) => match programa.ejecutores.get(nombre) {
-                Some(DefinicionEjecutor {
-                    tipo: TipoEjecutor::Embebido,
-                    ..
-                }) => Ok(EMBEDIDO),
-                Some(DefinicionEjecutor {
-                    tipo: TipoEjecutor::Grpc { .. },
-                    ..
-                }) => Ok(nombre),
-                Some(DefinicionEjecutor {
-                    tipo: TipoEjecutor::Wasm { .. },
-                    ..
-                }) => Err(Error::EjecutorWasmSinHost(nombre.to_string())),
-                None => Err(Error::EjecutorNoDeclarado(nombre.to_string())),
-            },
+        match cargador::resolver_endpoint(def.ejecutor.as_deref(), &programa.ejecutores) {
+            cargador::Endpoint::Embebido => Ok(EMBEDIDO),
+            cargador::Endpoint::Grpc(n) => Ok(n),
+            cargador::Endpoint::Wasm(n) => Err(Error::EjecutorWasmSinHost(n.to_string())),
+            cargador::Endpoint::NoDeclarado(n) => Err(Error::EjecutorNoDeclarado(n.to_string())),
         }
     }
 
@@ -180,7 +188,14 @@ impl Motor {
         intento: i32,
         parametros: &[(String, Value)],
     ) -> Result<ResultadoStep, Error> {
-        let endpoint = Self::resolver_endpoint(def, programa)?;
+        let endpoint = Self::resolver_endpoint(def, programa)?.to_string();
+        // Before anything crosses the wire (ADR-0022 §6: **before** invoking,
+        // never on reading the result — a restart shows up on the next call,
+        // and that call may be the very one carrying the dead handle).
+        if let Some(r) = self.veredicto_de_las_referencias(def, &endpoint, parametros) {
+            return Ok(r);
+        }
+        let endpoint = endpoint.as_str();
         let peticion = StepRequest {
             name: def.nombre.clone(),
             attempt: intento,
@@ -227,7 +242,120 @@ impl Motor {
         // quien sabe qué envió. Es lo que hace que dos corridas con distinto
         // canal dejen de producir informes idénticos.
         r.parametros = parametros.to_vec();
+        // El nombre del ejecutor lo estampa Anvil (ADR-0022 §4): el proceso de
+        // enfrente no sabe cómo lo ha llamado la secuencia.
+        if let Some(mal) = self.sella_referencias(&mut r, endpoint) {
+            return Ok(mal);
+        }
         Ok(r)
+    }
+
+    /// Stamps Anvil's half on every reference a step just minted, and refuses
+    /// one that claims a life its executor is not on.
+    ///
+    /// The stamping is ADR-0022 §4: the executor cannot know what the sequence
+    /// called it —the names live in `executors:`, on this side, which is also
+    /// what routes— so Anvil writes the name and the executor writes the rest.
+    ///
+    /// The refusal covers the executor that is simply **wrong about itself**:
+    /// it published one life in its catalog and minted a handle under another.
+    /// Anvil cannot check the payload, but it can check this, and a handle
+    /// nobody can resolve later is better refused now than spent at step 47.
+    fn sella_referencias(&self, r: &mut ResultadoStep, endpoint: &str) -> Option<ResultadoStep> {
+        let publicada = self.vidas.get(endpoint);
+        for (nombre, valor) in r.salidas.iter_mut() {
+            let Value::Reference(referencia) = valor else {
+                continue;
+            };
+            if let Some(vida) = publicada {
+                if !referencia.lifetime.is_empty() && referencia.lifetime != *vida {
+                    return Some(ResultadoStep::nuevo(
+                        &r.nombre,
+                        "error",
+                        format!(
+                            "el ejecutor '{}' devolvió en '{nombre}' una referencia de la vida \
+                             '{}', y su catálogo dice que está en la '{vida}'. Una referencia \
+                             que no es de la vida de quien la acuña no la va a poder resolver \
+                             nadie (ADR-0022 §6)",
+                            nombre_visible(endpoint),
+                            referencia.lifetime
+                        ),
+                    ));
+                }
+            }
+            referencia.executor = endpoint.to_string();
+        }
+        None
+    }
+
+    /// What to do about the references this step is about to be handed, or
+    /// `None` to go ahead and invoke.
+    ///
+    /// Two checks, in the order in which they cost:
+    ///
+    /// 1. **Whose handle is it.** A reference only means something inside the
+    ///    executor that minted it; anywhere else it is a string that does not
+    ///    match. The loader already refuses this by reading the file
+    ///    (ADR-0022 §3), so getting here means the handle arrived by a route
+    ///    the declaration did not describe — defence in depth, and free.
+    /// 2. **Is that executor still the same one.** Not a type question at all:
+    ///    the process opposite may have died and been born again, and no type
+    ///    system answers that (ADR-0022 §6). The answer is asked for, once, and
+    ///    only for a step that actually carries a handle to an endpoint that
+    ///    publishes a lifetime — so a sequence that uses no references pays
+    ///    nothing, and neither does an executor that publishes none.
+    ///
+    /// The verdict is a `ResultadoStep` in `error` and **never an abort**, and
+    /// that is the decision ADR-0022 left open. A run that stops in its tracks
+    /// does not run its `cleanup` (`ejecuta_secuencia_interna` returns before
+    /// the closing loop), and the very moment this check fires is the moment
+    /// Anvil most wants the step that closes the rack to run. Only an `error`
+    /// gives it that chance. The step does not measure either way.
+    ///
+    /// Asking `Describe` again does not contradict ADR-0021 §3: **only the
+    /// lifetime is read**, the signatures are ignored, so the catalog is still
+    /// checked exactly once, at start-up, and the report stays reconstructible.
+    fn veredicto_de_las_referencias(
+        &mut self,
+        def: &DefinicionPaso,
+        endpoint: &str,
+        parametros: &[(String, Value)],
+    ) -> Option<ResultadoStep> {
+        let referencias: Vec<(&str, &expr::Reference)> = parametros
+            .iter()
+            .filter_map(|(n, v)| v.reference().map(|r| (n.as_str(), r)))
+            .collect();
+        if referencias.is_empty() {
+            return None;
+        }
+
+        for (nombre, r) in &referencias {
+            if r.executor != endpoint {
+                return Some(ResultadoStep::nuevo(
+                    &def.nombre,
+                    "error",
+                    format!(
+                        "el parámetro '{nombre}' lleva una referencia del ejecutor '{}' y este \
+                         paso se despacha a '{}'. Una referencia sólo significa algo dentro del \
+                         ejecutor que la acuñó (ADR-0022 §3)",
+                        nombre_visible(&r.executor),
+                        nombre_visible(endpoint)
+                    ),
+                ));
+            }
+        }
+
+        // The endpoint publishes no lifetime: liveness is unchecked, said out
+        // loud at start-up (`comprueba_firmas`) and not silently assumed. The
+        // executor still rejects a foreign life on its own account — it is the
+        // one that knows with certainty (ADR-0022 §6).
+        self.vidas.get(endpoint)?;
+
+        let ahora = match self.describe_uno(endpoint) {
+            Descripcion::Describe(c) => Ok(c.lifetime),
+            Descripcion::NoDescribe(motivo) => Err(motivo),
+        };
+        veredicto_de_vida(&def.nombre, endpoint, &referencias, ahora)
     }
 
     /// Corre un paso hasta que pase o se agoten los intentos.
@@ -403,11 +531,61 @@ fn evalua_entradas(
 /// una clave interna que no se puede declarar en el YAML, así que enseñarla
 /// tal cual sería enseñar un detalle de implementación.
 pub(crate) fn nombre_visible(endpoint: &str) -> &str {
-    if endpoint == EMBEDIDO {
-        "embebido"
-    } else {
-        endpoint
+    modelo::nombre_visible_de_ejecutor(endpoint)
+}
+
+/// The liveness verdict, separated from the network so it can be tested
+/// (ADR-0022 §6).
+///
+/// `ahora` is the life the executor claims **right now**, or why it could not
+/// be asked. Each reference is compared against it and not against the life
+/// recorded at start-up: what has to still be resolvable is the handle, and
+/// comparing it directly is one fewer assumption than comparing two things
+/// that are only equal because something else made them so.
+///
+/// A reference carrying **no** lifetime is left alone: that executor does not
+/// stamp one, so there is nothing to compare and saying so is the honest
+/// answer (ADR-0019, Rule 2).
+fn veredicto_de_vida(
+    paso: &str,
+    endpoint: &str,
+    referencias: &[(&str, &expr::Reference)],
+    ahora: Result<String, String>,
+) -> Option<ResultadoStep> {
+    let ahora = match ahora {
+        Ok(v) => v,
+        Err(motivo) => {
+            return Some(ResultadoStep::nuevo(
+                paso,
+                "error",
+                format!(
+                    "el ejecutor '{}' publicó su vida al arrancar y ahora no contesta \
+                     ({motivo}). El paso lleva una referencia suya y no se invoca: medir \
+                     contra un ejecutor que ya no se sabe si es el mismo sería medir contra \
+                     otro banco (ADR-0022 §6)",
+                    nombre_visible(endpoint)
+                ),
+            ))
+        }
+    };
+    for (nombre, r) in referencias {
+        if r.lifetime.is_empty() || r.lifetime == ahora {
+            continue;
+        }
+        return Some(ResultadoStep::nuevo(
+            paso,
+            "error",
+            format!(
+                "el ejecutor '{}' se ha reiniciado a mitad de la corrida: el parámetro \
+                 '{nombre}' lleva una referencia de la vida '{}' y el ejecutor dice estar \
+                 ahora en la '{ahora}'. Esa referencia ya no apunta a nada, así que el paso \
+                 no se invoca y no mide (ADR-0022 §6)",
+                nombre_visible(endpoint),
+                r.lifetime
+            ),
+        ));
     }
+    None
 }
 
 /// La comprobación del eco (ADR-0020 §4b), aislada de la red para poder
@@ -2446,6 +2624,170 @@ mod tests {
         assert_eq!(call.fase, Fase::Setup, "el call, con la fase del padre");
         let sub = call.sub_pasos.as_ref().unwrap();
         assert_eq!(sub[0].fase, Fase::Main, "el sub-paso, con la suya");
+    }
+
+    // ---------------------------------------------------------------------
+    // ADR-0022: lo que el motor hace con una referencia sin tocar la red.
+    // ---------------------------------------------------------------------
+
+    /// A `Motor` with no connections: enough for everything that decides
+    /// **before** the wire, which is where these checks live.
+    fn motor_con_vidas(vidas: &[(&str, &str)]) -> Motor {
+        Motor {
+            conexiones: HashMap::new(),
+            vidas: vidas
+                .iter()
+                .map(|(e, v)| ((*e).to_string(), (*v).to_string()))
+                .collect(),
+        }
+    }
+
+    fn referencia(ejecutor: &str, vida: &str, payload: &str) -> Value {
+        Value::Reference(expr::Reference {
+            executor: ejecutor.into(),
+            lifetime: vida.into(),
+            payload: payload.into(),
+        })
+    }
+
+    /// El nombre del ejecutor lo pone Anvil, no el ejecutor (ADR-0022 §4): el
+    /// proceso de enfrente no sabe cómo lo ha llamado la secuencia.
+    ///
+    /// Visto fallar quitando la línea que estampa `referencia.executor`: la
+    /// referencia sale con el nombre vacío que puso el ejecutor, y el chequeo
+    /// cruzado de la llamada siguiente la rechazaría por «del ejecutor ''».
+    #[test]
+    fn anvil_estampa_el_nombre_del_ejecutor_en_la_referencia() {
+        let motor = motor_con_vidas(&[("banco", "v1")]);
+        let mut r = ResultadoStep::nuevo("abrir", "pass", "ok");
+        r.salidas = vec![("rack".into(), referencia("", "v1", "s1"))];
+        assert!(motor.sella_referencias(&mut r, "banco").is_none());
+        assert_eq!(
+            r.salidas[0].1.reference().unwrap().executor,
+            "banco",
+            "el nombre lo pone el motor"
+        );
+    }
+
+    /// Un ejecutor que publica una vida en su catálogo y acuña con otra está
+    /// equivocado sobre sí mismo, y la referencia no la va a resolver nadie.
+    #[test]
+    fn una_referencia_de_una_vida_que_no_es_la_del_ejecutor_es_error() {
+        let motor = motor_con_vidas(&[("banco", "v1")]);
+        let mut r = ResultadoStep::nuevo("abrir", "pass", "ok");
+        r.salidas = vec![("rack".into(), referencia("", "v9", "s1"))];
+        let mal = motor
+            .sella_referencias(&mut r, "banco")
+            .expect("una vida ajena no pasa");
+        assert_eq!(mal.estado, "error");
+        assert!(
+            mal.mensaje.contains("v9") && mal.mensaje.contains("v1"),
+            "{}",
+            mal.mensaje
+        );
+    }
+
+    /// Defensa en profundidad del chequeo cruzado: el cargador ya lo rechaza
+    /// leyendo el fichero, así que llegar aquí significa que la referencia
+    /// entró por una ruta que la declaración no describía.
+    #[test]
+    fn una_referencia_de_otro_ejecutor_no_llega_a_invocar() {
+        let mut motor = motor_con_vidas(&[("banco", "v1")]);
+        let def = DefinicionPaso::nuevo("medir", 1);
+        let params = vec![("rack".to_string(), referencia("banco", "v1", "s1"))];
+        let r = motor
+            .veredicto_de_las_referencias(&def, "otro", &params)
+            .expect("no se invoca");
+        assert_eq!(r.estado, "error");
+        assert!(
+            r.mensaje.contains("banco") && r.mensaje.contains("otro"),
+            "{}",
+            r.mensaje
+        );
+    }
+
+    /// Un ejecutor que no publica vida no cuesta ni una llamada de más: la
+    /// comprobación de vida se declara sin hacer (`comprueba_firmas` lo avisa)
+    /// en vez de suponerla buena, y el paso sigue (ADR-0022 §6). Sin esto, un
+    /// `describe_uno` sobre un motor sin conexiones daría error de red y el
+    /// paso saldría `error` por no usar referencias contra un tercero.
+    #[test]
+    fn sin_vida_publicada_la_referencia_pasa_sin_comprobar() {
+        let mut motor = motor_con_vidas(&[]);
+        let def = DefinicionPaso::nuevo("medir", 1);
+        let params = vec![("rack".to_string(), referencia("banco", "v1", "s1"))];
+        assert!(motor
+            .veredicto_de_las_referencias(&def, "banco", &params)
+            .is_none());
+    }
+
+    /// Y un paso sin referencias no paga nada: ni una comparación ni una
+    /// llamada. Es lo que mantiene el coste en cero para quien no las usa.
+    #[test]
+    fn un_paso_sin_referencias_no_pregunta_nada() {
+        let mut motor = motor_con_vidas(&[("banco", "v1")]);
+        let def = DefinicionPaso::nuevo("medir", 1);
+        let params = vec![("canal".to_string(), Value::Numero(2.0))];
+        assert!(motor
+            .veredicto_de_las_referencias(&def, "banco", &params)
+            .is_none());
+    }
+
+    /// **Criterio 4 del encargo**, en su parte decidible sin red: un ejecutor
+    /// que se ha reiniciado se detecta **antes** de invocar, y el paso no mide.
+    ///
+    /// Visto fallar comparando `ahora` consigo mismo en vez de con la vida de
+    /// la referencia: los tres casos pasan a devolver `None` y el paso saldría
+    /// a medir contra un banco que ya no existe.
+    #[test]
+    fn un_ejecutor_reiniciado_se_detecta_antes_de_invocar() {
+        let vieja = expr::Reference {
+            executor: "banco".into(),
+            lifetime: "v1".into(),
+            payload: "s1".into(),
+        };
+        let refs = vec![("rack", &vieja)];
+
+        // Misma vida: se invoca.
+        assert!(veredicto_de_vida("medir", "banco", &refs, Ok("v1".into())).is_none());
+
+        // Vida distinta: se reinició.
+        let r = veredicto_de_vida("medir", "banco", &refs, Ok("v2".into()))
+            .expect("una vida distinta no se invoca");
+        assert_eq!(r.estado, "error");
+        assert!(r.valor_medido.is_none(), "y no mide");
+        assert!(
+            r.mensaje.contains("reiniciado")
+                && r.mensaje.contains("v1")
+                && r.mensaje.contains("v2"),
+            "{}",
+            r.mensaje
+        );
+
+        // Y el reinicio que además se llevó la conexión por delante: no
+        // contesta, y eso también es «no se invoca», no un aborto de corrida.
+        let caido = veredicto_de_vida("medir", "banco", &refs, Err("conexión cerrada".into()))
+            .expect("un ejecutor que no contesta no se invoca");
+        assert_eq!(caido.estado, "error");
+        assert!(
+            caido.mensaje.contains("conexión cerrada"),
+            "{}",
+            caido.mensaje
+        );
+    }
+
+    /// Una referencia sin vida no se puede comparar con nada, y no se inventa
+    /// un veredicto sobre ella (ADR-0019, Regla 2).
+    #[test]
+    fn una_referencia_sin_vida_no_se_juzga() {
+        let sin_vida = expr::Reference {
+            executor: "banco".into(),
+            lifetime: String::new(),
+            payload: "s1".into(),
+        };
+        assert!(
+            veredicto_de_vida("medir", "banco", &[("rack", &sin_vida)], Ok("v2".into())).is_none()
+        );
     }
 }
 

@@ -53,7 +53,7 @@ use pb::{Catalog, CatalogRequest, StepRequest, StepResult};
 /// alguien sube el contrato en `modelo` y se olvida de aquí, ese test se pone
 /// rojo — que es la diferencia entre un fallo de compilación y **un eco que
 /// miente**.
-const CONTRACT: i32 = 3;
+const CONTRACT: i32 = 4;
 
 // Bindings del WIT `anvil:paso` (el `wit/` de este crate es la fuente de
 // verdad del contrato; el autor del componente usa el mismo fichero).
@@ -199,10 +199,16 @@ impl StepExecutor for ServicioEjecutor {
             .iter()
             .map(proto_a_nombrado)
             .collect::<Result<Vec<_>, _>>()
-            .map_err(|n: String| {
-                Status::invalid_argument(format!(
+            .map_err(|e| match e {
+                NoTraducible::SinTipo(n) => Status::invalid_argument(format!(
                     "el parámetro '{n}' llegó sin tipo (ninguna de las ramas numero/texto/booleano)"
-                ))
+                )),
+                NoTraducible::Referencia(n) => Status::invalid_argument(format!(
+                    "el parámetro '{n}' es una referencia a objeto, y un componente WASM no \
+                     puede sostener una: la interfaz 'anvil:step' es una función sin estado \
+                     entre llamadas, así que no tiene dónde guardar el objeto. Sirve ese paso \
+                     desde un ejecutor 'grpc' de proceso (ADR-0022 §8)"
+                )),
             })?;
         let mut comp = self
             .componente
@@ -396,18 +402,44 @@ fn nombrado_a_proto(n: &Named) -> pb::Value {
     }
 }
 
+/// Por qué un `Valor` del protobuf no se puede pasar al componente.
+#[derive(Debug, PartialEq)]
+enum NoTraducible {
+    /// El `oneof` llegó vacío: no dice de qué tipo es.
+    SinTipo(String),
+    /// Es una referencia a objeto (ADR-0022).
+    Referencia(String),
+}
+
 /// Un `Valor` del protobuf al `Named` del WIT (el parámetro de entrada).
 ///
-/// `Err(nombre)` si el `oneof` llegó vacío: no hay forma de construir el
-/// `variant` del WIT sin saber de qué tipo es, y no la hay a propósito — el
-/// WIT no tiene rama «desconocido», que es lo que hace imposible pasarle al
-/// componente un parámetro que nadie sabe interpretar.
-fn proto_a_nombrado(v: &pb::Value) -> Result<Named, String> {
+/// `Err` si no hay forma de construir el `variant` del WIT, y el WIT no tiene
+/// rama «desconocido» a propósito: es lo que hace imposible pasarle al
+/// componente un parámetro que nadie sabe interpretar. Dos motivos:
+///
+/// - **El `oneof` llegó vacío**: no dice de qué tipo es.
+/// - **Es una referencia** (contrato 4, ADR-0022). El WIT de este puente es
+///   `run(name, attempt, inputs) -> step-result`: una función, sin recursos y
+///   sin estado entre llamadas (ADR-0020 §4d), así que el componente del
+///   usuario **no tiene dónde guardar el objeto**. Darle una referencia sería
+///   darle un identificador que no puede resolver.
+///
+///   El fallo es explícito y nunca un silencio, que es justo lo que ADR-0022
+///   §8 exige mientras el WIT no se toque: darle al WASM estado es una
+///   decisión con su propio ADR, y hasta entonces esto se dice en voz alta.
+fn proto_a_nombrado(v: &pb::Value) -> Result<Named, NoTraducible> {
     use exports::anvil::step::step::Value as ValueWit;
-    let valor = match v.value.as_ref().ok_or_else(|| v.name.clone())? {
+    let valor = match v
+        .value
+        .as_ref()
+        .ok_or_else(|| NoTraducible::SinTipo(v.name.clone()))?
+    {
         pb::value::Value::Number(x) => ValueWit::Number(*x),
         pb::value::Value::Text(s) => ValueWit::Text(s.clone()),
         pb::value::Value::Boolean(b) => ValueWit::Boolean(*b),
+        pb::value::Value::Reference(_) => {
+            return Err(NoTraducible::Referencia(v.name.clone()))
+        }
     };
     Ok(Named {
         name: v.name.clone(),
@@ -441,7 +473,38 @@ mod tests_contrato {
             name: "channel".into(),
             value: None,
         };
-        assert_eq!(proto_a_nombrado(&v).unwrap_err(), "channel");
+        assert_eq!(
+            proto_a_nombrado(&v).unwrap_err(),
+            NoTraducible::SinTipo("channel".into())
+        );
+    }
+
+    /// ADR-0022 §8: una referencia que llega a un componente WASM es un error
+    /// **explícito**, nunca un silencio.
+    ///
+    /// El WIT de este puente es `run(name, attempt, inputs)`: una función, sin
+    /// recursos y sin estado entre llamadas, así que el componente no tiene
+    /// dónde guardar el objeto. Darle estado es una decisión con su propio
+    /// ADR; hasta entonces esto se dice en voz alta y en el sitio donde se
+    /// sabe.
+    ///
+    /// Visto fallar añadiendo una rama que la convierte en `ValueWit::Text`
+    /// con el payload: `proto_a_nombrado` devuelve `Ok` y el componente recibe
+    /// una cadena que no puede resolver.
+    #[test]
+    fn una_referencia_no_llega_a_un_componente_wasm() {
+        let v = pb::Value {
+            name: "rack".into(),
+            value: Some(pb::value::Value::Reference(pb::Reference {
+                executor: "banco".into(),
+                lifetime: "v1".into(),
+                payload: "s1".into(),
+            })),
+        };
+        assert_eq!(
+            proto_a_nombrado(&v).unwrap_err(),
+            NoTraducible::Referencia("rack".into())
+        );
     }
 
     #[test]
