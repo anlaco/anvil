@@ -20,5 +20,9 @@ betatester/
 # issue anlaco/anvil#43 y sus ficheros son de usar y tirar.
 /.bench-tmp
 
+# Bytecode de Python: los pasos de QA y del ejecutor se importan por path, así
+# que dejan `__pycache__/` allí donde se corren. Es artefacto, no producto.
+__pycache__/
+
 # Instrucciones de agente: son locales, no parte del producto.
 CLAUDE.md
