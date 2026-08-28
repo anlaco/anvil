@@ -69,18 +69,22 @@ despacho por nombre. Un cambio al contrato (`paso.proto`) **o** a
 
 ## Convenciones
 
-- **Idioma:** la frontera está en si lo ve quien *usa* Anvil o quien *abre* el
-  repo. **La interfaz va en inglés** —el YAML de secuencia, `paso.proto`, el
-  WIT, las claves del JSON, las columnas del CSV, los estados y los flags del
-  CLI—; **el código, los comentarios, los ADRs y los mensajes de commit van en
-  español**. La traducción de cada término está fijada en
-  [`GLOSSARY.md`](GLOSSARY.md): consúltalo antes de nombrar algo nuevo en la
-  superficie pública.
-  Los mensajes de error y el reporte de texto siguen en español y se van
-  traduciendo por la regla del *Boy Scout*: el fichero que se abre para
-  modificarlo se traduce, en un commit aparte del cambio que motivó abrirlo.
+- **Idioma:** **el código va en inglés** desde el 27/08/2026 —
+  identificadores, comentarios y mensajes de error—, igual que la interfaz, que
+  ya lo estaba: el YAML de secuencia, `paso.proto`, el WIT, las claves del JSON,
+  las columnas del CSV, los estados y los flags del CLI. La traducción de cada
+  término está fijada en [`GLOSSARY.md`](GLOSSARY.md): consúltalo antes de
+  nombrar algo nuevo en la superficie pública.
+  **Los ADRs y el resto de `docs/` siguen en español.**
+  No es una reescritura: lo que queda en español se traduce por la regla del
+  *Boy Scout* —el fichero que se abre para modificarlo se traduce, en un commit
+  aparte del cambio que motivó abrirlo—, así que un fichero entero en español
+  hoy no es una anomalía, es el punto de partida. Documenta con la herramienta
+  nativa del lenguaje: `rustdoc` en Rust.
 - **Commits:** [conventional commits](https://www.conventionalcommits.org/)
-  (`feat:`, `fix:`, `chore:`, `docs:`, `refactor:`…). Mira el historial.
+  (`feat:`, `fix:`, `chore:`, `docs:`, `refactor:`…) **y en inglés**, también
+  desde el 27/08/2026. No es retroactivo: el historial ya escrito en español se
+  queda como está. Mira el historial reciente.
 - **Estilo de código:** el del entorno (`cargo fmt`); comentarios como los
   existentes: concisos, explican el *por qué*.
 
