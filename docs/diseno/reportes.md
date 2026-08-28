@@ -91,6 +91,57 @@ on_fin_secuencia(resultado)   # el ResultadoSecuencia agregado
 > congelada no cambia). Los pasos sin sub-pasos producen la misma línea de
 > siempre. Sin cambios en `paso.proto` (ADR-0010).
 
+### An object reference in the report (ADR-0022)
+
+A step's `inputs` and `outputs` both reach the report, so **what bench each
+measurement was made against ends up written down** — Rule 3 of ADR-0019
+surviving a pattern that at first sight looked like it would break it. ADR-0022
+left the exact form open; this is what it is.
+
+**JSON: an object.**
+
+```json
+"inputs": {
+  "bench": {
+    "type": "reference",
+    "executor": "python",
+    "lifetime": "2cd0659e…",
+    "payload": "s1"
+  },
+  "channel": 2.0
+}
+```
+
+Not a string, and that is the decision. A string would put the reference back
+where the type took it from — indistinguishable from a text, concatenable by
+whoever post-processes the report, and needing a separator that the first
+payload containing it would break. An object cannot be confused with any of the
+three scalars, needs no escaping at all, and keeps the three parts apart.
+`type` is spelled out rather than implied by the shape, so a consumer that only
+knows the scalars sees a named thing instead of a number it might have used.
+
+**CSV: a percent-encoded token.**
+
+```
+bench=ref:python/2cd0659e…/rack%3Bcanal%3D2
+```
+
+The cell packs several `name=value` pairs joined by `;`, and the field escaping
+only covers what RFC-4180 asks for — comma, quote, CR, LF. A payload carrying a
+`;` or an `=` would therefore split the cell into pairs that were never there,
+**in silence**: the file still parses, and the row reads as if the bench had
+been something else. A payload is minted by the executor and opaque to Anvil,
+so there is no character it can be promised not to contain. Percent-encoding
+`% ; = / , "` and the control characters leaves a token that means nothing to
+this format and is still reversible, which is what separates it from dropping
+the awkward characters. `ref:` marks it as a reference rather than a text that
+happens to look like a path.
+
+> **Still open, and not fixed here:** the same corruption is reachable through
+> a plain **text** output holding a `;` or an `=`. Fixing that means changing
+> how texts have always been written, which would change files already being
+> read — a separate decision from this one.
+
 ### Visibilidad de los pasos saltados (#13)
 
 `saltado` es **neutral** en el agregado, y debe seguir siéndolo: un paso saltado

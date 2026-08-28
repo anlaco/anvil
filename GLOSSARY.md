@@ -11,14 +11,18 @@ cada sitio y acaben conviviendo `executor` y `runner` para lo mismo.
 
 ## La frontera
 
-> **Lo que ve quien usa Anvil, en inglés. Lo de dentro, en castellano.**
+> **Todo lo que entra al repo, en inglés.**
 
-- **En inglés:** el YAML de secuencia, el contrato `paso.proto`, el WIT
-  `anvil:step`, las claves del JSON, las columnas del CSV, los estados, los
-  flags del CLI y la documentación que describe cualquiera de esas cosas.
-- **En castellano:** el código, los comentarios, los ADRs, los mensajes de
-  commit y `docs/` que no describa la superficie. No es dejadez: es una
-  decisión, y está escrita en `CONTRIBUTING.md`.
+La frontera se movió: primero era «la interfaz en inglés, lo de dentro en
+castellano», y desde el 28/08/2026 lo son también el código, los ADRs, `docs/`
+y los mensajes de commit. Este fichero sigue existiendo porque su trabajo no
+era marcar esa frontera, sino **fijar la traducción de cada término del dominio
+una sola vez**, para que no convivan `executor` y `runner` para lo mismo. Se
+consulta **antes** de nombrar algo nuevo en la superficie pública.
+
+La migración es *boy scout* y no retroactiva: un fichero entero en castellano
+hoy no es una anomalía, es el punto de partida. La decisión está en
+`CONTRIBUTING.md`.
 
 El sitio donde se cruza la frontera ya existe y tiene nombre:
 `PasoYaml::a_definicion()` en `crates/cargador`, que traduce lo que se
@@ -126,6 +130,16 @@ el contrato miente.
 | `limite_min` / `limite_max` | `limit_min` / `limit_max` |
 | `salidas` | `outputs` |
 | `numero` / `texto` / `booleano` | `number` / `text` / `boolean` |
+
+Términos nuevos del contrato 4 (ADR-0022), que nacen ya en inglés:
+
+| Término | Qué es |
+|---|---|
+| `Reference` | El handle a un objeto que se queda en el ejecutor. **Referencia**, nunca *handle* ni *puntero* en la superficie pública. |
+| `executor` (de una `Reference`) | El nombre que la secuencia le da al ejecutor dueño. Lo estampa Anvil. |
+| `lifetime` | La **vida** del ejecutor: la acuña él al arrancar y la publica en su `Catalog`. Nunca *session* ni *epoch*. |
+| `payload` | La parte opaca que acuña el ejecutor. Nunca *id*, que sugeriría que Anvil la interpreta. |
+| `type: reference` | Cómo se declara una variable de referencia en `locals:`. |
 
 ### WIT
 

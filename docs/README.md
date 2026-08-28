@@ -53,7 +53,9 @@ docs/
 │  └─ 0006-wasi-grpc-propio.md
 │  (0007-0018 en la misma carpeta; 0013 reemplaza 0012 en el cargador y el routing)
 ├─ planes/                    planes de hito (m4-nucleo, m4b, m5-ext)
-├─ qa/                        informes de campaña + regresión ejecutable
+├─ qa/                        informes de campaña + comprobaciones ejecutables
+│  ├─ regresion/run.sh        los defectos de la beta de agosto 2026
+│  └─ referencia/run.sh       ADR-0022 de punta a punta (necesita grpcio)
 └─ diseno/                    diseño del dominio, un doc por área funcional
    ├─ motor-de-ejecucion.md
    ├─ limites-y-estados.md

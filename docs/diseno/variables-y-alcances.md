@@ -33,6 +33,10 @@ de alcance más abajo.
 name: basica
 locals:
   voltaje_leido: 0.0
+  # The one variable with no initial value: a reference (ADR-0022). It has no
+  # literal form, so all the sequence can state is which executor its handle
+  # will come from.
+  rack: { type: reference, executor: bench }
 parameters: {}            # al llamar desde otra secuencia
 file_globals:
   lote: "A-2026-08"
@@ -55,9 +59,9 @@ main:
   StationGlobals — eso lo hace el motor, no el paso, para mantener el paso
   aislado por contrato). Ver el recorte de `Parameters` en sequence call, más
   abajo.
-- **Tipado:** declaración con tipo básico (numérico, texto, booleano); la
-  validación es al cargar (fail-fast). Sin el árbol de propiedades tipado
-  recursivo de TestStand en el MVP.
+- **Tipado:** declaración con tipo básico (numérico, texto, booleano,
+  **referencia**); la validación es al cargar (fail-fast). Sin el árbol de
+  propiedades tipado recursivo de TestStand en el MVP.
 - **Destinos declarados:** el destino de `asigna` y los lvalues de
   `statement` (`locals.X`/`parameters.P`) deben estar declarados en su
   `locals:`/`parameters:` — el cargador lo rechaza si no (DEF-3 del informe
@@ -127,6 +131,47 @@ main:
   `statement` o un `pass_fail` es **error de carga**: ninguno de los dos produce
   `resultado.*` que volcar, así que la `asigna` sería un no-op silencioso. Un
   `statement` asigna dentro de su propia sentencia (`locals.x = …`).
+
+## Reference variables (ADR-0022)
+
+A reference is a handle to an object an executor keeps for itself — a bench
+session, an instrument connection: a thing with open sockets that cannot cross
+the wire. It is declared, and only in `locals:`:
+
+```yaml
+locals:
+  rack: { type: reference, executor: bench }
+```
+
+**Why the executor is part of the declaration.** It is the only thing that makes
+"this handle is being passed to a step of another executor" decidable without
+following it back through `assign`, subsequence `args` and the process model —
+the data-flow analysis ADR-0021 declined to do. `inputs: { rack: '${locals.rack}' }`
+is an expression, and the type of an expression is not guessed. Declared on the
+variable, the check is one lookup and it can be seen by reading the file: it
+runs with nothing connected, in plain `--validate`.
+
+**It has no initial value**, and that is the point: a reference cannot be
+written by hand, so until a step mints one there is nothing there. Reading it
+before then and handing it to a step is refused where every other absent
+parameter is.
+
+**What can be written into it, and by whom.** Only the `assign` of a step served
+by that executor, and only from `result.outputs.<name>`. A `statement` cannot:
+a statement computes, and a reference is not computed. `result.measured_value`
+cannot either: it is a number, and letting one land in a variable the file calls
+a handle would make the type a label rather than a fact.
+
+**Only in `locals:`**, and each refusal for its own reason. `file_globals:` are
+the file's constants and the engine refuses to write them at all, so a handle
+declared there could never be filled in. `parameters:` is the by-reference
+channel of a `sequence_call`, and handing a rack to a subsequence is a decision
+ADR-0022 does not take — allowing it here would be taking it by accident.
+
+**What can be done with one**, and it is deliberately almost nothing: read it
+out of a variable, and hand it to a step. Arithmetic, comparison, use as a
+limit or as a verdict are all errors, and that refusal is the whole reason the
+type exists — the mechanism already worked while a handle was just text.
 
 ## Por qué este recorte
 

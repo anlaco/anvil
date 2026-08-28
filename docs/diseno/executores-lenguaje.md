@@ -151,6 +151,37 @@ executors/
 - Cada módulo es autocontenido y versionable → **descargable desde la UI**
   cuando exista (post-MVP).
 
+### Objects that stay in the executor (ADR-0022)
+
+A bench session, an instrument connection, a driver handle: a thing with open
+sockets and vendor locks that **cannot cross the wire and must not be reopened
+per step**. It stays in the executor's process, and the sequence carries a
+`Reference` to it — which is the one thing a language executor can offer that
+the embedded WASM one cannot, since `anvil:step` is a function with no state
+between calls.
+
+Two duties fall on whoever writes an executor, and **Anvil cannot check either
+from outside**. An executor that breaks one is a broken executor:
+
+1. **Never recycle a payload within one lifetime.** If a closed bench's key
+   came back for the next open, an old reference would resolve cleanly to a
+   live, *different* object: same executor, same lifetime, everything green,
+   measuring against the wrong bench. A monotonic counter is what makes this
+   impossible; a free list is what makes it happen.
+2. **Mint a different lifetime on every start**, and publish it in
+   `Catalog.lifetime`. A process that came back on the same lifetime would make
+   its own restart undetectable, for Anvil and for itself.
+
+And one it should do because it is the only one that can: **reject a reference
+whose lifetime is not its own**. Anvil knows this only by comparison; the
+executor knows it with certainty.
+
+The Python executor is the worked example — `ctx.objects` is the store, and
+`executors/python/steps/instrument.py` ships the shape any object steps take:
+one opens and mints, several use, one closes. What it does *not* do is mint a
+new handle when a step merely changes the bench: the reference names a slot,
+and answering a new one would break retries.
+
 ### LID: despliegue en SO legacy (patrón, no componente — aplazado a post-M5-ext)
 
 Cuando el paso exige DLLs/drivers de un SO que Anvil no ofrece (Windows 7/10,
