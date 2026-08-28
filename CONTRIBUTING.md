@@ -69,22 +69,23 @@ despacho por nombre. Un cambio al contrato (`paso.proto`) **o** a
 
 ## Convenciones
 
-- **Idioma:** **el código va en inglés** desde el 27/08/2026 —
-  identificadores, comentarios y mensajes de error—, igual que la interfaz, que
-  ya lo estaba: el YAML de secuencia, `paso.proto`, el WIT, las claves del JSON,
-  las columnas del CSV, los estados y los flags del CLI. La traducción de cada
-  término está fijada en [`GLOSSARY.md`](GLOSSARY.md): consúltalo antes de
-  nombrar algo nuevo en la superficie pública.
-  **Los ADRs y el resto de `docs/` siguen en español.**
-  No es una reescritura: lo que queda en español se traduce por la regla del
-  *Boy Scout* —el fichero que se abre para modificarlo se traduce, en un commit
-  aparte del cambio que motivó abrirlo—, así que un fichero entero en español
-  hoy no es una anomalía, es el punto de partida. Documenta con la herramienta
-  nativa del lenguaje: `rustdoc` en Rust.
+- **Idioma: inglés, en todo.** Anvil es un producto open-source
+  internacional, así que desde el 28/08/2026 van en inglés el código
+  —identificadores, comentarios y mensajes de error—, los mensajes de commit,
+  los ADRs y `docs/`. La interfaz ya lo estaba: el YAML de secuencia,
+  `paso.proto`, el WIT, las claves del JSON, las columnas del CSV, los estados y
+  los flags del CLI. La traducción de cada término está fijada en
+  [`GLOSSARY.md`](GLOSSARY.md): consúltalo antes de nombrar algo nuevo en la
+  superficie pública.
+  **No es una reescritura de golpe.** Lo que sigue en español se traduce por la
+  regla del *Boy Scout* —el fichero que se abre para modificarlo se traduce, en
+  un commit aparte del cambio que motivó abrirlo—, así que un fichero entero en
+  español hoy no es una anomalía, es el punto de partida. Documenta con la
+  herramienta nativa del lenguaje: `rustdoc` en Rust.
 - **Commits:** [conventional commits](https://www.conventionalcommits.org/)
-  (`feat:`, `fix:`, `chore:`, `docs:`, `refactor:`…) **y en inglés**, también
-  desde el 27/08/2026. No es retroactivo: el historial ya escrito en español se
-  queda como está. Mira el historial reciente.
+  (`feat:`, `fix:`, `chore:`, `docs:`, `refactor:`…) **y en inglés**. No es
+  retroactivo: el historial ya escrito en español se queda como está. Mira el
+  historial reciente.
 - **Estilo de código:** el del entorno (`cargo fmt`); comentarios como los
   existentes: concisos, explican el *por qué*.
 
