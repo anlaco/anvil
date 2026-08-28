@@ -1,0 +1,71 @@
+# The WASM executor (bridge)
+
+`anvil-puente-wasm` — a native binary that serves a user's `.wasm` step
+component over gRPC ([ADR-0015](../../docs/adr/0015-el-wasm-del-usuario-es-una-funcion-puenteado-a-grpc.md)).
+Your step is a WIT component exporting `run` (`anvil:step@0.3.0`); this
+process loads it into wasmtime and turns it into an executor the engine can
+dispatch to. It is the sibling of [`../python/`](../python/): both listen on
+gRPC, speak [`paso.proto`](../../crates/modelo/paso.proto), answer the
+engine's contract echo (ADR-0020 §4b), and the engine cannot tell them apart
+— sequences mix both freely.
+
+The component knows nothing about gRPC, protobuf or contract versions: it is
+a function. The bridge is the only translator, which is why the bridge — not
+your component — answers the contract echo.
+
+## How Anvil uses it
+
+`anvil` embeds this binary and spawns it itself for every `type: wasm`
+executor declared in the sequence: one process per `.wasm` path, on an
+ephemeral loopback port, with stdin piped so the bridge exits when the host
+dies. Nothing to install, nothing to start: `anvil sequence.yaml` works out
+of the box. The embedded copy is extracted to a temp file at startup, keyed
+by a content hash.
+
+## Running it by hand
+
+The binary has a CLI of its own — useful to try a component without a
+sequence around it:
+
+```sh
+anvil-puente-wasm --wasm <path.wasm> [--port <port>] [--bind <ip>]
+```
+
+`--bind 0.0.0.0` is what makes the remote case (the executor on another
+machine — the Raspberry Pi case ADR-0015 anticipated) possible without
+changing anything. Built by hand:
+
+```sh
+cargo build --release --manifest-path executors/wasm/Cargo.toml
+```
+
+## What it does not speak (yet)
+
+The bridge implements `anvil:step@0.3.0` and nothing beyond it: no step
+catalog ([ADR-0021](../../docs/adr/0021-el-ejecutor-describe-su-catalogo.md))
+and no object references
+([ADR-0022](../../docs/adr/0022-la-referencia-a-objeto-es-un-cuarto-tipo-y-nombra-una-ranura.md))
+— the Python executor serves both. Growing the WIT to match is its own work
+and would recompile every component in the wild (ADR-0020 §4d). Until then,
+its steps show up as *unchecked* under `--validate --with-executors`, and
+Anvil says so on stderr.
+
+There is no compatibility shim: the version lives in the package name and
+travels with the artifact — wasmtime refuses to instantiate a component that
+does not match, and the rule is to recompile (ADR-0020 §4d).
+
+## Reference
+
+The complete hello-world — a step in Rust compiled to a component and run by
+`anvil` — is [`ejemplos/hola-paso/`](../../ejemplos/hola-paso/), the official
+reference for the
+[quick-start guide](../../docs/guia-inicio-rapido.md#writing-your-own-step-in-rust-m5-ext2-adr-0015).
+
+## License
+
+**Apache-2.0**, like everything under
+[`executors/`](../README.md#license-apache-20-and-not-the-rest-of-the-repos)
+([ADR-0004](../../docs/adr/0004-licencia-dual-agpl-apache.md)): what you
+*use* is AGPL; what you *link* is Apache. Your `.wasm` links public
+`wit-bindgen` bindings — never this bridge — and stays yours, under whatever
+license you want.

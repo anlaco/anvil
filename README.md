@@ -66,7 +66,7 @@ do not have to remember it. By hand:
 
 ```sh
 cargo build --release --target wasm32-wasip2 -p motor -p ejecutor_pasos      # guests
-cargo build --release --manifest-path packaging/anvil-puente-wasm/Cargo.toml # bridge (ADR-0015)
+cargo build --release --manifest-path executors/wasm/Cargo.toml              # bridge (ADR-0015)
 cargo build --release --manifest-path packaging/anvil-host/Cargo.toml        # host (embedded wasmtime)
 ```
 
@@ -76,8 +76,8 @@ another matter: it is built for the `x86_64-unknown-linux-musl` target so it
 runs on any Linux. It requires a C compiler for musl, because `wasmtime`
 drags in `zstd-sys`; `musl-gcc` or `zig cc -target x86_64-linux-musl` work
 after `rustup target add x86_64-unknown-linux-musl`. The bridge must be
-copied to `packaging/anvil-puente-wasm/target/release/` before building the
-host: its `build.rs` looks for the artifacts there, and does not consider the
+copied to `executors/wasm/target/release/` before building the host: its
+`build.rs` looks for the artifacts there, and does not consider the
 target-triple subdirectory.
 
 `make build` does the same in debug. Use it for development, but expect that
@@ -115,8 +115,11 @@ crates/
 packaging/
   anvil-host/      native host: one binary hosting wasmtime + the two guests
                    (its own workspace; the core drags no wasmtime)
-  anvil-puente-wasm/  gRPC ↔ user's WASM component bridge (ADR-0015);
-                   embedded in `anvil`, extracted to temp at startup
+executors/
+  python/          the Python executor: a downloadable module (ADR-0012)
+  wasm/            gRPC ↔ user's WASM component bridge (ADR-0015); it keeps
+                   its own workspace and goes embedded in `anvil`, extracted
+                   to temp at startup
 ```
 
 The gRPC stack lives apart, in

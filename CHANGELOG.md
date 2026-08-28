@@ -82,6 +82,16 @@ minors, con el cambio anotado aquí.
   `make test-executores` a `make test-executors`. Nada del contenido cambia —
   ni rutas dentro del ejecutor, ni el contrato, ni las secuencias.
 
+- **The WASM executor moves to `executors/wasm`, next to the Python one.**
+  The bridge `anvil-puente-wasm` — the process that serves a user's `.wasm`
+  step component over gRPC — used to live in `packaging/`, a placement that
+  read as plumbing; it is a sibling of the Python executor and now lives
+  beside it, under Apache-2.0 like everything else in that directory.
+  Nothing changes for the user yet: `anvil` keeps embedding it and spawning
+  it by itself, so `anvil sequence.yaml` works exactly as before. Shipping
+  it as a file next to `anvil` — the second half of
+  [issue #57](https://github.com/anlaco/anvil/issues/57) — comes later.
+
 ## [0.3.0] — 2026-08-27
 
 ### Añadido

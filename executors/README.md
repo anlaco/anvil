@@ -8,12 +8,16 @@ behind ([ADR-0012](../docs/adr/0012-executores-de-lenguaje-como-modulos.md)).
 | | |
 |---|---|
 | [`python/`](python/) | The first one. You write a step as a function and drop it in a folder. |
+| [`wasm/`](wasm/) | The WASM bridge. Serves your Rust steps compiled to components; Anvil brings it up by itself. |
 | LabVIEW, MATLAB, … | Future ones. Each in its own subdirectory, with the same shape. |
 
 They are **alternatives, not layers**: you pick the one you need, you can run
 several at once, and mix them in the same sequence. The WASM executor Anvil
-ships by default (`crates/ejecutor_pasos`) does not live here: it is part of
-the core and goes embedded in the binary.
+ships by default (`crates/ejecutor_pasos`) is a different piece: it is part
+of the core, lives in `crates/`, and goes embedded in the binary. What does
+live here is its **bridge** — the process that takes a user's `.wasm` step
+component and serves it over gRPC like any other executor:
+[`wasm/`](wasm/).
 
 ## License: **Apache-2.0**, and not the rest of the repo's
 
