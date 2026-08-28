@@ -19,9 +19,9 @@
 //!   `--bind 0.0.0.0` habilita el caso remoto (Raspberry Pi).
 //!
 //! El puente es código NATIVO de Anvil: por eso puede usar tonic (a
-//! diferencia de los guests WASM, que usan wasi-grpc). El usuario nunca lo
-//! compila; anvil-host lo spawnea (embebido en el binario `anvil`) o se
-//! distribuye suelto.
+//! diferencia de los guests WASM, que usan wasi-grpc). anvil-host lo spawnea
+//! del fichero que lo acompaña (ADR-0023): vive al lado del binario `anvil`,
+//! y el mismo fichero se puede copiar y lanzar a mano.
 
 use std::net::{IpAddr, SocketAddr};
 use std::path::PathBuf;

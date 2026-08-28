@@ -82,15 +82,26 @@ minors, con el cambio anotado aquí.
   `make test-executores` a `make test-executors`. Nada del contenido cambia —
   ni rutas dentro del ejecutor, ni el contrato, ni las secuencias.
 
-- **The WASM executor moves to `executors/wasm`, next to the Python one.**
+- **The WASM executor is a product now: it lives in `executors/wasm`, under
+  Apache-2.0, and ships as a file next to `anvil`** (issue #57,
+  [ADR-0023](docs/adr/0023-the-bridge-ships-as-a-file-next-to-anvil.md)).
   The bridge `anvil-puente-wasm` — the process that serves a user's `.wasm`
-  step component over gRPC — used to live in `packaging/`, a placement that
-  read as plumbing; it is a sibling of the Python executor and now lives
-  beside it, under Apache-2.0 like everything else in that directory.
-  Nothing changes for the user yet: `anvil` keeps embedding it and spawning
-  it by itself, so `anvil sequence.yaml` works exactly as before. Shipping
-  it as a file next to `anvil` — the second half of
-  [issue #57](https://github.com/anlaco/anvil/issues/57) — comes later.
+  step component over gRPC — used to live in `packaging/` and went embedded
+  inside the `anvil` binary, extracted to a temp file at startup. It was a
+  sibling of the Python executor in everything but its placement, and
+  placement read as plumbing; it also could not be copied to another
+  machine, which is what ADR-0015 promised for the remote (Raspberry Pi)
+  case and never shipped.
+
+  What changes: `anvil` no longer carries the bridge inside. The package
+  now ships **two files** — `anvil` and `anvil-puente-wasm` — and `anvil`
+  looks the bridge up next to its own executable, spawning it itself as
+  before: no extra step for the user, and the same file can be copied
+  elsewhere and launched by hand (`--wasm <path> [--port <n>] [--bind <ip>]`).
+  A missing bridge stops the run naming the path it looked at; an executor
+  older than the binary still fails with both contract versions named
+  (ADR-0020 §4b). Sequences that declare no `type: wasm` executor never
+  notice the change.
 
 ## [0.3.0] — 2026-08-27
 

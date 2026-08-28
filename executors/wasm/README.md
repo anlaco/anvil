@@ -15,12 +15,16 @@ your component — answers the contract echo.
 
 ## How Anvil uses it
 
-`anvil` embeds this binary and spawns it itself for every `type: wasm`
-executor declared in the sequence: one process per `.wasm` path, on an
-ephemeral loopback port, with stdin piped so the bridge exits when the host
-dies. Nothing to install, nothing to start: `anvil sequence.yaml` works out
-of the box. The embedded copy is extracted to a temp file at startup, keyed
-by a content hash.
+The bridge ships as a **file next to `anvil`** — the release carries both,
+and `make release` leaves them together in the target directory too
+([ADR-0023](../../docs/adr/0023-the-bridge-ships-as-a-file-next-to-anvil.md)).
+For every `type: wasm` executor declared in the sequence, `anvil` looks the
+bridge up next to its own executable and spawns it itself: one process per
+`.wasm` path, on an ephemeral loopback port, with stdin piped so the bridge
+exits when the host dies. Nothing to install, nothing to start — and the
+same file you got with the release is the one you can copy to another
+machine and run by hand. If the file is missing, `anvil` stops with the
+path it looked at and how to get it there.
 
 ## Running it by hand
 
