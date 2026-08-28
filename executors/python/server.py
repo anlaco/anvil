@@ -37,10 +37,13 @@ import paso_pb2_grpc
 from anvil_step import (
     BOOLEAN,
     NUMBER,
+    OBJECTS,
+    REFERENCE,
     REGISTRY,
     TEXT,
     Context,
     DiscoveryError,
+    Reference,
     Result,
     discover,
 )
@@ -67,14 +70,18 @@ STEPS_ENV = "ANVIL_PYTHON_STEPS"
 #
 # Raise it in the core and forget it here, and this executor stops being able
 # to run steps with parameters — which is the loud, correct failure.
-CONTRACT = 3
+#
+# 4 is the object reference (ADR-0022): a fourth branch in `Value`'s `oneof`, a
+# fourth `ValueType`, and the lifetime this executor publishes in its catalog.
+CONTRACT = 4
 
-#: Maps the SDK's three type names to the wire enum. A type the step did not
+#: Maps the SDK's four type names to the wire enum. A type the step did not
 #: state stays `UNSPECIFIED` and Anvil leaves that parameter unchecked.
 WIRE_TYPES = {
     NUMBER: paso_pb2.VALUE_TYPE_NUMBER,
     TEXT: paso_pb2.VALUE_TYPE_TEXT,
     BOOLEAN: paso_pb2.VALUE_TYPE_BOOLEAN,
+    REFERENCE: paso_pb2.VALUE_TYPE_REFERENCE,
 }
 
 
@@ -88,7 +95,18 @@ def value_to_python(v):
     list.
     """
     which = v.WhichOneof("value")
-    return None if which is None else getattr(v, which)
+    if which is None:
+        return None
+    if which == "reference":
+        # The three parts stay apart all the way to the step (ADR-0022 §4):
+        # flattening them into one string here would make this executor the
+        # place where a payload containing the separator goes wrong.
+        return Reference(
+            payload=v.reference.payload,
+            lifetime=v.reference.lifetime,
+            executor=v.reference.executor,
+        )
+    return getattr(v, which)
 
 
 def inputs_of(request):
@@ -109,7 +127,14 @@ def fill_value(target, name, value):
     boolean default as the number 1.
     """
     target.name = name
-    if isinstance(value, bool):
+    if isinstance(value, Reference):
+        # `executor` is left as the step set it (normally empty): stamping it
+        # is Anvil's half, and this process does not know what the sequence
+        # called it (ADR-0022 §4). The lifetime is ours and we do say it.
+        target.reference.payload = value.payload
+        target.reference.lifetime = value.lifetime
+        target.reference.executor = value.executor
+    elif isinstance(value, bool):
         target.boolean = value
     elif isinstance(value, (int, float)):
         target.number = float(value)
@@ -167,9 +192,10 @@ class StepExecutorServicer(paso_pb2_grpc.StepExecutorServicer):
     and neither can drift from the other.
     """
 
-    def __init__(self, registry, options):
+    def __init__(self, registry, options, objects=OBJECTS):
         self.registry = registry
         self.options = options
+        self.objects = objects
 
     def Invoke(self, request, context):
         name = request.name
@@ -198,7 +224,12 @@ class StepExecutorServicer(paso_pb2_grpc.StepExecutorServicer):
                 ),
             )
 
-        ctx = Context(attempt=request.attempt, options=self.options, step_name=name)
+        ctx = Context(
+            attempt=request.attempt,
+            options=self.options,
+            step_name=name,
+            objects=self.objects,
+        )
         return to_proto(name, s.invoke(ctx, inputs))
 
     def Describe(self, request, context):
@@ -209,7 +240,12 @@ class StepExecutorServicer(paso_pb2_grpc.StepExecutorServicer):
         says `True` — even when the catalog is empty, which is a real answer
         and one worth seeing.
         """
-        catalog = paso_pb2.Catalog(describes=True, contract=CONTRACT)
+        # `lifetime` is what lets Anvil find out that this process died and was
+        # born again while it held references to it — a fact about the world,
+        # not about the sequence, so no type system answers it (ADR-0022 §6).
+        catalog = paso_pb2.Catalog(
+            describes=True, contract=CONTRACT, lifetime=self.objects.lifetime
+        )
         for spec in self.registry.catalog():
             catalog.steps.append(to_proto_spec(spec))
         return catalog

@@ -13,6 +13,12 @@ Protocolo: línea de texto de entrada, línea de texto de salida.
 - `medir`    -> `medida: 4.8`
 - `reset`    -> `ok`
 - otra cosa  -> `error: comando desconocido`
+
+La conexión **se mantiene abierta** hasta que el cliente la cierra, y admite
+varias líneas seguidas. Eso es lo que permite que un paso abra una sesión con
+el banco y la reutilice en los pasos siguientes (ADR-0022): un socket abierto
+es justo lo que no puede cruzar el cable, y por eso lo que cruza es una
+referencia.
 """
 
 import socket
@@ -39,10 +45,16 @@ def main():
         while True:
             conn, _ = srv.accept()
             with conn:
-                datos = conn.recv(4096).decode("utf-8").strip()
-                if not datos:
-                    continue
-                conn.sendall((responde(datos) + "\n").encode("utf-8"))
+                # Una línea por petición, hasta que el cliente cierre. Antes se
+                # atendía una sola y se colgaba: una sesión que sobrevive a
+                # varios pasos manda varias.
+                while True:
+                    datos = conn.recv(4096)
+                    if not datos:
+                        break
+                    for linea in datos.decode("utf-8").splitlines():
+                        if linea.strip():
+                            conn.sendall((responde(linea) + "\n").encode("utf-8"))
 
 
 if __name__ == "__main__":
