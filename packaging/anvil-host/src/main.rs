@@ -25,11 +25,10 @@
 //!     verdict (#52).
 //!  3. Waits for it to listen (a probe `connect`; the executor discards it).
 //!  4. **M5-ext.2 (ADR-0015):** instantiates every `tipo: wasm` executor in
-//!     the YAML by spawning the **bridge** `anvil-puente-wasm` (embedded in
-//!     this binary, extracted to temp) with `--wasm <path> --port
-//!     <ephemeral>`. The bridge loads the user's `.wasm` component (the
-//!     `anvil:paso` interface, a `run` function) and serves it as gRPC on
-//!     loopback. Waits for each one (readiness).
+//!     the YAML by spawning the **bridge** `anvil-puente-wasm` with
+//!     `--wasm <path> --port <ephemeral>`. The bridge loads the user's
+//!     `.wasm` component (the `anvil:paso` interface, a `run` function) and
+//!     serves it as gRPC on loopback. Waits for each one (readiness).
 //!  5. Starts the engine (main) whose sandbox allows loopback **plus** the
 //!     non-loopback IPs declared in `executors:` (only those). Connects,
 //!     runs the sequence and exits.
@@ -42,7 +41,6 @@
 //! and the engine↔executor isolation (one `Store` per guest) are preserved.
 
 use std::collections::{HashMap, HashSet};
-use std::io::Write;
 use std::net::{IpAddr, TcpListener, TcpStream};
 use std::path::{Path, PathBuf};
 use std::thread;
@@ -52,11 +50,10 @@ use wasmtime::{Engine, Store};
 use wasmtime_wasi::{DirPerms, FilePerms, WasiCtx, WasiCtxBuilder, WasiCtxView, WasiView};
 
 /// Embedded guests (built for `wasm32-wasip2` and copied into `OUT_DIR` by
-/// `build.rs`) + the bridge binary (native, copied into `OUT_DIR` by
-/// `build.rs`; extracted to temp at startup to spawn it, M5-ext.2).
+/// `build.rs`). The bridge binary is NOT embedded: it is a product that ships
+/// as a file next to this one (ADR-0023) and gets looked up at spawn time.
 const ANVIL_GUEST: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/anvil-guest.wasm"));
 const EJECUTOR: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/ejecutor_pasos.wasm"));
-const BRIDGE: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/anvil-puente-wasm"));
 
 /// Port of the embedded executor when the user pins it with `--port`.
 /// Without that flag an **ephemeral** port per process is used (see
@@ -136,7 +133,7 @@ fn puerto_pedido(args: &[String]) -> Option<u16> {
 }
 
 /// Reserves an ephemeral loopback port and returns it. The same mechanism the
-/// host already used for the `.wasm` bridges (`instantiate_wasm`): binding
+/// host already used for the `.wasm` bridges (`instanciar_wasm`): binding
 /// port 0 lets the OS pick a free one, it gets read back and released for the
 /// guest to take. The window between the `drop` and the guest's `bind` is the
 /// same as the bridge's, and it has given no trouble.
@@ -271,28 +268,29 @@ struct EjecutorWasm {
     _child: std::process::Child,
 }
 
-/// Extracts the embedded bridge binary to a temp file (keyed by a hash of
-/// the contents: each version of the binary has its own file, without
-/// rewriting if it already exists). Returns its path.
-fn extract_bridge() -> Result<PathBuf, String> {
-    let mut h = std::collections::hash_map::DefaultHasher::new();
-    use std::hash::{Hash, Hasher};
-    BRIDGE.hash(&mut h);
-    let ruta = std::env::temp_dir().join(format!("anvil-puente-wasm-{:016x}", h.finish()));
+/// Where the bridge binary should be: **next to this binary** (ADR-0023).
+/// One mechanism for development and distribution alike — the pair travels
+/// together in the tarball, and `make release` leaves it together in the
+/// target directory too.
+///
+/// The error names the path that was looked at and how to get the file
+/// there. It never speculates about contract versions: a missing file is not
+/// an old executor, and the engine's contract echo (ADR-0020 §4b) is the one
+/// that names both numbers when that is the case.
+fn ruta_puente() -> Result<PathBuf, String> {
+    let exe = std::env::current_exe()
+        .map_err(|e| format!("no se pudo localizar el binario anvil: {e}"))?;
+    let dir = exe
+        .parent()
+        .ok_or_else(|| "el binario anvil no tiene directorio".to_string())?;
+    let ruta = dir.join("anvil-puente-wasm");
     if !ruta.exists() {
-        let mut f = std::fs::File::create(&ruta)
-            .map_err(|e| format!("no se pudo crear '{}': {e}", ruta.display()))?;
-        f.write_all(BRIDGE)
-            .map_err(|e| format!("no se pudo escribir el puente: {e}"))?;
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            let mut perm = std::fs::metadata(&ruta)
-                .map_err(|e| format!("{e}"))?
-                .permissions();
-            perm.set_mode(0o755);
-            std::fs::set_permissions(&ruta, perm).map_err(|e| format!("{e}"))?;
-        }
+        return Err(format!(
+            "no se encontró el ejecutor WASM en '{}'. anvil lo busca junto a sí mismo \
+             (ADR-0023): copia ahí 'anvil-puente-wasm' — make release lo deja al lado \
+             del binario; también puedes copiarlo de executors/wasm/target/.",
+            ruta.display()
+        ));
     }
     Ok(ruta)
 }
@@ -300,7 +298,7 @@ fn extract_bridge() -> Result<PathBuf, String> {
 /// Spawns the bridge for a `.wasm` by path (M5-ext.2, ADR-0015):
 ///
 /// 1. Reserves an **ephemeral** loopback port (`bind 127.0.0.1:0`).
-/// 2. Extracts `anvil-puente-wasm` (embedded) to a temp file.
+/// 2. Looks up the bridge binary next to this one (ADR-0023).
 /// 3. Spawns `anvil-puente-wasm --wasm <path> --port <port>` with stdin
 ///    piped: the bridge exits on its own if the host dies (EOF).
 ///
@@ -326,7 +324,7 @@ fn instanciar_wasm(nombre: &str, path: &Path) -> Result<EjecutorWasm, String> {
         .port();
     drop(listener);
 
-    let puente = extract_bridge()?;
+    let puente = ruta_puente()?;
     let child = std::process::Command::new(&puente)
         .args([
             "--wasm",
