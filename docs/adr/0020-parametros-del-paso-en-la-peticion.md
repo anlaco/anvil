@@ -13,7 +13,7 @@
   sesión y van marcadas como tales.
 - **Relaciona:** ADR-0003, ADR-0005, ADR-0008, ADR-0009, ADR-0010, ADR-0012,
   ADR-0013, ADR-0015, ADR-0019, RNF-04, RNF-05, RNF-08
-  ([requisitos.md](../requisitos.md)), issues #34, #39
+  ([requisitos.md](../requisitos.md)), issues #34, #39, #55
 - **Alcance:** decide el contrato. **No** lo implementa, no diseña el editor
   visual, no añade lenguajes y no toca el empaquetado del release.
 
@@ -117,6 +117,13 @@ tiempo de un instrumento— vale igual para unos cientos de bytes más.
 - **Un `oneof` sin rama puesta es error**, no un cero. Es la Regla 2 de
   ADR-0019 aplicada al cable de entrada.
 
+> **Superado en parte por [ADR-0022](0022-la-referencia-a-objeto-es-un-cuarto-tipo-y-nombra-una-ranura.md)
+> (2026-08-28):** los tipos pasan a ser **cuatro**. El cuarto es una
+> **referencia a objeto** —opaca, plana, sin clase— que permite que el estado
+> del banco viva en el ejecutor y viaje sólo su identificador. Lo que **no**
+> cambia es el resto de esta viñeta: sigue sin haber listas ni mapas, y la
+> composición sigue siendo un hueco abierto.
+
 **Sobre la asimetría con las medidas, que es deliberada.** El contrato manda
 `valor_medido`, `limite_min` y `limite_max` como `string`, y
 [contrato-grpc.md](../contrato-grpc.md) da tres razones. La primera —«en proto3
@@ -193,6 +200,14 @@ Su diseño no es de aquí, pero su motivo sí: queda escrito.
 
 Hoy el contrato **no declara versión en el wire**, y `contrato-grpc.md` lo
 tiene como *pendiente*. La política, desde aquí:
+
+> **Aviso de [ADR-0022](0022-la-referencia-a-objeto-es-un-cuarto-tipo-y-nombra-una-ranura.md)
+> (2026-08-28):** el entero monótono que se elige aquí hace que subir a
+> `contrato: 4` sea un **flag day**. `veredicto_del_eco`
+> (`crates/motor/src/lib.rs:427`) da `error` cuando el paso usa `inputs:` y el
+> eco es menor que `CONTRACT`, sin mirar si el paso usa referencias — así que un
+> ejecutor que hable 3 deja de servir cualquier paso con parámetros. Se asume,
+> por ser pre-v1, y se anuncia en el CHANGELOG.
 
 **a) Un único mecanismo: un entero monótono, `contrato`, en la petición y en la
 respuesta.** El motor manda el que habla; el ejecutor devuelve **el que ha
