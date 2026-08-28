@@ -20,7 +20,7 @@
 //! debug). CI uses `--release` for the same reason.
 
 use std::path::{Path, PathBuf};
-use std::process::{Command, Output};
+use std::process::Output;
 
 /// The repo root. The binary only preopens its CWD, so the tests run from
 /// here and pass **relative paths** (an absolute path would not cross the

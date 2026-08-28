@@ -15,10 +15,8 @@
 
 use std::io::Read;
 use std::net::TcpStream;
-use std::process::{Command, Stdio};
+use std::process::Command;
 use std::time::Duration;
-
-const SONDEOS: u32 = 1000; // 10 s of 10 ms polls; a native binary binds fast.
 
 /// The demo component, if it has been compiled. `cargo component` is not part
 /// of this repo's build, so this is `None` on a clean checkout and in CI.
