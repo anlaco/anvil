@@ -1,44 +1,45 @@
-//! Host nativo de Anvil (ADR-0011): un único binario que **hospeda wasmtime
-//! como librería** y orquesta los dos guests WASM — `anvil-guest.wasm` (motor)
-//! y `ejecutor_pasos.wasm` (ejecutor) — embebidos en el propio binario.
+//! Anvil's native host (ADR-0011): a single binary that **hosts wasmtime as
+//! a library** and orchestrates the two WASM guests — `anvil-guest.wasm`
+//! (engine) and `ejecutor_pasos.wasm` (executor) — embedded in the binary
+//! itself.
 //!
-//! El usuario descarga un binario y corre:
+//! The user downloads a binary and runs:
 //!
 //! ```sh
-//! ./anvil <secuencia.yaml> [--json <ruta>] [--csv <ruta>] [--limits <ruta>]
+//! ./anvil <sequence.yaml> [--json <path>] [--csv <path>] [--limits <path>]
 //! ```
 //!
-//! El host no parsea la línea de comandos (salvo `--loopback-only`, que es
-//! suyo): la pasa al guest motor (`inherit_args`), que la parsea como hoy.
-//! El host sólo:
-//!  1. Lee el YAML de la secuencia (M5-ext.1/2) para recolectar los
-//!     `ejecutores:` — las IPs no-loopback declaradas (relajación acotada
-//!     del loopback de ADR-0011: sólo se permiten las declaradas) y, en
-//!     M5-ext.2, los `.wasm` por path a cargar.
-//!  2. Arranca el ejecutor (thread) que bindea `127.0.0.1:<puerto>` en su
-//!     sandbox (loopback-only, sin relajación). El puerto es efímero por
-//!     proceso salvo que el usuario lo fije con `--port` (#15), y el host se
-//!     lo pasa al motor para que las dos puntas coincidan. Esa decisión sale
-//!     **sólo de los argumentos**: si el paso 1 no pudo leer el YAML, el
-//!     ejecutor arranca igual — el host no predice el veredicto del guest
-//!     (#52).
-//!  3. Espera a que escuche (un `connect` de prueba; el ejecutor lo descarta).
-//!  4. **M5-ext.2 (ADR-0015):** instancia cada ejecutor `tipo: wasm` del
-//!     YAML spawneando el **puente** `anvil-puente-wasm` (embebido en este
-//!     binario, extraído a temp) con `--wasm <path> --port <efímero>`. El
-//!     puente carga el componente `.wasm` del usuario (interfaz `anvil:paso`,
-//!     una función `run`) y lo sirve como gRPC en loopback. Espera a cada
-//!     uno (readiness).
-//!  5. Arranca el motor (main) cuyo sandbox permite loopback **más** las IPs
-//!     no-loopback declaradas en `ejecutores:` (sólo ésas). Conecta, corre la
-//!     secuencia y sale.
-//!  6. Propaga el exit del motor. Los threads de los ejecutores se abortan al
-//!     acabar el proceso.
+//! The host does not parse the command line (except `--loopback-only`, which
+//! is its own): it hands it to the engine guest (`inherit_args`), which
+//! parses it as before. The host only:
+//!  1. Reads the sequence's YAML (M5-ext.1/2) to collect the declared
+//!     `executors:` — the declared non-loopback IPs (ADR-0011's bounded
+//!     relaxation: only the declared ones are allowed) and, in M5-ext.2, the
+//!     `.wasm` files to load by path.
+//!  2. Starts the executor (thread) that binds `127.0.0.1:<port>` in its
+//!     sandbox (loopback-only, no relaxation). The port is ephemeral per
+//!     process unless the user pins it with `--port` (#15), and the host
+//!     hands it to the engine so both ends agree. That decision comes
+//!     **from the arguments alone**: if step 1 could not read the YAML, the
+//!     executor starts all the same — the host does not predict the guest's
+//!     verdict (#52).
+//!  3. Waits for it to listen (a probe `connect`; the executor discards it).
+//!  4. **M5-ext.2 (ADR-0015):** instantiates every `tipo: wasm` executor in
+//!     the YAML by spawning the **bridge** `anvil-puente-wasm` (embedded in
+//!     this binary, extracted to temp) with `--wasm <path> --port
+//!     <ephemeral>`. The bridge loads the user's `.wasm` component (the
+//!     `anvil:paso` interface, a `run` function) and serves it as gRPC on
+//!     loopback. Waits for each one (readiness).
+//!  5. Starts the engine (main) whose sandbox allows loopback **plus** the
+//!     non-loopback IPs declared in `executors:` (only those). Connects,
+//!     runs the sequence and exits.
+//!  6. Propagates the engine's exit. The executor threads get aborted when
+//!     the process ends.
 //!
-//! Los guests hablan por gRPC sobre **loopback TCP** restringido
-//! (`socket_addr_check → is_loopback`), salvo las IPs no-loopback
-//! declaradas (ADR-0011, relajación acotada). El sandbox WASM y el
-//! aislamiento motor↔ejecutor (un `Store` por guest) se preservan.
+//! The guests speak over gRPC on **restricted loopback TCP**
+//! (`socket_addr_check → is_loopback`), except for the non-loopback IPs
+//! declared in `executors:` (ADR-0011, bounded relaxation). The WASM sandbox
+//! and the engine↔executor isolation (one `Store` per guest) are preserved.
 
 use std::collections::{HashMap, HashSet};
 use std::io::Write;
@@ -50,23 +51,23 @@ use wasmtime::component::{Component, Linker, ResourceTable};
 use wasmtime::{Engine, Store};
 use wasmtime_wasi::{DirPerms, FilePerms, WasiCtx, WasiCtxBuilder, WasiCtxView, WasiView};
 
-/// Guests embebidos (construidos a `wasm32-wasip2` y copiados a `OUT_DIR` por
-/// `build.rs`) + el binario del puente (nativo, copiado a `OUT_DIR` por
-/// `build.rs`; se extrae a temp al arrancar para spawnearlo, M5-ext.2).
+/// Embedded guests (built for `wasm32-wasip2` and copied into `OUT_DIR` by
+/// `build.rs`) + the bridge binary (native, copied into `OUT_DIR` by
+/// `build.rs`; extracted to temp at startup to spawn it, M5-ext.2).
 const ANVIL_GUEST: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/anvil-guest.wasm"));
 const EJECUTOR: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/ejecutor_pasos.wasm"));
-const PUENTE: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/anvil-puente-wasm"));
+const BRIDGE: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/anvil-puente-wasm"));
 
-/// Puerto del ejecutor embebido cuando el usuario lo fija con `--port`. Sin
-/// ese flag se usa uno **efímero** por proceso (ver [`reservar_puerto`]): con
-/// un puerto fijo, dos `anvil` no podían coexistir — el segundo moría con
-/// `address in use`, que es lo que impedía paralelizar una campaña lanzando N
-/// procesos (#15). El 9100 sigue siendo el default del guest ejecutor suelto,
-/// para el flujo de dos terminales del README.
-const PUERTO_COMPAT: u16 = 9100;
+/// Port of the embedded executor when the user pins it with `--port`.
+/// Without that flag an **ephemeral** port per process is used (see
+/// [`reserve_port`]): with a fixed port, two `anvil` processes could not
+/// coexist — the second died with `address in use`, which is what blocked
+/// parallelizing a campaign by launching N processes (#15). 9100 remains the
+/// loose guest executor's default, for the two-terminal README flow.
+const COMPAT_PORT: u16 = 9100;
 
-/// Estado de cada guest: el contexto WASI (sockets/preopen/args) + la tabla
-/// de recursos que `wasmtime-wasi` necesita.
+/// Each guest's state: the WASI context (sockets/preopens/args) + the
+/// resource table `wasmtime-wasi` needs.
 struct State {
     wasi: WasiCtx,
     table: ResourceTable,
@@ -81,9 +82,9 @@ impl WasiView for State {
     }
 }
 
-/// `WasiCtxBuilder` base con stdio heredado y **sockets restringidos a
-/// loopback** (sólo `127.0.0.0/8` y `::1`). `inherit_network` da acceso a la
-/// red del host; `socket_addr_check` rechaza cualquier IP no-loopback.
+/// The `WasiCtxBuilder` base with inherited stdio and **sockets restricted to
+/// loopback** (only `127.0.0.0/8` and `::1`). `inherit_network` grants access
+/// to the host's network; `socket_addr_check` rejects any non-loopback IP.
 fn wasi_loopback() -> WasiCtxBuilder {
     let mut b = WasiCtx::builder();
     b.inherit_stdio().inherit_network();
@@ -91,10 +92,10 @@ fn wasi_loopback() -> WasiCtxBuilder {
     b
 }
 
-/// Como `wasi_loopback`, pero **relajando el loopback de forma acotada**
-/// (ADR-0011, M5-ext.1): además de loopback, se permiten exactamente las
-/// IPs no-loopback declaradas en `ejecutores:` del YAML. Sin declaración,
-/// el comportamiento es idéntico a `wasi_loopback` (loopback-only).
+/// Like `wasi_loopback`, but **relaxing loopback in a bounded way**
+/// (ADR-0011, M5-ext.1): besides loopback, exactly the non-loopback IPs
+/// declared in the sequence's `executors:` are allowed. With no declaration,
+/// behavior is identical to `wasi_loopback` (loopback-only).
 fn wasi_loopback_con_declaradas(ips_declaradas: HashSet<IpAddr>) -> WasiCtxBuilder {
     let mut b = WasiCtx::builder();
     b.inherit_stdio().inherit_network();
@@ -105,9 +106,9 @@ fn wasi_loopback_con_declaradas(ips_declaradas: HashSet<IpAddr>) -> WasiCtxBuild
     b
 }
 
-/// Flags del CLI del guest motor que **consumen el argumento siguiente**
-/// (M5, RF-40). El host los conoce sólo para saber cuál de los argumentos es
-/// la ruta de la secuencia; el parseo de verdad lo hace el guest.
+/// CLI flags of the engine guest that **consume the next argument**
+/// (M5, RF-40). The host only knows them to tell which argument is the
+/// sequence's path; the real parsing is the guest's job.
 const FLAGS_CON_VALOR: [&str; 6] = [
     "--process-model",
     "--json",
@@ -117,13 +118,13 @@ const FLAGS_CON_VALOR: [&str; 6] = [
     "--port",
 ];
 
-/// El puerto que el usuario fijó con `--port`, si lo hizo.
+/// The port the user pinned with `--port`, if any.
 ///
-/// Antes el flag sólo le decía al **motor** a dónde conectarse, mientras el
-/// host bindeaba 9100 pase lo que pase: `anvil x.yaml --port 9200` levantaba
-/// el ejecutor en 9100, el motor buscaba en 9200 y salía `connection refused`.
-/// La guía llegó a recomendarlo como remedio para el choque de puertos, y no
-/// funcionaba. Ahora fija **las dos puntas**.
+/// The flag used to only tell the **engine** where to connect, while the
+/// host bound 9100 come what may: `anvil x.yaml --port 9200` brought the
+/// executor up on 9100, the engine looked for 9200, and `connection refused`
+/// came out. The guide even recommended it as a fix for port clashes, and it
+/// did not work. It now pins **both ends**.
 fn puerto_pedido(args: &[String]) -> Option<u16> {
     let mut it = args.iter();
     while let Some(a) = it.next() {
@@ -134,11 +135,11 @@ fn puerto_pedido(args: &[String]) -> Option<u16> {
     None
 }
 
-/// Reserva un puerto efímero de loopback y lo devuelve. Mismo mecanismo que
-/// ya usaba el host para los puentes `.wasm` (`instanciar_wasm`): bindear el
-/// puerto 0 deja que el SO elija uno libre, se lee y se suelta para que lo
-/// tome el guest. La ventana entre el `drop` y el `bind` del guest es la
-/// misma que la del puente, y no ha dado problemas.
+/// Reserves an ephemeral loopback port and returns it. The same mechanism the
+/// host already used for the `.wasm` bridges (`instantiate_wasm`): binding
+/// port 0 lets the OS pick a free one, it gets read back and released for the
+/// guest to take. The window between the `drop` and the guest's `bind` is the
+/// same as the bridge's, and it has given no trouble.
 fn reservar_puerto() -> Result<u16, String> {
     let listener = TcpListener::bind("127.0.0.1:0")
         .map_err(|e| format!("no se pudo reservar puerto para el ejecutor embebido: {e}"))?;
@@ -150,31 +151,33 @@ fn reservar_puerto() -> Result<u16, String> {
     Ok(puerto)
 }
 
-/// Si el motor va a salir sin invocar un paso, **nada que sirva pasos** pinta
-/// nada: ni el ejecutor embebido ni los puentes de los `.wasm` declarados.
-/// Arrancarlos anuncia `escuchando en …` por delante de la ayuda o del
-/// veredicto, y con el puerto fijo del MVP bloquea a otro `anvil` que sí fuera
-/// a correr. Cubre lo que se decide **sólo con los argumentos** —`-h`, `-V`,
-/// `--validate` (que carga sin conectar) y la falta de secuencia—; un flag
-/// desconocido no, porque el host no parsea la línea de comandos (eso es del
-/// guest) y duplicar aquí el flag set completo sería peor negocio.
+/// If the engine is going to exit without invoking a step, **nothing that
+/// serves steps** should come up: neither the embedded executor nor the
+/// bridges of the declared `.wasm` files. Starting them announces
+/// `escuchando en …` ahead of the help or the verdict, and with the MVP's
+/// fixed port it would block another `anvil` that did mean to run. Covers
+/// what is decided **by the arguments alone** —`-h`, `-V`, `--validate`
+/// (which loads without connecting) and a missing sequence—; an unknown flag
+/// does not, because the host does not parse the command line (that is the
+/// guest's job) and duplicating the full flag set here would be a worse
+/// trade.
 ///
-/// Issue #22: esto existía desde el principio, pero sólo guardaba el ejecutor
-/// embebido. El bucle de los `.wasm` no lo consultaba, así que
-/// `anvil s.yaml --validate` con un `tipo: wasm` declarado spawneaba
-/// `anvil-puente-wasm`, que hacía `bind` en un puerto efímero e imprimía dos
-/// líneas — justo lo que el manual promete que `--validate` no hace, y en el
-/// escenario (CI, sin hardware) donde más importa.
+/// Issue #22: this existed from the start, but it only guarded the embedded
+/// executor. The `.wasm` loop never consulted it, so `anvil s.yaml
+/// --validate` with a declared `tipo: wasm` spawned `anvil-puente-wasm`,
+/// which bound an ephemeral port and printed two lines — exactly what the
+/// manual promises `--validate` does not do, and in the scenario (CI, no
+/// hardware) where it matters most.
 ///
-/// Que el `.wasm` **exista** se sigue comprobando bajo `--validate`: eso lo
-/// hace `EjecutorYaml::a_definicion` en el cargador, es una comprobación de
-/// fichero y no requiere instanciar wasmtime ni abrir nada.
+/// Whether the `.wasm` **exists** is still checked under `--validate`: that
+/// is `EjecutorYaml::a_definicion`'s job in the loader, a file check that
+/// needs neither instantiating wasmtime nor opening anything.
 fn va_a_ejecutar_pasos(args: &[String]) -> bool {
-    // ADR-0021: `--validate --with-executors` no ejecuta un solo paso, pero sí
-    // **pregunta** a los ejecutores qué pasos ofrecen, y para preguntar hay que
-    // conectar. Es la única excepción, y es explícita: la pide quien la escribe
-    // en la línea de comandos. Sin el flag, `--validate` sigue sin levantar
-    // nada (issue #22).
+    // ADR-0021: `--validate --with-executors` does not run a single step, but
+    // it does **ask** the executors which steps they serve, and asking
+    // requires connecting. The only exception, and an explicit one: whoever
+    // typed it on the command line asked for it. Without the flag, `--validate`
+    // still brings nothing up (issue #22).
     let pregunta_catalogos = args.iter().any(|a| a == "--with-executors");
     let mut it = args.iter();
     let mut hay_ruta = false;
@@ -182,8 +185,8 @@ fn va_a_ejecutar_pasos(args: &[String]) -> bool {
         match a.as_str() {
             "--help" | "-h" | "--version" | "-V" => return false,
             "--validate" if !pregunta_catalogos => return false,
-            // `--validate --with-executors` no sale por aquí: sigue contando la
-            // ruta como cualquier corrida.
+            // `--validate --with-executors` does not exit here: the path still
+            // counts, like any run.
             "--validate" => {}
             f if FLAGS_CON_VALOR.contains(&f) => {
                 it.next();
@@ -195,10 +198,10 @@ fn va_a_ejecutar_pasos(args: &[String]) -> bool {
     hay_ruta
 }
 
-/// La ruta de la secuencia: el primer argumento **posicional**, saltando los
-/// flags y sus valores. `None` si no hay ninguno, o si se pidió
-/// `--help`/`--version` (ahí no hay YAML que pre-escanear y avisar de que
-/// "no se pudo leer '--help'" sólo ensuciaría la ayuda).
+/// The sequence's path: the first **positional** argument, skipping flags and
+/// their values. `None` if there is none, or if `--help`/`--version` was
+/// requested (there is no YAML to pre-scan there, and warning that "no se
+/// pudo leer '--help'" would only pollute the help).
 fn ruta_de_secuencia(args: &[String]) -> Option<String> {
     let mut it = args.iter();
     while let Some(a) = it.next() {
@@ -214,11 +217,12 @@ fn ruta_de_secuencia(args: &[String]) -> Option<String> {
     None
 }
 
-/// IPs no-loopback declaradas en `ejecutores:` del YAML de la secuencia
-/// (sólo `tipo: grpc` con `host` no-loopback). Es la "declaración" que
-/// justifica la relajación del loopback de ADR-0011: nada sale de loopback
-/// sin declararlo. Hosts que no parsean como IP (p. ej. `localhost`) no se
-/// incluyen (el motor ya fallará al conectar; el sandbox no las deja pasar).
+/// Non-loopback IPs declared in the sequence YAML's `executors:` (only
+/// `tipo: grpc` with a non-loopback `host`). This is the "declaration" that
+/// justifies ADR-0011's loopback relaxation: nothing leaves loopback without
+/// being declared. Hosts that do not parse as an IP (e.g. `localhost`) are
+/// not included (the engine will fail to connect anyway; the sandbox does not
+/// let them through).
 fn ips_no_loopback_declaradas(programa: &modelo::Programa) -> HashSet<IpAddr> {
     programa
         .ejecutores
@@ -232,9 +236,9 @@ fn ips_no_loopback_declaradas(programa: &modelo::Programa) -> HashSet<IpAddr> {
         .collect()
 }
 
-/// Instancia y ejecuta un guest (componente WASI P2 `wasi:cli/run`) en su
-/// propio `Store`. Devuelve el resultado de `call_run` para que el llamador
-/// decida el exit. `bytes` = el `.wasm` embebido.
+/// Instantiates and runs a guest (WASI P2 component, `wasi:cli/run`) in its
+/// own `Store`. Returns the `call_run` result so the caller decides the exit
+/// code. `bytes` = the embedded `.wasm`.
 fn correr_guest(engine: &Engine, wasi: WasiCtx, bytes: &[u8]) -> wasmtime::Result<Result<(), ()>> {
     let mut linker = Linker::new(engine);
     wasmtime_wasi::p2::add_to_linker_sync(&mut linker)?;
@@ -249,17 +253,17 @@ fn correr_guest(engine: &Engine, wasi: WasiCtx, bytes: &[u8]) -> wasmtime::Resul
     command.wasi_cli_run().call_run(&mut store)
 }
 
-/// Un ejecutor `.wasm` cargado por path (M5-ext.2, ADR-0015): el host
-/// spawnea el **puente** (`anvil-puente-wasm`, embebido en este binario),
-/// que carga el componente `.wasm` del usuario (interfaz `anvil:paso`, una
-/// función `run`) y lo sirve como ejecutor gRPC en loopback. El `.wasm` del
-/// usuario NO es un servidor gRPC: es una función pura; el puente traduce
-/// gRPC↔función.
+/// A `.wasm` executor loaded by path (M5-ext.2, ADR-0015): the host spawns
+/// the **bridge** (`anvil-puente-wasm`, a file next to this binary —
+/// ADR-0023), which loads the user's `.wasm` component (the `anvil:paso`
+/// interface, a `run` function) and serves it as a gRPC executor on
+/// loopback. The user's `.wasm` is NOT a gRPC server: it is a pure function;
+/// the bridge translates gRPC↔function.
 ///
-/// `puerto` es el asignado (efímero) para el readiness y para exponerlo al
-/// motor. `_child` se mantiene vivo para conservar el pipe de stdin: si el
-/// host muere, el pipe se cierra → EOF → el puente sale solo (sin
-/// huérfanos).
+/// `puerto` is the assigned (ephemeral) port, for readiness and to expose it
+/// to the engine. `_child` is kept alive to preserve the stdin pipe: if the
+/// host dies, the pipe closes → EOF → the bridge exits on its own (no
+/// orphans).
 struct EjecutorWasm {
     nombre: String,
     path: String,
@@ -267,18 +271,18 @@ struct EjecutorWasm {
     _child: std::process::Child,
 }
 
-/// Extrae el binario del puente embebido a un fichero temporal (con hash
-/// del contenido: cada versión del binario tiene su propio fichero, sin
-/// reescribir si ya existe). Devuelve su ruta.
-fn extraer_puente() -> Result<PathBuf, String> {
+/// Extracts the embedded bridge binary to a temp file (keyed by a hash of
+/// the contents: each version of the binary has its own file, without
+/// rewriting if it already exists). Returns its path.
+fn extract_bridge() -> Result<PathBuf, String> {
     let mut h = std::collections::hash_map::DefaultHasher::new();
     use std::hash::{Hash, Hasher};
-    PUENTE.hash(&mut h);
+    BRIDGE.hash(&mut h);
     let ruta = std::env::temp_dir().join(format!("anvil-puente-wasm-{:016x}", h.finish()));
     if !ruta.exists() {
         let mut f = std::fs::File::create(&ruta)
             .map_err(|e| format!("no se pudo crear '{}': {e}", ruta.display()))?;
-        f.write_all(PUENTE)
+        f.write_all(BRIDGE)
             .map_err(|e| format!("no se pudo escribir el puente: {e}"))?;
         #[cfg(unix)]
         {
@@ -293,15 +297,15 @@ fn extraer_puente() -> Result<PathBuf, String> {
     Ok(ruta)
 }
 
-/// Spawnea el puente para un `.wasm` por path (M5-ext.2, ADR-0015):
+/// Spawns the bridge for a `.wasm` by path (M5-ext.2, ADR-0015):
 ///
-/// 1. Reserva un **puerto efímero** de loopback (`bind 127.0.0.1:0`).
-/// 2. Extrae `anvil-puente-wasm` (embebido) a un fichero temporal.
-/// 3. Spawnea `anvil-puente-wasm --wasm <path> --port <puerto>` con stdin
-///    en pipe: el puente sale solo si el host muere (EOF).
+/// 1. Reserves an **ephemeral** loopback port (`bind 127.0.0.1:0`).
+/// 2. Extracts `anvil-puente-wasm` (embedded) to a temp file.
+/// 3. Spawns `anvil-puente-wasm --wasm <path> --port <port>` with stdin
+///    piped: the bridge exits on its own if the host dies (EOF).
 ///
-/// El puente es quien carga el componente en su propio Store (sandbox WASI
-/// vacío: sin ficheros ni red — el componente es una función pura).
+/// The bridge is the one loading the component into its own Store (empty
+/// WASI sandbox: no files, no network — the component is a pure function).
 fn instanciar_wasm(nombre: &str, path: &Path) -> Result<EjecutorWasm, String> {
     let bytes = std::fs::read(path).map_err(|e| {
         format!(
@@ -322,7 +326,7 @@ fn instanciar_wasm(nombre: &str, path: &Path) -> Result<EjecutorWasm, String> {
         .port();
     drop(listener);
 
-    let puente = extraer_puente()?;
+    let puente = extract_bridge()?;
     let child = std::process::Command::new(&puente)
         .args([
             "--wasm",
@@ -342,21 +346,21 @@ fn instanciar_wasm(nombre: &str, path: &Path) -> Result<EjecutorWasm, String> {
     })
 }
 
-/// Sondeos de 10 ms al esperar a que un ejecutor empiece a escuchar (60 s).
-/// Generoso a propósito: en un build **debug** wasmtime compila el guest sin
-/// optimizar y el ejecutor puede tardar decenas de segundos en llegar al
-/// `bind` (en release es inmediato). El timeout sólo se agota cuando algo va
-/// mal de verdad, así que pasarse de largo no cuesta nada.
+/// 10 ms polls while waiting for an executor to start listening (60 s).
+/// Generous on purpose: in a **debug** build wasmtime compiles the guest
+/// unoptimized and the executor can take tens of seconds to reach its `bind`
+/// (in release it is immediate). The timeout only runs out when something is
+/// really wrong, so overshooting costs nothing.
 const SONDEOS_ARRANQUE: u32 = 6000;
 
-/// Espera a que el puente del ejecutor `.wasm` escuche en su puerto (mismo
-/// patrón polling que `esperar_ejecutor`). Timeout agregado por módulo;
-/// falla con un mensaje claro nombrando al ejecutor.
+/// Waits for the bridge of the `.wasm` executor to listen on its port (same
+/// polling pattern as `wait_executor`). Timeout is per module; it fails with
+/// a clear message naming the executor.
 fn esperar_wasm(exec: &EjecutorWasm) -> Result<(), String> {
     let addr = format!("127.0.0.1:{}", exec.puerto);
     for _ in 0..SONDEOS_ARRANQUE {
         if let Ok(c) = TcpStream::connect(&addr) {
-            drop(c);
+            drop(c); // conexión de prueba: se cierra; el puente la descarta.
             return Ok(());
         }
         thread::sleep(Duration::from_millis(10));
@@ -367,8 +371,8 @@ fn esperar_wasm(exec: &EjecutorWasm) -> Result<(), String> {
     ))
 }
 
-/// Espera a que el ejecutor escuche en `127.0.0.1:puerto` con un `connect`
-/// de prueba. El ejecutor (loop de aceptar) descarta esa conexión.
+/// Waits for the executor to listen on `127.0.0.1:port` with a probe
+/// `connect`. The executor (its accept loop) discards that connection.
 fn esperar_ejecutor(puerto: u16) {
     let addr = format!("127.0.0.1:{puerto}");
     for _ in 0..SONDEOS_ARRANQUE {
@@ -383,9 +387,9 @@ fn esperar_ejecutor(puerto: u16) {
 }
 
 fn main() {
-    // El host parsea un único flag propio: `--loopback-only` (rechaza
-    // cualquier `grpc` no-loopback declarado, para CI/paranoia). El resto de
-    // la línea de comandos se pasa tal cual al guest motor.
+    // The host parses a single flag of its own: `--loopback-only` (rejects
+    // any declared non-loopback `grpc`, for CI/paranoia). The rest of the
+    // command line goes through to the engine guest as-is.
     let args: Vec<String> = std::env::args().skip(1).collect();
     let solo_loopback = args.iter().any(|a| a == "--loopback-only");
     let args_motor: Vec<String> = args
@@ -394,10 +398,10 @@ fn main() {
         .cloned()
         .collect();
 
-    // M5-ext.1/2: leer el YAML para recolectar los `ejecutores:` declarados.
-    // La ruta es el primer argumento **posicional** (M5, RF-40: el CLI acepta
-    // flags antes de la secuencia); si falta, o si sólo se pidió ayuda, no hay
-    // nada que pre-escanear y el guest motor se encarga.
+    // M5-ext.1/2: read the YAML to collect the declared `executors:`. The
+    // path is the first **positional** argument (M5, RF-40: the CLI accepts
+    // flags before the sequence); if it is missing, or only help was asked
+    // for, there is nothing to pre-scan and the engine guest takes over.
     let mut ips_no_loopback: HashSet<IpAddr> = HashSet::new();
     let mut programa: Option<modelo::Programa> = None;
     let ruta_secuencia = ruta_de_secuencia(&args_motor);
@@ -416,34 +420,35 @@ fn main() {
                 }
                 programa = Some(p);
             }
-            // El guest motor re-parsea el mismo YAML un instante después y
-            // reporta el error con su redacción buena. Repetirlo aquí, y
-            // encima como "no se pudo leer ... para los ejecutores" —cuando el
-            // fichero se leyó perfectamente y el fallo es de esquema— es el
-            // patrón que DIAG-5 persigue. Sólo se avisa de lo que el guest no
-            // va a ver igual: un fallo de lectura, donde host y guest difieren
-            // porque el guest mira dentro de su sandbox.
+            // The engine guest re-parses the same YAML an instant later and
+            // reports the error with its own wording. Repeating it here, and
+            // on top as "no se pudo leer ... para los ejecutores" — when the
+            // file was read perfectly fine and the failure is a schema one —
+            // is the pattern DIAG-5 hunts down. Only warn about what the
+            // guest would not see either: a read failure, where host and
+            // guest differ because the guest looks inside its sandbox.
             Err(e @ cargador::ErrorCarga::Lectura(_)) => {
                 eprintln!("aviso: no se pudo leer '{ruta}' para los ejecutores: {e}");
             }
-            // Sintaxis/validación: el guest va a reparsear el mismo fichero y
-            // reportarlo con su redacción buena, así que aquí no se dice nada.
-            // Lo que **no** se hace es deducir de esto que el guest tampoco va
-            // a poder cargarlo (#52): esa deducción sólo vale mientras host y
-            // guest compartan cargador, y cuando no lo comparten el precio es
-            // un `connection-refused` sin autor. Ver `arranca_ejecutor`.
+            // Syntax/validation: the guest will reparse the same file and
+            // report it with its own wording, so nothing is said here. What
+            // is **not** done is deducing from this that the guest will fail
+            // to load it too (#52): that deduction only holds while host and
+            // guest share a loader, and when they do not the price is an
+            // unexplained `connection-refused`. See `start_executor`.
             Err(_) => {}
         }
     }
 
     let engine = Engine::default();
 
-    // --- M5-ext.2: instanciar los ejecutores `tipo: wasm` declarados en el
-    // --- YAML y exponerlos al motor como overrides `--executor` sintéticos.
-    // --- El guest motor re-parsea el YAML él mismo (ADR-0005: el motor no
-    // --- recibe un `Programa` en memoria), así que el host no puede
-    // --- reescribirle el modelo: compone `--executor nombre=127.0.0.1:puerto`
-    // --- (M5-ext.1, que ya convierte `wasm` → `grpc` al aplicarlo).
+    // --- M5-ext.2: instantiate the `tipo: wasm` executors declared in the
+    // --- YAML and expose them to the engine as synthetic `--executor`
+    // --- overrides. The engine guest re-parses the YAML itself (ADR-0005:
+    // --- the engine is not handed an in-memory `Programa`), so the host
+    // --- cannot rewrite its model: it composes
+    // --- `--executor name=127.0.0.1:port` (M5-ext.1, which already turns
+    // --- `wasm` into `grpc` when applying it).
     let ruta_yaml = ruta_secuencia.clone().unwrap_or_default();
     let dir_yaml = Path::new(&ruta_yaml)
         .parent()
@@ -452,28 +457,31 @@ fn main() {
     let mut ejecutores_wasm: Vec<EjecutorWasm> = Vec::new();
     let mut overrides_motor: Vec<String> = Vec::new();
     let mut args_motor_final: Vec<String> = args_motor;
-    // Se calcula sobre `args_motor` (todavía sin los `--executor` sintéticos,
-    // que es justo lo que este bloque produce). Da lo mismo que calcularlo
-    // sobre `args_motor_final`: el guard salta `--executor` y su valor por
-    // `FLAGS_CON_VALOR`.
+    // Computed over `args_motor` (still without the synthetic `--executor`
+    // flags, which is exactly what this block produces). It makes no
+    // difference whether it is computed over `args_motor_final`: the guard
+    // skips `--executor` and its value via `FLAGS_CON_VALOR`.
     //
-    // Decide **sólo con los argumentos** (#52). Antes también exigía que el
-    // host hubiera podido parsear el YAML, lo cual daba por hecho que un YAML
-    // que el host rechaza el guest lo va a rechazar igual. En cuanto host y
-    // guest dejan de compartir cargador —un build a medias basta— la premisa
-    // es falsa: el guest carga la secuencia, nadie ha arrancado el ejecutor
-    // embebido, y el usuario ve `connection-refused` contra el 9100 sin una
-    // sola línea que diga por qué. El host no predice el veredicto del guest.
+    // Decided **from the arguments alone** (#52). It used to also require the
+    // host to have parsed the YAML, which assumed a YAML the host rejects
+    // would be rejected by the guest all the same. As soon as host and guest
+    // stop sharing a loader — a half-built tree suffices — the premise is
+    // false: the guest loads the sequence, nobody started the embedded
+    // executor, and the user sees `connection-refused` against 9100 without
+    // a single line saying why. The host does not predict the guest's
+    // verdict.
     let va_a_ejecutar = va_a_ejecutar_pasos(&args_motor_final);
     if va_a_ejecutar {
         if let Some(p) = programa.as_ref() {
-            // Deduplicar por path (dos ejecutores con el mismo `.wasm` → un Store).
+            // Deduplicate by path (two executors with the same `.wasm` → one
+            // Store).
             let mut stores_por_path: HashMap<String, u16> = HashMap::new();
             let mut errores: Vec<String> = Vec::new();
             for (nombre, def) in &p.ejecutores {
                 if let modelo::TipoEjecutor::Wasm { path } = &def.tipo {
-                    // El cargador ya validó que el path existe (fail-fast al
-                    // cargar); aquí lo resolvemos relativo al directorio del YAML.
+                    // The loader already validated the path exists (fail-fast
+                    // at load); here we resolve it relative to the YAML's
+                    // directory.
                     let ruta = cargador::normalizar_path(&dir_yaml, Path::new(path));
                     let clave = ruta.to_string_lossy().into_owned();
                     let puerto = if let Some(puerto) = stores_por_path.get(&clave) {
@@ -517,31 +525,32 @@ fn main() {
         args_motor_final.push(o.clone());
     }
 
-    // --- Thread ejecutor: bind en su sandbox, loopback-only (no atiende IPs
-    // --- externas). No se arranca si el motor no va a llegar a invocar un
-    // --- paso (ayuda, versión, `--validate`, falta de secuencia).
+    // --- Executor thread: binds inside its sandbox, loopback-only (it does
+    // --- not serve external IPs). It does not start if the engine will never
+    // --- invoke a step (help, version, `--validate`, missing sequence).
     //
-    // El puerto es **efímero por proceso** salvo que el usuario lo fije con
-    // `--port`: así dos `anvil` simultáneos no chocan (#15). Se le pasa al
-    // ejecutor por `ANVIL_PORT` —la vía que ya usaba para los `.wasm` cargados
-    // por path (ADR-0014)— y al motor como `--port`, que es como localiza al
-    // ejecutor embebido.
+    // The port is **ephemeral per process** unless the user pins it with
+    // `--port`: that way two simultaneous `anvil` processes do not clash
+    // (#15). It is handed to the executor via `ANVIL_PORT` — the channel
+    // already used for path-loaded `.wasm` executors (ADR-0014) — and to the
+    // engine as `--port`, which is how it locates the embedded executor.
     let arranca_ejecutor = va_a_ejecutar;
     let puerto_ejecutor = match puerto_pedido(&args_motor_final) {
         Some(p) => p,
-        // Sin ejecutor embebido no hay a quién asignarle puerto (y reservarlo
-        // sería tocar la red para nada: ver DIAG-5f).
-        None if !arranca_ejecutor => PUERTO_COMPAT,
+        // Without an embedded executor there is nobody to assign a port to
+        // (and reserving one would touch the network for nothing: DIAG-5f).
+        None if !arranca_ejecutor => COMPAT_PORT,
         None => match reservar_puerto() {
             Ok(p) => {
                 args_motor_final.push("--port".into());
                 args_motor_final.push(p.to_string());
                 p
             }
-            // Sin puerto efímero, el 9100 de siempre: peor es no arrancar.
+            // No ephemeral port available: the usual 9100. Worse is not
+            // starting at all.
             Err(e) => {
-                eprintln!("aviso: {e}; se usa el puerto {PUERTO_COMPAT}");
-                PUERTO_COMPAT
+                eprintln!("aviso: {e}; se usa el puerto {COMPAT_PORT}");
+                COMPAT_PORT
             }
         },
     };
@@ -551,24 +560,24 @@ fn main() {
             let mut b = wasi_loopback();
             b.env("ANVIL_PORT", puerto_ejecutor.to_string());
             let wasi = b.build();
-            // El ejecutor es un loop infinito de aceptar: si termina, es un
-            // fallo. El error va a stderr — si no, el usuario sólo ve el
-            // timeout de `esperar_ejecutor()` sin la causa.
+            // The executor is an infinite accept loop: if it ends, that is a
+            // failure. The error goes to stderr — otherwise the user only
+            // sees `wait_executor()`'s timeout without the cause.
             if let Err(e) = correr_guest(&exec_engine, wasi, EJECUTOR) {
                 eprintln!("el ejecutor de pasos terminó con error: {e:?}");
             }
         });
-        // --- Esperar a que escuche antes de lanzar el motor (no reintenta).
+        // --- Wait for it to listen before launching the engine (no retry).
         esperar_ejecutor(puerto_ejecutor);
         Some(h)
     } else {
         None
     };
 
-    // --- Motor: hereda los args del host (secuencia + flags), preopen cwd.
-    // --- Su sandbox permite loopback + las IPs no-loopback declaradas.
+    // --- Engine: inherits the host's args (sequence + flags), preopens cwd.
+    // --- Its sandbox allows loopback + the declared non-loopback IPs.
     let mut wasi = wasi_loopback_con_declaradas(ips_no_loopback);
-    // argv[0] es el nombre del comando (el guest motor hace `args().skip(1)`).
+    // argv[0] is the command name (the engine guest does `args().skip(1)`).
     let mut argv: Vec<String> = vec!["anvil".to_string()];
     argv.extend(args_motor_final);
     wasi.args(&argv);
@@ -577,13 +586,13 @@ fn main() {
     }
     let wasi = wasi.build();
 
-    // El motor corre en el thread principal: su exit determina el del host.
+    // The engine runs on the main thread: its exit determines the host's.
     let r = correr_guest(&engine, wasi, ANVIL_GUEST);
 
-    // El std de Rust en `wasm32-wasip2` normaliza `process::exit(non-zero)`
-    // a `I32Exit(1)` (pérdida del código exacto, conocido en WASI P2). Así que
-    // aquí propagamos 0 en éxito y el código del `I32Exit` (típicamente 1) en
-    // fallo. El mensaje de error del motor va a stderr y guía al usuario.
+    // Rust's std on `wasm32-wasip2` normalizes `process::exit(non-zero)` to
+    // `I32Exit(1)` (exact code lost, known in WASI P2). So we propagate 0 on
+    // success and the `I32Exit` code (typically 1) on failure. The engine's
+    // error message goes to stderr and guides the user.
     let exit_code = match r {
         Ok(Ok(())) => 0,
         Ok(Err(())) => 1,
@@ -597,9 +606,9 @@ fn main() {
         }
     };
 
-    // Los threads de los ejecutores (loops infinitos de aceptar) se abortan
-    // al salir. Los `.wasm` cargados quedan en el proceso hasta aquí (preload,
-    // como TestStand por defecto); no hay shutdown ordenado en el MVP.
+    // The executor threads (infinite accept loops) get aborted on exit. The
+    // loaded `.wasm` components stay in the process until then (preload,
+    // TestStand's default); there is no orderly shutdown in the MVP.
     drop(exec_handle);
     drop(ejecutores_wasm);
     std::process::exit(exit_code);
@@ -626,7 +635,7 @@ mod tests {
 
     #[test]
     fn el_valor_de_un_flag_no_es_la_ruta() {
-        // `pm.yaml` es el valor de `--process-model`, no la secuencia.
+        // `pm.yaml` is the value of `--process-model`, not the sequence.
         let a = args(&["--process-model", "pm.yaml"]);
         assert_eq!(ruta_de_secuencia(&a), None);
     }
@@ -637,31 +646,23 @@ mod tests {
         assert_eq!(ruta_de_secuencia(&a), Some("s.yaml".into()));
     }
 
-    /// El ejecutor embebido abre un puerto fijo y lo anuncia por stderr: no
-    /// debe arrancar cuando el motor va a salir sin invocar ningún paso.
     #[test]
-    fn el_ejecutor_embebido_solo_arranca_si_hay_pasos_que_correr() {
-        use super::va_a_ejecutar_pasos as necesita;
-        assert!(necesita(&args(&["s.yaml"])));
-        assert!(necesita(&args(&["--process-model", "pm.yaml", "s.yaml"])));
-        // Ayuda y versión: el motor imprime y sale.
-        assert!(!necesita(&args(&["-h"])));
-        assert!(!necesita(&args(&["--help"])));
-        assert!(!necesita(&args(&["-V"])));
-        assert!(!necesita(&args(&["s.yaml", "--version"])));
-        // `--validate` carga y valida sin conectar con nadie.
-        assert!(!necesita(&args(&["s.yaml", "--validate"])));
-        // Sin secuencia no hay nada que correr.
-        assert!(!necesita(&args(&[])));
-        assert!(!necesita(&args(&["--quiet"])));
-        // Y el valor de un flag no cuenta como secuencia.
-        assert!(!necesita(&args(&["--json", "o.json"])));
+    fn flag_desconocido_no_se_confunde_con_la_ruta() {
+        // The guest will complain; the host only has to not take it for a
+        // path.
+        let a = args(&["--inventado", "s.yaml"]);
+        assert_eq!(ruta_de_secuencia(&a), Some("s.yaml".into()));
     }
 
-    /// DIAG-5: `-h` no es la ruta de una secuencia llamada `-h`, ni `-x` la de
-    /// un fichero llamado `-x`; ambos son asunto del parser del guest.
+    #[test]
+    fn sin_argumentos() {
+        assert_eq!(ruta_de_secuencia(&[]), None);
+    }
+
     #[test]
     fn los_flags_cortos_no_son_la_ruta() {
+        // DIAG-5: `-h` is not the path of a sequence called `-h`, nor `-x`
+        // that of a file called `-x`; both are the guest parser's business.
         assert_eq!(ruta_de_secuencia(&args(&["-h"])), None);
         assert_eq!(ruta_de_secuencia(&args(&["-V"])), None);
         assert_eq!(ruta_de_secuencia(&args(&["-x"])), None);
@@ -675,23 +676,32 @@ mod tests {
     fn help_y_version_no_tienen_ruta() {
         assert_eq!(ruta_de_secuencia(&args(&["--help"])), None);
         assert_eq!(ruta_de_secuencia(&args(&["--version"])), None);
-        // También si van detrás de la secuencia: el guest sale por ayuda y el
-        // host no debe pre-escanear ni quejarse del YAML.
+        // Also when they trail the sequence: the guest exits via help and the
+        // host must not pre-scan or complain about the YAML.
         assert_eq!(
             ruta_de_secuencia(&args(&["s.yaml", "--help"])),
             Some("s.yaml".into())
         );
     }
 
+    /// The embedded executor opens a fixed port and announces it on stderr:
+    /// it must not start when the engine will exit without invoking any step.
     #[test]
-    fn sin_argumentos() {
-        assert_eq!(ruta_de_secuencia(&[]), None);
-    }
-
-    #[test]
-    fn flag_desconocido_no_se_confunde_con_la_ruta() {
-        // El guest se quejará; el host sólo debe no tomarlo por un path.
-        let a = args(&["--inventado", "s.yaml"]);
-        assert_eq!(ruta_de_secuencia(&a), Some("s.yaml".into()));
+    fn el_ejecutor_embebido_solo_arranca_si_hay_pasos_que_correr() {
+        use super::va_a_ejecutar_pasos as necesita;
+        assert!(necesita(&args(&["s.yaml"])));
+        assert!(necesita(&args(&["--process-model", "pm.yaml", "s.yaml"])));
+        // Help and version: the engine prints and exits.
+        assert!(!necesita(&args(&["-h"])));
+        assert!(!necesita(&args(&["--help"])));
+        assert!(!necesita(&args(&["-V"])));
+        assert!(!necesita(&args(&["s.yaml", "--version"])));
+        // `--validate` loads and validates without connecting to anyone.
+        assert!(!necesita(&args(&["s.yaml", "--validate"])));
+        // No sequence, nothing to run.
+        assert!(!necesita(&args(&[])));
+        assert!(!necesita(&args(&["--quiet"])));
+        // And a flag's value does not count as a sequence.
+        assert!(!necesita(&args(&["--json", "o.json"])));
     }
 }
