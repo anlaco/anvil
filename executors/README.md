@@ -1,39 +1,39 @@
-# Ejecutores de lenguaje
+# Language executors
 
-Un servidor gRPC por lenguaje que habla el contrato
-[`paso.proto`](../crates/modelo/paso.proto). El motor de Anvil los ve como
-endpoints: despacha por nombre→endpoint y no sabe qué hay detrás
-([ADR-0012](../docs/adr/0012-executores-de-lenguaje-como-modulos.md)).
+One gRPC server per language that speaks the
+[`paso.proto`](../crates/modelo/paso.proto) contract. Anvil's engine sees them
+as endpoints: it dispatches by name→endpoint and does not know what sits
+behind ([ADR-0012](../docs/adr/0012-executores-de-lenguaje-como-modulos.md)).
 
 | | |
 |---|---|
-| [`python/`](python/) | El primero. Escribes un paso como función y lo dejas en una carpeta. |
-| LabVIEW, MATLAB, … | Futuros. Cada uno en su subdirectorio, con la misma forma. |
+| [`python/`](python/) | The first one. You write a step as a function and drop it in a folder. |
+| LabVIEW, MATLAB, … | Future ones. Each in its own subdirectory, with the same shape. |
 
-Son **alternativas, no capas**: eliges el que necesites, puedes arrancar
-varios a la vez, y mezclarlos en la misma secuencia. El ejecutor WASM que
-Anvil trae de serie (`crates/ejecutor_pasos`) no vive aquí: es parte del
-núcleo y va embebido en el binario.
+They are **alternatives, not layers**: you pick the one you need, you can run
+several at once, and mix them in the same sequence. The WASM executor Anvil
+ships by default (`crates/ejecutor_pasos`) does not live here: it is part of
+the core and goes embedded in the binary.
 
-## Licencia: **Apache-2.0**, y no la del resto del repo
+## License: **Apache-2.0**, and not the rest of the repo's
 
-> Todo lo que cuelga de este directorio es **Apache-2.0** ([`LICENSE`](LICENSE)),
-> no AGPL-3.0. Anvil —el secuenciador, la raíz del repo— sí es AGPL.
+> Everything under this directory is **Apache-2.0** ([`LICENSE`](LICENSE)),
+> not AGPL-3.0. Anvil —the sequencer, the repo root— is AGPL.
 
-La frontera no es caprichosa y está en
-[ADR-0004](../docs/adr/0004-licencia-dual-agpl-apache.md): **lo que se *usa*
-es AGPL; lo que se *linka* es Apache.**
+The border is not a whim and lives in
+[ADR-0004](../docs/adr/0004-licencia-dual-agpl-apache.md): **what you *use* is
+AGPL; what you *link* is Apache.**
 
-Anvil se usa: le pasas una secuencia y te devuelve un veredicto. Un ejecutor
-de lenguaje no: su SDK entra **dentro de tu código** en cuanto escribes
-`from anvil_step import step`. Copyleft ahí sería copyleft sobre tus pasos de
-test, que es exactamente lo que ADR-0004 decide evitar — igual que con
-`wasi-grpc` y `wasi-visa`.
+Anvil is *used*: you hand it a sequence and it hands you back a verdict. A
+language executor is not: its SDK goes **inside your code** the moment you
+write `from anvil_step import step`. Copyleft there would be copyleft over
+your test steps, which is exactly what ADR-0004 decides to avoid — same as
+with `wasi-grpc` and `wasi-visa`.
 
-**Tus pasos y tus secuencias son tuyos**, con la licencia que quieras, y no se
-contagian de nada. Los límites de aceptación y el know-how de producto que hay
-en una secuencia siguen siendo tuyos.
+**Your steps and your sequences are yours**, under whatever license you want,
+and they catch nothing. The acceptance limits and the product know-how that
+live in a sequence stay yours.
 
-Los ficheros llevan además su `SPDX-License-Identifier` en cabecera: este
-directorio está dentro de un repositorio AGPL, y un fichero suelto que alguien
-copie fuera tiene que seguir diciendo bajo qué licencia va.
+The files also carry their `SPDX-License-Identifier` in their header: this
+directory sits inside an AGPL repository, and a single file someone copies
+out has to keep saying what license it travels under.

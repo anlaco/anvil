@@ -1,25 +1,25 @@
 # anvil
 
-Un secuenciador de test: corre secuencias de pasos contra equipo real,
-reintenta los que fallan y reporta el resultado. Escrito en **Rust
-compilado a WASM** (`wasm32-wasip2`, bajo wasmtime).
+A test sequencer: it runs step sequences against real equipment, retries the
+ones that fail, and reports the outcome. Written in **Rust compiled to WASM**
+(`wasm32-wasip2`, on wasmtime).
 
-La secuencia es **datos**, no código: el motor la recorre sin saber qué hace
-cada paso, y cada paso se invoca **por gRPC por su nombre** — nunca con una
-llamada directa. Eso aísla los pasos entre sí y deja la puerta abierta a
-escribirlos en cualquier lenguaje.
+The sequence is **data**, not code: the engine walks it without knowing what
+each step does, and each step is invoked **over gRPC by name** — never with a
+direct call. That isolates the steps from one another and leaves the door
+open to writing them in any language.
 
-## Documentación
+## Documentation
 
-La documentación de producto (visión, requisitos, arquitectura, ADRs,
-diseño del dominio, licencia y roadmap) vive en [`docs/`](docs/README.md).
-Empieza por [`docs/vision.md`](docs/vision.md).
+The product documentation (vision, requirements, architecture, ADRs, domain
+design, licensing and roadmap) lives in [`docs/`](docs/README.md). Start at
+[`docs/vision.md`](docs/vision.md).
 
-## Correr el ejemplo
+## Run the example
 
-**Un binario** (`anvil`, ADR-0011) hospeda wasmtime y los dos guests WASM en
-sandbox. Está enlazado estáticamente contra musl: no necesita Rust, ni cargo,
-ni glibc, ni nada instalado en el sistema.
+**One binary** (`anvil`, ADR-0011) hosts wasmtime and the two WASM guests in
+a sandbox. It is statically linked against musl: it needs no Rust, no cargo,
+no glibc, nothing installed on the system.
 
 ```sh
 curl -LO https://github.com/anlaco/anvil/releases/download/v0.3.0/anvil-v0.3.0-x86_64-linux-musl.tar.gz
@@ -29,61 +29,62 @@ cd anvil-v0.3.0-x86_64-linux-musl
 ./anvil ejemplos/subsecuencia.yaml --json ./out.json --csv ./out.csv
 ```
 
-Linux x86_64, cualquier libc. La [página del release][rel] publica el SHA256
-del `.tar.gz`; para comprobarlo, `sha256sum -c SHA256SUMS` con el segundo
-asset descargado al lado. Los `.yaml` van en el paquete porque
-`subsecuencia.yaml` invoca a `medir_fuentes.yaml` por path relativo.
+Linux x86_64, any libc. The [release page][rel] publishes the SHA256 of the
+`.tar.gz`; to check it, `sha256sum -c SHA256SUMS` with the second asset
+downloaded alongside. The `.yaml` files ship in the package because
+`subsecuencia.yaml` invokes `medir_fuentes.yaml` by relative path.
 
 [rel]: https://github.com/anlaco/anvil/releases/latest
 
-## Compilar desde fuentes
+## Building from source
 
-Sólo hace falta si vas a tocar el código; para *usar* Anvil, descarga el
-binario de arriba.
+Only needed if you are going to touch the code; to *use* Anvil, download the
+binary above.
 
-> **Antes de compilar: clona `wasi-grpc` al lado de este repo.** La pila gRPC
-> se referencia por ruta relativa y todavía no está publicada en crates.io, así
-> que sin ella `cargo` **no llega ni a leer el manifiesto**. El repo es público
-> y Apache-2.0: clonarlo es todo lo que hace falta.
+> **Before building: clone `wasi-grpc` next to this repo.** The gRPC stack is
+> referenced by relative path and is not published on crates.io yet, so
+> without it `cargo` **cannot even read the manifest**. The repo is public
+> and Apache-2.0: cloning it is all it takes.
 >
 > ```sh
 > git clone https://github.com/anlaco/anvil
-> git clone https://github.com/anlaco/wasi-grpc   # hermano, no dentro
+> git clone https://github.com/anlaco/wasi-grpc   # sibling, not inside
 > cd anvil
 > ```
 >
-> Es un apaño y está reconocido como tal: [#25](https://github.com/anlaco/anvil/issues/25).
+> It is a stopgap and is acknowledged as such: [#25](https://github.com/anlaco/anvil/issues/25).
 
 ```sh
-make release   # guests WASM → puente → host, en ese orden
+make release   # WASM guests → bridge → host, in that order
 
 ./packaging/anvil-host/target/release/anvil ejemplos/subsecuencia.yaml --json ./out.json --csv ./out.csv
 ```
 
-Son tres compilaciones encadenadas (el `build.rs` del host copia los
-artifacts, no los construye), y el orden importa; el `Makefile` existe para no
-tener que recordarlo. A mano:
+These are three chained builds (the host's `build.rs` copies the artifacts,
+it does not build them), and the order matters; the `Makefile` exists so you
+do not have to remember it. By hand:
 
 ```sh
 cargo build --release --target wasm32-wasip2 -p motor -p ejecutor_pasos      # guests
-cargo build --release --manifest-path packaging/anvil-puente-wasm/Cargo.toml # puente (ADR-0015)
-cargo build --release --manifest-path packaging/anvil-host/Cargo.toml        # host (wasmtime embebido)
+cargo build --release --manifest-path packaging/anvil-puente-wasm/Cargo.toml # bridge (ADR-0015)
+cargo build --release --manifest-path packaging/anvil-host/Cargo.toml        # host (embedded wasmtime)
 ```
 
-Eso deja un binario enlazado contra la glibc de tu máquina, que es lo que
-quieres para desarrollar. El **binario que se publica** en los releases es otra
-cosa: se compila al target `x86_64-unknown-linux-musl` para que corra en
-cualquier Linux. Requiere un compilador de C para musl, porque `wasmtime`
-arrastra `zstd-sys`; sirve `musl-gcc` o `zig cc -target x86_64-linux-musl` tras
-`rustup target add x86_64-unknown-linux-musl`. El puente hay que copiarlo a
-`packaging/anvil-puente-wasm/target/release/` antes de compilar el host: su
-`build.rs` busca los artifacts ahí, sin contemplar el subdirectorio del triple.
+That leaves a binary linked against your machine's glibc, which is what you
+want for development. The **binary that gets published** in the releases is
+another matter: it is built for the `x86_64-unknown-linux-musl` target so it
+runs on any Linux. It requires a C compiler for musl, because `wasmtime`
+drags in `zstd-sys`; `musl-gcc` or `zig cc -target x86_64-linux-musl` work
+after `rustup target add x86_64-unknown-linux-musl`. The bridge must be
+copied to `packaging/anvil-puente-wasm/target/release/` before building the
+host: its `build.rs` looks for the artifacts there, and does not consider the
+target-triple subdirectory.
 
-`make build` hace lo mismo en debug. Úsalo para desarrollar, pero cuenta con
-que ese binario **arranca en decenas de segundos**: wasmtime compila los
-guests sin optimizar cada vez. El de release arranca en ~1 s.
+`make build` does the same in debug. Use it for development, but expect that
+binary to **start in tens of seconds**: wasmtime compiles the guests
+unoptimized every time. The release one starts in ~1 s.
 
-Para depurar los guests sueltos con el CLI de wasmtime (dos terminales):
+To debug the guests on their own with the wasmtime CLI (two terminals):
 
 ```sh
 cargo build --target wasm32-wasip2 -p ejecutor_pasos -p motor
@@ -95,78 +96,78 @@ wasmtime -S cli -S tcp=y -S inherit-network=y --dir=. \
   target/wasm32-wasip2/debug/anvil-guest.wasm ejemplos/basica.yaml
 ```
 
-Los flags de wasmtime no son opcionales: sin `-S tcp=y -S
-inherit-network=y` el guest no puede tocar la red. Más en la
-[guía de inicio rápido](docs/guia-inicio-rapido.md).
+The wasmtime flags are not optional: without `-S tcp=y -S
+inherit-network=y` the guest cannot touch the network. More in the
+[quick-start guide](docs/guia-inicio-rapido.md).
 
-## Estructura
+## Layout
 
 ```
 crates/
-  modelo/          modelo de datos + mensajes de paso.proto (prost)
-  cargador/        YAML → modelo: valida, resuelve paths y detecta ciclos
-  expr/            motor de expresiones (subconjunto de sintaxis Julia)
-  result_sink/     sinks del reporte: consola, JSON, CSV
-  pasos_demo/      los pasos de la secuencia de ejemplo
-  pasos_scpi/      paso real por SCPI sobre TCP (ADR-0017)
-  ejecutor_pasos/  servidor gRPC: despacha pasos por nombre
-  motor/           cliente gRPC: recorre la secuencia (bin `anvil-guest`)
+  modelo/          data model + paso.proto messages (prost)
+  cargador/        YAML → model: validates, resolves paths, detects cycles
+  expr/            expression engine (a Julia-syntax subset)
+  result_sink/     report sinks: console, JSON, CSV
+  pasos_demo/      the example sequence's steps
+  pasos_scpi/      a real step over SCPI on TCP (ADR-0017)
+  ejecutor_pasos/  gRPC server: dispatches steps by name
+  motor/           gRPC client: walks the sequence (bin `anvil-guest`)
 packaging/
-  anvil-host/      host nativo: un binario que hospeda wasmtime + los dos guests
-                   (workspace aparte; el core no arrastra wasmtime)
-  anvil-puente-wasm/  puente gRPC ↔ componente WASM del usuario (ADR-0015);
-                   va embebido en `anvil` y se extrae a temp al arrancar
+  anvil-host/      native host: one binary hosting wasmtime + the two guests
+                   (its own workspace; the core drags no wasmtime)
+  anvil-puente-wasm/  gRPC ↔ user's WASM component bridge (ADR-0015);
+                   embedded in `anvil`, extracted to temp at startup
 ```
 
-La pila gRPC vive aparte, en
-[`anlaco/wasi-grpc`](https://github.com/anlaco/wasi-grpc): gRPC sobre
-sockets WASI nativos, porque `tonic`/`tokio` no compilan a WASM. anvil es su
-primer consumidor y la dogfoodea.
+The gRPC stack lives apart, in
+[`anlaco/wasi-grpc`](https://github.com/anlaco/wasi-grpc): gRPC over native
+WASI sockets, because `tonic`/`tokio` do not compile to WASM. anvil is its
+first consumer and dogfoods it.
 
-## La especificación
+## The specification
 
-Estas son las decisiones que definen el producto. No se tocan sin querer
-tocarlas:
+These are the decisions that define the product. Do not touch them without
+meaning to:
 
-- **Semántica de ejecución.** Setup → Main (solo si el Setup fue bien) →
-  Cleanup. El Main **corta en el primer fallo**; el Cleanup corre **siempre**
-  — un equipo que se quedó encendido es peor que una secuencia que falló.
-- **Reintentos por paso.** Cada paso declara cuántos intentos admite. El
-  número de intento llega al paso, que puede usarlo.
-- **Un vocabulario cerrado de estados:** `pass`, `fail`, `error` y `skipped`.
-  En el agregado de la secuencia un `error` manda sobre un `fail`, y el motor
-  puede añadir `inconclusive` cuando no ha podido juzgar (ADR-0019).
-- **El contrato** está en `crates/modelo/paso.proto`: `StepRequest`,
-  `StepResult` y `service StepExecutor { rpc Invoke, rpc Describe }`. Es la
-  fuente de verdad; los structs `prost` de `crates/modelo/src/proto.rs` lo
-  espejan a mano (wasi-grpc v0.1 no trae codegen). `Describe` devuelve el
-  catálogo del ejecutor —qué pasos sirve y con qué firma— y es lo que permite
-  a `--validate --with-executors` cazar un nombre mal escrito sin ejecutar
-  nada (ADR-0021).
+- **Execution semantics.** Setup → Main (only if Setup passed) →
+  Cleanup. Main **stops at the first failure**; Cleanup **always runs** — an
+  instrument left switched on is worse than a sequence that failed.
+- **Retries per step.** Each step declares how many attempts it allows. The
+  attempt number reaches the step, which may use it.
+- **A closed vocabulary of statuses:** `pass`, `fail`, `error` and `skipped`.
+  In the sequence aggregate an `error` wins over a `fail`, and the engine may
+  add `inconclusive` when it could not judge (ADR-0019).
+- **The contract** lives in `crates/modelo/paso.proto`: `StepRequest`,
+  `StepResult` and `service StepExecutor { rpc Invoke, rpc Describe }`. It is
+  the source of truth; the `prost` structs of `crates/modelo/src/proto.rs`
+  mirror it by hand (wasi-grpc v0.1 has no codegen). `Describe` returns the
+  executor's catalog —which steps it serves and with what signature— and is
+  what lets `--validate --with-executors` catch a mistyped name without
+  executing anything (ADR-0021).
 
-## Verificar
+## Verify
 
 ```sh
-make test               # 342 tests del core + 26 del host + los del ejecutor Python
-make check              # clippy de los tres workspaces
+make test               # 342 core tests + 26 host tests + the Python executor's
+make check              # clippy for the three workspaces
 ```
 
-## Licencia
+## License
 
-**anvil es AGPL-3.0-or-later** (ver [LICENSE](LICENSE)). anvil es el
-producto: se *usa*, no se linka. La AGPL impide que alguien lo cierre y lo
-revenda, y **no afecta a tus secuencias de test** — son datos que le pasas al
-secuenciador, no obra derivada de él. Los límites de aceptación y el know-how
-de producto que hay en una secuencia son tuyos y siguen siendo tuyos.
+**anvil is AGPL-3.0-or-later** (see [LICENSE](LICENSE)). anvil is the
+product: it is *used*, not linked. The AGPL prevents anyone from closing it
+and reselling it, and **it does not affect your test sequences** — they are
+data you hand the sequencer, not a derivative work of it. The acceptance
+limits and product know-how inside a sequence are yours and stay yours.
 
-Las librerías sobre las que se apoya van deliberadamente **Apache-2.0**:
+The libraries it rests on are deliberately **Apache-2.0**:
 
-| Pieza | Licencia | Por qué |
+| Piece | License | Why |
 |---|---|---|
-| Interfaces WIT | Apache-2.0 | Queremos que se adopten como referencia |
-| `wasi-grpc`, `wasi-visa` | Apache-2.0 | Se linkan en código ajeno |
-| `executors/` | Apache-2.0 | Su SDK entra en el código de tus pasos ([LICENSE propia](executors/LICENSE)) |
-| anvil | AGPL-3.0 | Es el producto |
+| WIT interfaces | Apache-2.0 | We want them adopted as a reference |
+| `wasi-grpc`, `wasi-visa` | Apache-2.0 | They get linked in someone else's code |
+| `executors/` | Apache-2.0 | Their SDK enters your steps' code ([its own LICENSE](executors/LICENSE)) |
+| anvil | AGPL-3.0 | It is the product |
 
-Un paso de test se **linka** con las librerías, así que copyleft ahí
-contagiaría el código de quien las use. En el secuenciador no ocurre.
+A test step **links** with the libraries, so copyleft there would infect the
+code of whoever uses them. In the sequencer it does not happen.
