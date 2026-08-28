@@ -19,3 +19,6 @@ betatester/
 # Banco de medida temporal (`#43`, `#46`): se regenera con el script del
 # issue anlaco/anvil#43 y sus ficheros son de usar y tirar.
 /.bench-tmp
+
+# Instrucciones de agente: son locales, no parte del producto.
+CLAUDE.md
