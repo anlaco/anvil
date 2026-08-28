@@ -1,155 +1,160 @@
-# Diseño: Executores de lenguaje y cargador de `.wasm`
+# Design: language executors and the `.wasm` loader
 
-> **Prioridad:** MVP extendido. El ejecutor WASM embebido ya existe; el
-> routing nombre→endpoint está **implementado en M5-ext.1** (ADR-0013); el
-> cargador de `.wasm` por path está **implementado en M5-ext.2** (ADR-0014,
-> agnóstico al origen del `.wasm`); LID es un patrón de despliegue
-> **aplazado a M5-ext.3**.
+> **Priority:** extended MVP. The embedded WASM executor already exists; the
+> name→endpoint routing is **implemented in M5-ext.1** (ADR-0013); the
+> `.wasm` loader by path is **implemented in M5-ext.2** (ADR-0014, agnostic
+> to the `.wasm`'s origin); LID is a deployment pattern **postponed to
+> M5-ext.3**.
 
-Cómo Anvil llama a pasos en **cualquier lenguaje** y a **módulos WASM
-propios** sin recompilar. Trazable a [ADR-0015](../adr/0015-el-wasm-del-usuario-es-una-funcion-puenteado-a-grpc.md),
-[ADR-0014](../adr/0014-cargador-wasm-host-side-m5-ext2.md) (superseded en el
-contrato del `.wasm`), [ADR-0013](../adr/0013-cargador-wasm-host-side-y-routing.md),
+How Anvil calls steps in **any language** and **its own WASM modules**
+without recompiling. Traceable to
+[ADR-0015](../adr/0015-el-wasm-del-usuario-es-una-funcion-puenteado-a-grpc.md),
+[ADR-0014](../adr/0014-cargador-wasm-host-side-m5-ext2.md) (superseded on
+the `.wasm` contract), [ADR-0013](../adr/0013-cargador-wasm-host-side-y-routing.md),
 [ADR-0012](../adr/0012-executores-de-lenguaje-como-modulos.md) (superseded
-en el cargador y el routing),
-[ADR-0003](../adr/0003-pasos-por-grpc-por-nombre.md) y
+on the loader and the routing),
+[ADR-0003](../adr/0003-pasos-por-grpc-por-nombre.md) and
 [ADR-0011](../adr/0011-distribucion-un-binario-hospeda-wasmtime.md).
 
-## El modelo completo
+## The complete model
 
 ```
                     ┌──────────────────────────────────────────────┐
-                    │  anvil-host (bin nativo, ADR-0011)           │
+                    │  anvil-host (native bin, ADR-0011)           │
                     │  ┌────────────────┐    ┌──────────────────┐  │
-Motor (WASM) ─gRPC─▶│  │ ejecutor.wasm  │◀──▶│  módulos .wasm   │  │
- nombre→endpoint    │  │  (embebido)    │    │  cargados por     │  │
-                    │  │  · pasos_demo  │    │  path (modelo .vi)│  │
-                    │  │  · built-in    │    │  · Store propio   │  │
+Motor (WASM) ─gRPC─▶│  │ ejecutor.wasm  │◀──▶│  .wasm modules   │  │
+ name→endpoint      │  │  (embedded)    │    │  loaded by        │  │
+                    │  │  · pasos_demo  │    │  path (.vi model) │  │
+                    │  │  · built-in    │    │  · own Store      │  │
                     │  └────────────────┘    └──────────────────┘  │
                     └───────────┬──────────────────────────────────┘
-                                │ gRPC (mismo contrato)
+                                │ gRPC (same contract)
                     ┌───────────▼──────────────────────────────┐
-                    │  ejecutores/  (módulos Apache-2.0)       │
-                    │  python/  ·  labview/ (futuro)  ·  ...    │
-                    │  └─ (opcional) en LID: SO legacy (Win7)   │
-                    │     con puertas declaradas                │
+                    │  executors/  (Apache-2.0 modules)        │
+                    │  python/  ·  labview/ (future)  ·  ...    │
+                    │  └─ (optional) on an LID: legacy OS (Win7)│
+                    │     with declared doors                   │
                     └───────────┬──────────────────────────────┘
                                 │ TCP/SCPI/etc.
                                 ▼
-                        Instrumento / simulador
+                        Instrument / simulator
 ```
 
-- El motor despacha por **nombre→endpoint**: no sabe ni le importa si el
-  paso lo atiende el ejecutor embebido, un `.wasm` cargado, o un ejecutor
-  Python en otra máquina.
-- Todos hablan el **mismo `paso.proto`**. El contrato no cambia (RNF-05).
+- The engine dispatches by **name→endpoint**: it neither knows nor cares
+  whether the step is served by the embedded executor, a loaded `.wasm`, or
+  a Python executor on another machine.
+- They all speak the **same `paso.proto`**. The contract does not change
+  (RNF-05).
 
-## El ejecutor WASM embebido (de serie)
+## The embedded WASM executor (the default one)
 
-- **Zero-install**: va dentro de `anvil-host` (ADR-0011). WASM/Rust es el
-  **lenguaje de serie** de un ejecutor de pruebas.
-- Atiende los pasos **built-in**: `pasos_demo` compilado dentro (pass/fail,
-  limit test, action, conectar/medir/desconectar simulados). Siempre
-  disponibles, en `127.0.0.1:9100`.
-- **No** carga `.wasm` por path: un guest WASM no puede instanciar wasmtime
-  dentro de sí mismo (ADR-0013). Eso lo hace el **host** (ver abajo).
+- **Zero-install**: it lives inside `anvil-host` (ADR-0011). WASM/Rust is
+  the **default language** of a test executor.
+- It serves the **built-in** steps: `pasos_demo` compiled in (pass/fail,
+  limit test, action, simulated connect/measure/disconnect). Always
+  available, on `127.0.0.1:9100`.
+- It does **not** load `.wasm` by path: a WASM guest cannot instantiate
+  wasmtime inside itself (ADR-0013). That is the **host's** job (see
+  below).
 
-### Routing nombre→endpoint (M5-ext.1, implementado)
+### Name→endpoint routing (M5-ext.1, implemented)
 
-El YAML declara `ejecutores:` y cada paso `grpc` puede declarar `ejecutor:`.
-El motor despacha por **nombre→endpoint** (tabla de conexiones en
-`Motor::desde_programa`); sin declaración, todo va al embebido (compat M4b).
+The YAML declares `executors:` and each `grpc` step may declare
+`executor:`. The engine dispatches by **name→endpoint** (connection table in
+`Motor::desde_programa`); without a declaration, everything goes to the
+embedded executor (M4b compatibility).
 
 ```yaml
 executors:
-  - name: embebido        # el ejecutor WASM de serie (127.0.0.1:9100)
+  - name: embebido        # the default WASM executor (127.0.0.1:9100)
     type: embedded
-  - name: python          # ejecutor de lenguaje aparte
+  - name: python          # a separate language executor
     type: grpc
-    host: 127.0.0.1         # o 192.168.x.y (LID futuro) — solo si se declara
+    host: 127.0.0.1         # or 192.168.x.y (future LID) — only if declared
     port: 9101
 main:
-  - name: verificar_led   # embebido (default)
+  - name: verificar_led   # embedded (default)
   - name: medir_simulador
     executor: python
 ```
 
-Override por CLI: `--executor python=192.168.1.50:9101` (patrón `--limits`).
-IPs no-loopback solo si se declaran (relajación acotada del loopback,
-ADR-0011); flag `--loopback-only` en el host para rechazarlas.
+CLI override: `--executor python=192.168.1.50:9101` (the `--limits`
+pattern). Non-loopback IPs only if declared (ADR-0011's bounded loopback
+relaxation); the host flag `--loopback-only` rejects them.
 
-### Cargador de `.wasm` por path (modelo `.vi`, M5-ext.2, implementado)
+### `.wasm` loader by path (the `.vi` model, M5-ext.2, implemented)
 
-Como en TestStand con un `.vi`: tú compilas el módulo, lo guardas en un
-archivo, y la secuencia lo referencia por path. **No se recompila nada.**
+Like TestStand with a `.vi`: you compile the module, save it to a file, and
+the sequence references it by path. **Nothing gets recompiled.**
 
 ```yaml
 executors:
-  - name: mi_paso_wasm      # clave libre para la secuencia
-    type: wasm                # componente cargado por el HOST (ADR-0015)
-    path: ./pasos/mi_paso.wasm  # relativo al YAML
+  - name: mi_paso_wasm      # free key for the sequence
+    type: wasm                # component loaded by the HOST (ADR-0015)
+    path: ./pasos/mi_paso.wasm  # relative to the YAML
 ```
 
-- **El `.wasm` del usuario es un componente WASM que exporta una función
-  `run`** (interfaz WIT `anvil:paso`, ADR-0015). No es un servidor gRPC:
-  no sabe de gRPC ni de protobuf ni de Anvil. El autor del paso escribe una
-  función Rust de ~15 líneas con `wit-bindgen` (público, crates.io) y la
-  compila con `cargo component` — sin `wasi-grpc`, sin `modelo`, sin clonar
-  el repo.
-- **El host spawnea el puente `anvil-puente-wasm`** (embebido en el binario
-  `anvil`, extraído a temp) con `--wasm <path> --port <efímero>`. El puente
-  (nativo: wasmtime + tonic + wit-bindgen) carga el componente en un Store
-  con sandbox WASI **vacío** (sin ficheros ni red: el componente es una
-  función pura — aislamiento real) y traduce gRPC↔función: por cada
-  `Invoca` del motor llama a `run(nombre, intento)` y devuelve el resultado
-  como `ResultadoPasoProto`. `paso.proto` no cambia (RNF-05); la
-  traducción vive dentro del ejecutor.
-- **Un puente por path** (deduplicado: dos ejecutores con el mismo `.wasm`
-  → un puente). Preload al arrancar, readiness por polling, puerto efímero
-  (`bind 127.0.0.1:0`).
-- **El motor nunca ejecuta `Wasm`** (ADR-0014/0015): el host compone un
-  override `--executor nombre=127.0.0.1:<puerto>` sintético (M5-ext.1, que
-  ya convierte `wasm` → `grpc`), así el motor sólo ve `embebido`/`grpc`,
-  como siempre. Correr `anvil.wasm` suelto con wasmtime CLI (sin host)
-  contra un ejecutor `wasm` da `Error::EjecutorWasmSinHost` con mensaje
-  claro.
-- **Caso remoto (Raspberry Pi, futuro)**: el mismo puente se distribuye
-  suelto y se corre con `--bind 0.0.0.0`; el YAML declara `tipo: grpc,
-  host: 192.168.x.y`. Anvil no distingue: el puente interno y el de la Pi
-  son el mismo binario.
-- **Rendimiento (50+ módulos)**: wasmtime compila **JIT a nativo** (no
-  interpreta). AOT precompile a `.cwasm` + `StoreLimitsBuilder` son
-  **post-M5-ext.2** (cuando se mida RSS). Detalle en
+- **The user's `.wasm` is a WASM component exporting a `run` function**
+  (WIT interface `anvil:step`, ADR-0015). It is not a gRPC server: it knows
+  nothing about gRPC, protobuf or Anvil. The step's author writes a ~15-line
+  Rust function with `wit-bindgen` (public, crates.io) and compiles it with
+  `cargo component` — no `wasi-grpc`, no `modelo`, no cloning the repo.
+- **The host spawns the bridge `anvil-puente-wasm`** (embedded in the
+  `anvil` binary, extracted to temp) with `--wasm <path> --port <ephemeral>`.
+  The bridge (native: wasmtime + tonic + wit-bindgen) loads the component
+  into a Store with an **empty** WASI sandbox (no files, no network: the
+  component is a pure function — real isolation) and translates
+  gRPC↔function: for each `Invoca` of the engine it calls
+  `run(nombre, intento)` and returns the result as `ResultadoPasoProto`.
+  `paso.proto` does not change (RNF-05); the translation lives inside the
+  executor.
+- **One bridge per path** (deduplicated: two executors with the same
+  `.wasm` → one bridge). Preload at startup, readiness by polling, ephemeral
+  port (`bind 127.0.0.1:0`).
+- **The engine never runs `Wasm`** (ADR-0014/0015): the host composes a
+  synthetic `--executor name=127.0.0.1:<port>` override (M5-ext.1, which
+  already turns `wasm` into `grpc`), so the engine only sees
+  `embebido`/`grpc`, as always. Running `anvil.wasm` loose with the wasmtime
+  CLI (no host) against a `wasm` executor gives `Error::EjecutorWasmSinHost`
+  with a clear message.
+- **Remote case (Raspberry Pi, future)**: the same bridge gets distributed
+  loose and run with `--bind 0.0.0.0`; the YAML declares
+  `tipo: grpc, host: 192.168.x.y`. Anvil cannot tell: the internal bridge
+  and the Pi's are the same binary.
+- **Performance (50+ modules)**: wasmtime compiles **JIT to native** (it
+  does not interpret). AOT precompile to `.cwasm` + `StoreLimitsBuilder`
+  are **post-M5-ext.2** (once RSS is measured). Detail in
   `docs/planes/m5-ext.md`.
 
-> **Patrón soportado desde M5-ext.1** (sin hito propio): un **único `.wasm`
-> que despacha por nombre** (un módulo que atiende N nombres internamente)
-> es un ejecutor `grpc` más — 1 Store, N llamadas. Anvil no distingue si
-> detrás hay un `.wasm` suelto por path (M5-ext.2) o un módulo que fusiona
-> varios pasos. Es el análogo del Run-Time Engine de TestStand: si un
-> generador produce ese formato, funciona sin nada especial.
+> **Pattern supported since M5-ext.1** (no milestone of its own): a **single
+> `.wasm` dispatching by name** (a module that serves N names internally) is
+> just another `grpc` executor — 1 Store, N calls. Anvil cannot tell whether
+> behind it there is one loose `.wasm` by path (M5-ext.2) or a module that
+> fuses several steps. It is the analogue of TestStand's Run-Time Engine: if
+> a generator produces that format, it works with nothing special.
 
-## Executores de lenguaje (`executors/`)
+## Language executors (`executors/`)
 
-Módulos aparte, uno por sistema, distribuidos con Anvil, licencia
-**Apache-2.0** (adoptables, ADR-0012):
+Separate modules, one per system, distributed with Anvil, **Apache-2.0**
+(adoptable, ADR-0012):
 
 ```
 executors/
-  python/    # gRPC server en Python (M5)
-  labview/   # futuro
-  matlab/    # futuro
+  python/    # gRPC server in Python (M5)
+  labview/   # future
+  matlab/    # future
 ```
 
-- Son **alternativas**: se arranca el que haga falta; pueden correr a la vez
-  y mezclarse en la misma secuencia.
-- Hablan el mismo `paso.proto` con **gRPC nativo de su ecosistema**
-  (`grpcio`, `tonic`, …), no `wasi-grpc` (esa es solo para WASM, ADR-0006).
-- El motor no necesita ese runtime instalado (ADR-0003); quien corre el
-  ejecutor sí lo instala en su máquina — su elección, no un requisito de
-  Anvil.
-- Cada módulo es autocontenido y versionable → **descargable desde la UI**
-  cuando exista (post-MVP).
+- They are **alternatives**: you start the one you need; they can run at the
+  same time and mix in the same sequence.
+- They speak the same `paso.proto` with **their ecosystem's native gRPC**
+  (`grpcio`, `tonic`, …), not `wasi-grpc` (that one is only for WASM,
+  ADR-0006).
+- The engine needs no such runtime installed (ADR-0003); whoever runs the
+  executor does install it on their machine — their choice, not a requirement
+  of Anvil.
+- Each module is self-contained and versionable → **downloadable from the
+  UI** once it exists (post-MVP).
 
 ### Objects that stay in the executor (ADR-0022)
 
@@ -182,61 +187,61 @@ one opens and mints, several use, one closes. What it does *not* do is mint a
 new handle when a step merely changes the bench: the reference names a slot,
 and answering a new one would break retries.
 
-### LID: despliegue en SO legacy (patrón, no componente — aplazado a post-M5-ext)
+### LID: deployment on legacy OSes (a pattern, not a component — postponed to post-M5-ext)
 
-Cuando el paso exige DLLs/drivers de un SO que Anvil no ofrece (Windows 7/10,
-Ubuntu antiguo), **cualquier** ejecutor de lenguaje puede desplegarse en ese
-SO legacy con **aislamiento declarado** — es un *Legacy Isolation Domain*:
+When a step needs DLLs/drivers of an OS Anvil does not offer (Windows 7/10,
+old Ubuntu), **any** language executor can deploy on that legacy OS with
+**declared isolation** — a *Legacy Isolation Domain*:
 
-- Solo salen las **puertas declaradas** (instrumentos por red, ficheros
-  pactados); el resto está aislado.
-- Anvil ve un endpoint gRPC más: `192.168.x.y:9100` (PC en red) o una
-  VM/contenedor local. No sabe ni le importa el SO.
-- **Aplazado a post-M5-ext** (primero moderno, después legacy): el patrón es
-  fijo, pero el **mecanismo de aislamiento a definir al construir**
-  (contenedor / VM / firewall de SO). La investigación exhaustiva de
-  opciones (QEMU/KVM, Hyper-V, Sandboxie-Plus, Docker, systemd-nspawn,
-  namespaces, Windows Sandbox, Firecracker, gVisor, WSL2, …) con fuentes
-  verificadas y recomendación por topología está en
+- Only the **declared doors** go out (network instruments, agreed files);
+  the rest is isolated.
+- Anvil sees one more gRPC endpoint: `192.168.x.y:9100` (a networked PC) or
+  a local VM/container. It neither knows nor cares about the OS.
+- **Postponed to post-M5-ext** (modern first, legacy later): the pattern is
+  fixed, but the **isolation mechanism is defined when building it**
+  (container / VM / OS firewall). The exhaustive option survey
+  (QEMU/KVM, Hyper-V, Sandboxie-Plus, Docker, systemd-nspawn,
+  namespaces, Windows Sandbox, Firecracker, gVisor, WSL2, …) with verified
+  sources and a recommendation per topology lives in
   [investigacion/aislamiento-lid.md](../investigacion/aislamiento-lid.md).
 
-## Configuración del routing
+## Routing configuration
 
-Patrón embebido primero, sidecar después (igual que los límites, RF-30):
+Embedded first, sidecar later (same as the limits, RF-30):
 
-1. **Embebido en el YAML de la secuencia** (MVP): sección `ejecutores:`
-   versionable con la secuencia.
+1. **Embedded in the sequence's YAML** (MVP): the `executors:` section,
+   versionable with the sequence.
 
    ```yaml
    executors:
-     - name: embebido        # el ejecutor WASM de serie
+     - name: embebido        # the default WASM executor
        type: embedded
-     - name: mi_paso_wasm    # módulo .wasm cargado por path
+     - name: mi_paso_wasm    # .wasm module loaded by path
        type: wasm
        path: ./pasos/mi_paso.wasm
-     - name: python          # ejecutor de lenguaje aparte
-       type: grpc              # mismo contrato, otro proceso/host
-       host: 127.0.0.1         # o 192.168.x.y (LID) — solo si se declara
+     - name: python          # a separate language executor
+       type: grpc              # same contract, other process/host
+       host: 127.0.0.1         # or 192.168.x.y (LID) — only if declared
        port: 9101
    ```
 
-   Y cada paso referencia su ejecutor: `ejecutor: python` en
-   `DefinicionPaso` (o un ejecutor por defecto si no se declara).
+   And each step references its executor: `executor: python` in
+   `DefinicionPaso` (or a default executor if none is declared).
 
-2. **Override por flag CLI** (MVP): `--executor python=192.168.1.50:9100`
-   para apuntar un ejecutor a otro endpoint sin tocar el YAML (R&D vs.
-   fábrica), como ya hace `--limits`.
+2. **CLI flag override** (MVP): `--executor python=192.168.1.50:9100` to
+   point an executor at another endpoint without touching the YAML (R&D vs.
+   factory), like `--limits` already does.
 
-3. **Sidecar reutilizable** (post-MVP): fichero de configuración compartido
-   entre varias secuencias.
+3. **Reusable sidecar** (post-MVP): a config file shared by several
+   sequences.
 
-Sin `ejecutores:` declarado, todo va al ejecutor embebido en loopback —
-comportamiento idéntico al de M4b (compatibilidad con ADR-0011).
+With no `executors:` declared, everything goes to the embedded executor on
+loopback — identical behavior to M4b (ADR-0011 compatibility).
 
-## Demo M5-ext.1 (hecha, sin Docker)
+## Demo M5-ext.1 (done, no Docker)
 
-La demo real es `ejemplos/demo_ejecutores.yaml`: **embebido + Python en
-loopback** (sin Docker, sin LID).
+The real demo is `ejemplos/demo_ejecutores.yaml`: **embedded + Python on
+loopback** (no Docker, no LID).
 
 ```yaml
 name: demo_ejecutores
@@ -244,35 +249,34 @@ executors:
   - { name: embebido, type: embedded }
   - { name: python, type: grpc, host: 127.0.0.1, port: 9101 }
 main:
-  - name: verificar_led        # embebido (default)
+  - name: verificar_led        # embedded (default)
   - name: medir_simulador, executor: python
   - name: conectar_equipo, executor: python
 ```
 
-Verificación: la secuencia pasa/falla según cada paso, y el reporte muestra
-pasos atendidos por dos ejecutores distintos sin que el motor supiera nada
-del lenguaje. La demo con un paso `.wasm` propio (`tipo: wasm`) es
-`ejemplos/demo_wasm.yaml` (M5-ext.2, ADR-0015): el host spawnea el puente,
-que carga el componente `ejemplos/hola-paso` (el "hola mundo") y llama a su
-`run`; el motor despacha los tres pasos (embebido + componente) con límite
-y reintentos evaluados por el motor. Ver
+Verification: the sequence passes/fails per step, and the report shows steps
+served by two different executors without the engine knowing anything about
+the language. The demo with an own `.wasm` step (`tipo: wasm`) is
+`ejemplos/demo_wasm.yaml` (M5-ext.2, ADR-0015): the host spawns the bridge,
+which loads the `ejemplos/hola-paso` component (the "hello world") and calls
+its `run`; the engine dispatches the three steps (embedded + component) with
+the limit and retries evaluated by the engine. See
 [ADR-0015](../adr/0015-el-wasm-del-usuario-es-una-funcion-puenteado-a-grpc.md).
 
-## Recortes MVP extendido
+## Extended-MVP cuts
 
-- Cache AOT de módulos `.wasm` (post-M5-ext.2, cuando se mida RSS/threads
-  con 50+ módulos).
-- Sidecar de `ejecutores:` (post-MVP).
-- Descubrimiento automático / balanceo / reconnect por endpoint (post-MVP;
-  solo reintento por paso existente, RF-07).
-- Descargables desde la UI (post-MVP; la estructura lo permite).
-- LID: patrón documentado, aplazado a M5-ext.3; tecnología a definir al
-  construir.
+- AOT cache of `.wasm` modules (post-M5-ext.2, once RSS/threads are measured
+  with 50+ modules).
+- Sidecar for `executors:` (post-MVP).
+- Auto-discovery / balancing / reconnect per endpoint (post-MVP; only the
+  per-step retry exists, RF-07).
+- Downloadable from the UI (post-MVP; the structure allows it).
+- LID: pattern documented, postponed to M5-ext.3; technology defined when
+  building it.
 
 ## Out-of-scope
 
-- Ejecutores de lenguaje distintos de Python en el MVP (LabVIEW/MATLAB:
-  futuros).
-- WASM dentro del LID (imposible con DLLs nativas; su aislamiento es de
-  red/FS declarados).
-- Cambios a `paso.proto` (RNF-05).
+- Language executors other than Python in the MVP (LabVIEW/MATLAB: future).
+- WASM inside the LID (impossible with native DLLs; their isolation is by
+  declared network/FS).
+- Changes to `paso.proto` (RNF-05).

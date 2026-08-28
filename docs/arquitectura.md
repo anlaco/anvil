@@ -1,215 +1,216 @@
-# Arquitectura
+# Architecture
 
-Arquitectura de Anvil en **C4 niveles 1–3** (Contexto, Container, Component).
-Sustituye al SDD IEEE 1016 (12 viewpoints) —exceso aquí— conservando lo
-que importa: qué se construye, cómo se aísla, dónde vive el estado y dónde
-está la frontera de licencia.
+Anvil's architecture in **C4 levels 1–3** (Context, Container, Component).
+It replaces the IEEE 1016 SDD (12 viewpoints) — overkill here — keeping what
+matters: what gets built, how things are isolated, where state lives and
+where the license boundary sits.
 
-Las decisiones de fondo están en los [ADRs](adr/); este doc es el *cómo*.
+The underlying decisions live in the [ADRs](adr/); this doc is the *how*.
 
-## Nivel 1 — Contexto del sistema
+## Level 1 — System context
 
 ```
                   ┌───────────────┐
-   Ingeniero      │   Anvil       │      ResultSinks
-   de test ──────▶│  secuenciador │─────▶ (consola/JSON/CSV/
-  (authora YAML)  │  (WASM host)  │      SQLite/STDF post-MVP)
+   Test           │   Anvil       │      ResultSinks
+   engineer ─────▶│  sequencer    │─────▶ (console/JSON/CSV/
+  (authors YAML)  │  (WASM host)  │      SQLite/STDF post-MVP)
                   └───────┬───────┘
-                          │ gRPC (por nombre)
+                          │ gRPC (by name)
                           ▼
                   ┌───────────────┐         ┌──────────────────┐
-   Operador ─────▶│  Ejecutor de  │────────▶│  Pasos / code     │
-  (corre en       │  pasos (WASM) │ gRPC    │  modules (cual-   │
-   planta, CLI)   │               │         │  quier lenguaje)  │
+   Operator ─────▶│  Step         │────────▶│  Steps / code     │
+  (runs on the    │  executor     │ gRPC    │  modules (any     │
+   shop floor)    │  (WASM)       │         │  language)        │
                   └───────────────┘         └────────┬─────────┘
                                                       │ SCPI/Visa (post-MVP)
                                                       ▼
                                                ┌──────────────┐
-                                               │ Instrumentos │
+                                               │ Instruments  │
                                                │  (hardware)  │
                                                └──────────────┘
 ```
 
-- **Ingeniero de test** authora la secuencia como YAML (datos) y la
-  versiona en Git.
-- **Operador** corre la secuencia en planta, headless/CLI en el MVP.
-- **Anvil (secuenciador)** = el motor WASM. Recorre la secuencia y pide cada
-  paso por gRPC.
-- **Ejecutor de pasos** = servidor gRPC que despacha pasos por nombre. En el
-  MVP hospeda los pasos en el mismo `.wasm`; el objetivo es que los pasos
-  puedan ser **servicios gRPC en cualquier lenguaje**.
-- **Pasos / code modules** = la lógica de medición, en cualquier lenguaje.
-  Tocan los **instrumentos** (SCPI/VISA post-MVP).
-- **ResultSinks** reciben los resultados como dato abierto (hoy `println!`).
-- **wasi-grpc** (lib externa, Apache-2.0, `../wasi-grpc`) es la pila de
-  transporte: no es de Anvil pero es su base ([ADR-0006](adr/0006-wasi-grpc-propio.md)).
+- **Test engineer** authors the sequence as YAML (data) and versions it in
+  Git.
+- **Operator** runs the sequence on the bench, headless/CLI in the MVP.
+- **Anvil (sequencer)** = the WASM engine. Walks the sequence and asks for
+  each step over gRPC.
+- **Step executor** = a gRPC server that dispatches steps by name. In the
+  MVP it hosts the steps in the same `.wasm`; the goal is for steps to be
+  **gRPC services in any language**.
+- **Steps / code modules** = the measurement logic, in any language. They
+  touch the **instruments** (SCPI/VISA post-MVP).
+- **ResultSinks** receive results as open data (today `println!`).
+- **wasi-grpc** (external lib, Apache-2.0, `../wasi-grpc`) is the transport
+  stack: not Anvil's, but its foundation ([ADR-0006](adr/0006-wasi-grpc-propio.md)).
 
-## Nivel 2 — Containers
+## Level 2 — Containers
 
-Cosas que se despliegan o existen de forma independiente:
+Things that deploy or exist independently:
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
 │  Motor  (crates/motor → motor.wasm, wasmtime)                 │
-│  Cliente gRPC. Recorre DefinicionSecuencia, aplica semántica. │
-│  Contiene TODO el estado de la ejecución en memoria.          │
+│  gRPC client. Walks DefinicionSecuencia, applies semantics.   │
+│  Holds ALL the run's state in memory.                         │
 └─────────────────────────────────────────────────────────────┘
-        │ gRPC  /EjecutorPasos/Invoca   (wasi-grpc, un stream/call)
+        │ gRPC  /EjecutorPasos/Invoca   (wasi-grpc, one stream/call)
         ▼
 ┌─────────────────────────────────────────────────────────────┐
-│  Ejecutor de pasos  (crates/ejecutor_pasos → .wasm, wasmtime)  │
-│  Servidor gRPC en 127.0.0.1:9100. Despacha por nombre.         │
-│  MVP: hospeda pasos_demo en el mismo .wasm. Stateless entre    │
-│  llamadas.                                                    │
+│  Step executor  (crates/ejecutor_pasos → .wasm, wasmtime)     │
+│  gRPC server on 127.0.0.1:9100. Dispatches by name.           │
+│  MVP: hosts pasos_demo in the same .wasm. Stateless across    │
+│  calls.                                                       │
 └─────────────────────────────────────────────────────────────┘
-        │ llamada directa en proceso (MVP)  ──── futuro: gRPC a
-        ▼                                      servidores de paso
+        │ in-process direct call (MVP)  ──── future: gRPC to
+        ▼                                      step servers
 ┌─────────────────────────────────────────────────────────────┐
-│  Pasos  (crates/pasos_demo hoy; cualquier lenguaje mañana)   │
+│  Steps  (crates/pasos_demo today; any language tomorrow)     │
 │  Code modules: medir_voltaje, verificar_led, conectar…        │
 └─────────────────────────────────────────────────────────────┘
 
 ┌──────────────┐   ┌──────────────────────┐   ┌─────────────────┐
-│ Secuencia    │   │ ResultSink (post-MVP) │   │ wasi-grpc (lib)  │
-│ YAML (datos) │   │ consola/JSON/CSV/      │   │ Apache-2.0,      │
-│ (RF-20)      │   │ SQLite/STDF (RF-21+)  │   │ repo aparte      │
+│ Sequence     │   │ ResultSink (post-MVP) │   │ wasi-grpc (lib)  │
+│ YAML (data)  │   │ console/JSON/CSV/      │   │ Apache-2.0,      │
+│ (RF-20)      │   │ SQLite/STDF (RF-21+)   │   │ separate repo    │
 └──────────────┘   └──────────────────────┘   └─────────────────┘
 
 ┌─────────────────────────────────────────────────────────────┐
-│  modelo  (crates/modelo, lib)  — compartido, NO despliega solo │
-│  DefinicionSecuencia, ResultadoStep, mensajes proto.rs.       │
-│  Licencia: AGPL (parte del producto).                         │
+│  modelo  (crates/modelo, lib)  — shared, does NOT deploy alone │
+│  DefinicionSecuencia, ResultadoStep, proto.rs messages.       │
+│  License: AGPL (part of the product).                         │
 └─────────────────────────────────────────────────────────────┘
 ```
 
-**MVP actual vs. objetivo (honesto):**
+**Current MVP vs. goal (honest):**
 
-| Container | Hoy (prototipo) | Objetivo |
+| Container | Today (prototype) | Goal |
 |---|---|---|
-| Motor | `motor.wasm` construye la secuencia en código (`basica_datos.rs`) | Lee secuencia YAML (RF-20) |
-| Ejecutor + Pasos | Mismo `.wasm`; `pasos_demo` linkado en proceso | Pasos como servicios gRPC en cualquier lenguaje |
-| Reporte | `println!` textual congelado | ResultSink desacoplado (RF-21) |
-| UI | Sin UI (CLI) | Operator UI web post-MVP |
-| Proceso de test | Sequential implícito (una secuencia) | Process model Sequential + plug-ins |
+| Engine | `motor.wasm` builds the sequence in code (`basica_datos.rs`) | Reads sequence YAML (RF-20) |
+| Executor + Steps | Same `.wasm`; `pasos_demo` linked in-process | Steps as gRPC services in any language |
+| Report | Frozen textual `println!` | Decoupled ResultSink (RF-21) |
+| UI | No UI (CLI) | Operator web UI post-MVP |
+| Test process | Implicit Sequential (one sequence) | Sequential process model + plug-ins |
 
-La **frontera gRPC motor↔ejecutor ya existe y es real** (aislamiento
-motor-side). La frontera ejecutor↔paso es en-proceso hoy; el objetivo es
-que sea gRPC para pasos en cualquier lenguaje (ADR-0003).
+The **gRPC engine↔executor border already exists and is real**
+(engine-side isolation). The executor↔step border is in-process today; the
+goal is gRPC for steps in any language (ADR-0003).
 
-**M5-ext.1 (ADR-0013):** el ejecutor WASM embebido se mantiene como **de
-serie** (zero-install, ADR-0011); el motor despacha por **nombre→endpoint**
-(`ejecutores:` en el YAML + override `--executor`), con IPs no-loopback
-solo si se declaran. A su lado, **executores de lenguaje** (`executors/`,
-Apache-2.0) atienden pasos con gRPC nativo de su ecosistema.
+**M5-ext.1 (ADR-0013):** the embedded WASM executor stays as the **default**
+(zero-install, ADR-0011); the engine dispatches by **name→endpoint**
+(`executors:` in the YAML + the `--executor` override), with non-loopback
+IPs only if declared. Beside it, **language executors** (`executors/`,
+Apache-2.0) serve steps with their ecosystem's native gRPC.
 
-**M5-ext.2 (ADR-0014/0015):** el **cargador de módulos `.wasm` por path**
-(modelo `.vi` de TestStand) lo hace el **host**: para cada `tipo: wasm` del
-YAML spawnea el **puente** `anvil-puente-wasm` (embebido en el binario,
-extraído a temp), que carga el componente `.wasm` del usuario (interfaz WIT
-`anvil:paso`: una función `run`, sin gRPC ni protobuf) y traduce
-gRPC↔función por tonic. El puente corre con sandbox WASI vacío (el
-componente es una función pura). El motor sólo ve overrides `--executor`
-sintéticos — nunca un `Wasm`. El patrón **LID** para SO legacy queda
-aplazado a post-M5-ext. Ver
+**M5-ext.2 (ADR-0014/0015):** the **`.wasm` module loader by path** (the
+`.vi` model of TestStand) is the **host's** job: for every `tipo: wasm` in
+the YAML it spawns the **bridge** `anvil-puente-wasm` (embedded in the
+binary, extracted to temp), which loads the user's `.wasm` component (WIT
+interface `anvil:paso`: a `run` function, no gRPC, no protobuf) and
+translates gRPC↔function with tonic. The bridge runs with an empty WASI
+sandbox (the component is a pure function). The engine only sees synthetic
+`--executor` overrides — never a `Wasm`. The **LID** pattern for legacy OSes
+is postponed to post-M5-ext. See
 [diseno/executores-lenguaje.md](diseno/executores-lenguaje.md),
 [ADR-0013](adr/0013-cargador-wasm-host-side-y-routing.md),
-[ADR-0014](adr/0014-cargador-wasm-host-side-m5-ext2.md) y
+[ADR-0014](adr/0014-cargador-wasm-host-side-m5-ext2.md) and
 [ADR-0015](adr/0015-el-wasm-del-usuario-es-una-funcion-puenteado-a-grpc.md).
 
-## Nivel 3 — Componentes
+## Level 3 — Components
 
-### Dentro del Motor (`crates/motor/src/lib.rs`)
+### Inside the engine (`crates/motor/src/lib.rs`)
 
 ```
 Motor
- ├─ desde_programa(programa)     → tabla de conexiones por ejecutor (M5-ext.1)
- ├─ conecta(host, puerto)        → Cliente wasi-grpc (legacy, embebido)
- ├─ ejecuta_paso(def, programa)  → resuelve endpoint por def.ejecutor, codifica
- │                                 PeticionPaso, llama RUTA_INVOCA, decodifica
- ├─ ejecuta_con_reintentos(def)  → reintenta mientras !paso() && intento<max
- └─ ejecuta_secuencia(def)       → Setup / Main(corta en 1er fallo) / Cleanup(siempre)
-                                   + agrega en ResultadoSecuencia
+ ├─ desde_programa(programa)     → connection table per executor (M5-ext.1)
+ ├─ conecta(host, puerto)        → wasi-grpc client (legacy, embedded)
+ ├─ ejecuta_paso(def, programa)  → resolves the endpoint by def.ejecutor, encodes
+ │                                 PeticionPaso, calls RUTA_INVOCA, decodes
+ ├─ ejecuta_con_reintentos(def)  → retries while !paso() && intento<max
+ └─ ejecuta_secuencia(def)       → Setup / Main(stops at 1st fail) / Cleanup(always)
+                                   + aggregates into ResultadoSecuencia
 ```
 
-- **Estado:** toda la ejecución vive en `ResultadoSecuencia` **en memoria**;
-  no hay persistencia en el MVP. El ResultSink (post-MVP) la verterá.
-- **Errores:** `Error::Red` (comunicación) / `Error::Protobuf` (respuesta
-  ilegible). Un paso que *falla* **no** es error del motor (RF-11).
+- **State:** the whole run lives in `ResultadoSecuencia` **in memory**; no
+  persistence in the MVP. The ResultSink (post-MVP) will pour it out.
+- **Errors:** `Error::Red` (communication) / `Error::Protobuf` (unreadable
+  response). A step that *fails* is **not** an engine error (RF-11).
 
-### Dentro del Ejecutor (`crates/ejecutor_pasos/src/main.rs`)
+### Inside the executor (`crates/ejecutor_pasos/src/main.rs`)
 
 ```
-Ejecutor
- ├─ Servidor::escuchar(127.0.0.1:9100) → aceptar() una conexión
- ├─ loop: siguiente_peticion()         → valida path == RUTA_INVOCA
- │   ├─ decodifica PeticionPaso
- │   ├─ pasos_demo::despacha(nombre, intento)   ← único punto nombre→función
- │   └─ responde(stream, ResultadoPasoProto)
- └─ Stateless entre llamadas
+Executor
+ ├─ Servidor::escuchar(127.0.0.1:9100) → accept() one connection
+ ├─ loop: siguiente_peticion()         → validates path == RUTA_INVOCA
+ │   ├─ decodes PeticionPaso
+ │   ├─ pasos_demo::despacha(nombre, intento)   ← the only name→function spot
+ │   └─ responds(stream, ResultadoPasoProto)
+ └─ Stateless across calls
 ```
 
-- **Despacho por nombre:** `pasos_demo::despacha` es el **único** sitio donde
-  el nombre del cable se ata a una función. Nombre desconocido → `error`
-  (RF-12).
-- Cada llamada gasta un **stream HTTP/2 nuevo** (gestionado por wasi-grpc).
+- **Dispatch by name:** `pasos_demo::despacha` is the **only** place where
+  the wire's name gets tied to a function. Unknown name → `error` (RF-12).
+- Each call spends a **new HTTP/2 stream** (handled by wasi-grpc).
 
-## Por qué WASM
+## Why WASM
 
-Ver [ADR-0001](adr/0001-rust-wasm.md). En resumen: **aislamiento** (sandbox
-del secuenciador; el interior de cada paso es opaco al motor) +
-**portabilidad** (un `.wasm` corre en cualquier SO con wasmtime, sin
-instalador) + **determinismo** (base para reintentos reproducibles). El
-coste (sin `tonic`/`tokio` → pila propia, sin codegen → structs a mano) se
-paga en [ADR-0006](adr/0006-wasi-grpc-propio.md) y `crates/modelo/src/proto.rs`.
+See [ADR-0001](adr/0001-rust-wasm.md). In short: **isolation** (the
+sequencer's sandbox; each step's interior is opaque to the engine) +
+**portability** (a `.wasm` runs on any OS with wasmtime, no installer) +
+**determinism** (the basis for reproducible retries). The cost (no
+`tonic`/`tokio` → own stack, no codegen → hand-written structs) is paid in
+[ADR-0006](adr/0006-wasi-grpc-propio.md) and `crates/modelo/src/proto.rs`.
 
-**Rendimiento (ADR-0012):** wasmtime compila WASM **JIT a código nativo**
-(no lo interpreta): ~1.5–2× de C/Rust nativo y muy por delante de Python
-puro; frente a una DLL nativa paga ~10–30% por el sandbox, despreciable
-frente al tiempo de un instrumento real (RNF-04). No hay razón para "lo
-rápido en DLL, lo lento en WASM".
+**Performance (ADR-0012):** wasmtime compiles WASM **JIT to native code**
+(it does not interpret it): ~1.5–2× of native C/Rust and far ahead of plain
+Python; versus a native DLL it pays ~10–30% for the sandbox, negligible
+next to the time of a real instrument (RNF-04). There is no reason for
+"fast stuff in DLLs, slow stuff in WASM".
 
-## Dónde vive el estado
+## Where state lives
 
-- **La ejecución** (resultado en curso): en memoria, en el Motor, como
-  `ResultadoSecuencia`. No persiste en el MVP.
-- **La definición** (qué correr): datos (`DefinicionSecuencia`), hoy
-  construidos en código, mañana YAML. Es **inerte**: no muta al ejecutarse.
-- **El ejecutor**: stateless entre llamadas. No guarda nada de la secuencia.
-- **Variables de secuencia** (Locals/Parameters/FileGlobals, post-MVP):
-  vivirán en el Motor, ligadas al alcance de la ejecución
+- **The run** (the result in progress): in memory, in the engine, as
+  `ResultadoSecuencia`. It does not persist in the MVP.
+- **The definition** (what to run): data (`DefinicionSecuencia`), today
+  built in code, tomorrow YAML. It is **inert**: it does not mutate while
+  running.
+- **The executor**: stateless across calls. It stores nothing about the
+  sequence.
+- **Sequence variables** (Locals/Parameters/FileGlobals, post-MVP): they
+  will live in the engine, bound to the run's scope
   ([diseno/variables-y-alcances.md](diseno/variables-y-alcances.md)).
 
-## Modelo de concurrencia
+## Concurrency model
 
-- **MVP: secuencial.** Una conexión, un stream por llamada, una secuencia a
-  la vez. No hay hilos en el motor; el determinismo de reintentos depende de
-  eso (RNF-03).
-- **Post-MVP: paralelismo con cancelación jerárquica** (Parallel/Batch), con
-  un *CancellationToken* (estilo OpenTAP TapThreads) para abortar en cascada.
-  Ver [diseno/proceso-de-test.md](diseno/proceso-de-test.md).
+- **MVP: sequential.** One connection, one stream per call, one sequence at
+  a time. No threads in the engine; retry determinism depends on that
+  (RNF-03).
+- **Post-MVP: parallelism with hierarchical cancellation** (Parallel/Batch),
+  with a *CancellationToken* (OpenTAP TapThreads style) to abort in cascade.
+  See [diseno/proceso-de-test.md](diseno/proceso-de-test.md).
 
-## Frontera de licencia (Apache / AGPL)
+## License border (Apache / AGPL)
 
 ```
 AGPL-3.0-or-later                     Apache-2.0
 ─────────────────────                ─────────────────────
-anvil (el producto):                  wasi-grpc   (lib, linkable)
+anvil (the product):                  wasi-grpc   (lib, linkable)
   motor, ejecutor_pasos,              wasi-visa   (lib, linkable, post-MVP)
-  modelo, pasos_demo                  interfaces WIT
-   (se USAN, no se linkan)
+  modelo, pasos_demo                  WIT interfaces
+   (they are USED, not linked)
 ```
 
-- Quien **usa** Anvil (lo corre) no recibe contagio AGPL.
-- Quien **linka** las libs (escribe un paso que enlaza `wasi-grpc`/`wasi-visa`)
-  está bajo Apache: su código le pertenece.
-- Las **secuencias** son datos: no obra derivada, no contagian
+- Whoever **uses** Anvil (runs it) catches no AGPL.
+- Whoever **links** the libs (writes a step that links
+  `wasi-grpc`/`wasi-visa`) is under Apache: their code belongs to them.
+- **Sequences** are data: not a derivative work, they infect nothing
   ([ADR-0004](adr/0004-licencia-dual-agpl-apache.md), [licencia.md](licencia.md)).
 
-## Determinismo y rendimiento
+## Determinism and performance
 
-- **Determinismo:** para la misma secuencia y los mismos pasos, el número de
-  intentos y el orden son reproducibles porque no hay concurrencia implícita
-  en el MVP (RNF-03). Verificar en CI con los pasos simulados de `pasos_demo`
-  (p. ej. `conectar` falla el intento 1 y pasa el 2).
-- **Rendimiento:** el overhead de una llamada gRPC local es despreciable
-  frente al tiempo de un instrumento real (RNF-04). No es cuello de botella.
+- **Determinism:** for the same sequence and the same steps, the number of
+  attempts and their order are reproducible because there is no implicit
+  concurrency in the MVP (RNF-03). Verified in CI with `pasos_demo`'s
+  simulated steps (e.g. `conectar` fails attempt 1 and passes 2).
+- **Performance:** the overhead of a local gRPC call is negligible next to
+  the time of a real instrument (RNF-04). It is not the bottleneck.
