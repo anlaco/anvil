@@ -95,7 +95,7 @@ for the distribution binary):
 cargo build --target wasm32-wasip2 -p motor -p ejecutor_pasos
 
 # 2. gRPC↔component bridge (M5-ext.2, ADR-0015) — its own workspace
-cargo build --manifest-path packaging/anvil-puente-wasm/Cargo.toml
+cargo build --manifest-path executors/wasm/Cargo.toml
 
 # 3. Native host (its own workspace; wasmtime compiles here, not in the core)
 cargo build --manifest-path packaging/anvil-host/Cargo.toml
@@ -185,7 +185,7 @@ anvil <sequence.yaml> [--process-model <pm.yaml>] [--json <path>] [--csv <path>]
 - `--process-model` wraps the sequence in a Sequential PM (RF-38).
 - `--validate` loads and validates without executing or connecting (CI with
   no hardware). It opens no ports: it does not even bring up the bridge of a
-  `tipo: wasm` executor, though it does check the declared `.wasm` exists.
+  `type: wasm` executor, though it does check the declared `.wasm` exists.
   Beyond the schema, the cycles and the subsequence signatures, it validates
   the **expressions**: reading an undeclared name, writing `file_globals`, or
   writing `parameters` from the root, are load errors. The **types** are not:
@@ -286,43 +286,61 @@ Official reference: `ejemplos/hola-paso/`.
    ```sh
    cargo install cargo-component --locked
    ```
-2. The step project (`hola/Cargo.toml` with `[lib] crate-type = ["cdylib"]`,
-   `hola/wit/anvil-paso.wit`, `hola/src/lib.rs`). The WIT is the contract:
+2. The step project (`hola/Cargo.toml` with `[lib] crate-type = ["cdylib"]`
+   and `[package.metadata.component] package = "anvil:step"`,
+   `hola/wit/anvil-step.wit`, `hola/src/lib.rs`). The WIT is the contract:
    ```wit
-   package anvil:paso@0.1.0;
-   interface paso {
-     record resultado {
-       // Uno de "paso" | "fallo" | "error" | "saltado", en minúscula.
-       estado: string,
-       mensaje: string,
-       valor-medido: option<f64>,
+   package anvil:step@0.3.0;
+
+   interface step {
+     variant value {
+       number(f64),
+       text(string),
+       boolean(bool),
      }
-     run: func(nombre: string, intento: s32) -> resultado;
+
+     record named {
+       name: string,
+       value: value,
+     }
+
+     record step-result {
+       // One of "pass" | "fail" | "error", lowercase. "skipped" is set by
+       // the engine; a step never returns it.
+       status: string,
+       message: string,
+       measured-value: option<f64>,
+       outputs: list<named>,
+     }
+
+     run: func(name: string, attempt: s32, inputs: list<named>) -> step-result;
    }
-   world anvil-paso { export paso; }
+
+   world anvil-step { export step; }
    ```
 
-   **`estado` is text, but the vocabulary is closed**: exactly one of
-   `"paso"`, `"fallo"`, `"error"` or `"saltado"`. Any other string
-   —`"Paso"` with a capital letter is the real case that motivated issue
-   #28— turns the step into `error`, with a message naming the value you
-   returned. Anvil does not judge a unit with a status it does not
-   understand (ADR-0019, Rule 2). The distinction that matters most is the
-   middle one: **`fallo` is the unit's** ("I measured and it does not
-   comply"), **`error` is the bench's or the step's** ("I could not
-   measure").
+   **`status` is text, but the vocabulary is closed**: exactly one of
+   `"pass"`, `"fail"` or `"error"` — `"skipped"` is set by the engine, never
+   returned by a step. Any other string —`"Pass"` with a capital letter is
+   the real case that motivated issue #28— turns the step into `error`,
+   with a message naming the value you returned. Anvil does not judge a unit
+   with a status it does not understand (ADR-0019, Rule 2). The distinction
+   that matters most is between `fail` and `error`: **`fail` is the unit's**
+   ("I measured and it does not comply"), **`error` is the bench's or the
+   step's** ("I could not measure").
 3. The implementation is a function (~15 lines, with `wit-bindgen`):
    ```rust
    #[allow(warnings)]
    mod bindings;
-   use bindings::exports::anvil::paso::paso::{Guest, Resultado};
+   use bindings::exports::anvil::step::step::{Guest, StepResult};
    struct Component;
    impl Guest for Component {
-       fn run(nombre: String, intento: i32) -> Resultado {
-           Resultado {
-               estado: "paso".to_string(),
-               mensaje: format!("hola {nombre} (intento {intento})"),
-               valor_medido: Some(4.2),
+       fn run(name: String, attempt: i32, inputs: Vec<bindings::exports::anvil::step::step::Named>) -> StepResult {
+           StepResult {
+               status: "pass".to_string(),
+               message: format!("hello {name} (attempt {attempt})"),
+               measured_value: Some(4.2),
+               outputs: Vec::new(),
            }
        }
    }
@@ -330,8 +348,8 @@ Official reference: `ejemplos/hola-paso/`.
    ```
 4. Compile to a component:
    `cargo component build` → `target/wasm32-wasip1/debug/hola.wasm`.
-5. Declare it in the YAML (`ejecutores: [{ nombre: hola, tipo: wasm, path:
-   ./hola.wasm }]`, a step with `ejecutor: hola`) and run
+5. Declare it in the YAML (`executors: [{ name: hola, type: wasm, path:
+   ./hola.wasm }]`, a step with `executor: hola`) and run
    `./anvil sequence.yaml`. The host spawns the bridge, which loads your
    component (empty WASI sandbox: no files, no network) and translates
    gRPC↔function.
