@@ -1,3 +1,6 @@
+//! SPDX-License-Identifier: Apache-2.0
+//! Copyright 2026 ANLACO
+//!
 //! Puente gRPC↔función (ADR-0015): sirve un componente `.wasm` de paso de
 //! Anvil (interfaz `anvil:paso`, una función `run`) como un ejecutor gRPC
 //! en loopback. El motor habla con él por el mismo `paso.proto` de siempre;

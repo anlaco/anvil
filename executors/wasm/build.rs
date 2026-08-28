@@ -1,3 +1,6 @@
+//! SPDX-License-Identifier: Apache-2.0
+//! Copyright 2026 ANLACO
+//!
 //! Build script: genera el servicio tonic (server gRPC) desde `paso.proto`
 //! (el contrato del motor). El puente es nativo, así que tonic puede usarse
 //! sin restricciones (a diferencia de los guests WASM, que usan wasi-grpc).
