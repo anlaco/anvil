@@ -13,44 +13,44 @@ jobs:
   ci:
     runs-on: ubuntu-latest
     steps:
-      # `wasi-grpc` es un repo hermano y anvil lo referencia por
-      # `path = "../wasi-grpc"` (dogfooding: los dos se desarrollan a la vez).
-      # Ya es público: la deploy key de abajo es de cuando no lo era, y sobra.
-      # Sin él, cargo ni siquiera lee el workspace, así que el layout del
-      # runner tiene que reproducir el del disco:
+      # `wasi-grpc` is a sibling repo and anvil references it with
+      # `path = "../wasi-grpc"` (dogfooding: the two are developed together).
+      # It is public already: the deploy key below dates from when it was not,
+      # and is redundant now. Without it, cargo does not even read the
+      # workspace, so the runner layout has to reproduce the disk layout:
       #
       #   $GITHUB_WORKSPACE/
-      #     anvil/       ← este repo
-      #     wasi-grpc/   ← el hermano
+      #     anvil/       ← this repo
+      #     wasi-grpc/   ← the sibling
       #
-      # De ahí el `path:` de los dos checkouts y el `working-directory` del
-      # job. El acceso al hermano va con una deploy key de SÓLO LECTURA
-      # (secret `WASI_GRPC_DEPLOY_KEY`): el `GITHUB_TOKEN` por defecto sólo
-      # cubre el propio repositorio.
+      # Hence the `path:` of the two checkouts and the job's
+      # `working-directory`. Access to the sibling goes through a READ-ONLY
+      # deploy key (secret `WASI_GRPC_DEPLOY_KEY`): the default `GITHUB_TOKEN`
+      # only covers this repository.
       - name: Checkout anvil
         uses: actions/checkout@v4
         with:
           path: anvil
 
-      - name: Checkout wasi-grpc (repo hermano)
+      - name: Checkout wasi-grpc (sibling repo)
         uses: actions/checkout@v4
         with:
           repository: anlaco/wasi-grpc
           ssh-key: ${{ secrets.WASI_GRPC_DEPLOY_KEY }}
           path: wasi-grpc
 
-      # `rust-toolchain.toml` fija el canal y el target wasm32-wasip2, así que
-      # basta con que la acción lo respete.
+      # `rust-toolchain.toml` pins the channel and the wasm32-wasip2 target,
+      # so it is enough for the action to honor it.
       - name: Toolchain
         uses: dtolnay/rust-toolchain@stable
         with:
           targets: wasm32-wasip2
           components: rustfmt, clippy
 
-      # Los tres workspaces tienen `target/` separados (ADR-0011: el core no
-      # arrastra wasmtime). wasmtime tarda ~2 min en frío, así que la caché
-      # es lo que hace que este job dure minutos y no decenas de minutos.
-      - name: Caché de cargo
+      # The three workspaces have separate `target/` directories (ADR-0011:
+      # the core drags no wasmtime). wasmtime takes ~2 min cold, so the cache
+      # is what keeps this job at minutes instead of tens of minutes.
+      - name: Cargo cache
         uses: Swatinem/rust-cache@v2
         with:
           workspaces: |
@@ -58,36 +58,37 @@ jobs:
             anvil/packaging/anvil-host
             anvil/packaging/anvil-puente-wasm
 
-      # `check` depende de `build`: clippy sobre el host ejecuta su `build.rs`,
-      # que exige los guests y el puente ya compilados. Por eso este paso
-      # construye en debug antes de revisar.
-      - name: Formato y lints
+      # `check` depends on `build`: clippy over the host runs its `build.rs`,
+      # which demands the guests and the bridge already compiled. That is why
+      # this step builds in debug before linting.
+      - name: Format and lints
         working-directory: anvil
         run: make check
 
-      - name: Tests del core
+      - name: Core tests
         working-directory: anvil
         run: cargo test
 
-      # Compila en release y corre los tests del host: en debug wasmtime
-      # compila los guests sin optimizar y el binario tarda ~26 s en arrancar
-      # (~1,2 s en release), lo que haría inviables las pruebas que lo ejecutan.
+      # Builds in release and runs the host tests: in debug wasmtime compiles
+      # the guests unoptimized and the binary takes ~26 s to start
+      # (~1.2 s in release), which would make any test that runs it unviable.
       - name: Build release
         working-directory: anvil
         run: make release
 
-      # `--release` no es cosmético: `tests/exit_codes.rs` lanza el binario
-      # cuatro veces, y sin él cargo compilaría un `anvil` de debug aparte del
-      # que acaba de dejar `make release` (~23 s por invocación en vez de ~1 s).
-      - name: Tests del host
+      # `--release` is not cosmetic: `tests/exit_codes.rs` launches the binary
+      # four times, and without it cargo would compile a separate debug `anvil`
+      # beside the one `make release` just built (~23 s per invocation instead
+      # of ~1 s).
+      - name: Host tests
         working-directory: anvil
         run: cargo test --release --manifest-path packaging/anvil-host/Cargo.toml
 
-      # Los casos del informe de beta afirman el comportamiento CORRECTO. Nació
-      # informativo (`|| true`) porque los defectos estaban abiertos y fallaba a
-      # propósito; desde que se cerró DIAG-5 sale entero en verde, así que corta
-      # el build: volver a romper uno de estos diez casos es una regresión de
-      # algo que ya costó una campaña de betatesting encontrar.
-      - name: Regresión de la beta
+      # The beta-report cases assert the CORRECT behavior. It was born
+      # informational (`|| true`) because the defects were open and it failed
+      # on purpose; since DIAG-5 got closed it comes out fully green, so it
+      # cuts the build: breaking one of these ten cases again is a regression
+      # of something that cost a whole betatesting campaign to find.
+      - name: Beta regression
         working-directory: anvil
         run: ./docs/qa/regresion/run.sh
