@@ -12,6 +12,18 @@ minors, con el cambio anotado aquí.
 
 ### Añadido
 
+- **`anvil-exec-python`**, the Python executor's launcher
+  ([`executors/python/`](executors/python/)). Same product, the family's name,
+  and it puts the executor's own directory on `sys.path` so nobody has to
+  export `PYTHONPATH` to start it:
+
+  ```sh
+  ./anvil-exec-python --steps mis_pasos
+  ```
+
+  `server.py` is untouched and still runs exactly as before, with the same
+  flags — the launcher hands it the command line.
+
 - **Writing a step in Rust is annotating a function** (issue #39,
   [ADR-0024](docs/adr/0024-the-signature-is-the-catalog-in-rust-too.md)). The
   Rust step SDK, [`executors/rust/`](executors/rust/), the sibling of the

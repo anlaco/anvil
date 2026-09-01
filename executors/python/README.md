@@ -30,8 +30,14 @@ def medir_resistencia(ctx: Context, canal: float, escala: str = "auto") -> Resul
 Y se corre así:
 
 ```sh
-python3 server.py --steps mis_pasos
+./anvil-exec-python --steps mis_pasos
 ```
+
+`anvil-exec-python` es el nombre de la familia (`anvil-exec-wasm`,
+`anvil-exec-labview`, …) y sólo añade una cosa: pone este directorio en
+`sys.path`, para que el ejecutor encuentre lo suyo sin que tú exportes
+`PYTHONPATH`. Por debajo es `server.py`, que sigue corriéndose igual
+(`python3 server.py --steps mis_pasos`) y acepta los mismos flags.
 
 **La firma es el catálogo.** El nombre de cada parámetro, su tipo y si es
 obligatorio salen de la propia función: no se escriben dos veces, así que no
@@ -213,10 +219,10 @@ python3 -m grpc_tools.protoc \
 python3 simulador_tcp.py
 
 # terminal 2 — ejecutor de pasos en Python, con los pasos de ejemplo
-python3 server.py                 # ./steps, en 127.0.0.1:9101
+./anvil-exec-python               # ./steps, en 127.0.0.1:9101
 
 # (variante LID: apuntar el simulador a la caja legacy)
-python3 server.py --option simulator=192.168.1.50:4000
+./anvil-exec-python --option simulator=192.168.1.50:4000
 ```
 
 Los pasos que vienen de serie viven en [`steps/instrument.py`](steps/instrument.py)
