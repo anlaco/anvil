@@ -1,0 +1,30 @@
+#!/usr/bin/env python3
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 ANLACO
+"""`anvil-exec-python` — the Python step executor, launched like its siblings.
+
+The same product as `server.py`, under the name the executor family uses:
+`anvil-exec-wasm`, `anvil-exec-python`, and whatever comes next. What it adds
+is the one piece of setup a user should not have to know about — this
+directory on `sys.path`, so the executor finds its own `paso_pb2` and
+`anvil_step` — and then hands the command line straight to `server.main()`.
+
+    ./anvil-exec-python --steps ~/my-steps
+    ./anvil-exec-python --list
+
+Every flag is `server.py`'s: this file adds none of its own and takes none
+away. `server.py` stays runnable as it always was; it is the same code.
+"""
+
+import os
+import sys
+
+# The executor's own modules live next to this launcher, wherever the user
+# unpacked it. Prepended, not appended: a `paso_pb2` of theirs on PYTHONPATH
+# must not silently replace ours.
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
+from server import main  # noqa: E402  (the path above has to be set first)
+
+if __name__ == "__main__":
+    main()
