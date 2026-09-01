@@ -115,6 +115,23 @@ minors, con el cambio anotado aquí.
 
 ### Rupturista
 
+- **The WASM bridge is now `anvil-exec-wasm`** (was `anvil-puente-wasm`).
+  `anvil` looks for it next to itself by that name, so an installation that
+  still carries the old file gets the error naming the path and the new name.
+  Rename the file, or take the pair from the release again. Nothing else
+  changes: same CLI (`--wasm <path> [--port <n>] [--bind <ip>]`), same
+  contract, same components — a `.wasm` built for the old bridge runs
+  untouched.
+
+  The name is now a **family**: every executor a user launches is
+  `anvil-exec-<language>`, with the hole reserved for the ones to come
+  (`anvil-exec-labview`, `anvil-exec-native`). The scheme, and the three
+  things it deliberately is not, are written down in
+  [diseno/executores-lenguaje.md](docs/diseno/executores-lenguaje.md#naming-anvil-exec-language).
+  `puente` was the last Spanish word left in a public file name;
+  [ADR-0023](docs/adr/0023-the-bridge-ships-as-a-file-next-to-anvil.md)
+  §Alcance had left the rename open on purpose.
+
 - **`anvil:step@0.3.0` → `@0.4.0`: every step component must be rebuilt.** The
   WIT travels stuck to the artifact and there is no compatibility shim by
   decision ([ADR-0020 §4d](docs/adr/0020-parametros-del-paso-en-la-peticion.md)),

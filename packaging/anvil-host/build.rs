@@ -89,7 +89,7 @@ fn main() {
     // --- `main.rs` looks it up there at spawn time and fails with a named
     // --- path if it is missing.
     let (name, dir, command) = (
-        "anvil-puente-wasm",
+        "anvil-exec-wasm",
         "executors/wasm/",
         "cargo build --manifest-path executors/wasm/Cargo.toml",
     );

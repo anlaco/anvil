@@ -3,7 +3,7 @@
 //! exercised — the bridge can now be copied anywhere and started with
 //!
 //! ```sh
-//! anvil-puente-wasm --wasm <path.wasm> [--port <n>] [--bind <ip>]
+//! anvil-exec-wasm --wasm <path.wasm> [--port <n>] [--bind <ip>]
 //! ```
 //!
 //! and the tests here launch it exactly that way. They use
@@ -41,7 +41,7 @@ fn puerto_libre() -> u16 {
 /// listening on an empty component. This is the CLI's front door.
 #[test]
 fn sin_wasm_no_arranca() {
-    let out = Command::new(env!("CARGO_BIN_EXE_anvil-puente-wasm"))
+    let out = Command::new(env!("CARGO_BIN_EXE_anvil-exec-wasm"))
         .output()
         .expect("launch the bridge");
     let code = out.status.code().expect("exit code");
@@ -63,7 +63,7 @@ fn fichero_que_no_es_wasm_se_diagnostica() {
     let basura = dir.join("no-es-wasm.bin");
     std::fs::write(&basura, b"esto no empieza por la cabecera \\0asm").expect("write junk");
 
-    let out = Command::new(env!("CARGO_BIN_EXE_anvil-puente-wasm"))
+    let out = Command::new(env!("CARGO_BIN_EXE_anvil-exec-wasm"))
         .args(["--wasm"])
         .arg(&basura)
         .output()
@@ -94,7 +94,7 @@ fn escucha_y_sale_por_eof() {
     };
     let puerto = puerto_libre();
 
-    let mut hijo = Command::new(env!("CARGO_BIN_EXE_anvil-puente-wasm"))
+    let mut hijo = Command::new(env!("CARGO_BIN_EXE_anvil-exec-wasm"))
         .args(["--wasm"])
         .arg(&componente)
         .args(["--port", &puerto.to_string()])

@@ -1,5 +1,5 @@
 //! The bridge lookup (ADR-0023): `anvil` no longer embeds the bridge — it
-//! looks for `anvil-puente-wasm` **next to its own executable** and spawns it
+//! looks for `anvil-exec-wasm` **next to its own executable** and spawns it
 //! from there. These tests exercise exactly that lookup, in both directions:
 //!
 //! - with the file present, a sequence with a `type: wasm` executor runs
@@ -111,13 +111,13 @@ fn sin_el_puente_falla_nominando_la_ruta_buscada() {
         "a missing bridge must stop the run before touching anything. stderr:\n{stderr}"
     );
     assert!(
-        stderr.contains("anvil-puente-wasm"),
+        stderr.contains("anvil-exec-wasm"),
         "the error must name the bridge. stderr:\n{stderr}"
     );
     assert!(
-        stderr.contains(dir.join("anvil-puente-wasm").display().to_string().as_str()),
+        stderr.contains(dir.join("anvil-exec-wasm").display().to_string().as_str()),
         "the error must name the path it looked at ({}). stderr:\n{stderr}",
-        dir.join("anvil-puente-wasm").display()
+        dir.join("anvil-exec-wasm").display()
     );
     // On an assert failure this stays behind in /tmp; the OS cleans that up.
     let _ = std::fs::remove_file(&anvil_solo);

@@ -5,7 +5,7 @@
 //! The component knows nothing about gRPC or protobuf: it is handed the step's
 //! name, the attempt number and its already-evaluated parameters, and gives
 //! back a result. What speaks gRPC with the engine is the bridge
-//! (`anvil-puente-wasm`), which loads this component and calls it.
+//! (`anvil-exec-wasm`), which loads this component and calls it.
 //!
 //! It knows nothing about **contract versions** either (ADR-0015): the echo the
 //! engine checks is answered by the bridge on its behalf. What does reach it is

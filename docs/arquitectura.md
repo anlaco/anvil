@@ -104,7 +104,7 @@ Apache-2.0) serve steps with their ecosystem's native gRPC.
 
 **M5-ext.2 (ADR-0014/0015):** the **`.wasm` module loader by path** (the
 `.vi` model of TestStand) is the **host's** job: for every `tipo: wasm` in
-the YAML it spawns the **bridge** `anvil-puente-wasm` (a file next to the
+the YAML it spawns the **bridge** `anvil-exec-wasm` (a file next to the
 `anvil` binary since ADR-0023 — no longer embedded), which loads the user's
 `.wasm` component (WIT interface `anvil:step`: a `run` function, no gRPC, no
 protobuf) and translates gRPC↔function with tonic. The bridge runs with an

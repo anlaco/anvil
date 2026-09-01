@@ -25,7 +25,7 @@
 //!     verdict (#52).
 //!  3. Waits for it to listen (a probe `connect`; the executor discards it).
 //!  4. **M5-ext.2 (ADR-0015):** instantiates every `tipo: wasm` executor in
-//!     the YAML by spawning the **bridge** `anvil-puente-wasm` with
+//!     the YAML by spawning the **bridge** `anvil-exec-wasm` with
 //!     `--wasm <path> --port <ephemeral>`. The bridge loads the user's
 //!     `.wasm` component (the `anvil:paso` interface, a `run` function) and
 //!     serves it as gRPC on loopback. Waits for each one (readiness).
@@ -161,7 +161,7 @@ fn reservar_puerto() -> Result<u16, String> {
 ///
 /// Issue #22: this existed from the start, but it only guarded the embedded
 /// executor. The `.wasm` loop never consulted it, so `anvil s.yaml
-/// --validate` with a declared `tipo: wasm` spawned `anvil-puente-wasm`,
+/// --validate` with a declared `tipo: wasm` spawned `anvil-exec-wasm`,
 /// which bound an ephemeral port and printed two lines — exactly what the
 /// manual promises `--validate` does not do, and in the scenario (CI, no
 /// hardware) where it matters most.
@@ -251,7 +251,7 @@ fn correr_guest(engine: &Engine, wasi: WasiCtx, bytes: &[u8]) -> wasmtime::Resul
 }
 
 /// A `.wasm` executor loaded by path (M5-ext.2, ADR-0015): the host spawns
-/// the **bridge** (`anvil-puente-wasm`, a file next to this binary —
+/// the **bridge** (`anvil-exec-wasm`, a file next to this binary —
 /// ADR-0023), which loads the user's `.wasm` component (the `anvil:paso`
 /// interface, a `run` function) and serves it as a gRPC executor on
 /// loopback. The user's `.wasm` is NOT a gRPC server: it is a pure function;
@@ -283,11 +283,11 @@ fn ruta_puente() -> Result<PathBuf, String> {
     let dir = exe
         .parent()
         .ok_or_else(|| "el binario anvil no tiene directorio".to_string())?;
-    let ruta = dir.join("anvil-puente-wasm");
+    let ruta = dir.join("anvil-exec-wasm");
     if !ruta.exists() {
         return Err(format!(
             "no se encontró el ejecutor WASM en '{}'. anvil lo busca junto a sí mismo \
-             (ADR-0023): copia ahí 'anvil-puente-wasm' — make release lo deja al lado \
+             (ADR-0023): copia ahí 'anvil-exec-wasm' — make release lo deja al lado \
              del binario; también puedes copiarlo de executors/wasm/target/.",
             ruta.display()
         ));
@@ -299,7 +299,7 @@ fn ruta_puente() -> Result<PathBuf, String> {
 ///
 /// 1. Reserves an **ephemeral** loopback port (`bind 127.0.0.1:0`).
 /// 2. Looks up the bridge binary next to this one (ADR-0023).
-/// 3. Spawns `anvil-puente-wasm --wasm <path> --port <port>` with stdin
+/// 3. Spawns `anvil-exec-wasm --wasm <path> --port <port>` with stdin
 ///    piped: the bridge exits on its own if the host dies (EOF).
 ///
 /// The bridge is the one loading the component into its own Store (empty

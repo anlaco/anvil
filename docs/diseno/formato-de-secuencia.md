@@ -109,7 +109,7 @@ Reglas:
     de `--port`); 9100 es el default del guest ejecutor suelto.
   - `tipo: wasm` — componente `.wasm` propio cargado por el **host** por
     path (M5-ext.2, ADR-0014/0015; implementado). Campo `path` (relativo
-    al YAML, debe existir). El host spawnea el puente `anvil-puente-wasm`,
+    al YAML, debe existir). El host spawnea el puente `anvil-exec-wasm`,
     que carga el componente (interfaz WIT `anvil:paso`, función `run`) y lo
     expone al motor como `grpc` (override sintético).
   - `tipo: grpc` — ejecutor de lenguaje distribuido (p. ej. Python). Campos

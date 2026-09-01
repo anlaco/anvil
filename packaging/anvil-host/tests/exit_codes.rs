@@ -278,7 +278,7 @@ fn validate_no_levanta_el_puente_wasm() {
     let s = valida("packaging/anvil-host/tests/fixtures/validate_wasm_basura.yaml");
     let err = String::from_utf8_lossy(&s.stderr);
     assert!(
-        !err.contains("anvil-puente-wasm"),
+        !err.contains("anvil-exec-wasm"),
         "el puente no debe arrancar bajo --validate. stderr:\n{err}"
     );
     assert!(!err.contains("escuchando en"), "stderr:\n{err}");

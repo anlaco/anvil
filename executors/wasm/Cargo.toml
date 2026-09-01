@@ -1,5 +1,5 @@
 [package]
-name = "anvil-puente-wasm"
+name = "anvil-exec-wasm"
 version = "0.3.0"
 edition = "2021"
 license = "Apache-2.0"
@@ -36,7 +36,7 @@ prost-build = "0.13"
 protoc-bin-vendored = "3"
 
 [[bin]]
-name = "anvil-puente-wasm"
+name = "anvil-exec-wasm"
 path = "src/main.rs"
 
 # Standalone workspace: NOT part of the Anvil core workspace, so that the
