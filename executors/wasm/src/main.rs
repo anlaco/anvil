@@ -107,8 +107,8 @@ fn diagnostica_no_componente(bytes: &[u8]) -> Option<String> {
     if bytes[4..8] == [0x01, 0x00, 0x00, 0x00] {
         return Some(
             "es un módulo core de WebAssembly, no un componente: compílalo con \
-             'cargo component build' y comprueba que el crate llama a \
-             'bindings::export!' (ver docs/guia-inicio-rapido.md)"
+             'cargo build --target wasm32-wasip2' y comprueba que el crate llama a \
+             'anvil_step::export!()' (ver docs/guia-inicio-rapido.md)"
                 .to_string(),
         );
     }
@@ -172,10 +172,25 @@ impl ComponenteCargado {
             // contrato (ADR-0015); el puente es el único que traduce, y por
             // tanto el único que sabe qué número de contrato corresponde a
             // qué versión del WIT. Si llegó hasta aquí es que el `.wasm`
-            // casaba con `anvil:step@0.3.0` —wasmtime falla al instanciar si
+            // casaba con `anvil:step@0.4.0` —wasmtime falla al instanciar si
             // no— así que habla el contrato de este binario.
             contract: CONTRACT,
         })
+    }
+
+    /// Pide su catálogo al componente y lo traduce al protobuf del contrato.
+    ///
+    /// Se llama una vez, al arrancar (ADR-0021 §3), y su coste es el de una
+    /// llamada WASM: el componente devuelve una lista construida en tiempo de
+    /// compilación por el SDK.
+    #[allow(clippy::result_large_err)]
+    fn describir(&mut self) -> Result<Vec<pb::StepSpec>, Status> {
+        let specs = self
+            .paso
+            .anvil_step_step()
+            .call_describe(&mut self.store)
+            .map_err(|e| Status::internal(format!("el componente no pudo describirse: {e}")))?;
+        Ok(specs.iter().map(spec_a_proto).collect())
     }
 }
 
@@ -235,24 +250,46 @@ impl StepExecutor for ServicioEjecutor {
         Ok(Response::new(respuesta))
     }
 
-    /// The bridge **cannot** describe the component it serves, and says so
-    /// (ADR-0021 §4).
+    /// The component's catalog, asked through the WIT's second door
+    /// (`anvil:step@0.4.0`) and translated (ADR-0021 §1, ADR-0024).
     ///
-    /// `anvil:step@0.3.0` exports a single `run(name, attempt, inputs)`: the
-    /// component dispatches by name inside itself, so from out here there is no
-    /// list of names to publish and no signature to read. The WIT embedded in
-    /// the `.wasm` does not help either — it would say *"there is a `run` that
-    /// takes a name and a list"*, which is true and useless. It is the bill for
-    /// dispatching by name (ADR-0003), the decision that makes Anvil
-    /// language-agnostic.
+    /// Until 0.4.0 this answered `describes = false` and there was nothing else
+    /// it could do: the interface exported a single `run(name, attempt,
+    /// inputs)`, the component dispatched by name inside itself, and from out
+    /// here there was no list of names to publish and no signature to read. The
+    /// WIT embedded in the `.wasm` did not help either — it said *"there is a
+    /// `run` that takes a name and a list"*, which is true and useless. That
+    /// was the bill for dispatching by name (ADR-0003); `describe` is the bill
+    /// being paid.
     ///
-    /// So it answers `describes = false`: those steps come out as unchecked in
-    /// `--validate`, which is the honest answer. Making them describable means
-    /// adding an introspection function to the WIT — a new version of the
-    /// interface and a recompile of every component (ADR-0020 §4d), and that is
-    /// the decision issue #39 is waiting on, not this one.
+    /// **An empty list is read as `describes = false`.** In gRPC the boolean
+    /// tells apart "I serve nothing" from "do not check me" because an
+    /// executor can legitimately serve zero steps; a component that serves
+    /// zero steps has nothing to do, so the safe reading is the only useful
+    /// one (ADR-0021 §4).
+    ///
+    /// A component that traps while describing itself is **not** a run-stopping
+    /// error here: it comes back as `describes = false`, its steps come out as
+    /// unchecked, and the sequence goes on — the same treatment as an executor
+    /// that does not answer at all (`crates/motor/src/catalogo.rs`).
+    #[allow(clippy::result_large_err)]
     async fn describe(&self, _r: Request<CatalogRequest>) -> Result<Response<Catalog>, Status> {
-        Ok(Response::new(Catalog::default()))
+        // `block_in_place` por lo mismo que en `invoke`, arriba.
+        let steps = tokio::task::block_in_place(|| {
+            self.componente
+                .lock()
+                .map_err(|_| Status::internal("componente en uso"))?
+                .describir()
+        })?;
+        Ok(Response::new(Catalog {
+            describes: !steps.is_empty(),
+            steps,
+            contract: CONTRACT,
+            // Empty on purpose: with no objects there is no life to declare
+            // (ADR-0022 §6). A component cannot hold one — the bridge rejects
+            // a reference before it gets here.
+            lifetime: String::new(),
+        }))
     }
 }
 
@@ -416,6 +453,67 @@ fn nombrado_a_proto(n: &Named) -> pb::Value {
     pb::Value {
         name: n.name.clone(),
         value: Some(dato),
+    }
+}
+
+/// El `value-type` del WIT al `ValueType` del protobuf.
+///
+/// El WIT no tiene `reference` (ADR-0022 §8) y por eso el `match` es total sin
+/// rama de descarte: si algún día el WIT gana un tipo, esto deja de compilar,
+/// que es exactamente lo que se quiere.
+fn tipo_a_proto(t: exports::anvil::step::step::ValueType) -> i32 {
+    use exports::anvil::step::step::ValueType as TipoWit;
+    let t = match t {
+        TipoWit::Unspecified => pb::ValueType::Unspecified,
+        TipoWit::Number => pb::ValueType::Number,
+        TipoWit::Text => pb::ValueType::Text,
+        TipoWit::Boolean => pb::ValueType::Boolean,
+    };
+    t as i32
+}
+
+/// Un `value` suelto del WIT al `Value` del protobuf, sin nombre.
+///
+/// Sólo lo usa el `default` de un parámetro, que viaja sin nombre porque el
+/// nombre ya está en el `ParameterSpec` que lo contiene.
+fn valor_a_proto(v: &exports::anvil::step::step::Value) -> pb::Value {
+    use exports::anvil::step::step::Value as ValueWit;
+    let dato = match v {
+        ValueWit::Number(x) => pb::value::Value::Number(*x),
+        ValueWit::Text(s) => pb::value::Value::Text(s.clone()),
+        ValueWit::Boolean(b) => pb::value::Value::Boolean(*b),
+    };
+    pb::Value {
+        name: String::new(),
+        value: Some(dato),
+    }
+}
+
+/// Un `step-spec` del WIT al `StepSpec` del protobuf: el catálogo, traducido.
+fn spec_a_proto(s: &exports::anvil::step::step::StepSpec) -> pb::StepSpec {
+    pb::StepSpec {
+        name: s.name.clone(),
+        inputs: s
+            .inputs
+            .iter()
+            .map(|p| pb::ParameterSpec {
+                name: p.name.clone(),
+                r#type: tipo_a_proto(p.type_),
+                required: p.required,
+                default: p.default.as_ref().map(valor_a_proto),
+                doc: p.doc.clone(),
+            })
+            .collect(),
+        outputs: s
+            .outputs
+            .iter()
+            .map(|o| pb::OutputSpec {
+                name: o.name.clone(),
+                r#type: tipo_a_proto(o.type_),
+                doc: o.doc.clone(),
+            })
+            .collect(),
+        doc: s.doc.clone(),
     }
 }
 

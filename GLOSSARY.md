@@ -148,12 +148,18 @@ son concesiones a palabras reservadas del lenguaje, no al idioma.
 
 | Antes | Ahora |
 |---|---|
-| `anvil:paso@0.2.0` | `anvil:step@0.3.0` |
+| `anvil:paso@0.2.0` | `anvil:step@0.4.0` |
 | `run(nombre, intento, parametros)` | `run(name, attempt, inputs)` |
 | `record resultado` | `record step-result` |
 | `record nombrado` | `record named` |
 | `variant valor` | `variant value` |
 | `valor-medido` | `measured-value` |
+
+En el SDK de Rust (`anvil-step`) lo que un paso devuelve se llama **`Outcome`**,
+no `Result`: `Result` es otra cosa en Rust y un paso puede devolver
+`Result<Outcome, E>`, donde el `Err` sale como `error`. Es la misma concesión al
+lenguaje que `step-result` en el WIT — el término del dominio sigue siendo el
+resultado del paso (ADR-0024).
 
 ### Informes
 

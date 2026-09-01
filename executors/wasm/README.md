@@ -2,7 +2,7 @@
 
 `anvil-puente-wasm` — a native binary that serves a user's `.wasm` step
 component over gRPC ([ADR-0015](../../docs/adr/0015-el-wasm-del-usuario-es-una-funcion-puenteado-a-grpc.md)).
-Your step is a WIT component exporting `run` (`anvil:step@0.3.0`); this
+Your step is a WIT component exporting `run` and `describe` (`anvil:step@0.4.0`); this
 process loads it into wasmtime and turns it into an executor the engine can
 dispatch to. It is the sibling of [`../python/`](../python/): both listen on
 gRPC, speak [`paso.proto`](../../crates/modelo/paso.proto), answer the
@@ -45,14 +45,24 @@ cargo build --release --manifest-path executors/wasm/Cargo.toml
 
 ## What it does not speak (yet)
 
-The bridge implements `anvil:step@0.3.0` and nothing beyond it: no step
-catalog ([ADR-0021](../../docs/adr/0021-el-ejecutor-describe-su-catalogo.md))
-and no object references
-([ADR-0022](../../docs/adr/0022-la-referencia-a-objeto-es-un-cuarto-tipo-y-nombra-una-ranura.md))
-— the Python executor serves both. Growing the WIT to match is its own work
-and would recompile every component in the wild (ADR-0020 §4d). Until then,
-its steps show up as *unchecked* under `--validate --with-executors`, and
-Anvil says so on stderr.
+The bridge implements `anvil:step@0.4.0`. Since 0.4.0 it **does** serve the
+step catalog: the component publishes it through `describe` and the bridge
+translates it, so a WASM step is checked before the run like any other
+([ADR-0021](../../docs/adr/0021-el-ejecutor-describe-su-catalogo.md),
+[ADR-0024](../../docs/adr/0024-the-signature-is-the-catalog-in-rust-too.md)).
+That was the first WIT break, and it recompiled every component in the wild
+(ADR-0020 §4d).
+
+What it still does not speak is **object references**
+([ADR-0022](../../docs/adr/0022-la-referencia-a-objeto-es-un-cuarto-tipo-y-nombra-una-ranura.md)),
+which the Python executor does serve: a component is a function with no state
+between calls, so it has nowhere to keep an open instrument session, and a
+reference that reaches the bridge is rejected with that as the reason.
+
+And one thing it gets wrong: a component that **traps** —a `panic!`, an
+`unwrap()` that fails— takes its instance with it, and the bridge does not
+reinstantiate, so the engine sees the stream close without an answer and the
+run is cut. Verified 2026-09-01.
 
 There is no compatibility shim: the version lives in the package name and
 travels with the artifact — wasmtime refuses to instantiate a component that
@@ -60,16 +70,16 @@ does not match, and the rule is to recompile (ADR-0020 §4d).
 
 ## Reference
 
-The complete hello-world — a step in Rust compiled to a component and run by
-`anvil` — is [`ejemplos/hola-paso/`](../../ejemplos/hola-paso/), the official
-reference for the
-[quick-start guide](../../docs/guia-inicio-rapido.md#writing-your-own-step-in-rust-m5-ext2-adr-0015).
+Steps are written with the [Rust SDK](../rust/): `#[step]` on a function and
+`cargo build --target wasm32-wasip2`. The complete hello-world is
+[`ejemplos/hola-paso/`](../../ejemplos/hola-paso/), the official reference for
+the [quick-start guide](../../docs/guia-inicio-rapido.md#writing-your-own-step-in-rust-adr-0015-adr-0024).
 
 ## License
 
 **Apache-2.0**, like everything under
 [`executors/`](../README.md#license-apache-20-and-not-the-rest-of-the-repos)
 ([ADR-0004](../../docs/adr/0004-licencia-dual-agpl-apache.md)): what you
-*use* is AGPL; what you *link* is Apache. Your `.wasm` links public
-`wit-bindgen` bindings — never this bridge — and stays yours, under whatever
-license you want.
+*use* is AGPL; what you *link* is Apache. Your `.wasm` links the
+Apache-2.0 SDK — never this bridge — and stays yours, under whatever license
+you want.
