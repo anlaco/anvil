@@ -12,6 +12,44 @@ minors, con el cambio anotado aquí.
 
 ### Añadido
 
+- **Writing a step in Rust is annotating a function** (issue #39,
+  [ADR-0024](docs/adr/0024-the-signature-is-the-catalog-in-rust-too.md)). The
+  Rust step SDK, [`executors/rust/`](executors/rust/), the sibling of the
+  Python one:
+
+  ```rust
+  use anvil_step::{step, Ctx, Outcome};
+
+  /// Measures the voltage on a channel.
+  #[step(outputs(channel_used: f64))]
+  fn measure_voltage(channel: f64, scale: Option<String>) -> Outcome {
+      Outcome::measured(read(channel)?).output("channel_used", channel)
+  }
+
+  anvil_step::export!();
+  ```
+
+  ```sh
+  cargo build --target wasm32-wasip2
+  ```
+
+  Gone from the author's project: the hand-written `run` that looked for its own
+  parameters, the copied `wit/` directory, the 507-line generated `bindings.rs`,
+  and `cargo install cargo-component`. One dependency and the plain toolchain.
+
+  **The signature is the catalog**, as in Python: names, types and which inputs
+  are required come from the function, so a `channell` in the YAML is caught by
+  `--validate --with-executors` before the unit is on the bench. A parameter of a
+  type a sequence cannot send does not compile.
+
+- **WASM steps are no longer *unchecked***. `anvil:step@0.4.0` adds `describe`,
+  the component publishes its catalog and the bridge translates it. Until now
+  the bridge answered `describes = false` because there was nothing to publish.
+
+- `make example` builds the reference component, and `make build` and CI now do
+  too. Before, nothing built it: it needed `cargo component` and was a manual
+  acceptance criterion.
+
 - **The object reference: a fourth type, and it names a slot** (issue #55,
   [ADR-0022](docs/adr/0022-la-referencia-a-objeto-es-un-cuarto-tipo-y-nombra-una-ranura.md)).
   A test sequence needs several steps to work on the same bench state — the
@@ -64,6 +102,26 @@ minors, con el cambio anotado aquí.
   the object. That is refused explicitly — at load if the executor is declared
   `type: wasm`, and again at the bridge — and never in silence. Giving WASM
   state is a decision with its own ADR.
+
+### Arreglado
+
+- **A `println!` in a WASM step no longer kills the executor.** The blocking
+  wasmtime call ran on the tokio runtime's driver thread, and the WASI bindings
+  block on the runtime from inside to serve the component's stdout: the first
+  print in a step died with *"Cannot start a runtime from within a runtime"* and
+  cut the sequence mid-unit. A `panic!` in a step still cuts the run — the
+  instance is gone and the bridge does not reinstantiate it — and that is now
+  written down as a known limitation in the quick-start guide.
+
+### Rupturista
+
+- **`anvil:step@0.3.0` → `@0.4.0`: every step component must be rebuilt.** The
+  WIT travels stuck to the artifact and there is no compatibility shim by
+  decision ([ADR-0020 §4d](docs/adr/0020-parametros-del-paso-en-la-peticion.md)),
+  so wasmtime refuses to instantiate a component built against 0.3.0 — nobody
+  finds out the wrong way. Rebuild with
+  `cargo build --target wasm32-wasip2`. `paso.proto` is untouched and the
+  contract number stays at 4: a gRPC executor is not affected.
 
 ### Cambiado
 
@@ -258,7 +316,6 @@ traduciendo por la regla del *Boy Scout*. Los **ADRs y los informes de beta**
 tampoco se tocan: son registro fechado, y reescribir sus ejemplos los haría
 mentir sobre lo que se decidió entonces.
 
-
 **Un paso ya puede recibir parámetros y devolver valores con nombre**
 (ADR-0020, issue #46). Hasta ahora un paso sólo recibía su nombre y el número
 de intento, así que todo lo que necesitaba para medir iba grabado dentro: un
@@ -317,7 +374,6 @@ producían informes idénticos.**
 - **`pasos_demo::medir_voltaje` acepta `canal` y `offset`** y devuelve las
   salidas `canal_usado` y `temperatura`. Sin parámetros mide los 4,2 V de
   siempre, así que `ejemplos/basica.yaml` no cambia.
-
 
 **`--validate` deja de decir «válida» a secuencias que no lo son.** El manual
 promete que el flag «carga la secuencia, valida el schema, resuelve

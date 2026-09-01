@@ -202,9 +202,11 @@ anvil <sequence.yaml> [--process-model <pm.yaml>] [--json <path>] [--csv <path>]
   opt-in because it would break the promise of plain `--validate`, which is
   running in CI with no hardware. **On a real run, this is always checked**,
   once per executor and before the first step: a finding stops the run
-  without touching the unit. An executor that cannot describe itself —today,
-  the bridge of a `.wasm` step— leaves its steps *unchecked*, and says so on
-  stderr: neither error nor silence.
+  without touching the unit. An executor that cannot describe itself
+  leaves its steps *unchecked*, and says so on stderr: neither error nor
+  silence. WASM steps used to be that case and no longer are — since
+  `anvil:step@0.4.0` a component publishes its catalog like anyone else
+  ([ADR-0024](adr/0024-the-signature-is-the-catalog-in-rust-too.md)).
 - `--port` fixes the port of the embedded executor — both the executor's and
   the one the engine looks for. Without it, the host takes an **ephemeral**
   port per process, so several `anvil` processes can run at once (#15).
@@ -279,85 +281,121 @@ first, the answer would be `0.0` and the 4.0–5.0 limit would fail it. The
 decimals vary on every run: Crucible's measurement model adds Gaussian
 noise.
 
-## Writing your own step in Rust (M5-ext.2, ADR-0015)
+## Writing your own step in Rust (ADR-0015, ADR-0024)
 
-The full "hello world": write a step in Rust, compile it to `.wasm` and run
-it with Anvil. **No cloning the repo, no `wasi-grpc`, no `modelo`.**
-Official reference: `ejemplos/hola-paso/`.
+The full "hello world": write a step in Rust, compile it to `.wasm` and run it
+with Anvil. **No cloning the repo, no `wasi-grpc`, no `modelo`, and nothing to
+install beyond the Rust toolchain.** Official reference: `ejemplos/hola-paso/`.
 
-1. Install the component tooling (once):
-   ```sh
-   cargo install cargo-component --locked
-   ```
-2. The step project (`hola/Cargo.toml` with `[lib] crate-type = ["cdylib"]`
-   and `[package.metadata.component] package = "anvil:step"`,
-   `hola/wit/anvil-step.wit`, `hola/src/lib.rs`). The WIT is the contract:
-   ```wit
-   package anvil:step@0.3.0;
+1. A library crate with one dependency:
 
-   interface step {
-     variant value {
-       number(f64),
-       text(string),
-       boolean(bool),
-     }
+   ```toml
+   # hola/Cargo.toml
+   [package]
+   name = "hola"
+   version = "0.1.0"
+   edition = "2021"
 
-     record named {
-       name: string,
-       value: value,
-     }
+   [dependencies]
+   anvil-step = "0.4"
 
-     record step-result {
-       // One of "pass" | "fail" | "error", lowercase. "skipped" is set by
-       // the engine; a step never returns it.
-       status: string,
-       message: string,
-       measured-value: option<f64>,
-       outputs: list<named>,
-     }
-
-     run: func(name: string, attempt: s32, inputs: list<named>) -> step-result;
-   }
-
-   world anvil-step { export step; }
+   [lib]
+   crate-type = ["cdylib"]
    ```
 
-   **`status` is text, but the vocabulary is closed**: exactly one of
-   `"pass"`, `"fail"` or `"error"` — `"skipped"` is set by the engine, never
-   returned by a step. Any other string —`"Pass"` with a capital letter is
-   the real case that motivated issue #28— turns the step into `error`,
-   with a message naming the value you returned. Anvil does not judge a unit
-   with a status it does not understand (ADR-0019, Rule 2). The distinction
-   that matters most is between `fail` and `error`: **`fail` is the unit's**
-   ("I measured and it does not comply"), **`error` is the bench's or the
-   step's** ("I could not measure").
-3. The implementation is a function (~15 lines, with `wit-bindgen`):
+2. The steps. A step is an ordinary function:
+
    ```rust
-   #[allow(warnings)]
-   mod bindings;
-   use bindings::exports::anvil::step::step::{Guest, StepResult};
-   struct Component;
-   impl Guest for Component {
-       fn run(name: String, attempt: i32, inputs: Vec<bindings::exports::anvil::step::step::Named>) -> StepResult {
-           StepResult {
-               status: "pass".to_string(),
-               message: format!("hello {name} (attempt {attempt})"),
-               measured_value: Some(4.2),
-               outputs: Vec::new(),
-           }
-       }
+   // hola/src/lib.rs
+   use anvil_step::{step, Ctx, Outcome};
+
+   /// Measures the voltage on a channel.
+   #[step(outputs(channel_used: f64))]
+   fn measure_voltage(channel: f64, scale: Option<String>) -> Outcome {
+       Outcome::measured(read_instrument(channel, scale))
+           .output("channel_used", channel)
    }
-   bindings::export!(Component with_types_in bindings);
+
+   /// Checks the LED is lit.
+   #[step]
+   fn check_led() -> Outcome {
+       Outcome::passed("led lit")
+   }
+
+   anvil_step::export!();
    ```
-4. Compile to a component:
-   `cargo component build` → `target/wasm32-wasip1/debug/hola.wasm`.
+
+   **The signature is the catalog.** The name of each parameter, its type and
+   whether it is required come from the function itself: they are not written
+   twice, so they cannot drift. That is what lets Anvil check a sequence
+   **without running it** (`--validate --with-executors`) and tell you that you
+   wrote `channell` instead of `channel` before the unit is on the bench.
+
+   A parameter is `f64`, `String` or `bool`, or an `Option` of one of them —
+   which is how it is declared optional. Anything else does not compile: a
+   parameter that needs structure is a badly cut step (ADR-0020 §2). What the
+   signature cannot say, the attribute takes: `outputs(name: Type)` for the
+   named outputs a sequence reads as `result.outputs.<name>`, and
+   `name = "..."` when the step's name in the sequence is not a valid Rust
+   identifier.
+
+   A step that wants the attempt number takes a `ctx: Ctx` first, and only if
+   it asks for one. `ctx` is never part of the described signature: it is the
+   executor talking to the step, not a value out of the sequence.
+
+3. What a step gives back. `Outcome::measured(v)` for a measurement,
+   `Outcome::passed(…)` / `Outcome::failed(…)` for a pass/fail,
+   `Outcome::error(…)` when it could not judge. Shortcuts also work: returning
+   a number is a measurement, a `bool` is pass/fail, `()` is a pass with no
+   measurement, and a `Result` whose `Err` is a bench problem comes out as
+   `error`.
+
+   **The threshold is not the step's business**: return the measurement and let
+   the engine judge it against the sequence's `limit` (ADR-0008). And the
+   distinction that matters most is between `fail` and `error`: **`fail` is the
+   unit's** ("I measured and it does not comply"), **`error` is the bench's or
+   the step's** ("I could not measure"). A step that blew up is never a failed
+   unit (ADR-0019, Rule 2).
+
+   Prefer `Result` over `panic!` or `unwrap()`: a component compiled to WASM
+   aborts on a panic, and an aborted component takes the run with it — see
+   *Known limitations* below.
+
+4. Compile it to a component:
+
+   ```sh
+   cargo build --target wasm32-wasip2
+   # → target/wasm32-wasip2/debug/hola.wasm
+   ```
+
+   The SDK carries the WIT and generates the bindings, so there is no `wit/`
+   directory in your project, no generated `bindings.rs` to keep, and no
+   `cargo component` to install.
+
 5. Declare it in the YAML (`executors: [{ name: hola, type: wasm, path:
    ./hola.wasm }]`, a step with `executor: hola`) and run
    `./anvil sequence.yaml`. The host spawns the bridge, which loads your
    component (empty WASI sandbox: no files, no network) and translates
    gRPC↔function.
 
-See [ADR-0015](adr/0015-el-wasm-del-usuario-es-una-funcion-puenteado-a-grpc.md).
+Your steps are ordinary functions, so their own unit tests call them directly:
+`cargo test` needs no WASM and no Anvil — outside `wasm32`, `export!()` expands
+to nothing.
+
+### Known limitations
+
+- **A `panic!` in a step cuts the run.** WASM aborts, the component's instance
+  is gone and the bridge does not reinstantiate it, so the engine sees the
+  stream close without an answer. Verified 2026-09-01. Return an
+  `Outcome::error` or a `Result` instead. (A `println!` used to do the same and
+  no longer does.)
+- **No object references** (ADR-0022 §8): a component is a function with no
+  state between calls, so it cannot hold an open instrument session. A step
+  that needs one is served from a `grpc` executor of its own process, such as
+  the Python one.
+
+See [ADR-0015](adr/0015-el-wasm-del-usuario-es-una-funcion-puenteado-a-grpc.md)
+and [ADR-0024](adr/0024-the-signature-is-the-catalog-in-rust-too.md).
 
 ## Continuous integration
 
