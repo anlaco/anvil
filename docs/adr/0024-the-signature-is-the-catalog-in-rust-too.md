@@ -62,7 +62,7 @@ use anvil_step::{step, Ctx, Outcome};
 /// Measures the voltage on a channel.
 #[step(outputs(channel_used: f64))]
 fn measure_voltage(ctx: Ctx, channel: f64, scale: Option<String>) -> Outcome {
-    Outcome::measured(read(channel)?).output("channel_used", channel)
+    Outcome::measured(read(channel, scale)).output("channel_used", channel)
 }
 
 anvil_step::export!();

@@ -27,9 +27,10 @@ use anvil_step::{step, Ctx, Outcome};
 
 /// Measures the voltage on a channel.
 #[step(outputs(channel_used: f64))]
-fn measure_voltage(channel: f64, scale: Option<String>) -> Outcome {
+fn measure_voltage(channel: f64, scale: Option<String>) -> Result<Outcome, String> {
+    // `?` on a bench problem: the `Err` comes out as `error`, never `fail`.
     let volts = read_instrument(channel, scale)?;
-    Outcome::measured(volts).output("channel_used", channel)
+    Ok(Outcome::measured(volts).output("channel_used", channel))
 }
 
 /// Checks the LED is lit.

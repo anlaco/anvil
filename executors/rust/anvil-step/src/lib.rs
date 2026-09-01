@@ -12,7 +12,7 @@
 //! /// Measures the DC voltage on a channel.
 //! #[step(outputs(channel_used: f64))]
 //! fn measure_voltage(ctx: Ctx, channel: f64, scale: Option<String>) -> Outcome {
-//!     let volts = read_instrument(channel)?;
+//!     let volts = read_instrument(channel, scale);
 //!     Outcome::measured(volts).output("channel_used", channel)
 //! }
 //!
