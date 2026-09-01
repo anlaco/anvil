@@ -7,43 +7,55 @@
 #
 #   make build     everything in debug
 #   make release   everything in release  ← the binary that gets distributed
-#   make test      tests of the core, the host and the Python executor
-#   make check     fmt + clippy for the three workspaces (what CI will demand)
+#   make test      tests of the core, the host and the two executor SDKs
+#   make check     fmt + clippy for the four workspaces (what CI will demand)
 #   make fmt       applies the format
 #   make run       runs the basic example with the debug binary
-#   make clean     cleans the three targets
+#   make clean     cleans the four targets
 #
-# The three workspaces are deliberately independent (the core does not drag in
-# wasmtime, ADR-0011), hence the `--manifest-path` calls.
+# The four workspaces are deliberately independent (the core does not drag in
+# wasmtime, ADR-0011; the Rust step SDK links nothing of Anvil's, ADR-0024),
+# hence the `--manifest-path` calls.
 
 HOST    := packaging/anvil-host/Cargo.toml
 BRIDGE  := executors/wasm/Cargo.toml
+RUSTSDK := executors/rust/Cargo.toml
+EXAMPLE := ejemplos/hola-paso/Cargo.toml
 GUESTS  := -p motor -p ejecutor_pasos
 TARGET  := wasm32-wasip2
 
 ANVIL_DEBUG   := packaging/anvil-host/target/debug/anvil
 ANVIL_RELEASE := packaging/anvil-host/target/release/anvil
 
-.PHONY: all build release test test-core test-bridge test-host test-executors check fmt run clean help
+.PHONY: all build release test test-core test-bridge test-host test-executors \
+        test-executors-rust example check fmt run clean help
 
 all: build
 
 ## Builds guests + bridge + host in debug.
-build:
+build: example
 	cargo build --target $(TARGET) $(GUESTS)
 	cargo build --manifest-path $(BRIDGE)
 	cargo build --manifest-path $(HOST)
 	@echo "ready → $(ANVIL_DEBUG)"
 
+## The reference step component (`ejemplos/hola-paso`), the one
+## `demo_wasm.yaml` loads. It builds with the plain toolchain: the SDK carries
+## the WIT and the bindings, so there is no `cargo component` to install
+## (ADR-0024). Until the SDK existed nothing built it — not the Makefile and
+## not CI — and it was a manual acceptance criterion.
+example:
+	cargo build --target $(TARGET) --manifest-path $(EXAMPLE)
+
 ## Same, in release. The release binary starts in ~1 s; the debug one takes
 ## tens of seconds because wasmtime compiles the guests unoptimized.
-release:
+release: example
 	cargo build --release --target $(TARGET) $(GUESTS)
 	cargo build --release --manifest-path $(BRIDGE)
 	cargo build --release --manifest-path $(HOST)
 	@echo "ready → $(ANVIL_RELEASE)"
 
-test: test-core test-bridge test-host test-executors
+test: test-core test-bridge test-host test-executors test-executors-rust
 
 ## Tests of the core workspace (no network and no compiled guests needed).
 test-core:
@@ -58,6 +70,12 @@ test-bridge:
 ## so we build first.
 test-host: build
 	cargo test --manifest-path $(HOST)
+
+## Tests of the Rust step-authoring SDK (`anvil-step`). Native: what they test
+## is the surface you write a step with, so none of them needs WASM — the same
+## thing that lets a step's own unit tests call it directly.
+test-executors-rust:
+	cargo test --manifest-path $(RUSTSDK)
 
 ## Tests of the Python step-executor SDK (`anvil_step`). stdlib only: they
 ## need neither `grpcio` nor the generated stubs, because what they test is
@@ -82,15 +100,21 @@ check: build
 	cargo fmt --check
 	cargo fmt --check --manifest-path $(HOST)
 	cargo fmt --check --manifest-path $(BRIDGE)
+	cargo fmt --check --all --manifest-path $(RUSTSDK)
+	cargo fmt --check --manifest-path $(EXAMPLE)
 	cargo clippy --all-targets -- -D warnings
 	cargo clippy --manifest-path $(HOST) --all-targets -- -D warnings
 	cargo clippy --manifest-path $(BRIDGE) --all-targets -- -D warnings
+	cargo clippy --manifest-path $(RUSTSDK) --all-targets -- -D warnings
+	cargo clippy --target $(TARGET) --manifest-path $(EXAMPLE) -- -D warnings
 
 ## Applies the format (what `check` verifies).
 fmt:
 	cargo fmt
 	cargo fmt --manifest-path $(HOST)
 	cargo fmt --manifest-path $(BRIDGE)
+	cargo fmt --all --manifest-path $(RUSTSDK)
+	cargo fmt --manifest-path $(EXAMPLE)
 
 ## Smoke: runs the basic example with the freshly built binary.
 run: build
@@ -100,6 +124,8 @@ clean:
 	cargo clean
 	cargo clean --manifest-path $(HOST)
 	cargo clean --manifest-path $(BRIDGE)
+	cargo clean --manifest-path $(RUSTSDK)
+	cargo clean --manifest-path $(EXAMPLE)
 
 help:
 	@grep -E '^##|^[a-z-]+:' $(MAKEFILE_LIST) | sed 's/^## /  /; s/:.*//'

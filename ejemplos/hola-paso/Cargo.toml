@@ -4,16 +4,14 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-wit-bindgen-rt = { version = "0.41.0", features = ["bitflags"] }
+# The SDK. Here it is a path because the example lives inside the repo; your
+# own step project takes a version from crates.io and nothing else — no `wit/`
+# directory, no generated `bindings.rs`, no `cargo component`.
+anvil-step = { path = "../../executors/rust/anvil-step" }
 
 [lib]
 crate-type = ["cdylib"]
 
-[package.metadata.component]
-package = "anvil:step"
-
-[package.metadata.component.dependencies]
-
-# Standalone (fuera del workspace del core): el componente es un ejemplo
-# independiente, igual que lo sería el proyecto de un usuario externo.
+# Standalone (outside the core workspace): the component is an independent
+# project, exactly as an outside user's would be.
 [workspace]

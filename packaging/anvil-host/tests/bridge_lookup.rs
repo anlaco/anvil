@@ -32,13 +32,14 @@ fn raiz_repo() -> PathBuf {
         .expect("repo root")
 }
 
-/// The demo component the `demo_wasm` sequence serves. It is built by
-/// `cargo component` (not by this repo's build), so it is missing on a clean
-/// checkout and in CI — the tests that need it say so and skip, the way
-/// `make test-executors` skips without python3. A skip never claims a pass.
+/// The demo component the `demo_wasm` sequence serves. Since the Rust step SDK
+/// carries the WIT and the bindings (ADR-0024) it builds with the plain
+/// toolchain, so `make build` builds it and it is there — `cargo component` is
+/// no longer needed and no longer missing on a clean checkout. The skip stays
+/// for a bare `cargo test` that did not go through the Makefile: a skip never
+/// claims a pass.
 fn componente_demo() -> Option<PathBuf> {
-    let ruta = raiz_repo()
-        .join("ejemplos/hola-paso/target/wasm32-wasip1/debug/hola_paso.wasm");
+    let ruta = raiz_repo().join("ejemplos/hola-paso/target/wasm32-wasip2/debug/hola_paso.wasm");
     ruta.exists().then_some(ruta)
 }
 
@@ -66,9 +67,8 @@ fn codigo(salida: &Output) -> i32 {
 fn con_el_puente_junto_al_binario_la_secuencia_wasm_corre() {
     let Some(_componente) = componente_demo() else {
         eprintln!(
-            "skipped: ejemplos/hola-paso has not been compiled (cargo component build \
-             --manifest-path ejemplos/hola-paso/Cargo.toml). The bridge lookup's missing-file \
-             case still runs below."
+            "skipped: ejemplos/hola-paso has not been compiled (make example). \
+             The bridge lookup's missing-file case still runs below."
         );
         return;
     };
@@ -94,10 +94,7 @@ fn sin_el_puente_falla_nominando_la_ruta_buscada() {
     // missing `.wasm` before reaching the bridge lookup, and the test would
     // pass for the wrong reason.
     if componente_demo().is_none() {
-        eprintln!(
-            "skipped: ejemplos/hola-paso has not been compiled (cargo component build \
-             --manifest-path ejemplos/hola-paso/Cargo.toml)"
-        );
+        eprintln!("skipped: ejemplos/hola-paso has not been compiled (make example)");
         return;
     }
 

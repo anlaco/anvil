@@ -22,7 +22,7 @@ use std::time::Duration;
 /// of this repo's build, so this is `None` on a clean checkout and in CI.
 fn componente_demo() -> Option<std::path::PathBuf> {
     let ruta = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("../../ejemplos/hola-paso/target/wasm32-wasip1/debug/hola_paso.wasm")
+        .join("../../ejemplos/hola-paso/target/wasm32-wasip2/debug/hola_paso.wasm")
         .canonicalize()
         .ok()?;
     ruta.exists().then_some(ruta)
@@ -46,7 +46,8 @@ fn sin_wasm_no_arranca() {
         .expect("launch the bridge");
     let code = out.status.code().expect("exit code");
     assert_ne!(
-        code, 0,
+        code,
+        0,
         "no --wasm is a usage error, not a listening server. stdout:\n{}",
         String::from_utf8_lossy(&out.stdout)
     );
@@ -88,10 +89,7 @@ fn fichero_que_no_es_wasm_se_diagnostica() {
 #[test]
 fn escucha_y_sale_por_eof() {
     let Some(componente) = componente_demo() else {
-        eprintln!(
-            "skipped: ejemplos/hola-paso has not been compiled (cargo component build \
-             --manifest-path ejemplos/hola-paso/Cargo.toml)"
-        );
+        eprintln!("skipped: ejemplos/hola-paso has not been compiled (make example)");
         return;
     };
     let puerto = puerto_libre();

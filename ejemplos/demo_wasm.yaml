@@ -8,10 +8,9 @@
 #
 # El `.wasm` de la demo es `ejemplos/hola-paso` (el "hola mundo" de la guía).
 #
-# Compilar el componente (requiere cargo-component instalado):
-#   cargo install cargo-component --locked
-#   cargo component build --manifest-path ejemplos/hola-paso/Cargo.toml
-#   # → ejemplos/hola-paso/target/wasm32-wasip1/debug/hola_paso.wasm
+# Compilar el componente (sin instalar nada: el SDK aporta los bindings):
+#   cargo build --target wasm32-wasip2 --manifest-path ejemplos/hola-paso/Cargo.toml
+#   # → ejemplos/hola-paso/target/wasm32-wasip2/debug/hola_paso.wasm
 #
 # Arranque (desde la raíz del repo):
 #   cargo build --target wasm32-wasip2 -p motor -p ejecutor_pasos
@@ -20,7 +19,7 @@
 #   ./packaging/anvil-host/target/debug/anvil ejemplos/demo_wasm.yaml --json out.json
 #
 # (El `path:` es relativo al directorio del YAML (`ejemplos/`); al resolver
-# queda `ejemplos/hola-paso/target/wasm32-wasip1/debug/hola_paso.wasm`. El
+# queda `ejemplos/hola-paso/target/wasm32-wasip2/debug/hola_paso.wasm`. El
 # host spawnea el puente y loguea `nombre → 127.0.0.1:<puerto efímero>`.)
 
 name: demo_wasm
@@ -29,7 +28,7 @@ executors:
     type: embedded
   - name: mi_paso_wasm
     type: wasm
-    path: hola-paso/target/wasm32-wasip1/debug/hola_paso.wasm
+    path: hola-paso/target/wasm32-wasip2/debug/hola_paso.wasm
 main:
   # Paso built-in: lo atiende el ejecutor WASM embebido (de serie). No
   # declara `ejecutor` → embebido por defecto.
@@ -52,3 +51,12 @@ main:
   - name: conectar_equipo
     executor: mi_paso_wasm
     retries: 3
+
+  # Un paso con parámetro. Desde `anvil:step@0.4.0` el componente **describe
+  # su catálogo**, así que `--validate --with-executors` comprueba que
+  # `a_quien` existe y es texto sin ejecutar nada (ADR-0021, ADR-0024).
+  - name: hola
+    executor: mi_paso_wasm
+    retries: 1
+    inputs:
+      a_quien: mundo
