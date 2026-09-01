@@ -56,19 +56,31 @@ col1=$(sed -n '2p' "$TMP/d2.csv" 2>/dev/null | cut -d, -f1)
 [ "$col1" = "regresion_csv_nombre" ]
 check DEF-2 "CSV columna 1 = nombre de secuencia (obtenido: '${col1}')" $?
 
-# ---- DEF-3a: asigna no debe ensombrecer un parameter en silencio ----
-$A "$R/bug3-sub-asigna-parameter.yaml" >"$TMP/d3a.out" 2>"$TMP/d3a.err"
-if grep -qiE 'inválida|invalida' "$TMP/d3a.err"; then
-  res=0   # el cargador lo rechaza: arreglo aceptable
-else
-  grep -qE '\[skipped\] verificar_led' "$TMP/d3a.out" && res=1 || res=0
-fi
-check DEF-3a "asigna no ensombrece un parameter declarado" $res
+# ---- DEF-3a / DEF-3b: asigna no debe ensombrecer un parameter en silencio ----
+# El defecto se cerró por la vía dura —el cargador rechaza la secuencia— así que
+# los dos casos aceptan el rechazo como arreglo. Lo que **no** aceptan es la
+# nada: sin la guardia de abajo, un binario que no imprimiera una sola línea
+# salía verde, porque el `grep` de la marca de fallo no casaba con un fichero
+# vacío. DEF-3b pasaba exactamente así.
+asigna_no_ensombrece() {  # <stdout> <stderr>
+  if grep -qiE 'inválida|invalida' "$2"; then
+    return 0            # el cargador lo rechaza: arreglo aceptable
+  fi
+  if ! grep -q '===' "$1"; then
+    return 1            # ni rechazo ni corrida: aquí no se ha comprobado nada
+  fi
+  grep -qE '\[skipped\] verificar_led' "$1" && return 1 || return 0
+}
 
-# ---- DEF-3b: el retorno by-reference debe traer el valor medido al padre ----
-$A "$R/bug3-padre-asigna-parameter.yaml" >"$TMP/d3b.out" 2>&1
-grep -qE '\[skipped\] verificar_led' "$TMP/d3b.out" && res=1 || res=0
-check DEF-3b "retorno by-reference trae el valor medido al padre" $res
+$A "$R/bug3-sub-asigna-parameter.yaml" >"$TMP/d3a.out" 2>"$TMP/d3a.err"
+asigna_no_ensombrece "$TMP/d3a.out" "$TMP/d3a.err"
+check DEF-3a "asigna no ensombrece un parameter declarado" $?
+
+# El mismo shadow visto desde el padre: el retorno by-reference no puede traerse
+# el valor inicial en vez del medido.
+$A "$R/bug3-padre-asigna-parameter.yaml" >"$TMP/d3b.out" 2>"$TMP/d3b.err"
+asigna_no_ensombrece "$TMP/d3b.out" "$TMP/d3b.err"
+check DEF-3b "retorno by-reference no trae el valor sin medir" $?
 
 # ---- DIAG-1: avisar cuando el sidecar no afecta a ningún paso ----
 # Antes este caso reusaba el comando de DEF-1, que daba 0 afectados **por el
