@@ -46,7 +46,7 @@ $A --process-model process_models/sequential.yaml \
    ejemplos/limites.yaml --limits ejemplos/limites.limits.yaml \
    >"$TMP/d1.out" 2>"$TMP/d1.err"
 afectados=$(grep -oE 'aplicado \([0-9]+ paso' "$TMP/d1.err" | grep -oE '[0-9]+' | head -1)
-grep -q ': paso ===' "$TMP/d1.out"; agregado=$?
+grep -q ': pass ===' "$TMP/d1.out"; agregado=$?
 [ "${afectados:-0}" -ge 1 ] && [ "$agregado" -eq 0 ]
 check DEF-1 "sidecar aplicado bajo --process-model (afectados=${afectados:-0}, esperado>=1)" $?
 
@@ -61,13 +61,13 @@ $A "$R/bug3-sub-asigna-parameter.yaml" >"$TMP/d3a.out" 2>"$TMP/d3a.err"
 if grep -qiE 'inválida|invalida' "$TMP/d3a.err"; then
   res=0   # el cargador lo rechaza: arreglo aceptable
 else
-  grep -qE '\[saltado\] verificar_led' "$TMP/d3a.out" && res=1 || res=0
+  grep -qE '\[skipped\] verificar_led' "$TMP/d3a.out" && res=1 || res=0
 fi
 check DEF-3a "asigna no ensombrece un parameter declarado" $res
 
 # ---- DEF-3b: el retorno by-reference debe traer el valor medido al padre ----
 $A "$R/bug3-padre-asigna-parameter.yaml" >"$TMP/d3b.out" 2>&1
-grep -qE '\[saltado\] verificar_led' "$TMP/d3b.out" && res=1 || res=0
+grep -qE '\[skipped\] verificar_led' "$TMP/d3b.out" && res=1 || res=0
 check DEF-3b "retorno by-reference trae el valor medido al padre" $res
 
 # ---- DIAG-1: avisar cuando el sidecar no afecta a ningún paso ----
@@ -75,9 +75,9 @@ check DEF-3b "retorno by-reference trae el valor medido al padre" $res
 # defecto**. Arreglado DEF-1, hace falta un sidecar huérfano de verdad.
 cat >"$TMP/huerfano.limits.yaml" <<'YAML'
 paso_que_no_existe:
-  tipo: comparacion
+  type: comparison
   op: ge
-  esperado: 4.0
+  expected: 4.0
 YAML
 $A ejemplos/limites.yaml --limits "$TMP/huerfano.limits.yaml" 2>&1 |
   grep -qiE 'aviso.*sidecar|sidecar.*no afect|ningún paso'
@@ -89,10 +89,13 @@ check DIAG-1 "aviso cuando el sidecar afecta a 0 pasos" $?
 $A ejemplos/basica.yaml --json "$TMP/d3.json" --csv "$TMP/d3.csv" >/dev/null 2>&1
 res=0
 for f in setup main cleanup; do
-  grep -q "\"fase\": \"$f\"" "$TMP/d3.json" || res=1
+  grep -q "\"phase\": \"$f\"" "$TMP/d3.json" || res=1
 done
-# El CSV va en CRLF (RFC-4180): hay que quitar el \r antes de anclar a fin.
-head -1 "$TMP/d3.csv" 2>/dev/null | tr -d '\r' | grep -q ',fase$' || res=1
+# El CSV va en CRLF (RFC-4180): hay que quitar el \r antes de mirar.
+# La columna no se ancla al final: lo que este caso afirma es que la fase esté,
+# no en qué posición — `inputs` y `outputs` se añadieron después (ADR-0020) y
+# la dejaron en medio.
+head -1 "$TMP/d3.csv" 2>/dev/null | tr -d '\r' | grep -qE '(^|,)phase(,|$)' || res=1
 check DIAG-3 "fase (setup/main/cleanup) en el JSON y en el CSV" $res
 
 # ---- DIAG-4: bajo un PM, qué secuencia de operador se corrió ----
@@ -100,18 +103,18 @@ check DIAG-3 "fase (setup/main/cleanup) en el JSON y en el CSV" $res
 # propio: sin él, el resultado archivado no registra qué se corrió.
 $A --process-model process_models/sequential.yaml \
    ejemplos/limites.yaml --json "$TMP/d4.json" >/dev/null 2>&1
-grep -q '"secuencia_usuario": "ejemplos/limites.yaml"' "$TMP/d4.json"
+grep -q '"user_sequence": "ejemplos/limites.yaml"' "$TMP/d4.json"
 check DIAG-4 "la secuencia del operador es un campo del JSON" $?
 
 # ---- DIAG-5a: un sidecar envuelto debe señalar el envoltorio ----
 # El error genérico acusaba al nombre del paso, que está bien; de ahí salió el
 # bug fantasma «el sidecar no funciona con process model».
 cat >"$TMP/envoltorio.limits.yaml" <<'YAML'
-limites:
+limits:
   medir_voltaje:
-    tipo: comparacion
+    type: comparison
     op: ge
-    esperado: 4.0
+    expected: 4.0
 YAML
 $A ejemplos/limites.yaml --limits "$TMP/envoltorio.limits.yaml" 2>&1 |
   grep -qiE 'mapa plano|envoltorio'
@@ -119,16 +122,16 @@ check DIAG-5a "un sidecar envuelto señala el envoltorio, no el paso" $?
 
 # ---- DIAG-5b: un campo desconocido debe ubicarse y sugerir el correcto ----
 cat >"$TMP/steps.yaml" <<'YAML'
-nombre: regresion_steps
-subsecuencias:
+name: regresion_steps
+subsequences:
   interna:
     steps:
-      - nombre: p
+      - name: p
 main:
-  - nombre: p
+  - name: p
 YAML
 $A "$TMP/steps.yaml" --validate 2>&1 |
-  grep -qE "subsecuencias.interna.*querías 'main'"
+  grep -qE "subsequences.interna.*querías 'main'"
 check DIAG-5b "campo desconocido: ubicación + sugerencia" $?
 
 # ---- DIAG-5c: mensaje de flag desconocido ----
@@ -157,14 +160,14 @@ check DIAG-5f "sin ejecutor embebido para -h/--validate" $?
 # "failed to parse WebAssembly module", que hizo culpar al toolchain).
 printf '\x00asm\x01\x00\x00\x00' >"$TMP/core.wasm"
 cat >"$TMP/coremod.yaml" <<'YAML'
-nombre: regresion_modulo_core
-ejecutores:
-  - nombre: dmm
-    tipo: wasm
+name: regresion_modulo_core
+executors:
+  - name: dmm
+    type: wasm
     path: ./core.wasm
 main:
-  - nombre: medir
-    ejecutor: dmm
+  - name: medir
+    executor: dmm
 YAML
 $A "$TMP/coremod.yaml" 2>&1 | grep -qiE 'módulo core|modulo core'
 check DIAG-5d "un .wasm módulo core se diagnostica como tal" $?
@@ -174,40 +177,40 @@ check DIAG-5d "un .wasm módulo core se diagnostica como tal" $?
 # constante, el paso se saltaba y la secuencia salía VERDE. La campaña propagó
 # el patrón a 19 secuencias y 51 precondiciones.
 cat >"$TMP/lec1.yaml" <<'YAML'
-nombre: regresion_resultado_fuera_de_asigna
+name: regresion_result_outside_assign
 locals:
   v_real: 5.0
 main:
-  - nombre: medir_voltaje
-    precondicion: 'locals.v_real > 4.9 && resultado.valor_medido != nothing'
+  - name: medir_voltaje
+    precondition: 'locals.v_real > 4.9 && result.measured_value != nothing'
 YAML
 $A "$TMP/lec1.yaml" --validate 2>&1 |
-  grep -qE "medir_voltaje.*resultado.valor_medido|resultado.valor_medido.*precondicion"
+  grep -qE "medir_voltaje.*result.measured_value|result.measured_value.*precondicion"
 check LEC-1 "resultado.* en una precondición es error de carga" $?
 
 # ---- LEC-2: un verde que se saltó pasos tiene que decirlo ----
 # `saltado` es neutral en el agregado y debe seguir siéndolo, pero 9 secuencias
 # de la campaña daban verde saltándose ≥30% de sus pasos sin que se notara.
 cat >"$TMP/lec2.yaml" <<'YAML'
-nombre: regresion_saltos_visibles
+name: regresion_visible_skips
 locals:
   activo: false
 main:
-  - nombre: preparar
-    tipo: statement
+  - name: preparar
+    type: statement
     statement: 'locals.activo = false'
-  - nombre: medir_voltaje
-    precondicion: 'locals.activo'
-  - nombre: verificar_led
+  - name: medir_voltaje
+    precondition: 'locals.activo'
+  - name: verificar_led
     disable: true
 YAML
 $A "$TMP/lec2.yaml" --json "$TMP/lec2.json" >"$TMP/lec2.out" 2>/dev/null
 res=0
 grep -qE '\(2 de 3 pasos saltados\)' "$TMP/lec2.out" || res=1
-grep -q '"pasos_saltados": 2' "$TMP/lec2.json" || res=1
-grep -q '"pasos_totales": 3' "$TMP/lec2.json" || res=1
+grep -q '"skipped_steps": 2' "$TMP/lec2.json" || res=1
+grep -q '"total_steps": 3' "$TMP/lec2.json" || res=1
 # Y el agregado sigue siendo verde: la neutralidad no cambia (RF-33/34).
-grep -q ': paso ===' "$TMP/lec2.out" || res=1
+grep -q ': pass ===' "$TMP/lec2.out" || res=1
 check LEC-2 "un verde con pasos saltados lo declara (consola y JSON)" $res
 
 # ---- NOTA-1: dos `anvil` simultáneos no deben chocar de puerto ----
