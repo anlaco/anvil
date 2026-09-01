@@ -92,7 +92,8 @@ término de TestStand no se replica igual en Anvil, se dice explícitamente.
 - **Cargador de `.wasm`.** El **host** (`anvil-host`) carga **módulos `.wasm`
   propios por path** en runtime (modelo `.vi` de TestStand: compilar y
   referenciar, sin recompilar). **M5-ext.2, implementado (ADR-0014/0015)**:
-  el host spawnea el **puente** `anvil-puente-wasm` (embebido en `anvil`),
+  el host spawnea el **puente** `anvil-exec-wasm` (un fichero al lado de
+  `anvil`, ADR-0023),
   que carga el componente del usuario (interfaz WIT `anvil:paso`: una
   función `run`, sin gRPC ni protobuf) y traduce gRPC↔función. El puente
   corre con sandbox WASI vacío (el componente es una función pura); el

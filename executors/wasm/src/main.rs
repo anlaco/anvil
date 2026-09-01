@@ -8,7 +8,7 @@
 //! `run(nombre, intento) -> resultado`.
 //!
 //! Uso:
-//!   anvil-puente-wasm --wasm <ruta.wasm> [--port <puerto>] [--bind <ip>]
+//!   anvil-exec-wasm --wasm <ruta.wasm> [--port <puerto>] [--bind <ip>]
 //!
 //! - `--wasm`: path al componente (obligatorio).
 //! - `--port`: puerto a escuchar. `anvil-host` siempre lo pasa concreto
@@ -341,7 +341,7 @@ fn main() {
         Ok(x) => x,
         Err(e) => {
             eprintln!(
-                "uso: anvil-puente-wasm --wasm <ruta.wasm> [--port <puerto>] [--bind <ip>]\n{e}"
+                "uso: anvil-exec-wasm --wasm <ruta.wasm> [--port <puerto>] [--bind <ip>]\n{e}"
             );
             std::process::exit(2);
         }
@@ -385,8 +385,8 @@ fn main() {
         .add_service(StepExecutorServer::new(servicio))
         .serve(addr);
 
-    eprintln!("anvil-puente-wasm: cargado '{}'", ruta_wasm.display());
-    eprintln!("anvil-puente-wasm: escuchando en {addr}");
+    eprintln!("anvil-exec-wasm: cargado '{}'", ruta_wasm.display());
+    eprintln!("anvil-exec-wasm: escuchando en {addr}");
 
     // Salida limpia: el host spawnea el puente con stdin en pipe; cuando el
     // host muere (o droppea el `Child`), el pipe se cierra → EOF → el puente

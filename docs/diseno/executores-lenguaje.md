@@ -101,7 +101,7 @@ executors:
   crates.io, Apache-2.0) and compiles it with
   `cargo build --target wasm32-wasip2` — no `wasi-grpc`, no `modelo`, no
   `cargo component`, no cloning the repo.
-- **The host spawns the bridge `anvil-puente-wasm`** (a file next to the
+- **The host spawns the bridge `anvil-exec-wasm`** (a file next to the
   `anvil` binary — ADR-0023; it used to be embedded) with
   `--wasm <path> --port <ephemeral>`.
   The bridge (native: wasmtime + tonic + wit-bindgen) loads the component
@@ -158,6 +158,46 @@ executors/
   of Anvil.
 - Each module is self-contained and versionable → **downloadable from the
   UI** once it exists (post-MVP).
+
+### Naming: `anvil-exec-<language>`
+
+Every executor a user launches is called `anvil-exec-<language>`, and the
+language is the one the steps are written in, not the transport:
+
+```
+anvil-exec-wasm      # the bridge: serves a user's .wasm step component
+anvil-exec-python    # the Python executor's launcher (server.py underneath)
+anvil-exec-labview   # future
+anvil-exec-native    # future: an external executable, TestStand's Call Executable
+```
+
+The names group on purpose: they sort together in the release directory and
+`anvil-e<TAB>` lists the executors installed on a machine without opening the
+documentation. The core binary, `anvil`, stays outside the family — it is not
+an executor.
+
+Three things the scheme is **not**:
+
+- It is **not** the `type:` of the sequence. The YAML types by transport —
+  `embedded`, `wasm`, `grpc` — because the engine does not know what language
+  sits behind an endpoint and must not (ADR-0013). `anvil-exec-python` and
+  `anvil-exec-labview` are both `type: grpc`. Only `wasm` names a runtime,
+  because it is the only one Anvil loads itself.
+- It is **not** a rename of the embedded executor. That one is inside the
+  `anvil` binary and is never launched by hand, so it has no file name to
+  carry (ADR-0011).
+- It does **not** replace `server.py`, which stays runnable exactly as before.
+  `anvil-exec-python` is a launcher over it: it puts the executor's own
+  directory on `sys.path` and hands the command line to `server.main()`.
+
+The word is `executor`, fixed in [`GLOSSARY.md`](../../GLOSSARY.md) — not
+`runner`, not `adapter`. `exec` is its abbreviation and not a second word for
+the same thing.
+
+> The WASM bridge shipped as `anvil-puente-wasm` until 2026-09-01, a name half
+> in Spanish from before the English-only rule. ADR-0023 §Alcance left the
+> rename open; this is it. ADR-0014, ADR-0015 and ADR-0023 still use the old
+> name and are immutable: they mean this binary.
 
 ### Objects that stay in the executor (ADR-0022)
 

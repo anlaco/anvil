@@ -1,6 +1,6 @@
 # The WASM executor (bridge)
 
-`anvil-puente-wasm` — a native binary that serves a user's `.wasm` step
+`anvil-exec-wasm` — a native binary that serves a user's `.wasm` step
 component over gRPC ([ADR-0015](../../docs/adr/0015-el-wasm-del-usuario-es-una-funcion-puenteado-a-grpc.md)).
 Your step is a WIT component exporting `run` and `describe` (`anvil:step@0.4.0`); this
 process loads it into wasmtime and turns it into an executor the engine can
@@ -32,7 +32,7 @@ The binary has a CLI of its own — useful to try a component without a
 sequence around it:
 
 ```sh
-anvil-puente-wasm --wasm <path.wasm> [--port <port>] [--bind <ip>]
+anvil-exec-wasm --wasm <path.wasm> [--port <port>] [--bind <ip>]
 ```
 
 `--bind 0.0.0.0` is what makes the remote case (the executor on another

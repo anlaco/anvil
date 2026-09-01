@@ -331,7 +331,7 @@ host, ADR-0015) o el ejecutor embebido — el motor siempre habla el mismo
 
 Lo que cambia es **dentro del ejecutor**: un componente `.wasm` de paso no
 habla `paso.proto` — exporta la función `run` (interfaz WIT `anvil:paso`,
-ADR-0015) y el **puente** (`anvil-puente-wasm`, nativo) traduce
+ADR-0015) y el **puente** (`anvil-exec-wasm`, nativo) traduce
 `paso.proto` ↔ `anvil:paso` por cada `Invoca`. `paso.proto` sigue siendo
 la superficie pública del cable (RNF-05); la traducción vive en el puente,
 que es código de Anvil. Ver

@@ -18,7 +18,7 @@ design, licensing and roadmap) lives in [`docs/`](docs/README.md). Start at
 ## Run the example
 
 **One binary** (`anvil`, ADR-0011) hosts wasmtime and the two WASM guests in
-a sandbox. The package also carries `anvil-puente-wasm` next to it — the
+a sandbox. The package also carries `anvil-exec-wasm` next to it — the
 executor that serves your `.wasm` steps (ADR-0023) — which `anvil` looks up
 and spawns by itself when a sequence needs it. Both are statically linked
 against musl: they need no Rust, no cargo, no glibc, nothing installed on

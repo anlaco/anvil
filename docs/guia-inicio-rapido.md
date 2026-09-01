@@ -3,7 +3,7 @@
 Anvil is **one binary**: you download it and run it. Inside, it hosts
 `wasmtime` and the two WASM guests (engine + executor) in a sandbox,
 speaking gRPC over loopback. You need no `wasmtime` install nor any runtime
-— it is embedded. The download also carries `anvil-puente-wasm`, the
+— it is embedded. The download also carries `anvil-exec-wasm`, the
 executor that serves `.wasm` steps, as a file next to it (ADR-0023): `anvil`
 brings it up by itself when a sequence declares one. See
 [ADR-0011](adr/0011-distribucion-un-binario-hospeda-wasmtime.md) for the
@@ -458,7 +458,7 @@ version and all of this goes away.
   `--port` do collide — that is what you asked for.
 - **`no se encontró el ejecutor WASM en '…'`** → a sequence declares a
   `type: wasm` executor and the bridge file is not next to the `anvil`
-  binary. `anvil` looks for `anvil-puente-wasm` beside itself (ADR-0023):
+  binary. `anvil` looks for `anvil-exec-wasm` beside itself (ADR-0023):
   `make release` leaves it there, or copy it from
   `executors/wasm/target/`. A copied `anvil` alone — without the bridge —
   runs sequences without `type: wasm` executors and stops with this message
