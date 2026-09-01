@@ -192,6 +192,9 @@ struct ServicioEjecutor {
 
 #[tonic::async_trait]
 impl StepExecutor for ServicioEjecutor {
+    // `clippy::result_large_err`: el `Err` es `tonic::Status`, el tipo de error
+    // canónico de tonic — ver la nota de `ComponenteCargado::llamar`.
+    #[allow(clippy::result_large_err)]
     async fn invoke(&self, request: Request<StepRequest>) -> Result<Response<StepResult>, Status> {
         let pet = request.into_inner();
         // Un parámetro cuyo `oneof` llegó sin rama no dice de qué tipo es. No
@@ -213,11 +216,22 @@ impl StepExecutor for ServicioEjecutor {
                      desde un ejecutor 'grpc' de proceso (ADR-0022 §8)"
                 )),
             })?;
-        let mut comp = self
-            .componente
-            .lock()
-            .map_err(|_| Status::internal("componente en uso"))?;
-        let respuesta = comp.llamar(&pet.name, pet.attempt, &parametros)?;
+        // `block_in_place`: la llamada a wasmtime es **bloqueante**, y los
+        // bindings WASI síncronos hacen `block_on` sobre el runtime de tokio
+        // desde dentro para atender el stdout/stderr del componente. Llamada
+        // directamente desde este método async, el primer `println!` de un paso
+        // —o el mensaje que imprime un `panic!`— muere con "Cannot start a
+        // runtime from within a runtime", se lleva por delante el worker del
+        // puente y corta la secuencia con la unidad en el banco. Sacar la
+        // llamada del hilo que mueve el runtime es lo que mantiene un print de
+        // depuración en un print de depuración (RF-12).
+        let respuesta = tokio::task::block_in_place(|| {
+            let mut comp = self
+                .componente
+                .lock()
+                .map_err(|_| Status::internal("componente en uso"))?;
+            comp.llamar(&pet.name, pet.attempt, &parametros)
+        })?;
         Ok(Response::new(respuesta))
     }
 
