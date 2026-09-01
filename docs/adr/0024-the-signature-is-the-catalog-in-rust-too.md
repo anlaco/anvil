@@ -194,7 +194,8 @@ of that component comes back as `error` naming the duplicate.
   - A `panic!` in a step still cuts the run: the component's instance is gone
     and the bridge does not reinstantiate it, so the engine sees the stream close
     without an answer. Verified 2026-09-01. **Not fixed here** — it is
-    reinstantiation after a trap, its own piece of work — and it is written into
+    reinstantiation after a trap, its own piece of work, open as
+    [#58](https://github.com/anlaco/anvil/issues/58) — and it is written into
     the quick-start guide as a known limitation, not left to be discovered.
 - The Python executor keeps two things this SDK does not have: object references
   (ADR-0022) and `options`. That asymmetry is the WIT's, not the SDK's.

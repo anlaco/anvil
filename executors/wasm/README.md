@@ -62,7 +62,8 @@ reference that reaches the bridge is rejected with that as the reason.
 And one thing it gets wrong: a component that **traps** —a `panic!`, an
 `unwrap()` that fails— takes its instance with it, and the bridge does not
 reinstantiate, so the engine sees the stream close without an answer and the
-run is cut. Verified 2026-09-01.
+run is cut. Verified 2026-09-01, tracked as
+[#58](https://github.com/anlaco/anvil/issues/58).
 
 There is no compatibility shim: the version lives in the package name and
 travels with the artifact — wasmtime refuses to instantiate a component that

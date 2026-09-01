@@ -121,7 +121,8 @@ needs neither WASM nor Anvil.
   executor of its own process, such as the Python one.
 - **Executor options** (`--option key=value`): they are not in the WIT.
 - **`panic!` as an error path.** WASM aborts, the instance is gone and the
-  bridge does not reinstantiate it, so the run is cut. Verified 2026-09-01.
+  bridge does not reinstantiate it, so the run is cut
+  ([#58](https://github.com/anlaco/anvil/issues/58)). Verified 2026-09-01.
   Return an `Outcome::error` or a `Result`.
 
 ## Layout
