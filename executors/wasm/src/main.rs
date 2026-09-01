@@ -35,6 +35,14 @@ use wasmtime_wasi::{WasiCtx, WasiCtxView, WasiView};
 
 /// `paso.proto` compilado por `build.rs` con tonic (sin `package` en el
 /// `.proto`, así que tonic genera el módulo raíz `_`).
+///
+/// `clippy::result_large_err` a nivel de módulo: el trait `StepExecutor` que
+/// genera tonic devuelve `Result<_, tonic::Status>` (176 bytes) en cada método,
+/// y desde clippy 1.98 el lint alcanza también al código generado. Boxear el
+/// error no está en nuestra mano —lo escribe tonic-build— y el razonamiento es
+/// el mismo que en `ComponenteCargado::llamar`: es el tipo de error canónico de
+/// tonic, y esto se llama una vez por paso, no en un bucle caliente.
+#[allow(clippy::result_large_err)]
 pub mod pb {
     tonic::include_proto!("_");
 }
