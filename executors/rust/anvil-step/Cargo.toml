@@ -1,0 +1,16 @@
+[package]
+name = "anvil-step"
+description = "Write a step for Anvil in Rust: annotate a function and compile to WASM"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+anvil-step-macros = { path = "../anvil-step-macros", version = "0.4.0" }
+# The registry `#[step]` writes to. Its constructors run when the component is
+# instantiated (a WASM *reactor* calls `_initialize`), which is what lets steps
+# declared in different modules be found without the author listing them.
+inventory = "0.3"
+# Only used by `export!`, which is the one thing that needs the WIT. Everything
+# else in this crate builds and is tested natively.
+wit-bindgen = "0.41"

@@ -1,0 +1,13 @@
+# The Rust step-authoring SDK. A **standalone workspace**, like the bridge and
+# the host: nothing here links Anvil's core, and a user who downloads this
+# directory gets a project that builds on its own (ADR-0012, ADR-0021).
+[workspace]
+resolver = "2"
+members = ["anvil-step", "anvil-step-macros"]
+
+[workspace.package]
+version = "0.4.0"
+edition = "2021"
+# Apache-2.0, like everything under `executors/`: what you *use* is AGPL, what
+# you *link* is Apache (ADR-0004). Your step links this crate and stays yours.
+license = "Apache-2.0"
