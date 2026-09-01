@@ -97,6 +97,14 @@ sin medir se decide sin medir.
 
 ### 4 — Poder no contestar, pero que se note
 
+> **Matizado por [ADR-0024](0024-the-signature-is-the-catalog-in-rust-too.md)
+> (2026-09-01).** El puente WASM era aquí el caso real de «no puedo
+> describirme», y ha dejado de serlo: `anvil:step@0.4.0` añade `describe` y el
+> puente publica el catálogo del componente. Lo que sigue vigente es todo lo
+> demás de esta sección —el booleano, el aviso y la lectura segura del
+> silencio—, y el puente lo usa: una lista vacía se responde como
+> `describes = false`.
+
 Un ejecutor de terceros puede no implementar `Describe`. Entonces sus pasos
 salen como **sin comprobar**, con el motivo y el recuento:
 

@@ -94,11 +94,13 @@ executors:
     path: ./pasos/mi_paso.wasm  # relative to the YAML
 ```
 
-- **The user's `.wasm` is a WASM component exporting a `run` function**
-  (WIT interface `anvil:step`, ADR-0015). It is not a gRPC server: it knows
-  nothing about gRPC, protobuf or Anvil. The step's author writes a ~15-line
-  Rust function with `wit-bindgen` (public, crates.io) and compiles it with
-  `cargo component` — no `wasi-grpc`, no `modelo`, no cloning the repo.
+- **The user's `.wasm` is a WASM component exporting `run` and `describe`**
+  (WIT interface `anvil:step`, ADR-0015, ADR-0024). It is not a gRPC server: it
+  knows nothing about gRPC, protobuf or Anvil. The step's author annotates a
+  plain Rust function with `#[step]` from the `anvil-step` SDK (public,
+  crates.io, Apache-2.0) and compiles it with
+  `cargo build --target wasm32-wasip2` — no `wasi-grpc`, no `modelo`, no
+  `cargo component`, no cloning the repo.
 - **The host spawns the bridge `anvil-puente-wasm`** (a file next to the
   `anvil` binary — ADR-0023; it used to be embedded) with
   `--wasm <path> --port <ephemeral>`.
