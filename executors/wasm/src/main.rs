@@ -411,7 +411,11 @@ mod tests {
     fn modulo_core_se_diagnostica_como_tal() {
         let diag = diagnostica_no_componente(&CABECERA_MODULO_CORE).expect("debe diagnosticar");
         assert!(diag.contains("módulo core"), "{diag}");
-        assert!(diag.contains("cargo component build"), "{diag}");
+        // El mensaje tiene que nombrar la herramienta CORRECTA: desde el SDK
+        // (ADR-0024) un paso se compila con la toolchain pelada, y mandar a
+        // instalar `cargo component` sería mandar por el camino equivocado a
+        // quien ya está perdido.
+        assert!(diag.contains("cargo build --target wasm32-wasip2"), "{diag}");
     }
 
     #[test]
