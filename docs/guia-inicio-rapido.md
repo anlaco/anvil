@@ -384,9 +384,10 @@ to nothing.
 
 ### Known limitations
 
-- **A `panic!` in a step cuts the run.** WASM aborts, the component's instance
-  is gone and the bridge does not reinstantiate it, so the engine sees the
-  stream close without an answer. Verified 2026-09-01. Return an
+- **A `panic!` in a step cuts the run**
+  ([#58](https://github.com/anlaco/anvil/issues/58)). WASM aborts, the
+  component's instance is gone and the bridge does not reinstantiate it, so the
+  engine sees the stream close without an answer. Verified 2026-09-01. Return an
   `Outcome::error` or a `Result` instead. (A `println!` used to do the same and
   no longer does.)
 - **No object references** (ADR-0022 §8): a component is a function with no
