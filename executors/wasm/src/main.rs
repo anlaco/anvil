@@ -415,7 +415,10 @@ mod tests {
         // (ADR-0024) un paso se compila con la toolchain pelada, y mandar a
         // instalar `cargo component` sería mandar por el camino equivocado a
         // quien ya está perdido.
-        assert!(diag.contains("cargo build --target wasm32-wasip2"), "{diag}");
+        assert!(
+            diag.contains("cargo build --target wasm32-wasip2"),
+            "{diag}"
+        );
     }
 
     #[test]
