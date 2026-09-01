@@ -4,11 +4,14 @@
 // The version lives in the package name and travels with the artifact:
 // wasmtime refuses to instantiate a component that does not match. **There is
 // no compatibility shim in the bridge: the rule is to recompile**
-// (ADR-0020 §4d, the answer to issue #39). The bridge is the only translator,
-// and therefore the only one that knows which contract number goes with which
-// WIT version — so it is the bridge that answers the gRPC echo. A component
-// knows nothing about gRPC, protobuf or contract versions (ADR-0015).
-package anvil:step@0.3.0;
+// (ADR-0020 §4d). 0.4.0 is the first time that bill has been paid: `describe`
+// was added so a component can publish its catalog (ADR-0024, issue #39), and
+// every component built against 0.3.0 has to be rebuilt. The bridge is the
+// only translator, and therefore the only one that knows which contract
+// number goes with which WIT version — so it is the bridge that answers the
+// gRPC echo. A component knows nothing about gRPC, protobuf or contract
+// versions (ADR-0015).
+package anvil:step@0.4.0;
 
 interface step {
   /// A typed value crossing the component boundary. The three types are the
@@ -68,6 +71,72 @@ interface step {
   /// (ADR-0009). The step never sees `locals` or `file_globals`; it is handed
   /// values.
   run: func(name: string, attempt: s32, inputs: list<named>) -> step-result;
+
+  /// What a parameter is, for the catalog. The same vocabulary as
+  /// `ValueType` of `paso.proto`, minus `reference`: a component cannot hold
+  /// an object between calls, and the bridge already rejects a reference that
+  /// reaches it (ADR-0022 §8). A type the component does not declare stays
+  /// `unspecified`, which Anvil reads as *unchecked* and never as "number"
+  /// (ADR-0019, Rule 2).
+  enum value-type {
+    unspecified,
+    number,
+    text,
+    boolean,
+  }
+
+  /// One input of a step, as the catalog describes it.
+  record parameter-spec {
+    name: string,
+    %type: value-type,
+    /// Whether the sequence has to send it. An optional one the sequence
+    /// omits is the step's business, not an error.
+    required: bool,
+    /// Declared **for the reader and for the future editor, not for the
+    /// engine**: the engine never sends it, the step applies its own
+    /// (ADR-0021 §5).
+    default: option<value>,
+    doc: string,
+  }
+
+  /// One named output of a step — what `assign` reads as
+  /// `result.outputs.<name>`. Declaring it is what lets Anvil check that
+  /// expression without running the sequence (ADR-0020 §3).
+  record output-spec {
+    name: string,
+    %type: value-type,
+    doc: string,
+  }
+
+  /// One step of the catalog: the name a sequence uses and the shape of the
+  /// call.
+  record step-spec {
+    name: string,
+    inputs: list<parameter-spec>,
+    outputs: list<output-spec>,
+    doc: string,
+  }
+
+  /// The catalog: which steps this component serves and what they take.
+  ///
+  /// It is the second door, and the reason this interface went to 0.4.0. With
+  /// only `run` there was no list of names to publish and no signature to
+  /// read, so the bridge answered `describes = false` and the steps came out
+  /// as *unchecked* under `--validate --with-executors` — a `canall` for
+  /// `canal` in the YAML was found with the unit already on the bench
+  /// (ADR-0021).
+  ///
+  /// **An empty list means "do not check me"**, not "I serve nothing". In
+  /// gRPC the two are told apart by a boolean because an executor can serve
+  /// zero steps on purpose; a component that serves zero steps is a component
+  /// with nothing to do, so the safe reading is the only useful one
+  /// (ADR-0021 §4). The bridge turns an empty list into `describes = false`.
+  ///
+  /// Asked **once per component at start-up**, never before each step:
+  /// finding out at step 47 that a name is wrong leaves the unit half tested,
+  /// and a catalog that changes mid-run makes the report impossible to
+  /// reconstruct (ADR-0021 §3).
+  describe: func() -> list<step-spec>;
 }
 
 world anvil-step {

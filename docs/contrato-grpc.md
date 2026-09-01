@@ -117,7 +117,7 @@ Retirar o renombrar un tag exige ADR, entrada *breaking* en el CHANGELOG y
 `reserved` sobre el tag: **un tag no se reutiliza jamás**.
 
 **Los pasos WASM no ven este número.** El WIT se versiona por recompilación
-(`anvil:step@0.3.0`) y **es el puente quien responde el eco** por ellos: un
+(`anvil:step@0.4.0`) y **es el puente quien responde el eco** por ellos: un
 componente no sabe de gRPC ni de versiones (ADR-0015).
 
 ## The object reference (ADR-0022)
@@ -183,9 +183,9 @@ moment Anvil most wants the step that closes the rack to run.
 
 ### WASM does not carry one, and says so
 
-`anvil:step` is `run(name, attempt, inputs) -> step-result`: a function, with no
-resources and no state between calls (ADR-0020 §4d), so a component has nowhere
-to keep the map. A reference reaching one is an **explicit error and never a
+`anvil:step` is `run(name, attempt, inputs) -> step-result` plus `describe()`:
+functions, with no resources and no state between calls (ADR-0020 §4d), so a
+component has nowhere to keep the map. A reference reaching one is an **explicit error and never a
 silence** — refused at load if the executor is declared `type: wasm`, and again
 at the bridge. Giving WASM state is a decision with its own ADR (ADR-0022 §8).
 
@@ -287,11 +287,15 @@ paso», `Catalog` lleva un booleano `describes`: el default `false` de proto3
 hace que **todo silencio caiga del lado seguro**. Es el mismo truco que el eco
 de contrato.
 
-**El puente WASM contesta que no describe.** `anvil:step` exporta un único
-`run(name, attempt, inputs)` y el componente despacha por nombre dentro de sí
-mismo: desde fuera no hay lista que publicar. Es la factura del despacho por
-nombre (ADR-0003), y hacerlo describible exige tocar el WIT — la decisión que
-espera el issue #39.
+**El puente WASM sí describe, desde `anvil:step@0.4.0`.** Hasta esa versión el
+WIT exportaba un único `run(name, attempt, inputs)` y el componente despachaba
+por nombre dentro de sí mismo: desde fuera no había lista que publicar, y el
+puente contestaba `describes = false`. Era la factura del despacho por nombre
+(ADR-0003), y se ha pagado tocando el WIT — que es lo que esperaba el issue #39
+(ADR-0024). El componente publica su catálogo por `describe` y el puente lo
+traduce; una lista vacía se responde como `describes = false`, porque un
+componente que no sirve ningún paso no tiene nada que hacer y la lectura segura
+es la única útil.
 
 **Añadir este RPC no sube `contrato`.** Un ejecutor que no describe su catálogo
 mide exactamente lo mismo: su silencio no puede alterar un veredicto, que es la
