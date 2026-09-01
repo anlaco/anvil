@@ -47,9 +47,10 @@ jobs:
           targets: wasm32-wasip2
           components: rustfmt, clippy
 
-      # The three workspaces have separate `target/` directories (ADR-0011:
-      # the core drags no wasmtime). wasmtime takes ~2 min cold, so the cache
-      # is what keeps this job at minutes instead of tens of minutes.
+      # The four workspaces have separate `target/` directories (ADR-0011:
+      # the core drags no wasmtime; ADR-0024: the Rust step SDK links nothing
+      # of Anvil's). wasmtime takes ~2 min cold, so the cache is what keeps
+      # this job at minutes instead of tens of minutes.
       - name: Cargo cache
         uses: Swatinem/rust-cache@v2
         with:
@@ -57,6 +58,8 @@ jobs:
             anvil
             anvil/packaging/anvil-host
             anvil/executors/wasm
+            anvil/executors/rust
+            anvil/ejemplos/hola-paso
 
       # `check` depends on `build`: clippy over the host runs its `build.rs`,
       # which demands the guests and the bridge already compiled. That is why
@@ -68,6 +71,15 @@ jobs:
       - name: Core tests
         working-directory: anvil
         run: cargo test
+
+      # The Rust step-authoring SDK. Native tests: what they check is the
+      # surface a step is written with, so none of them needs WASM. The
+      # component itself is built by `make check`/`make release`, which build
+      # `ejemplos/hola-paso` — something CI could not do before the SDK,
+      # because it needed `cargo component` (ADR-0024).
+      - name: Rust step SDK tests
+        working-directory: anvil
+        run: make test-executors-rust
 
       # Builds in release and runs the host tests: in debug wasmtime compiles
       # the guests unoptimized and the binary takes ~26 s to start

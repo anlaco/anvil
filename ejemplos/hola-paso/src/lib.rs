@@ -1,69 +1,64 @@
-//! Paso de ejemplo "hola mundo" (M5-ext.2, ADR-0015): un componente WASM
-//! que exporta `run` (interfaz `anvil:step`). Es la referencia de la guía
-//! "escribe un paso en Rust, compílalo a .wasm y ejecútalo con Anvil".
+//! The "hello world" step component (ADR-0015, ADR-0024): three steps in Rust,
+//! compiled to a `.wasm` and run by Anvil. The reference for the guide
+//! "write a step in Rust, compile it and run it with Anvil".
 //!
-//! El componente NO sabe de gRPC ni de protobuf: recibe el nombre del paso,
-//! el número de intento y sus parámetros ya evaluados, y devuelve un
-//! resultado. Quien habla gRPC con el motor es el puente
-//! (`anvil-puente-wasm`), que carga este componente y llama a `run`.
+//! The component knows nothing about gRPC or protobuf: it is handed the step's
+//! name, the attempt number and its already-evaluated parameters, and gives
+//! back a result. What speaks gRPC with the engine is the bridge
+//! (`anvil-puente-wasm`), which loads this component and calls it.
 //!
-//! Tampoco sabe de **versiones de contrato** (ADR-0015): el eco que el motor
-//! comprueba lo responde el puente por él. Lo que sí le afecta es que el WIT
-//! está versionado y viaja pegado al artefacto: desde `anvil:step@0.2.0` la
-//! firma de `run` lleva `parametros`, y **la regla es recompilar** — no hay
-//! capa de compatibilidad (ADR-0020 §4d). Un `.wasm` construido contra la
-//! 0.1.0 no instancia.
+//! It knows nothing about **contract versions** either (ADR-0015): the echo the
+//! engine checks is answered by the bridge on its behalf. What does reach it is
+//! that the WIT is versioned and travels stuck to the artifact — **the rule is
+//! to recompile**, there is no compatibility shim (ADR-0020 §4d). A `.wasm`
+//! built against `anvil:step@0.3.0` does not instantiate.
 //!
-//! Compilar:
-//!   cargo component build --manifest-path ejemplos/hola-paso/Cargo.toml
-//!   # → ejemplos/hola-paso/target/wasm32-wasip1/debug/hola_paso.wasm
-//!
-//! Requiere `cargo component` instalado:
-//!   cargo install cargo-component --locked
+//! Build:
+//!   cargo build --target wasm32-wasip2 --manifest-path ejemplos/hola-paso/Cargo.toml
+//!   # → ejemplos/hola-paso/target/wasm32-wasip2/debug/hola_paso.wasm
 
-#[allow(warnings)]
-mod bindings;
+use anvil_step::{step, Ctx, Outcome};
 
-use bindings::exports::anvil::step::step::{Guest, Named, StepResult, Value};
-
-struct Component;
-
-impl Guest for Component {
-    fn run(nombre: String, intento: i32, parametros: Vec<Named>) -> StepResult {
-        // Los parámetros llegan **ya evaluados** (ADR-0020): el motor resolvió
-        // las expresiones `${...}` del YAML contra su entorno antes de llamar.
-        // Aquí no hay expresiones que interpretar, sólo valores.
-        let saludo = match parametros.iter().find(|p| p.name == "a_quien") {
-            Some(Named {
-                value: Value::Text(a),
-                ..
-            }) => format!("hola {a}"),
-            // Un parámetro con otro tipo no se convierte a texto en silencio:
-            // si la secuencia dice `a_quien: 3`, quien la escribió se ha
-            // equivocado y conviene que lo vea.
-            Some(otro) => {
-                return StepResult {
-                    status: "error".to_string(),
-                    message: format!("'{}' tiene que ser texto", otro.name),
-                    measured_value: None,
-                    outputs: Vec::new(),
-                }
-            }
-            None => format!("hola {nombre}"),
-        };
-        StepResult {
-            status: "pass".to_string(),
-            message: format!("{saludo} (intento {intento})"),
-            measured_value: Some(4.2),
-            // Una salida con nombre, para que el ejemplo enseñe también este
-            // lado del contrato: la lee `assign` como
-            // `result.outputs.greeted`.
-            outputs: vec![Named {
-                name: "greeted".to_string(),
-                value: Value::Number(1.0),
-            }],
-        }
-    }
+/// Measures the voltage on a channel.
+///
+/// The measurement comes back on its own: **the threshold is not the step's
+/// business**, the engine judges it against the `limit` the sequence declares
+/// (ADR-0008). `canal_usado` is a named output, so the example shows that side
+/// of the contract too — `assign` reads it as `result.outputs.canal_usado`.
+#[step(name = "medir_voltaje", outputs(canal_usado: f64))]
+fn measure_voltage(canal: Option<f64>) -> Outcome {
+    let canal = canal.unwrap_or(1.0);
+    Outcome::measured(4.2)
+        .message(format!("measured on channel {canal}"))
+        .output("canal_usado", canal)
 }
 
-bindings::export!(Component with_types_in bindings);
+/// Connects to the instrument; fails once, then passes.
+///
+/// The same shape as `pasos_demo::conectar` in the embedded executor: a
+/// transient failure on attempt 1 that passes from attempt 2 — which is how the
+/// attempt number reaching the step is exercised (RF-09). It takes a `ctx`
+/// because it asks for one; the step above does not.
+#[step(name = "conectar_equipo")]
+fn connect(ctx: Ctx) -> Outcome {
+    if ctx.attempt == 1 {
+        // The unit, as far as this fake step is concerned: `fail`. A bench
+        // problem would be `error` (ADR-0019, Rule 2).
+        return Outcome::failed("lost the handshake (transient)");
+    }
+    Outcome::passed("connected")
+}
+
+/// Greets whoever the sequence names.
+///
+/// The original hello-world, now with its parameter extracted by the SDK. If
+/// the sequence says `a_quien: 3`, the step is never called: the mismatch comes
+/// back as `error` naming the parameter, instead of a number quietly turned
+/// into text.
+#[step]
+fn hola(ctx: Ctx, a_quien: Option<String>) -> Outcome {
+    let who = a_quien.unwrap_or_else(|| ctx.step_name.clone());
+    Outcome::passed(format!("hola {who} (attempt {})", ctx.attempt))
+}
+
+anvil_step::export!();
