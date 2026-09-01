@@ -46,8 +46,6 @@ pub use anvil_step_macros::step;
 // authoring surface: a step never names them.
 #[doc(hidden)]
 pub use inventory;
-#[doc(hidden)]
-pub use wit_bindgen;
 
 #[cfg(target_arch = "wasm32")]
 pub mod bindings;
