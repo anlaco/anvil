@@ -28,12 +28,12 @@ jobs:
       # deploy key (secret `WASI_GRPC_DEPLOY_KEY`): the default `GITHUB_TOKEN`
       # only covers this repository.
       - name: Checkout anvil
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           path: anvil
 
       - name: Checkout wasi-grpc (sibling repo)
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           repository: anlaco/wasi-grpc
           ssh-key: ${{ secrets.WASI_GRPC_DEPLOY_KEY }}
