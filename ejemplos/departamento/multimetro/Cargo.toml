@@ -1,0 +1,10 @@
+[package]
+name = "multimetro"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+anvil-step = { path = "../../../executors/rust/anvil-step" }
+
+[lib]
+crate-type = ["cdylib"]

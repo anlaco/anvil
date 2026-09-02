@@ -23,16 +23,16 @@
 //! - `--list`: print what is served — modules, hashes and signatures — and
 //!   exit, without listening. The *enumerate* door for an editor.
 //!
-//! The qualified name travels **inside `StepRequest.name`**, which is an opaque
-//! string to `paso.proto`. That is why serving many modules costs no contract
-//! change, no engine change and no WIT change.
-//!
 //! - `--port`: port to listen on. `anvil-host` always passes a concrete one
 //!   (it reserves `127.0.0.1:0` before spawning, as it already did for the
 //!   gRPC `.wasm` guests). Defaults to 0 (ephemeral; only useful by hand,
 //!   since there is no way to learn the assigned port).
 //! - `--bind`: IP to bind to; defaults to 127.0.0.1 (loopback-only).
 //!   `--bind 0.0.0.0` enables the remote case (Raspberry Pi).
+//!
+//! The qualified name travels **inside `StepRequest.name`**, which is an opaque
+//! string to `paso.proto`. That is why serving many modules costs no contract
+//! change, no engine change and no WIT change.
 //!
 //! The bridge is NATIVE Anvil code: that is why it can use tonic (unlike the
 //! WASM guests, which use wasi-grpc). anvil-host spawns it from the file that

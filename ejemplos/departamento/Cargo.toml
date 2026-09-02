@@ -1,0 +1,9 @@
+# A department's working directory (ADR-0025): two modules, built into one
+# shared `target/`, so that a single directory holds both `.wasm` files and
+# `anvil-exec-wasm` can serve them together.
+#
+#   cargo build --target wasm32-wasip2 --manifest-path ejemplos/departamento/Cargo.toml
+#   # → ejemplos/departamento/target/wasm32-wasip2/debug/{multimetro,plc}.wasm
+[workspace]
+members = ["multimetro", "plc"]
+resolver = "2"
