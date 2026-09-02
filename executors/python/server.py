@@ -260,9 +260,9 @@ def steps_paths(args):
     """
     if args.steps:
         return args.steps
-    del_entorno = os.environ.get(STEPS_ENV)
-    if del_entorno:
-        return [p for p in del_entorno.split(os.pathsep) if p]
+    from_env = os.environ.get(STEPS_ENV)
+    if from_env:
+        return [p for p in from_env.split(os.pathsep) if p]
     return [STEPS_DEFAULT] if os.path.isdir(STEPS_DEFAULT) else []
 
 
@@ -287,11 +287,11 @@ def print_catalog(registry):
         print("this executor serves no steps (nothing found under the steps path)")
         return
     for spec in registry.catalog():
-        firma = ", ".join(
+        signature = ", ".join(
             f"{p.name}: {p.type}" + ("" if p.required else f" = {p.default!r}")
             for p in spec.inputs
         )
-        print(f"{spec.name}({firma})")
+        print(f"{spec.name}({signature})")
         if spec.doc:
             print(f"    {spec.doc}")
         if spec.outputs:
@@ -325,7 +325,7 @@ def main():
 
     rutas = steps_paths(args)
     try:
-        cargados = discover(rutas)
+        loaded = discover(rutas)
     except DiscoveryError as e:
         # Loud and up front: an executor that serves the wrong catalog is worse
         # than one that refuses to start.
@@ -344,7 +344,7 @@ def main():
     server.start()
     print(
         f"python executor listening on {HOST}:{args.port} — "
-        f"{len(REGISTRY)} step(s) from {len(cargados)} module(s): "
+        f"{len(REGISTRY)} step(s) from {len(loaded)} module(s): "
         f"{', '.join(s.name for s in REGISTRY.catalog()) or 'none'}"
     )
     if not len(REGISTRY):

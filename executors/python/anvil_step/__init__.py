@@ -397,12 +397,12 @@ class Step:
 
         A mismatch is always ``error``, never ``fail`` and never a default.
         """
-        for nombre in inputs:
-            if not any(p.name == nombre for p in self.spec.inputs):
+        for name in inputs:
+            if not any(p.name == name for p in self.spec.inputs):
                 conocidos = ", ".join(p.name for p in self.spec.inputs) or "none"
                 return (
                     f"the step '{self.spec.name}' does not take a parameter "
-                    f"called '{nombre}' (it takes: {conocidos})"
+                    f"called '{name}' (it takes: {conocidos})"
                 )
         for p in self.spec.inputs:
             if p.name not in inputs:
@@ -447,11 +447,11 @@ class Registry:
         self._steps: Dict[str, Step] = {}
 
     def add(self, s: Step) -> None:
-        previo = self._steps.get(s.spec.name)
-        if previo is not None:
+        earlier = self._steps.get(s.spec.name)
+        if earlier is not None:
             raise DiscoveryError(
                 f"two steps are called '{s.spec.name}': "
-                f"{_where(previo.func)} and {_where(s.func)}. "
+                f"{_where(earlier.func)} and {_where(s.func)}. "
                 f"The name is what a sequence dispatches on, so it must be unique"
             )
         self._steps[s.spec.name] = s
@@ -474,10 +474,10 @@ REGISTRY = Registry()
 #: step module —which imports `step` and knows nothing about registries— lands
 #: in the registry the caller asked for. It is what makes the SDK testable
 #: without a process-wide global.
-_ACTUAL: Optional[Registry] = None
+_CURRENT: Optional[Registry] = None
 
 
-def _destino(registry: Optional[Registry]) -> Registry:
+def _target_registry(registry: Optional[Registry]) -> Registry:
     """Where a `@step` goes: the one named, the one being discovered, or the
     process-wide one.
 
@@ -488,7 +488,7 @@ def _destino(registry: Optional[Registry]) -> Registry:
     """
     if registry is not None:
         return registry
-    return _ACTUAL if _ACTUAL is not None else REGISTRY
+    return _CURRENT if _CURRENT is not None else REGISTRY
 
 
 def _where(func: Callable[..., Any]) -> str:
@@ -500,7 +500,7 @@ def _where(func: Callable[..., Any]) -> str:
         return getattr(func, "__name__", "<unknown>")
 
 
-def _type_mismatch(declarado: str, valor: Any) -> Optional[str]:
+def _type_mismatch(declared: str, value: Any) -> Optional[str]:
     """The name of the type that arrived when it is not the declared one.
 
     ``UNSPECIFIED`` accepts anything: a type the step never claimed cannot be
@@ -510,10 +510,10 @@ def _type_mismatch(declarado: str, valor: Any) -> Optional[str]:
     through and the step would measure on channel 1 while the sequence said
     ``true``.
     """
-    if declarado == UNSPECIFIED:
+    if declared == UNSPECIFIED:
         return None
-    llego = _TYPES.get(type(valor), UNSPECIFIED)
-    return None if llego == declarado else (llego if llego != UNSPECIFIED else type(valor).__name__)
+    arrived = _TYPES.get(type(value), UNSPECIFIED)
+    return None if arrived == declared else (arrived if arrived != UNSPECIFIED else type(value).__name__)
 
 
 def _type_of(annotation: Any) -> str:
@@ -582,22 +582,22 @@ def step(
     The docstring's first line becomes the step's ``doc`` in the catalog.
     """
 
-    def decora(f: Callable[..., Any]) -> Callable[..., Any]:
-        entradas, wants_ctx = _inputs_of(f)
+    def decorate(f: Callable[..., Any]) -> Callable[..., Any]:
+        inputs, wants_ctx = _inputs_of(f)
         doc = (inspect.getdoc(f) or "").strip().split("\n")[0]
         spec = StepSpec(
             name=name or f.__name__,
-            inputs=entradas,
+            inputs=inputs,
             outputs=_outputs_of(outputs),
             doc=doc,
         )
-        _destino(registry).add(Step(spec=spec, func=f, wants_ctx=wants_ctx))
+        _target_registry(registry).add(Step(spec=spec, func=f, wants_ctx=wants_ctx))
         # The function is returned untouched: a step is still an ordinary
         # function and its own unit tests call it directly, with no executor
         # and no gRPC in the way.
         return f
 
-    return decora if func is None else decora(func)
+    return decorate if func is None else decorate(func)
 
 
 def discover(paths: Iterable[str], registry: Optional[Registry] = None) -> List[Path]:
@@ -615,39 +615,39 @@ def discover(paths: Iterable[str], registry: Optional[Registry] = None) -> List[
     silently serves nothing because of a typo in a path is the emptiest
     possible false green.
     """
-    global _ACTUAL
-    reg = _destino(registry)
-    anterior, _ACTUAL = _ACTUAL, reg
+    global _CURRENT
+    reg = _target_registry(registry)
+    previous, _CURRENT = _CURRENT, reg
     try:
-        return _descubre(paths, reg)
+        return _discover_into(paths, reg)
     finally:
-        _ACTUAL = anterior
+        _CURRENT = previous
 
 
-def _descubre(paths: Iterable[str], reg: Registry) -> List[Path]:
-    cargados: List[Path] = []
-    for bruto in paths:
-        p = Path(bruto).expanduser()
+def _discover_into(paths: Iterable[str], reg: Registry) -> List[Path]:
+    loaded: List[Path] = []
+    for raw in paths:
+        p = Path(raw).expanduser()
         if not p.exists():
             raise DiscoveryError(f"the steps path '{p}' does not exist")
         if p.is_file():
-            _importa(p, reg)
-            cargados.append(p)
+            _import_one(p, reg)
+            loaded.append(p)
             continue
         dir_str = str(p.resolve())
         if dir_str not in sys.path:
             sys.path.insert(0, dir_str)
-        for hijo in sorted(p.iterdir()):
-            if hijo.name.startswith(("_", ".")):
+        for child in sorted(p.iterdir()):
+            if child.name.startswith(("_", ".")):
                 continue
-            if hijo.suffix == ".py" or (hijo.is_dir() and (hijo / "__init__.py").exists()):
-                destino = hijo / "__init__.py" if hijo.is_dir() else hijo
-                _importa(destino, reg)
-                cargados.append(hijo)
-    return cargados
+            if child.suffix == ".py" or (child.is_dir() and (child / "__init__.py").exists()):
+                target = child / "__init__.py" if child.is_dir() else child
+                _import_one(target, reg)
+                loaded.append(child)
+    return loaded
 
 
-def _importa(fichero: Path, reg: Registry) -> None:
+def _import_one(file: Path, reg: Registry) -> None:
     """Imports one module by path, under a name that cannot collide.
 
     The name carries a digest of the full path: two ``instrument.py`` under
@@ -655,17 +655,17 @@ def _importa(fichero: Path, reg: Registry) -> None:
     overwrite the first in ``sys.modules`` would serve a catalog nobody asked
     for.
     """
-    ruta = fichero.resolve()
-    huella = hashlib.sha256(str(ruta).encode("utf-8")).hexdigest()[:8]
-    nombre = f"anvil_steps_{ruta.stem}_{huella}"
-    spec = importlib.util.spec_from_file_location(nombre, fichero)
+    path = file.resolve()
+    digest = hashlib.sha256(str(path).encode("utf-8")).hexdigest()[:8]
+    name = f"anvil_steps_{path.stem}_{digest}"
+    spec = importlib.util.spec_from_file_location(name, file)
     if spec is None or spec.loader is None:
-        raise DiscoveryError(f"'{fichero}' cannot be imported as a Python module")
-    modulo = importlib.util.module_from_spec(spec)
-    sys.modules[nombre] = modulo
+        raise DiscoveryError(f"'{file}' cannot be imported as a Python module")
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[name] = module
     try:
-        spec.loader.exec_module(modulo)
+        spec.loader.exec_module(module)
     except DiscoveryError:
         raise
     except Exception as e:  # noqa: BLE001 — the file is the user's, not ours
-        raise DiscoveryError(f"'{fichero}' failed while importing: {e}") from e
+        raise DiscoveryError(f"'{file}' failed while importing: {e}") from e
