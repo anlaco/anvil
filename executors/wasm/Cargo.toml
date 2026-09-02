@@ -20,6 +20,9 @@ prost = "0.13"
 # tokio: the async runtime tonic needs (the bridge is native, no WASM
 # constraints).
 tokio = { version = "1", features = ["rt-multi-thread"] }
+# sha2: each module's artifact hash (ADR-0025 §6). Hashing reads the file and
+# compiles nothing, which is what keeps "what do you serve?" a cheap question.
+sha2 = "0.10"
 
 [dev-dependencies]
 # For the tests only: comparing `CONTRACT` with `modelo`'s so the two copies

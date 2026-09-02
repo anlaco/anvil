@@ -8,9 +8,25 @@
 //! `run(name, attempt, inputs) -> step-result`.
 //!
 //! Usage:
-//!   anvil-exec-wasm --wasm <path.wasm> [--port <port>] [--bind <ip>]
+//!   anvil-exec-wasm (--wasm <path.wasm> | --modules <dir>...) [--port <port>]
+//!                   [--bind <ip>] [--list]
 //!
-//! - `--wasm`: path to the component (required).
+//! It serves **one or more modules** (ADR-0025): a department that loads what
+//! is in its working directory, not the module itself. Which of the two it is
+//! comes from how it was pointed:
+//!
+//! - `--wasm <file>`: one module, and steps keep their **bare** names. What
+//!   every sequence written before ADR-0025 says, and it keeps working.
+//! - `--modules <dir>`: every `*.wasm` in the directory (repeatable), and
+//!   steps are named `<module>/<step>`. A module's logical name is its file
+//!   stem, so neither the extension nor the path reaches the YAML.
+//! - `--list`: print what is served — modules, hashes and signatures — and
+//!   exit, without listening. The *enumerate* door for an editor.
+//!
+//! The qualified name travels **inside `StepRequest.name`**, which is an opaque
+//! string to `paso.proto`. That is why serving many modules costs no contract
+//! change, no engine change and no WIT change.
+//!
 //! - `--port`: port to listen on. `anvil-host` always passes a concrete one
 //!   (it reserves `127.0.0.1:0` before spawning, as it already did for the
 //!   gRPC `.wasm` guests). Defaults to 0 (ephemeral; only useful by hand,
@@ -23,11 +39,13 @@
 //! ships next to it (ADR-0023): it lives beside the `anvil` binary, and the
 //! same file can be copied and launched by hand.
 
+use std::collections::BTreeMap;
 use std::net::{IpAddr, SocketAddr};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::thread;
 
+use sha2::{Digest, Sha256};
 use tonic::{transport::Server, Request, Response, Status};
 use wasmtime::component::{bindgen, Component, Linker, ResourceTable};
 use wasmtime::{Engine, Store};
@@ -199,15 +217,260 @@ impl LoadedComponent {
     }
 }
 
+/// The separator between a module's logical name and a step's, in the name
+/// that travels in `StepRequest.name` (ADR-0025 §2).
+///
+/// The qualified name rides **inside the existing field**, which is an opaque
+/// string as far as `paso.proto` is concerned. That is what lets a department
+/// serve many modules without touching the contract, the engine or the WIT.
+const MODULE_SEP: char = '/';
+
+/// One module the bridge serves: a `.wasm` under its working directory.
+///
+/// The **logical name is the file stem** (`multimetro.wasm` → `multimetro`),
+/// so neither the extension nor the path ever reaches the sequence
+/// (ADR-0025 §3): rewriting a module in another language, or the department
+/// reorganising its folders, must not edit anybody's YAML.
+struct Module {
+    path: PathBuf,
+    /// SHA-256 of the artifact, computed when the set is built — that is, by
+    /// reading the file, without compiling anything. Asking a department for
+    /// its hashes has to stay cheap, because it is what invalidates an
+    /// editor's catalog cache (ADR-0025 §5).
+    hash: String,
+    /// `None` until something actually needs this module. Loading is what
+    /// costs (wasmtime compiles the component), so it is paid per module and
+    /// on demand: `--validate` with no catalog compiles nothing, and a broken
+    /// `.wasm` sitting in the folder no longer takes the whole bridge down —
+    /// only whoever uses it fails.
+    loaded: Option<LoadedComponent>,
+}
+
+/// What this bridge serves: one or more modules, and how a step name maps onto
+/// them.
+struct ModuleSet {
+    engine: Engine,
+    modules: BTreeMap<String, Module>,
+    /// Whether step names carry a `module/` prefix.
+    ///
+    /// It comes from what the bridge was pointed at, and the two modes are
+    /// kept apart on purpose rather than blended: `--wasm <file>` serves one
+    /// module and steps keep their **bare** names, which is what every
+    /// sequence written before ADR-0025 says; `--modules <dir>` serves the
+    /// whole folder and steps are **qualified**. Mixing them would make
+    /// `medir_voltaje` mean different things depending on what else happens to
+    /// be in the directory.
+    qualified: bool,
+}
+
+impl ModuleSet {
+    /// The single-file mode: one module, bare step names. What `--wasm` gives.
+    ///
+    /// This one is loaded **eagerly**, unlike the directory mode. Laziness is
+    /// there so that one broken `.wasm` in a folder does not take down the
+    /// modules nobody asked about; with a single file pointed at by hand there
+    /// are no others, and finding out at the first step that it is not a
+    /// component —or is a core module, DIAG-5— would be finding out with the
+    /// unit already on the bench.
+    fn from_file(engine: Engine, path: &Path) -> Result<Self, String> {
+        let mut modules = BTreeMap::new();
+        let (name, mut module) = read_module(path)?;
+        let bytes =
+            std::fs::read(path).map_err(|e| format!("could not read '{}': {e}", path.display()))?;
+        module.loaded = Some(
+            LoadedComponent::load(&engine, &bytes)
+                .map_err(|e| format!("could not load the component '{}': {e}", path.display()))?,
+        );
+        modules.insert(name, module);
+        Ok(ModuleSet {
+            engine,
+            modules,
+            qualified: false,
+        })
+    }
+
+    /// The directory mode: every `*.wasm` in the given directories, qualified
+    /// step names. What `--modules` gives.
+    fn from_dirs(engine: Engine, dirs: &[PathBuf]) -> Result<Self, String> {
+        let mut modules: BTreeMap<String, Module> = BTreeMap::new();
+        for dir in dirs {
+            let entries = std::fs::read_dir(dir).map_err(|e| {
+                format!(
+                    "could not read the module directory '{}': {e}",
+                    dir.display()
+                )
+            })?;
+            for entry in entries {
+                let path = entry
+                    .map_err(|e| format!("could not read an entry of '{}': {e}", dir.display()))?
+                    .path();
+                if path.extension().and_then(|e| e.to_str()) != Some("wasm") {
+                    continue;
+                }
+                let (name, module) = read_module(&path)?;
+                // Two files with the same logical name would make a step name
+                // ambiguous, and serving the wrong one is worse than not
+                // starting: it would run a different step than the one the
+                // sequence asked for, and the report would not say so.
+                if let Some(previous) = modules.get(&name) {
+                    return Err(format!(
+                        "two modules are both called '{name}': '{}' and '{}'. A module's logical \
+                         name is its file stem, so rename one of the two files",
+                        previous.path.display(),
+                        path.display()
+                    ));
+                }
+                modules.insert(name, module);
+            }
+        }
+        if modules.is_empty() {
+            let list = dirs
+                .iter()
+                .map(|d| d.display().to_string())
+                .collect::<Vec<_>>()
+                .join(", ");
+            return Err(format!("no '.wasm' module found under: {list}"));
+        }
+        Ok(ModuleSet {
+            engine,
+            modules,
+            qualified: true,
+        })
+    }
+
+    /// Splits a step name into (module, step).
+    ///
+    /// In single-file mode the whole name is the step's, and the module is the
+    /// only one there is. In directory mode the prefix is required: guessing a
+    /// module because there happens to be one that serves that step would make
+    /// the sequence's meaning depend on the folder's contents.
+    fn resolve(&self, name: &str) -> Result<(String, String), String> {
+        if !self.qualified {
+            let module = self
+                .modules
+                .keys()
+                .next()
+                .expect("single-file mode always has exactly one module");
+            return Ok((module.clone(), name.to_string()));
+        }
+        let (module, step) = name.split_once(MODULE_SEP).ok_or_else(|| {
+            format!(
+                "step '{name}' has no module: this executor serves several modules, so a step is \
+                 named '<module>{MODULE_SEP}<step>'. It serves: {}",
+                self.module_names()
+            )
+        })?;
+        if !self.modules.contains_key(module) {
+            return Err(format!(
+                "this executor serves no module called '{module}'. It serves: {}",
+                self.module_names()
+            ));
+        }
+        Ok((module.to_string(), step.to_string()))
+    }
+
+    fn module_names(&self) -> String {
+        self.modules.keys().cloned().collect::<Vec<_>>().join(", ")
+    }
+
+    /// The module's component, loading it the first time it is needed.
+    fn component(&mut self, module: &str) -> Result<&mut LoadedComponent, String> {
+        // Split borrow: `engine` and `modules` are different fields, and
+        // taking them apart is what lets the load happen behind `&mut self`.
+        let ModuleSet {
+            engine, modules, ..
+        } = self;
+        let m = modules
+            .get_mut(module)
+            .ok_or_else(|| format!("unknown module '{module}'"))?;
+        if m.loaded.is_none() {
+            let bytes = std::fs::read(&m.path)
+                .map_err(|e| format!("could not read '{}': {e}", m.path.display()))?;
+            let loaded = LoadedComponent::load(engine, &bytes).map_err(|e| {
+                format!(
+                    "could not load the module '{module}' ({}): {e}",
+                    m.path.display()
+                )
+            })?;
+            m.loaded = Some(loaded);
+        }
+        Ok(m.loaded.as_mut().expect("just loaded"))
+    }
+
+    /// The catalog of every module, with each step's name qualified.
+    ///
+    /// A module that cannot be loaded, or that traps while describing itself,
+    /// **does not take the other modules' catalog down with it**: its steps
+    /// stay out and the reason goes to stderr. Anvil then reports those steps
+    /// as unchecked, which is ADR-0021 §4 — not being checked is not the same
+    /// as being fine, and it is said out loud.
+    // `clippy::result_large_err`: the inner `Result` is `describe`'s, whose
+    // `Err` is `tonic::Status` — see the note on `LoadedComponent::call`.
+    #[allow(clippy::result_large_err)]
+    fn catalog(&mut self) -> Vec<pb::StepSpec> {
+        let names: Vec<String> = self.modules.keys().cloned().collect();
+        let qualified = self.qualified;
+        let mut out = Vec::new();
+        for module in names {
+            let specs = match self.component(&module).map(|c| c.describe()) {
+                Ok(Ok(specs)) => specs,
+                Ok(Err(status)) => {
+                    eprintln!(
+                        "anvil-exec-wasm: module '{module}' could not describe itself ({}); its \
+                         steps stay unchecked",
+                        status.message()
+                    );
+                    continue;
+                }
+                Err(e) => {
+                    eprintln!(
+                        "anvil-exec-wasm: module '{module}' could not be loaded ({e}); its steps \
+                         stay unchecked"
+                    );
+                    continue;
+                }
+            };
+            out.extend(specs.into_iter().map(|mut s| {
+                if qualified {
+                    s.name = format!("{module}{MODULE_SEP}{}", s.name);
+                }
+                s
+            }));
+        }
+        out
+    }
+}
+
+/// Reads a `.wasm` off disk: its logical name and its hash, without compiling
+/// it. Loading is deferred to `ModuleSet::component`.
+fn read_module(path: &Path) -> Result<(String, Module), String> {
+    let name = path
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .ok_or_else(|| format!("'{}' has no usable file name", path.display()))?
+        .to_string();
+    let bytes =
+        std::fs::read(path).map_err(|e| format!("could not read '{}': {e}", path.display()))?;
+    let hash = format!("{:x}", Sha256::digest(&bytes));
+    Ok((
+        name,
+        Module {
+            path: path.to_path_buf(),
+            hash,
+            loaded: None,
+        },
+    ))
+}
+
 /// The `StepExecutor` gRPC service (the engine's contract). Every `Invoke`
-/// delegates to the loaded component.
+/// resolves its module and delegates to the component.
 ///
 /// The `Mutex` is the standard (blocking) one: wasmtime's `run` call is
 /// synchronous and the engine is sequential (one request at a time per
 /// client), so there is no contention. If parallelism ever arrives,
 /// `spawn_blocking` is what keeps the async runtime from stalling.
 struct ExecutorService {
-    component: Arc<Mutex<LoadedComponent>>,
+    modules: Arc<Mutex<ModuleSet>>,
 }
 
 #[tonic::async_trait]
@@ -247,11 +510,25 @@ impl StepExecutor for ExecutorService {
         // that drives the runtime is what keeps a debug print a debug print
         // (RF-12).
         let response = tokio::task::block_in_place(|| {
-            let mut comp = self
-                .component
+            let mut set = self
+                .modules
                 .lock()
-                .map_err(|_| Status::internal("component in use"))?;
-            comp.call(&req.name, req.attempt, &inputs)
+                .map_err(|_| Status::internal("executor in use"))?;
+            // Which module, and what the step is called inside it. A name that
+            // does not resolve is `invalid_argument` and names what is served:
+            // the sequence asked for something this department does not have,
+            // and that is information about the bench, never about the unit
+            // (ADR-0019, Rule 2).
+            let (module, step) = set.resolve(&req.name).map_err(Status::invalid_argument)?;
+            let mut result = set.component(&module).map_err(Status::internal)?.call(
+                &step,
+                req.attempt,
+                &inputs,
+            )?;
+            // The engine routed on the qualified name and expects it back:
+            // `StepResult.name` is what the report is written from.
+            result.name = req.name.clone();
+            Ok::<_, Status>(result)
         })?;
         Ok(Response::new(response))
     }
@@ -282,10 +559,12 @@ impl StepExecutor for ExecutorService {
     async fn describe(&self, _r: Request<CatalogRequest>) -> Result<Response<Catalog>, Status> {
         // `block_in_place` for the same reason as in `invoke`, above.
         let steps = tokio::task::block_in_place(|| {
-            self.component
-                .lock()
-                .map_err(|_| Status::internal("component in use"))?
-                .describe()
+            Ok::<_, Status>(
+                self.modules
+                    .lock()
+                    .map_err(|_| Status::internal("executor in use"))?
+                    .catalog(),
+            )
         })?;
         Ok(Response::new(Catalog {
             describes: !steps.is_empty(),
@@ -299,10 +578,25 @@ impl StepExecutor for ExecutorService {
     }
 }
 
-fn parse_args() -> Result<(PathBuf, u16, IpAddr), String> {
+/// What the bridge was told to serve.
+struct Args {
+    wasm: Option<PathBuf>,
+    modules: Vec<PathBuf>,
+    port: u16,
+    bind: IpAddr,
+    /// `--list`: print the catalog and exit, without listening. The
+    /// *enumerate* operation of ADR-0025 §4 — what an editor needs, and what
+    /// answers "which steps does this executor serve?" without starting a
+    /// bench. The same door the Python executor already has.
+    list: bool,
+}
+
+fn parse_args() -> Result<Args, String> {
     let mut wasm: Option<PathBuf> = None;
+    let mut modules: Vec<PathBuf> = Vec::new();
     let mut port: u16 = 0;
     let mut bind: IpAddr = "127.0.0.1".parse().unwrap();
+    let mut list = false;
     let args: Vec<String> = std::env::args().skip(1).collect();
     let mut i = 0;
     while i < args.len() {
@@ -311,6 +605,11 @@ fn parse_args() -> Result<(PathBuf, u16, IpAddr), String> {
                 i += 1;
                 wasm = Some(PathBuf::from(args.get(i).ok_or("--wasm with no value")?));
             }
+            "--modules" => {
+                i += 1;
+                modules.push(PathBuf::from(args.get(i).ok_or("--modules with no value")?));
+            }
+            "--list" => list = true,
             "--port" => {
                 i += 1;
                 port = args
@@ -331,45 +630,145 @@ fn parse_args() -> Result<(PathBuf, u16, IpAddr), String> {
         }
         i += 1;
     }
-    Ok((wasm.ok_or("missing --wasm <path.wasm>")?, port, bind))
+    if wasm.is_some() && !modules.is_empty() {
+        return Err(
+            "--wasm and --modules are exclusive: one file, or one or more directories".to_string(),
+        );
+    }
+    if wasm.is_none() && modules.is_empty() {
+        return Err("missing --wasm <path.wasm> or --modules <dir>".to_string());
+    }
+    Ok(Args {
+        wasm,
+        modules,
+        port,
+        bind,
+        list,
+    })
+}
+
+/// `--list`: every module, its hash and the steps it serves with their
+/// signature. Loads each module, because describing is the only way to know —
+/// which is why this is a tooling operation and not something a run does
+/// (ADR-0025 §4).
+// `clippy::result_large_err`: as in `ModuleSet::catalog`, above.
+#[allow(clippy::result_large_err)]
+fn print_catalog(set: &mut ModuleSet) {
+    let names: Vec<String> = set.modules.keys().cloned().collect();
+    for module in names {
+        let hash = set.modules[&module].hash.clone();
+        let path = set.modules[&module].path.display().to_string();
+        println!("{module}  sha256:{hash}");
+        println!("    {path}");
+        let specs = match set.component(&module).map(|c| c.describe()) {
+            Ok(Ok(specs)) => specs,
+            Ok(Err(status)) => {
+                println!("    (does not describe itself: {})", status.message());
+                continue;
+            }
+            Err(e) => {
+                println!("    (could not be loaded: {e})");
+                continue;
+            }
+        };
+        if specs.is_empty() {
+            println!("    (serves no steps)");
+            continue;
+        }
+        for s in specs {
+            let signature = s
+                .inputs
+                .iter()
+                .map(|p| {
+                    let t = match pb::ValueType::try_from(p.r#type) {
+                        Ok(pb::ValueType::Number) => "number",
+                        Ok(pb::ValueType::Text) => "text",
+                        Ok(pb::ValueType::Boolean) => "boolean",
+                        Ok(pb::ValueType::Reference) => "reference",
+                        _ => "unspecified",
+                    };
+                    if p.required {
+                        format!("{}: {t}", p.name)
+                    } else {
+                        format!("{}: {t} = optional", p.name)
+                    }
+                })
+                .collect::<Vec<_>>()
+                .join(", ");
+            // Printed exactly as a sequence must write it: qualified only when
+            // this executor serves several modules. A listing that showed a
+            // prefix the YAML must not carry would be a listing that lies.
+            if set.qualified {
+                println!("    {module}{MODULE_SEP}{}({signature})", s.name);
+            } else {
+                println!("    {}({signature})", s.name);
+            }
+            if !s.doc.is_empty() {
+                println!("        {}", s.doc);
+            }
+            if !s.outputs.is_empty() {
+                let outs = s
+                    .outputs
+                    .iter()
+                    .map(|o| o.name.clone())
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                println!("        outputs: {outs}");
+            }
+        }
+    }
 }
 
 fn main() {
-    let (wasm_path, port, bind) = match parse_args() {
+    let args = match parse_args() {
         Ok(x) => x,
         Err(e) => {
             eprintln!(
-                "usage: anvil-exec-wasm --wasm <path.wasm> [--port <port>] [--bind <ip>]\n{e}"
+                "usage: anvil-exec-wasm (--wasm <path.wasm> | --modules <dir>...) \
+                 [--port <port>] [--bind <ip>] [--list]\n{e}"
             );
             std::process::exit(2);
         }
     };
 
-    let bytes = match std::fs::read(&wasm_path) {
-        Ok(b) => b,
-        Err(e) => {
-            eprintln!("could not read '{}': {e}", wasm_path.display());
-            std::process::exit(1);
-        }
-    };
-
     let engine = Engine::default();
 
-    // Preload: instantiate the component at start-up (1 Store, N calls).
-    let component = match LoadedComponent::load(&engine, &bytes) {
-        Ok(c) => c,
+    // The modules are read (name and hash) but **not compiled** here: loading
+    // is per module and on demand, so a folder holding one broken `.wasm` still
+    // serves the rest, and `--validate` with no catalog compiles nothing.
+    let set = match &args.wasm {
+        Some(path) => ModuleSet::from_file(engine, path),
+        None => ModuleSet::from_dirs(engine, &args.modules),
+    };
+    let mut set = match set {
+        Ok(s) => s,
         Err(e) => {
-            eprintln!(
-                "could not load the component '{}': {e}",
-                wasm_path.display()
-            );
+            eprintln!("anvil-exec-wasm: {e}");
             std::process::exit(1);
         }
     };
-    let component = Arc::new(Mutex::new(component));
 
-    let addr = SocketAddr::new(bind, port);
-    let service = ExecutorService { component };
+    if args.list {
+        print_catalog(&mut set);
+        return;
+    }
+
+    // The hash goes into the log on every start: with the module named
+    // logically, this is what says which artifact actually answered
+    // (ADR-0025 §6). It is **not** yet in the run's report — that needs a field
+    // in the contract, and its own ADR.
+    for (name, m) in &set.modules {
+        eprintln!(
+            "anvil-exec-wasm: module '{name}' ({}) sha256:{}",
+            m.path.display(),
+            m.hash
+        );
+    }
+
+    let addr = SocketAddr::new(args.bind, args.port);
+    let service = ExecutorService {
+        modules: Arc::new(Mutex::new(set)),
+    };
 
     let rt = match tokio::runtime::Runtime::new() {
         Ok(rt) => rt,
@@ -383,7 +782,6 @@ fn main() {
         .add_service(StepExecutorServer::new(service))
         .serve(addr);
 
-    eprintln!("anvil-exec-wasm: loaded '{}'", wasm_path.display());
     eprintln!("anvil-exec-wasm: listening on {addr}");
 
     // Clean exit: the host spawns the bridge with stdin piped; when the host
@@ -451,6 +849,143 @@ mod tests {
     fn a_file_shorter_than_the_header_is_diagnosed() {
         let diag = diagnose_not_a_component(&COMPONENT_HEADER[..4]).expect("must diagnose");
         assert!(diag.contains("not a WebAssembly file"), "{diag}");
+    }
+
+    /// A `ModuleSet` with the given logical names and no file behind them.
+    /// Enough to exercise name resolution, which is the part that decides
+    /// **which module a step goes to** and never touches the disk.
+    fn set_with(names: &[&str], qualified: bool) -> ModuleSet {
+        let mut modules = BTreeMap::new();
+        for n in names {
+            modules.insert(
+                (*n).to_string(),
+                Module {
+                    path: PathBuf::from(format!("{n}.wasm")),
+                    hash: String::new(),
+                    loaded: None,
+                },
+            );
+        }
+        ModuleSet {
+            engine: Engine::default(),
+            modules,
+            qualified,
+        }
+    }
+
+    /// Single-file mode keeps bare names: this is what every sequence written
+    /// before ADR-0025 says, `ejemplos/demo_wasm.yaml` included.
+    #[test]
+    fn one_module_keeps_bare_step_names() {
+        let set = set_with(&["hola_paso"], false);
+        assert_eq!(
+            set.resolve("medir_voltaje").unwrap(),
+            ("hola_paso".to_string(), "medir_voltaje".to_string())
+        );
+    }
+
+    #[test]
+    fn a_qualified_name_picks_its_module() {
+        let set = set_with(&["multimetro", "plc"], true);
+        assert_eq!(
+            set.resolve("plc/medir_voltaje").unwrap(),
+            ("plc".to_string(), "medir_voltaje".to_string())
+        );
+        assert_eq!(
+            set.resolve("multimetro/medir_voltaje").unwrap(),
+            ("multimetro".to_string(), "medir_voltaje".to_string())
+        );
+    }
+
+    /// The whole point of qualifying: the same step name in two modules is two
+    /// different steps, and neither shadows the other.
+    #[test]
+    fn the_same_step_name_in_two_modules_does_not_collide() {
+        let set = set_with(&["multimetro", "plc"], true);
+        let (a, _) = set.resolve("multimetro/medir_voltaje").unwrap();
+        let (b, _) = set.resolve("plc/medir_voltaje").unwrap();
+        assert_ne!(a, b);
+    }
+
+    /// Serving several modules, a bare name is **not** guessed: which module a
+    /// step lands on would then depend on what else is in the folder.
+    ///
+    /// Seen to fail by making `resolve` fall back to the only module that
+    /// serves that step: the test goes green while the bridge starts choosing
+    /// for the sequence.
+    #[test]
+    fn a_bare_name_is_rejected_when_several_modules_are_served() {
+        let set = set_with(&["multimetro", "plc"], true);
+        let err = set.resolve("medir_voltaje").unwrap_err();
+        assert!(err.contains("has no module"), "{err}");
+        // And it says what there is, so the fix does not need a second run.
+        assert!(err.contains("multimetro") && err.contains("plc"), "{err}");
+    }
+
+    #[test]
+    fn an_unknown_module_names_the_ones_served() {
+        let set = set_with(&["multimetro"], true);
+        let err = set.resolve("osciloscopio/medir").unwrap_err();
+        assert!(err.contains("osciloscopio"), "{err}");
+        assert!(err.contains("multimetro"), "{err}");
+    }
+
+    /// Two files with the same stem make a step name ambiguous, and serving the
+    /// wrong one is worse than refusing to start: the run would measure with a
+    /// module nobody asked for and the report would not say so.
+    ///
+    /// Seen to fail by dropping the collision check (`insert` overwrites, last
+    /// one wins): the set builds happily with one module and the test stays
+    /// green only because it asserts on the error.
+    #[test]
+    fn two_modules_with_the_same_logical_name_are_refused() {
+        let dir = std::env::temp_dir().join(format!("anvil-modset-{}", std::process::id()));
+        let a = dir.join("a");
+        let b = dir.join("b");
+        std::fs::create_dir_all(&a).expect("create dir a");
+        std::fs::create_dir_all(&b).expect("create dir b");
+        // The content does not matter: the clash is decided by the name, and
+        // before anything is compiled.
+        std::fs::write(a.join("multimetro.wasm"), COMPONENT_HEADER).expect("write a");
+        std::fs::write(b.join("multimetro.wasm"), COMPONENT_HEADER).expect("write b");
+
+        let err = ModuleSet::from_dirs(Engine::default(), &[a, b])
+            .map(|_| ())
+            .unwrap_err();
+        assert!(
+            err.contains("two modules are both called 'multimetro'"),
+            "{err}"
+        );
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A directory with no `.wasm` is a misconfigured department, and saying so
+    /// at start-up beats answering "I serve nothing" to every step.
+    #[test]
+    fn an_empty_module_directory_is_refused() {
+        let dir = std::env::temp_dir().join(format!("anvil-modempty-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).expect("create dir");
+        let err = ModuleSet::from_dirs(Engine::default(), std::slice::from_ref(&dir))
+            .map(|_| ())
+            .unwrap_err();
+        assert!(err.contains("no '.wasm' module found"), "{err}");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// The logical name is the file stem: no extension, no path (ADR-0025 §3).
+    #[test]
+    fn the_logical_name_is_the_file_stem() {
+        let dir = std::env::temp_dir().join(format!("anvil-modstem-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).expect("create dir");
+        std::fs::write(dir.join("multimetro.wasm"), COMPONENT_HEADER).expect("write");
+        let set =
+            ModuleSet::from_dirs(Engine::default(), std::slice::from_ref(&dir)).expect("build");
+        assert_eq!(set.module_names(), "multimetro");
+        // And the hash is there without anything having been compiled.
+        assert_eq!(set.modules["multimetro"].hash.len(), 64);
+        assert!(set.modules["multimetro"].loaded.is_none());
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }
 
