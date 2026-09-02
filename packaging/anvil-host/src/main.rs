@@ -295,23 +295,34 @@ fn ruta_puente() -> Result<PathBuf, String> {
     Ok(ruta)
 }
 
-/// Spawns the bridge for a `.wasm` by path (M5-ext.2, ADR-0015):
+/// Spawns the bridge for a `.wasm` executor declared by path (M5-ext.2,
+/// ADR-0015; ADR-0025 for the directory case):
 ///
 /// 1. Reserves an **ephemeral** loopback port (`bind 127.0.0.1:0`).
 /// 2. Looks up the bridge binary next to this one (ADR-0023).
-/// 3. Spawns `anvil-exec-wasm --wasm <path> --port <port>` with stdin
-///    piped: the bridge exits on its own if the host dies (EOF).
+/// 3. Spawns `anvil-exec-wasm --wasm <file> --port <port>` — or
+///    `--modules <dir>` when the path is a directory — with stdin piped: the
+///    bridge exits on its own if the host dies (EOF).
 ///
-/// The bridge is the one loading the component into its own Store (empty
-/// WASI sandbox: no files, no network — the component is a pure function).
+/// **The path decides which of the two the executor is** (ADR-0025 §D2): a
+/// file serves one module and its steps keep their bare names, which is what
+/// every sequence written before ADR-0025 says; a directory serves every
+/// `*.wasm` in it and its steps are named `<module>/<step>`. Deriving it from
+/// what the YAML points at is what keeps the two modes from blending.
+///
+/// The bridge is the one loading the components into its own Store (empty
+/// WASI sandbox: no files, no network — a component is a pure function).
 fn instanciar_wasm(nombre: &str, path: &Path) -> Result<EjecutorWasm, String> {
-    let bytes = std::fs::read(path).map_err(|e| {
-        format!(
-            "el ejecutor '{nombre}' ({}) no se pudo leer: {e}",
-            path.display()
-        )
-    })?;
-    drop(bytes); // el puente es quien lee el fichero; aquí sólo validamos.
+    let es_directorio = path.is_dir();
+    if !es_directorio {
+        let bytes = std::fs::read(path).map_err(|e| {
+            format!(
+                "el ejecutor '{nombre}' ({}) no se pudo leer: {e}",
+                path.display()
+            )
+        })?;
+        drop(bytes); // el puente es quien lee el fichero; aquí sólo validamos.
+    }
 
     // Reservar un puerto efímero de loopback para el puente.
     let listener = TcpListener::bind("127.0.0.1:0")
@@ -327,7 +338,7 @@ fn instanciar_wasm(nombre: &str, path: &Path) -> Result<EjecutorWasm, String> {
     let puente = ruta_puente()?;
     let child = std::process::Command::new(&puente)
         .args([
-            "--wasm",
+            if es_directorio { "--modules" } else { "--wasm" },
             &path.display().to_string(),
             "--port",
             &puerto.to_string(),

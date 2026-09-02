@@ -378,6 +378,37 @@ install beyond the Rust toolchain.** Official reference: `ejemplos/hola-paso/`.
    component (empty WASI sandbox: no files, no network) and translates
    gRPC↔function.
 
+### One executor, several modules (ADR-0025)
+
+Point `path` at a **directory** instead of a file and every `*.wasm` in it is a
+module the same executor serves. A module's name is its file stem, and a step
+is then named `<module>/<step>`:
+
+```yaml
+executors:
+  - name: instrumentos
+    type: wasm
+    path: departamento/target/wasm32-wasip2/debug
+main:
+  - name: multimetro/medir_voltaje
+    executor: instrumentos
+  - name: plc/medir_voltaje        # same step name, different instrument
+    executor: instrumentos
+```
+
+The extension and the path never appear in the sequence, so the folder can be
+reorganised — or a module rewritten in another language — without editing the
+YAML. `ejemplos/demo_departamento.yaml` is the worked example; pointing `path`
+at a single file still works and keeps bare step names
+(`ejemplos/demo_wasm.yaml`).
+
+To see what a department serves without writing a sequence first, ask the
+bridge directly:
+
+```sh
+./anvil-exec-wasm --modules <dir> --list
+```
+
 Your steps are ordinary functions, so their own unit tests call them directly:
 `cargo test` needs no WASM and no Anvil — outside `wasm32`, `export!()` expands
 to nothing.

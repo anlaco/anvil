@@ -12,6 +12,42 @@ minors, con el cambio anotado aquí.
 
 ### Añadido
 
+- **Un ejecutor WASM sirve varios módulos**
+  ([ADR-0025](docs/adr/0025-the-executor-is-a-department-modules-by-logical-name.md)).
+  El `.wasm` deja de ser el ejecutor y pasa a ser un **módulo** dentro de él:
+  `path` admite ahora un **directorio**, cada `*.wasm` de dentro es un módulo
+  con el nombre lógico de su fichero, y un paso se llama `<módulo>/<paso>`.
+
+  ```yaml
+  executors:
+    - name: instrumentos
+      type: wasm
+      path: departamento/target/wasm32-wasip2/debug
+  main:
+    - name: multimetro/medir_voltaje
+      executor: instrumentos
+    - name: plc/medir_voltaje       # mismo nombre, otro instrumento
+      executor: instrumentos
+  ```
+
+  Ni la extensión ni la ruta aparecen en la secuencia, así que el ejecutor
+  puede reorganizar sus carpetas —o reescribir un módulo en otro lenguaje— sin
+  editar ningún YAML. Ejemplo completo en
+  [`ejemplos/demo_departamento.yaml`](ejemplos/demo_departamento.yaml).
+
+  **Apuntar `path` a un fichero sigue funcionando igual**, con los pasos sin
+  prefijo: las secuencias escritas hasta hoy no cambian
+  ([`ejemplos/demo_wasm.yaml`](ejemplos/demo_wasm.yaml)).
+
+  El nombre cualificado viaja dentro de `StepRequest.name`, que para
+  `paso.proto` es una cadena opaca: **no hay cambio de contrato, ni del motor,
+  ni del WIT**.
+
+- **`anvil-exec-wasm --list`**: imprime los módulos que sirve un ejecutor, su
+  SHA-256 y la firma de cada paso, y sale sin escuchar. Es la forma de
+  responder «¿qué pasos sirves?» sin montar un banco, y la puerta que
+  necesitaba un editor.
+
 - **`anvil-exec-python`**, the Python executor's launcher
   ([`executors/python/`](executors/python/)). Same product, the family's name,
   and it puts the executor's own directory on `sys.path` so nobody has to

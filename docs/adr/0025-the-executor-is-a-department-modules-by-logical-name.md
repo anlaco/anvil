@@ -1,7 +1,13 @@
 # ADR-0025: The executor is a department, and a step is addressed by logical module name
 
-- **Status:** Accepted — **decision only. Nothing here is implemented yet**, and
-  today's YAML keeps working exactly as it does (see §Scope).
+- **Status:** Accepted — written as a decision only.
+  > *(Implemented for the WASM executor on 2026-09-02, the same day: §1–§5 and
+  > the `--list` door are in `executors/wasm/`, and `path:` now takes a
+  > directory. **§6 is not**: the hash is computed, logged and shown by
+  > `--list`, but there is no field in `paso.proto` to carry it into the run's
+  > report, so that half still needs a contract change and its own ADR. §7 was
+  > already true and stays. §8–§9 (the pin) are not implemented. Nothing in
+  > §Deferred was touched, and the Python executor is untouched.)*
 - **Date:** 2026-09-02
 - **How it was decided:** in this repo, in a design conversation with
   management, starting from a question about the authoring experience: *"when I
