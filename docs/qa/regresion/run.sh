@@ -181,7 +181,7 @@ main:
   - name: medir
     executor: dmm
 YAML
-$A "$TMP/coremod.yaml" 2>&1 | grep -qiE 'módulo core|modulo core'
+$A "$TMP/coremod.yaml" 2>&1 | grep -qiE 'módulo core|modulo core|core module'
 check DIAG-5d "un .wasm módulo core se diagnostica como tal" $?
 
 # ---- LEC-1: `resultado.*` fuera de `asigna` debe ser error de carga ----
