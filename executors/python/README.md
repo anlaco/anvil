@@ -79,6 +79,7 @@ Keep it in this process and hand the sequence a handle to it
 ([ADR-0022](../../docs/adr/0022-la-referencia-a-objeto-es-un-cuarto-tipo-y-nombra-una-ranura.md)):
 
 ```python
+# mis_pasos/banco.py  → el módulo es `banco`
 from anvil_step import Context, Reference, Result, step
 
 
@@ -106,12 +107,12 @@ And in the sequence:
 locals:
   bench: { type: reference, executor: python }
 setup:
-  - name: open_bench
+  - name: banco/open_bench
     executor: python
     inputs: { address: '127.0.0.1:4000' }
     assign: { bench: result.outputs.bench }
 main:
-  - name: measure_bench
+  - name: banco/measure_bench
     executor: python
     inputs: { bench: '${locals.bench}' }
 ```
@@ -174,16 +175,51 @@ entre ellos.
 Una ruta que **no existe** es un fallo de arranque, no un aviso: un ejecutor que
 sirve el catálogo vacío por un dedazo en una ruta es un verde falso gratis.
 
+### Cómo se llama un paso: `<módulo>/<paso>`
+
+Cada `.py` es un **módulo**, y su nombre lógico es el del fichero sin extensión
+([ADR-0026](../../docs/adr/0026-the-python-executor-is-a-department-too.md)).
+Un paso se dirige con los dos:
+
+```yaml
+main:
+  - name: multimetro/medir_voltaje
+    executor: instrumentos
+  - name: plc/medir_voltaje       # mismo nombre, otro instrumento
+    executor: instrumentos
+```
+
+El módulo **se deriva del fichero, nunca se declara**: escribes una función y
+nada más, y renombrar o mover un módulo no obliga a editar los pasos de dentro.
+Un paquete toma el nombre de su carpeta, no `__init__`.
+
+Esto es lo que permite que dos módulos sirvan un `medir_voltaje` cada uno. Antes
+era un fallo de arranque —dos pasos no podían compartir nombre— y ahora es lo
+normal: lo que tiene que ser único es el nombre **dentro de** su módulo.
+
+> **Cambio de superficie.** Hasta la 0.3 los pasos se llamaban por su nombre
+> desnudo (`medir_voltaje`). Las secuencias escritas así hay que cualificarlas.
+> Anvil las caza antes de tocar la unidad: `--validate --with-executors` dice
+> qué sirve el ejecutor, con los nombres ya cualificados.
+
+Dos ficheros con el mismo nombre bajo dos `--steps` distintos hacen que el
+ejecutor **se niegue a arrancar**, nombrando los dos: servir el módulo
+equivocado es peor que no arrancar, y se detecta antes de importar nada —un
+import ejecuta código, y ese código puede tocar un instrumento.
+
 ### Ver el catálogo sin levantar nada
 
 ```sh
 $ python3 server.py --steps mis_pasos --list
-medir_resistencia(canal: number, escala: text = 'auto')
-    Mide resistencia en un canal, con la escala indicada.
-    outputs: serie: text
+resistencia  sha256:9f2c…
+    /home/tú/mis_pasos/resistencia.py
+    resistencia/medir_resistencia(canal: number, escala: text = 'auto')
+        Mide resistencia en un canal, con la escala indicada.
+        outputs: serie: text
 ```
 
-Es la misma información que Anvil obtiene por `Describe`.
+Es la misma información que Anvil obtiene por `Describe`, agrupada por módulo y
+con el SHA-256 del fichero que la sirvió.
 
 ## Requisitos
 
@@ -252,10 +288,12 @@ executors:
   - { name: python, type: grpc, host: 127.0.0.1, port: 9101 }
 main:
   - name: verificar_led          # servido por el ejecutor WASM embebido
-  - name: medir_simulador
+  # Los del ejecutor Python van con su módulo delante: viven en
+  # `steps/instrument.py`, así que el módulo es `instrument`.
+  - name: instrument/medir_simulador
     executor: python
     limit: { type: range, min: 4.0, max: 5.0 }
-  - name: conectar_equipo
+  - name: instrument/conectar_equipo
     executor: python
 ```
 

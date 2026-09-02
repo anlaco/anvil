@@ -112,20 +112,20 @@ executors:
 locals:
   bench: { type: reference, executor: banco }
 setup:
-  - name: open_bench
+  - name: instrument/open_bench
     executor: banco
     assign:
       bench: result.outputs.bench
 main:
-  - name: wait
+  - name: pacer/wait
     executor: reloj
     inputs: { seconds: 4 }
-  - name: measure_bench
+  - name: instrument/measure_bench
     executor: banco
     inputs:
       bench: '${locals.bench}'
 cleanup:
-  - name: close_bench
+  - name: instrument/close_bench
     executor: banco
     inputs:
       bench: '${locals.bench}'
@@ -143,8 +143,8 @@ res=0
 python3 - "$TMP/r2.json" <<'PY' || res=1
 import json, sys
 pasos = {p["name"]: p for p in json.load(open(sys.argv[1]))["steps"]}
-medir = pasos.get("measure_bench")
-cierre = pasos.get("close_bench")
+medir = pasos.get("instrument/measure_bench")
+cierre = pasos.get("instrument/close_bench")
 assert medir, "el paso de medida no está en el informe"
 assert medir["status"] == "error", f"medir salió {medir['status']}, no error"
 assert medir["measured_value"] is None, "no debería haber medido nada"
@@ -161,7 +161,7 @@ executors:
 locals:
   handle: { type: reference, executor: banco }
 main:
-  - name: mint_nasty_reference
+  - name: nasty/mint_nasty_reference
     executor: banco
     assign:
       handle: result.outputs.handle

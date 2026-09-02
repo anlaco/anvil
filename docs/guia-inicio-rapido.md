@@ -46,9 +46,12 @@ console. There are no dependencies to install.
 
 > **Executor routing (M5-ext.1, ADR-0013):** `ejemplos/demo_ejecutores.yaml`
 > demonstrates the name→endpoint dispatch: `verificar_led` is served by the
-> embedded executor (default) and `medir_simulador`/`conectar_equipo` by a
-> Python executor on `127.0.0.1:9101` (start `simulador_tcp.py` and
-> `server.py` from `executors/python/` in two other terminals). The flag
+> embedded executor (default) and `instrument/medir_simulador` /
+> `instrument/conectar_equipo` by a Python executor on `127.0.0.1:9101` (start
+> `simulador_tcp.py` and `server.py` from `executors/python/` in two other
+> terminals). Those two carry a module prefix because a Python step is named
+> `<module>/<step>` — the module being the `.py` it lives in
+> ([ADR-0026](adr/0026-the-python-executor-is-a-department-too.md)). The flag
 > `--executor name=host:port` re-points an executor without touching the YAML
 > (the `--limits` pattern). With no `executors:` declared, everything goes to
 > the embedded executor.

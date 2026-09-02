@@ -32,7 +32,7 @@ locals:
 setup:
   # Opens the session and mints the handle. This is the only step that mints
   # one: the ones below change the bench, not which bench.
-  - name: open_bench
+  - name: instrument/open_bench
     executor: python
     assign:
       bench: result.outputs.bench
@@ -42,7 +42,7 @@ main:
   # reference it was given (ADR-0022 §5), so the `assign` writes back what was
   # already there. It is written out because that is the shape a step that
   # *derives* a second object would have — and that one would mint a new handle.
-  - name: configure_bench
+  - name: instrument/configure_bench
     executor: python
     inputs:
       bench: '${locals.bench}'
@@ -52,7 +52,7 @@ main:
 
   # The measurement goes through the session opened in the setup. The threshold
   # is the engine's business, from the `limit` below (ADR-0008).
-  - name: measure_bench
+  - name: instrument/measure_bench
     executor: python
     inputs:
       bench: '${locals.bench}'
@@ -60,7 +60,7 @@ main:
 
 cleanup:
   # Cleanup always runs, which is what closes the bench even on a failed run.
-  - name: close_bench
+  - name: instrument/close_bench
     executor: python
     inputs:
       bench: '${locals.bench}'

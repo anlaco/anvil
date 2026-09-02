@@ -10,6 +10,39 @@ minors, con el cambio anotado aquí.
 
 ## [No publicado]
 
+### Cambiado (rompe)
+
+- **Los pasos del ejecutor Python se llaman `<módulo>/<paso>`**
+  ([ADR-0026](docs/adr/0026-the-python-executor-is-a-department-too.md)). Cada
+  `.py` bajo `--steps` es un módulo, con el nombre lógico de su fichero, y el
+  paso se dirige con los dos:
+
+  ```yaml
+  main:
+    - name: instrument/medir_simulador   # antes: medir_simulador
+      executor: python
+  ```
+
+  El módulo se deriva del fichero y no se declara: renombrar o mover un módulo
+  no obliga a editar los pasos de dentro. Un paquete toma el nombre de su
+  carpeta.
+
+  **Las secuencias que llamen a pasos de Python por su nombre desnudo hay que
+  cualificarlas.** Anvil las caza antes de tocar la unidad: `--validate
+  --with-executors` dice qué sirve el ejecutor, ya cualificado.
+
+  A cambio, **dos módulos pueden servir un `medir_voltaje` cada uno** — antes
+  era un fallo de arranque. Lo que debe ser único es el nombre dentro de su
+  módulo. Y dos ficheros con el mismo nombre bajo dos `--steps` distintos hacen
+  que el ejecutor se niegue a arrancar, nombrando los dos.
+
+  Actualizados en el repo: `ejemplos/demo_ejecutores.yaml`,
+  `ejemplos/referencia.yaml` y `docs/qa/referencia/run.sh`.
+
+- **`server.py --list` agrupa por módulo** y muestra el SHA-256 del fichero que
+  sirve cada uno, además de las firmas. La línea de arranque también lista los
+  nombres cualificados.
+
 ### Añadido
 
 - **Un ejecutor WASM sirve varios módulos**
