@@ -42,7 +42,7 @@ main:
   # Paso en el ejecutor Python en loopback: el motor despacha por gRPC a
   # 127.0.0.1:9101; el Python habla por TCP con el simulador y devuelve la
   # medida. El límite lo evalúa el motor desde el YAML (ADR-0008).
-  - name: medir_simulador
+  - name: instrument/medir_simulador
     executor: python
     retries: 1
     limit:
@@ -52,6 +52,6 @@ main:
 
   # Conexión al equipo simulado: fallo transitorio en el intento 1, pasa
   # desde el 2 (RF-09: el número de intento llega al paso).
-  - name: conectar_equipo
+  - name: instrument/conectar_equipo
     executor: python
     retries: 3

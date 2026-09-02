@@ -164,8 +164,14 @@ def to_proto(name, result):
 
 
 def to_proto_spec(spec):
-    """One step's signature as the wire `StepSpec` (ADR-0021)."""
-    out = paso_pb2.StepSpec(name=spec.name, doc=spec.doc)
+    """One step's signature as the wire `StepSpec` (ADR-0021).
+
+    The name published is the **qualified** one, `<module>/<step>`: that is
+    what a sequence writes and what the engine dispatches on (ADR-0026). It
+    rides in the existing `name` field, an opaque string as far as
+    `paso.proto` is concerned, so none of this is a contract change.
+    """
+    out = paso_pb2.StepSpec(name=spec.qualified, doc=spec.doc)
     for p in spec.inputs:
         wire = out.inputs.add()
         wire.name = p.name
@@ -215,7 +221,22 @@ class StepExecutorServicer(paso_pb2_grpc.StepExecutorServicer):
             # An unknown name is `error`, never an exception (RF-12). The list
             # is in the message because the mistake is nearly always a typo,
             # and the answer is right there.
-            known = ", ".join(x.name for x in self.registry.catalog()) or "none"
+            #
+            # A bare name gets the qualified one instead of the whole catalog:
+            # since a step is addressed `<module>/<step>` (ADR-0026), the
+            # likeliest mistake is a sequence written before that, and the fix
+            # is one specific name rather than a list to search through.
+            did_you_mean = self.registry.suggest(name)
+            if did_you_mean:
+                return to_proto(
+                    name,
+                    Result.error(
+                        f"the python executor does not serve a step called "
+                        f"'{name}': a step is named '<module>/<step>'. Did you "
+                        f"mean {' or '.join(repr(x) for x in did_you_mean)}?"
+                    ),
+                )
+            known = ", ".join(x.qualified for x in self.registry.catalog()) or "none"
             return to_proto(
                 name,
                 Result.error(
@@ -286,16 +307,29 @@ def print_catalog(registry):
     if not len(registry):
         print("this executor serves no steps (nothing found under the steps path)")
         return
+    # Grouped by module, each with the hash of the file it came from: which
+    # artifact answered is part of the answer (ADR-0025 §6).
+    by_module = {}
     for spec in registry.catalog():
-        signature = ", ".join(
-            f"{p.name}: {p.type}" + ("" if p.required else f" = {p.default!r}")
-            for p in spec.inputs
-        )
-        print(f"{spec.name}({signature})")
-        if spec.doc:
-            print(f"    {spec.doc}")
-        if spec.outputs:
-            print(f"    outputs: {', '.join(f'{o.name}: {o.type}' for o in spec.outputs)}")
+        by_module.setdefault(spec.module, []).append(spec)
+    for module in sorted(by_module):
+        info = registry.modules.get(module)
+        if info is not None:
+            print(f"{module}  sha256:{info.sha256}")
+            print(f"    {info.file}")
+        else:
+            print(f"{module or '(no module)'}")
+        for spec in by_module[module]:
+            signature = ", ".join(
+                f"{p.name}: {p.type}" + ("" if p.required else f" = {p.default!r}")
+                for p in spec.inputs
+            )
+            print(f"    {spec.qualified}({signature})")
+            if spec.doc:
+                print(f"        {spec.doc}")
+            if spec.outputs:
+                outs = ", ".join(f"{o.name}: {o.type}" for o in spec.outputs)
+                print(f"        outputs: {outs}")
 
 
 def main():
@@ -342,10 +376,17 @@ def main():
     )
     server.add_insecure_port(f"{HOST}:{args.port}")
     server.start()
+    # Qualified, because that is the name a sequence has to write: a start-up
+    # line listing bare names would be advertising an address that does not
+    # work. And each module with its hash, which is what says afterwards which
+    # artifact answered (ADR-0025 §6).
+    for name in sorted(REGISTRY.modules):
+        info = REGISTRY.modules[name]
+        print(f"module '{name}' ({info.file}) sha256:{info.sha256}")
     print(
         f"python executor listening on {HOST}:{args.port} — "
         f"{len(REGISTRY)} step(s) from {len(loaded)} module(s): "
-        f"{', '.join(s.name for s in REGISTRY.catalog()) or 'none'}"
+        f"{', '.join(s.qualified for s in REGISTRY.catalog()) or 'none'}"
     )
     if not len(REGISTRY):
         print(

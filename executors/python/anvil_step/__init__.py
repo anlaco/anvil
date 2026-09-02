@@ -64,6 +64,8 @@ __all__ = [
     "ParameterSpec",
     "OutputSpec",
     "StepSpec",
+    "ModuleInfo",
+    "MODULE_SEP",
     "Registry",
     "REGISTRY",
     "discover",
@@ -268,6 +270,35 @@ class OutputSpec:
 
 
 @dataclass(frozen=True)
+class ModuleInfo:
+    """A module this executor serves: where it came from, and what it was.
+
+    The hash is read off the file and identifies the artifact that answered.
+    ADR-0025 §6 wants it in every run's report; there is no field in
+    `paso.proto` to carry it yet, so for now it is logged and shown by
+    ``--list``.
+    """
+
+    file: Path
+    sha256: str
+
+
+def _sha256(file: Path) -> str:
+    try:
+        return hashlib.sha256(file.read_bytes()).hexdigest()
+    except OSError:
+        # A module that was imported and then vanished is not worth failing a
+        # bench over; the empty hash says "unknown", never a wrong one.
+        return ""
+
+
+#: What separates a module's logical name from a step's, in the name a
+#: sequence writes and Anvil dispatches on (ADR-0026 §1). The same separator
+#: the WASM bridge uses: the two departments speak one language.
+MODULE_SEP = "/"
+
+
+@dataclass(frozen=True)
 class StepSpec:
     """A step's signature: what Anvil can check without running it."""
 
@@ -275,6 +306,20 @@ class StepSpec:
     inputs: List[ParameterSpec] = field(default_factory=list)
     outputs: List[OutputSpec] = field(default_factory=list)
     doc: str = ""
+    #: The module this step lives in — the logical name of its ``.py``
+    #: (ADR-0026 §2). It is **derived from the file**, never declared: the
+    #: author of a step writes a function and nothing else, and a module that
+    #: is renamed or moved does not need its steps edited.
+    module: str = ""
+
+    @property
+    def qualified(self) -> str:
+        """The name a sequence writes: ``<module>/<step>``.
+
+        Two modules can now each serve a ``medir_voltaje`` — which is the whole
+        point — so the module is part of the address and not decoration.
+        """
+        return f"{self.module}{MODULE_SEP}{self.name}" if self.module else self.name
 
 
 @dataclass
@@ -441,23 +486,62 @@ class Step:
 
 
 class Registry:
-    """The steps this executor serves, keyed by the name a sequence uses."""
+    """The steps this executor serves, keyed by the name a sequence uses.
+
+    That key is the **qualified** name, ``<module>/<step>`` (ADR-0026): this
+    executor is a department that serves several modules, and two of them may
+    each have a ``medir_voltaje`` without either shadowing the other.
+    """
 
     def __init__(self) -> None:
         self._steps: Dict[str, Step] = {}
+        #: Logical module name → (file, sha256). Filled by ``discover``; what
+        #: answers "what do you serve, and from which artifact".
+        self.modules: Dict[str, "ModuleInfo"] = {}
 
     def add(self, s: Step) -> None:
-        earlier = self._steps.get(s.spec.name)
+        key = s.spec.qualified
+        earlier = self._steps.get(key)
         if earlier is not None:
+            # Same name in the same module: still an error, and the same one as
+            # before. Two modules sharing a step name is no longer a clash —
+            # that is what qualifying bought.
             raise DiscoveryError(
-                f"two steps are called '{s.spec.name}': "
+                f"two steps are called '{key}': "
                 f"{_where(earlier.func)} and {_where(s.func)}. "
                 f"The name is what a sequence dispatches on, so it must be unique"
             )
-        self._steps[s.spec.name] = s
+        self._steps[key] = s
+
+    def add_module(self, name: str, file: Path) -> None:
+        """Records a module and its artifact hash, refusing a name clash.
+
+        Two files with the same stem under different steps paths would make a
+        step name ambiguous, and serving the wrong one is worse than not
+        starting: the run would measure with a module nobody asked for and the
+        report would not say so.
+        """
+        earlier = self.modules.get(name)
+        if earlier is not None:
+            raise DiscoveryError(
+                f"two modules are both called '{name}': {earlier.file} and {file}. "
+                f"A module's logical name is its file stem, so rename one of the two"
+            )
+        self.modules[name] = ModuleInfo(file=file, sha256=_sha256(file))
 
     def get(self, name: str) -> Optional[Step]:
         return self._steps.get(name)
+
+    def suggest(self, name: str) -> List[str]:
+        """Qualified names whose step half is ``name``.
+
+        For the message when a sequence sends a bare name — the mistake this
+        change makes easy, and one worth answering with the fix rather than
+        with a list of everything served.
+        """
+        if MODULE_SEP in name:
+            return []
+        return sorted(k for k, s in self._steps.items() if s.spec.name == name)
 
     def catalog(self) -> List[StepSpec]:
         """The signatures, sorted by name so two runs describe identically."""
@@ -489,6 +573,37 @@ def _target_registry(registry: Optional[Registry]) -> Registry:
     if registry is not None:
         return registry
     return _CURRENT if _CURRENT is not None else REGISTRY
+
+
+def _logical_name(file: Path) -> str:
+    """A module's logical name: the stem of its ``.py`` (ADR-0026 §2).
+
+    ``instrument.py`` is ``instrument``. A package's ``__init__.py`` takes the
+    package's own directory name instead — nobody writes a sequence against a
+    module called ``__init__``.
+    """
+    return file.parent.name if file.stem == "__init__" else file.stem
+
+
+def _module_of(func: Callable[..., Any]) -> str:
+    """The logical module of the file a step is written in.
+
+    **Derived from the file, never declared.** The author of a step writes a
+    function and nothing else, so a module that is renamed or moved needs no
+    edit inside it — the same rule the WASM bridge follows for a `.wasm`.
+
+    A function with no readable file —built at runtime, typed into a REPL—
+    gets no module and registers under its bare name. That is a real case
+    (``exec``, a generated step), and giving it a made-up module would be
+    worse than leaving it unqualified.
+    """
+    try:
+        file = Path(func.__code__.co_filename)
+    except AttributeError:
+        return ""
+    if file.suffix != ".py":
+        return ""
+    return _logical_name(file)
 
 
 def _where(func: Callable[..., Any]) -> str:
@@ -590,6 +705,7 @@ def step(
             inputs=inputs,
             outputs=_outputs_of(outputs),
             doc=doc,
+            module=_module_of(f),
         )
         _target_registry(registry).add(Step(spec=spec, func=f, wants_ctx=wants_ctx))
         # The function is returned untouched: a step is still an ordinary
@@ -631,6 +747,10 @@ def _discover_into(paths: Iterable[str], reg: Registry) -> List[Path]:
         if not p.exists():
             raise DiscoveryError(f"the steps path '{p}' does not exist")
         if p.is_file():
+            # The module is recorded **before** importing: a name clash between
+            # two steps paths is decided by the file name, and finding it out
+            # before running anybody's module-level code is the whole point.
+            reg.add_module(_logical_name(p), p.resolve())
             _import_one(p, reg)
             loaded.append(p)
             continue
@@ -642,6 +762,7 @@ def _discover_into(paths: Iterable[str], reg: Registry) -> List[Path]:
                 continue
             if child.suffix == ".py" or (child.is_dir() and (child / "__init__.py").exists()):
                 target = child / "__init__.py" if child.is_dir() else child
+                reg.add_module(_logical_name(target), target.resolve())
                 _import_one(target, reg)
                 loaded.append(child)
     return loaded

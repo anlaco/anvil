@@ -21,6 +21,9 @@ HOST    := packaging/anvil-host/Cargo.toml
 BRIDGE  := executors/wasm/Cargo.toml
 RUSTSDK := executors/rust/Cargo.toml
 EXAMPLE := ejemplos/hola-paso/Cargo.toml
+# The two-module department (`ejemplos/departamento`), what
+# `demo_departamento.yaml` loads (ADR-0025).
+DEPT    := ejemplos/departamento/Cargo.toml
 GUESTS  := -p motor -p ejecutor_pasos
 TARGET  := wasm32-wasip2
 
@@ -46,6 +49,7 @@ build: example
 ## not CI — and it was a manual acceptance criterion.
 example:
 	cargo build --target $(TARGET) --manifest-path $(EXAMPLE)
+	cargo build --target $(TARGET) --manifest-path $(DEPT)
 
 ## Same, in release. The release binary starts in ~1 s; the debug one takes
 ## tens of seconds because wasmtime compiles the guests unoptimized.
@@ -102,11 +106,13 @@ check: build
 	cargo fmt --check --manifest-path $(BRIDGE)
 	cargo fmt --check --all --manifest-path $(RUSTSDK)
 	cargo fmt --check --manifest-path $(EXAMPLE)
+	cargo fmt --check --all --manifest-path $(DEPT)
 	cargo clippy --all-targets -- -D warnings
 	cargo clippy --manifest-path $(HOST) --all-targets -- -D warnings
 	cargo clippy --manifest-path $(BRIDGE) --all-targets -- -D warnings
 	cargo clippy --manifest-path $(RUSTSDK) --all-targets -- -D warnings
 	cargo clippy --target $(TARGET) --manifest-path $(EXAMPLE) -- -D warnings
+	cargo clippy --target $(TARGET) --manifest-path $(DEPT) -- -D warnings
 
 ## Applies the format (what `check` verifies).
 fmt:
@@ -115,6 +121,7 @@ fmt:
 	cargo fmt --manifest-path $(BRIDGE)
 	cargo fmt --all --manifest-path $(RUSTSDK)
 	cargo fmt --manifest-path $(EXAMPLE)
+	cargo fmt --all --manifest-path $(DEPT)
 
 ## Smoke: runs the basic example with the freshly built binary.
 run: build
@@ -126,6 +133,7 @@ clean:
 	cargo clean --manifest-path $(BRIDGE)
 	cargo clean --manifest-path $(RUSTSDK)
 	cargo clean --manifest-path $(EXAMPLE)
+	cargo clean --manifest-path $(DEPT)
 
 help:
 	@grep -E '^##|^[a-z-]+:' $(MAKEFILE_LIST) | sed 's/^## /  /; s/:.*//'
