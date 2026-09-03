@@ -19,15 +19,16 @@ design, licensing and roadmap) lives in [`docs/`](docs/README.md). Start at
 
 **One binary** (`anvil`, ADR-0011) hosts wasmtime and the two WASM guests in
 a sandbox. The package also carries `anvil-exec-wasm` next to it — the
-executor that serves your `.wasm` steps (ADR-0023) — which `anvil` looks up
-and spawns by itself when a sequence needs it. Both are statically linked
-against musl: they need no Rust, no cargo, no glibc, nothing installed on
-the system.
+executor that serves your `.wasm` steps (ADR-0023). You copy that file into a
+folder together with your `.wasm` modules — that folder is a *department* —
+and a sequence names its binary in `path:`; `anvil` spawns it (ADR-0027). Both
+are statically linked against musl: they need no Rust, no cargo, no glibc,
+nothing installed on the system.
 
 ```sh
-curl -LO https://github.com/anlaco/anvil/releases/download/v0.3.0/anvil-v0.3.0-x86_64-linux-musl.tar.gz
-tar xzf anvil-v0.3.0-x86_64-linux-musl.tar.gz
-cd anvil-v0.3.0-x86_64-linux-musl
+curl -LO https://github.com/anlaco/anvil/releases/download/v0.4.0/anvil-v0.4.0-x86_64-linux-musl.tar.gz
+tar xzf anvil-v0.4.0-x86_64-linux-musl.tar.gz
+cd anvil-v0.4.0-x86_64-linux-musl
 
 ./anvil ejemplos/subsecuencia.yaml --json ./out.json --csv ./out.csv
 ```

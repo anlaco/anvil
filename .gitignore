@@ -26,3 +26,4 @@ __pycache__/
 
 # Instrucciones de agente: son locales, no parte del producto.
 CLAUDE.md
+dist/

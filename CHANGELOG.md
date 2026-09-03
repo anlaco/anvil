@@ -1,85 +1,143 @@
 # Changelog
 
-Cambios reseñables de Anvil. El formato sigue
-[Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/) y el versionado es
-[SemVer](https://semver.org/lang/es/).
+Notable changes to Anvil. The format follows
+[Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the versioning is
+[SemVer](https://semver.org/).
 
-Anvil está en 0.x: la superficie pública —el formato de secuencia YAML, el
-contrato `paso.proto` y el reporte textual (RNF-08)— puede cambiar entre
-minors, con el cambio anotado aquí.
+Anvil is in 0.x: the public surface — the YAML sequence format, the
+`paso.proto` contract and the textual report (RNF-08) — may change between
+minors, with the change written down here.
 
-## [No publicado]
+## [Unreleased]
 
-### Cambiado (rompe)
+## [0.4.0] — 2026-09-03
 
-- **Los pasos del ejecutor Python se llaman `<módulo>/<paso>`**
-  ([ADR-0026](docs/adr/0026-the-python-executor-is-a-department-too.md)). Cada
-  `.py` bajo `--steps` es un módulo, con el nombre lógico de su fichero, y el
-  paso se dirige con los dos:
+### Breaking
 
-  ```yaml
-  main:
-    - name: instrument/medir_simulador   # antes: medir_simulador
-      executor: python
-  ```
-
-  El módulo se deriva del fichero y no se declara: renombrar o mover un módulo
-  no obliga a editar los pasos de dentro. Un paquete toma el nombre de su
-  carpeta.
-
-  **Las secuencias que llamen a pasos de Python por su nombre desnudo hay que
-  cualificarlas.** Anvil las caza antes de tocar la unidad: `--validate
-  --with-executors` dice qué sirve el ejecutor, ya cualificado.
-
-  A cambio, **dos módulos pueden servir un `medir_voltaje` cada uno** — antes
-  era un fallo de arranque. Lo que debe ser único es el nombre dentro de su
-  módulo. Y dos ficheros con el mismo nombre bajo dos `--steps` distintos hacen
-  que el ejecutor se niegue a arrancar, nombrando los dos.
-
-  Actualizados en el repo: `ejemplos/demo_ejecutores.yaml`,
-  `ejemplos/referencia.yaml` y `docs/qa/referencia/run.sh`.
-
-- **`server.py --list` agrupa por módulo** y muestra el SHA-256 del fichero que
-  sirve cada uno, además de las firmas. La línea de arranque también lista los
-  nombres cualificados.
-
-### Añadido
-
-- **Un ejecutor WASM sirve varios módulos**
-  ([ADR-0025](docs/adr/0025-the-executor-is-a-department-modules-by-logical-name.md)).
-  El `.wasm` deja de ser el ejecutor y pasa a ser un **módulo** dentro de él:
-  `path` admite ahora un **directorio**, cada `*.wasm` de dentro es un módulo
-  con el nombre lógico de su fichero, y un paso se llama `<módulo>/<paso>`.
+- **The `path` of a `wasm` executor is the executor's binary**
+  ([ADR-0027](docs/adr/0027-a-sequence-names-the-executor-not-the-module.md)),
+  not a `.wasm` and not the folder of modules:
 
   ```yaml
   executors:
     - name: instrumentos
       type: wasm
-      path: departamento/target/wasm32-wasip2/debug
+      path: departamento/anvil-exec-wasm     # was: the path to the modules
+  ```
+
+  Where its modules are is the executor's own business: it serves the `.wasm`
+  it finds **next to its own binary**. So a sequence stops carrying anybody's
+  build tree inside it, and **a department becomes a copyable folder** — the
+  binary and its modules — that you move to another machine and reach by
+  swapping `type: wasm` for `type: grpc`.
+
+  Pointing `path` at a `.wasm` is stopped with a message that explains it,
+  instead of failing with "Exec format error".
+
+  Updated in this repo: `ejemplos/demo_wasm.yaml` and
+  `ejemplos/demo_departamento.yaml`. `make build`/`make release` assemble the
+  example department in `ejemplos/departamento/dist/`.
+
+  **Amends [ADR-0023](docs/adr/0023-the-bridge-ships-as-a-file-next-to-anvil.md):**
+  `anvil` no longer looks `anvil-exec-wasm` up next to itself. It still ships
+  there, but from there it gets copied into whatever folder is to be a
+  department. And a consequence worth knowing: **a sequence can now make Anvil
+  launch any binary** — the same deal TestStand gives a DLL.
+
+- **The WASM bridge is now `anvil-exec-wasm`** (was `anvil-puente-wasm`).
+  `anvil` looks for it next to itself by that name, so an installation that
+  still carries the old file gets the error naming the path and the new name.
+  Rename the file, or take the pair from the release again. Nothing else
+  changes: same CLI (`--wasm <path> [--port <n>] [--bind <ip>]`), same
+  contract, same components — a `.wasm` built for the old bridge runs
+  untouched.
+
+  The name is now a **family**: every executor a user launches is
+  `anvil-exec-<language>`, with the hole reserved for the ones to come
+  (`anvil-exec-labview`, `anvil-exec-native`). The scheme, and the three
+  things it deliberately is not, are written down in
+  [diseno/executores-lenguaje.md](docs/diseno/executores-lenguaje.md#naming-anvil-exec-language).
+  `puente` was the last Spanish word left in a public file name;
+  [ADR-0023](docs/adr/0023-the-bridge-ships-as-a-file-next-to-anvil.md)
+  §Alcance had left the rename open on purpose.
+
+- **`anvil:step@0.3.0` → `@0.4.0`: every step component must be rebuilt.** The
+  WIT travels stuck to the artifact and there is no compatibility shim by
+  decision ([ADR-0020 §4d](docs/adr/0020-parametros-del-paso-en-la-peticion.md)),
+  so wasmtime refuses to instantiate a component built against 0.3.0 — nobody
+  finds out the wrong way. Rebuild with
+  `cargo build --target wasm32-wasip2`. `paso.proto` is untouched and the
+  contract number stays at 4: a gRPC executor is not affected.
+
+- **A step of the Python executor is named `<module>/<step>`**
+  ([ADR-0026](docs/adr/0026-the-python-executor-is-a-department-too.md)). Every
+  `.py` under `--steps` is a module, named after its file, and a step is
+  addressed with both:
+
+  ```yaml
+  main:
+    - name: instrument/medir_simulador   # was: medir_simulador
+      executor: python
+  ```
+
+  The module is derived from the file and never declared: renaming or moving a
+  module does not force an edit on the steps inside it. A package takes the
+  name of its folder.
+
+  **Sequences calling a Python step by its bare name have to be qualified.**
+  Anvil catches them before the unit is touched: `--validate --with-executors`
+  says what the executor serves, already qualified.
+
+  In exchange, **two modules can each serve a `medir_voltaje`** — which used to
+  be a startup failure. What must be unique is a name within its module. And
+  two files with the same name under two different `--steps` make the executor
+  refuse to start, naming both.
+
+  Updated in this repo: `ejemplos/demo_ejecutores.yaml`,
+  `ejemplos/referencia.yaml` and `docs/qa/referencia/run.sh`.
+
+- **`paso.proto` goes to contract 4, and this is a flag day.** `Value`'s
+  `oneof` gains a branch and `ValueType` a value (ADR-0022). The contract echo
+  is gated on the **integer**, not on functionality (ADR-0020 §4a), so **every
+  step with `inputs:` against an executor still speaking 3 becomes `error`,
+  whether it uses references or not**. Third-party executors have to be
+  updated; this repo's Python executor and the WASM bridge already speak 4.
+  It is accepted because Anvil is pre-v1 and promises no backward
+  compatibility — and it is said here in those words, not as a footnote.
+
+### Added
+
+- **A WASM executor serves several modules**
+  ([ADR-0025](docs/adr/0025-the-executor-is-a-department-modules-by-logical-name.md)).
+  The `.wasm` stops being the executor and becomes a **module** inside it: one
+  executor serves several, each under the logical name of its file, and a step
+  is called `<module>/<step>`.
+
+  ```yaml
+  executors:
+    - name: instrumentos
+      type: wasm
+      path: departamento/anvil-exec-wasm
   main:
     - name: multimetro/medir_voltaje
       executor: instrumentos
-    - name: plc/medir_voltaje       # mismo nombre, otro instrumento
+    - name: plc/medir_voltaje       # same name, another instrument
       executor: instrumentos
   ```
 
-  Ni la extensión ni la ruta aparecen en la secuencia, así que el ejecutor
-  puede reorganizar sus carpetas —o reescribir un módulo en otro lenguaje— sin
-  editar ningún YAML. Ejemplo completo en
+  Neither the extension nor the path appears in the sequence, so the executor
+  can reorganise its folders — or rewrite a module in another language —
+  without editing any YAML. Worked example in
   [`ejemplos/demo_departamento.yaml`](ejemplos/demo_departamento.yaml).
 
-  **Apuntar `path` a un fichero sigue funcionando igual**, con los pasos sin
-  prefijo: las secuencias escritas hasta hoy no cambian
-  ([`ejemplos/demo_wasm.yaml`](ejemplos/demo_wasm.yaml)).
+  The qualified name travels inside `StepRequest.name`, which for `paso.proto`
+  is an opaque string: **no contract change, no engine change and no WIT
+  change**.
 
-  El nombre cualificado viaja dentro de `StepRequest.name`, que para
-  `paso.proto` es una cadena opaca: **no hay cambio de contrato, ni del motor,
-  ni del WIT**.
-
-- **`anvil-exec-wasm --list`**: imprime los módulos que sirve un ejecutor, su
-  SHA-256 y la firma de cada paso, y sale sin escuchar. Es la forma de
-  responder «¿qué pasos sirves?» sin montar un banco, y la puerta que
-  necesitaba un editor.
+- **`anvil-exec-wasm --list`**: prints the modules an executor serves, their
+  SHA-256 and the signature of every step, and exits without listening. It is
+  how to answer "what steps do you serve?" without setting up a bench, and the
+  door an editor needed.
 
 - **`anvil-exec-python`**, the Python executor's launcher
   ([`executors/python/`](executors/python/)). Same product, the family's name,
@@ -184,59 +242,17 @@ minors, con el cambio anotado aquí.
   `type: wasm`, and again at the bridge — and never in silence. Giving WASM
   state is a decision with its own ADR.
 
-### Arreglado
+### Changed
 
-- **A `println!` in a WASM step no longer kills the executor.** The blocking
-  wasmtime call ran on the tokio runtime's driver thread, and the WASI bindings
-  block on the runtime from inside to serve the component's stdout: the first
-  print in a step died with *"Cannot start a runtime from within a runtime"* and
-  cut the sequence mid-unit. A `panic!` in a step still cuts the run — the
-  instance is gone and the bridge does not reinstantiate it — and that is now
-  written down as a known limitation in the quick-start guide.
+- **`server.py --list` groups by module** and shows the SHA-256 of the file
+  serving each one, alongside the signatures. The startup line lists the
+  qualified names too.
 
-### Rupturista
-
-- **The WASM bridge is now `anvil-exec-wasm`** (was `anvil-puente-wasm`).
-  `anvil` looks for it next to itself by that name, so an installation that
-  still carries the old file gets the error naming the path and the new name.
-  Rename the file, or take the pair from the release again. Nothing else
-  changes: same CLI (`--wasm <path> [--port <n>] [--bind <ip>]`), same
-  contract, same components — a `.wasm` built for the old bridge runs
-  untouched.
-
-  The name is now a **family**: every executor a user launches is
-  `anvil-exec-<language>`, with the hole reserved for the ones to come
-  (`anvil-exec-labview`, `anvil-exec-native`). The scheme, and the three
-  things it deliberately is not, are written down in
-  [diseno/executores-lenguaje.md](docs/diseno/executores-lenguaje.md#naming-anvil-exec-language).
-  `puente` was the last Spanish word left in a public file name;
-  [ADR-0023](docs/adr/0023-the-bridge-ships-as-a-file-next-to-anvil.md)
-  §Alcance had left the rename open on purpose.
-
-- **`anvil:step@0.3.0` → `@0.4.0`: every step component must be rebuilt.** The
-  WIT travels stuck to the artifact and there is no compatibility shim by
-  decision ([ADR-0020 §4d](docs/adr/0020-parametros-del-paso-en-la-peticion.md)),
-  so wasmtime refuses to instantiate a component built against 0.3.0 — nobody
-  finds out the wrong way. Rebuild with
-  `cargo build --target wasm32-wasip2`. `paso.proto` is untouched and the
-  contract number stays at 4: a gRPC executor is not affected.
-
-### Cambiado
-
-- **`paso.proto` goes to contract 4, and this is a flag day.** `Value`'s
-  `oneof` gains a branch and `ValueType` a value (ADR-0022). The contract echo
-  is gated on the **integer**, not on functionality (ADR-0020 §4a), so **every
-  step with `inputs:` against an executor still speaking 3 becomes `error`,
-  whether it uses references or not**. Third-party executors have to be
-  updated; this repo's Python executor and the WASM bridge already speak 4.
-  It is accepted because Anvil is pre-v1 and promises no backward
-  compatibility — and it is said here in those words, not as a footnote.
-
-- **`executores/` pasa a llamarse `executors/`.** No era palabra en ningún
-  idioma: en castellano es *ejecutores* y en inglés *executors*. Con el código
-  ya en inglés, el híbrido sólo confundía. El target del Makefile pasa de
-  `make test-executores` a `make test-executors`. Nada del contenido cambia —
-  ni rutas dentro del ejecutor, ni el contrato, ni las secuencias.
+- **`executores/` is now `executors/`.** It was not a word in either language:
+  Spanish spells it *ejecutores* and English *executors*. With the code already
+  in English, the hybrid only confused. The Makefile target goes from
+  `make test-executores` to `make test-executors`. Nothing about the contents
+  changes — not the paths inside the executor, not the contract, not sequences.
 
 - **The WASM executor is a product now: it lives in `executors/wasm`, under
   Apache-2.0, and ships as a file next to `anvil`** (issue #57,
@@ -248,16 +264,25 @@ minors, con el cambio anotado aquí.
   placement read as plumbing; it also could not be copied to another
   machine, which is what ADR-0015 promised for the remote (Raspberry Pi)
   case and never shipped.
+  What changes: `anvil` no longer carries the bridge inside. The package now
+  ships **two files** — `anvil` and `anvil-exec-wasm` — and the bridge can be
+  copied elsewhere and launched by hand. An executor older than the binary
+  still fails with both contract versions named (ADR-0020 §4b). Sequences that
+  declare no `type: wasm` executor never notice the change.
 
-  What changes: `anvil` no longer carries the bridge inside. The package
-  now ships **two files** — `anvil` and `anvil-puente-wasm` — and `anvil`
-  looks the bridge up next to its own executable, spawning it itself as
-  before: no extra step for the user, and the same file can be copied
-  elsewhere and launched by hand (`--wasm <path> [--port <n>] [--bind <ip>]`).
-  A missing bridge stops the run naming the path it looked at; an executor
-  older than the binary still fails with both contract versions named
-  (ADR-0020 §4b). Sequences that declare no `type: wasm` executor never
-  notice the change.
+  *(Superseded within this same release by ADR-0027, above: `anvil` no longer
+  looks the bridge up beside itself — the sequence names the binary to spawn.
+  Shipping it next to `anvil` is still how it arrives.)*
+
+### Fixed
+
+- **A `println!` in a WASM step no longer kills the executor.** The blocking
+  wasmtime call ran on the tokio runtime's driver thread, and the WASI bindings
+  block on the runtime from inside to serve the component's stdout: the first
+  print in a step died with *"Cannot start a runtime from within a runtime"* and
+  cut the sequence mid-unit. A `panic!` in a step still cuts the run — the
+  instance is gone and the bridge does not reinstantiate it — and that is now
+  written down as a known limitation in the quick-start guide.
 
 ## [0.3.0] — 2026-08-27
 
@@ -707,6 +732,7 @@ primera campaña de betatesting externa.
 - *Private vulnerability reporting* no puede activarse mientras el
   repositorio sea privado; hasta entonces vale el correo de `SECURITY.md`.
 
+[0.4.0]: https://github.com/anlaco/anvil/releases/tag/v0.4.0
 [0.3.0]: https://github.com/anlaco/anvil/releases/tag/v0.3.0
 [0.2.0]: https://github.com/anlaco/anvil/releases/tag/v0.2.0
 [0.1.0]: https://github.com/anlaco/anvil/releases/tag/v0.1.0
