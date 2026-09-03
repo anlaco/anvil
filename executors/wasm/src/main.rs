@@ -8,18 +8,24 @@
 //! `run(name, attempt, inputs) -> step-result`.
 //!
 //! Usage:
-//!   anvil-exec-wasm (--wasm <path.wasm> | --modules <dir>...) [--port <port>]
+//!   anvil-exec-wasm [--modules <dir>... | --wasm <path.wasm>] [--port <port>]
 //!                   [--bind <ip>] [--list]
 //!
-//! It serves **one or more modules** (ADR-0025): a department that loads what
-//! is in its working directory, not the module itself. Which of the two it is
-//! comes from how it was pointed:
+//! It serves **one or more modules** (ADR-0025): a department that loads a
+//! folder of components, not the component itself. A module's logical name is
+//! its file stem, and a step is named `<module>/<step>`, so neither the
+//! extension nor any path reaches a sequence.
 //!
-//! - `--wasm <file>`: one module, and steps keep their **bare** names. What
-//!   every sequence written before ADR-0025 says, and it keeps working.
-//! - `--modules <dir>`: every `*.wasm` in the directory (repeatable), and
-//!   steps are named `<module>/<step>`. A module's logical name is its file
-//!   stem, so neither the extension nor the path reaches the YAML.
+//! **Told nothing, it serves the folder its own binary is in** (ADR-0027).
+//! That is what makes a department a copyable thing — this binary with its
+//! `.wasm` beside it — and it is why a sequence points `path:` at *this
+//! executor* and never at a module: where the modules are is this process's
+//! business, not the sequence's.
+//!
+//! - `--modules <dir>`: serve these directories instead (repeatable).
+//! - `--wasm <file>`: serve exactly one file, and then steps keep their
+//!   **bare** names. Only for running a component by hand; Anvil never uses
+//!   it, so a step served through Anvil is always qualified.
 //! - `--list`: print what is served — modules, hashes and signatures — and
 //!   exit, without listening. The *enumerate* door for an editor.
 //!
@@ -35,9 +41,10 @@
 //! change, no engine change and no WIT change.
 //!
 //! The bridge is NATIVE Anvil code: that is why it can use tonic (unlike the
-//! WASM guests, which use wasi-grpc). anvil-host spawns it from the file that
-//! ships next to it (ADR-0023): it lives beside the `anvil` binary, and the
-//! same file can be copied and launched by hand.
+//! WASM guests, which use wasi-grpc). It ships as a file next to `anvil`
+//! (ADR-0023) — but that is only where it *arrives*: since ADR-0027 the
+//! sequence names the binary to spawn, so this file gets copied into whatever
+//! folder is going to be a department, and launched from there.
 
 use std::collections::BTreeMap;
 use std::net::{IpAddr, SocketAddr};
@@ -329,7 +336,11 @@ impl ModuleSet {
                 .map(|d| d.display().to_string())
                 .collect::<Vec<_>>()
                 .join(", ");
-            return Err(format!("no '.wasm' module found under: {list}"));
+            return Err(format!(
+                "no '.wasm' module found under: {list}. An executor finds its modules \
+                 next to its own binary (ADR-0027), so copy them there — or point it \
+                 elsewhere with --modules <dir>"
+            ));
         }
         Ok(ModuleSet {
             engine,
@@ -578,6 +589,20 @@ impl StepExecutor for ExecutorService {
     }
 }
 
+/// The directory this binary lives in — where its modules are, unless it was
+/// told otherwise (ADR-0027).
+///
+/// Resolved from the executable itself and not from the working directory: the
+/// bridge is spawned by `anvil`, which has its own cwd, and a department has to
+/// mean the same thing wherever it is launched from.
+fn own_directory() -> Result<PathBuf, String> {
+    let exe = std::env::current_exe()
+        .map_err(|e| format!("could not locate this executor's own binary: {e}"))?;
+    exe.parent()
+        .map(|d| d.to_path_buf())
+        .ok_or_else(|| "this executor's binary has no directory".to_string())
+}
+
 /// What the bridge was told to serve.
 struct Args {
     wasm: Option<PathBuf>,
@@ -635,8 +660,13 @@ fn parse_args() -> Result<Args, String> {
             "--wasm and --modules are exclusive: one file, or one or more directories".to_string(),
         );
     }
+    // Nothing said: **the executor finds its own modules**, next to its own
+    // binary (ADR-0027). That is what makes a department a copyable folder —
+    // the bridge and its `.wasm` together — and what keeps the path to them
+    // out of anybody's sequence. Anvil is told where the executor is; where
+    // its modules are is the executor's business.
     if wasm.is_none() && modules.is_empty() {
-        return Err("missing --wasm <path.wasm> or --modules <dir>".to_string());
+        modules.push(own_directory()?);
     }
     Ok(Args {
         wasm,

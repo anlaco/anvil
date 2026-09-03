@@ -24,11 +24,11 @@
 //!     executor starts all the same — the host does not predict the guest's
 //!     verdict (#52).
 //!  3. Waits for it to listen (a probe `connect`; the executor discards it).
-//!  4. **M5-ext.2 (ADR-0015):** instantiates every `tipo: wasm` executor in
-//!     the YAML by spawning the **bridge** `anvil-exec-wasm` with
-//!     `--wasm <path> --port <ephemeral>`. The bridge loads the user's
-//!     `.wasm` component (the `anvil:paso` interface, a `run` function) and
-//!     serves it as gRPC on loopback. Waits for each one (readiness).
+//!  4. **M5-ext.2 (ADR-0015, ADR-0027):** instantiates every `tipo: wasm`
+//!     executor in the YAML by spawning **the binary the sequence names in its
+//!     `path:`** with `--port <ephemeral>`, and nothing else: which modules
+//!     that executor serves is its own business — it finds them next to its
+//!     binary. Waits for each one (readiness).
 //!  5. Starts the engine (main) whose sandbox allows loopback **plus** the
 //!     non-loopback IPs declared in `executors:` (only those). Connects,
 //!     runs the sequence and exits.
@@ -42,7 +42,7 @@
 
 use std::collections::{HashMap, HashSet};
 use std::net::{IpAddr, TcpListener, TcpStream};
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::thread;
 use std::time::Duration;
 use wasmtime::component::{Component, Linker, ResourceTable};
@@ -50,8 +50,10 @@ use wasmtime::{Engine, Store};
 use wasmtime_wasi::{DirPerms, FilePerms, WasiCtx, WasiCtxBuilder, WasiCtxView, WasiView};
 
 /// Embedded guests (built for `wasm32-wasip2` and copied into `OUT_DIR` by
-/// `build.rs`). The bridge binary is NOT embedded: it is a product that ships
-/// as a file next to this one (ADR-0023) and gets looked up at spawn time.
+/// `build.rs`). The bridge binary is NOT embedded: it ships as a file next to
+/// this one (ADR-0023), and from there it gets **copied into whatever folder
+/// is to be a department** — the sequence names the binary to spawn
+/// (ADR-0027), so there is no lookup here any more.
 const ANVIL_GUEST: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/anvil-guest.wasm"));
 const EJECUTOR: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/ejecutor_pasos.wasm"));
 
@@ -268,33 +270,6 @@ struct EjecutorWasm {
     _child: std::process::Child,
 }
 
-/// Where the bridge binary should be: **next to this binary** (ADR-0023).
-/// One mechanism for development and distribution alike — the pair travels
-/// together in the tarball, and `make release` leaves it together in the
-/// target directory too.
-///
-/// The error names the path that was looked at and how to get the file
-/// there. It never speculates about contract versions: a missing file is not
-/// an old executor, and the engine's contract echo (ADR-0020 §4b) is the one
-/// that names both numbers when that is the case.
-fn ruta_puente() -> Result<PathBuf, String> {
-    let exe = std::env::current_exe()
-        .map_err(|e| format!("no se pudo localizar el binario anvil: {e}"))?;
-    let dir = exe
-        .parent()
-        .ok_or_else(|| "el binario anvil no tiene directorio".to_string())?;
-    let ruta = dir.join("anvil-exec-wasm");
-    if !ruta.exists() {
-        return Err(format!(
-            "no se encontró el ejecutor WASM en '{}'. anvil lo busca junto a sí mismo \
-             (ADR-0023): copia ahí 'anvil-exec-wasm' — make release lo deja al lado \
-             del binario; también puedes copiarlo de executors/wasm/target/.",
-            ruta.display()
-        ));
-    }
-    Ok(ruta)
-}
-
 /// Spawns the bridge for a `.wasm` executor declared by path (M5-ext.2,
 /// ADR-0015; ADR-0025 for the directory case):
 ///
@@ -313,15 +288,27 @@ fn ruta_puente() -> Result<PathBuf, String> {
 /// The bridge is the one loading the components into its own Store (empty
 /// WASI sandbox: no files, no network — a component is a pure function).
 fn instanciar_wasm(nombre: &str, path: &Path) -> Result<EjecutorWasm, String> {
-    let es_directorio = path.is_dir();
-    if !es_directorio {
-        let bytes = std::fs::read(path).map_err(|e| {
-            format!(
-                "el ejecutor '{nombre}' ({}) no se pudo leer: {e}",
-                path.display()
-            )
-        })?;
-        drop(bytes); // el puente es quien lee el fichero; aquí sólo validamos.
+    // El tropiezo nº1 viniendo de antes de ADR-0027: apuntar `path` al `.wasm`.
+    // Es un fichero, así que pasaría cualquier comprobación de existencia, y
+    // `exec` fallaría con «Exec format error» — que manda a mirar el toolchain
+    // en vez de la línea del YAML que está mal.
+    if path.extension().and_then(|e| e.to_str()) == Some("wasm") {
+        return Err(format!(
+            "el ejecutor '{nombre}' declara 'path: {}', que es un módulo '.wasm'. El \
+             'path' de un ejecutor 'wasm' es **el binario del ejecutor** (por ejemplo \
+             'mi-departamento/anvil-exec-wasm'), no un módulo ni la carpeta de \
+             módulos: los módulos los encuentra el propio ejecutor, junto a su \
+             binario, y el paso los nombra con '<módulo>/<paso>'",
+            path.display()
+        ));
+    }
+    if !path.is_file() {
+        return Err(format!(
+            "el ejecutor '{nombre}' declara 'path: {}', que no es un fichero: se \
+             espera el binario del ejecutor (por ejemplo \
+             'mi-departamento/anvil-exec-wasm')",
+            path.display()
+        ));
     }
 
     // Reservar un puerto efímero de loopback para el puente.
@@ -335,17 +322,20 @@ fn instanciar_wasm(nombre: &str, path: &Path) -> Result<EjecutorWasm, String> {
         .port();
     drop(listener);
 
-    let puente = ruta_puente()?;
-    let child = std::process::Command::new(&puente)
-        .args([
-            if es_directorio { "--modules" } else { "--wasm" },
-            &path.display().to_string(),
-            "--port",
-            &puerto.to_string(),
-        ])
+    // **El binario que se lanza es el que declara la secuencia** (ADR-0027),
+    // no el que acompaña a `anvil`. Sólo se le pasa el puerto: dónde están sus
+    // módulos lo sabe él, junto a su propio binario, y eso es lo que mantiene
+    // la ruta de los módulos fuera de la partitura.
+    let child = std::process::Command::new(path)
+        .args(["--port", &puerto.to_string()])
         .stdin(std::process::Stdio::piped())
         .spawn()
-        .map_err(|e| format!("no se pudo lanzar el puente para '{nombre}': {e}"))?;
+        .map_err(|e| {
+            format!(
+                "no se pudo lanzar el ejecutor '{nombre}' ({}): {e}",
+                path.display()
+            )
+        })?;
 
     Ok(EjecutorWasm {
         nombre: nombre.into(),

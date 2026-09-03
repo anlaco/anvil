@@ -7,25 +7,25 @@
 # its folders, or rewrite a module in another language, without editing this
 # file.
 #
-# Build the modules:
+# Assemble the department (`make build` does it; this is what it does):
 #   cargo build --target wasm32-wasip2 --manifest-path ejemplos/departamento/Cargo.toml
-#   # → ejemplos/departamento/target/wasm32-wasip2/debug/{multimetro,plc}.wasm
+#   cp executors/wasm/target/debug/anvil-exec-wasm ejemplos/departamento/dist/
+#   cp ejemplos/departamento/target/wasm32-wasip2/debug/*.wasm ejemplos/departamento/dist/
 #
 # Run (from the repo root):
 #   ./packaging/anvil-host/target/release/anvil ejemplos/demo_departamento.yaml
 #
 # See what the department serves, without running anything:
-#   ./packaging/anvil-host/target/release/anvil-exec-wasm \
-#       --modules ejemplos/departamento/target/wasm32-wasip2/debug --list
+#   ./ejemplos/departamento/dist/anvil-exec-wasm --list
 
 name: demo_departamento
 executors:
-  # `path` is a **directory**: every `*.wasm` in it is a module. Pointing it at
-  # a single file is still valid and serves one module with bare step names
-  # (see ejemplos/demo_wasm.yaml).
+  # `path` is **the executor's own binary** (ADR-0027). Where its modules are
+  # is its business: it finds them next to itself, so no build path of ours
+  # ends up in this file.
   - name: instrumentos
     type: wasm
-    path: departamento/target/wasm32-wasip2/debug
+    path: departamento/dist/anvil-exec-wasm
 
 main:
   # Two modules, the same step name, two different instruments. This is the
