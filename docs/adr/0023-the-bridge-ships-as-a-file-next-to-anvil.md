@@ -1,6 +1,12 @@
 # ADR-0023: The bridge ships as a file next to `anvil`, not inside it
 
 - **Estado:** Aceptada
+  > ⚠️ **Enmendada por [ADR-0027](0027-a-sequence-names-the-executor-not-the-module.md)
+  > el 2026-09-02.** Lo que sigue vigente es que el puente **se distribuye**
+  > como fichero al lado de `anvil`. Lo que ya no existe es la **búsqueda**:
+  > `anvil` no lo busca junto a sí mismo, porque desde ADR-0027 la secuencia
+  > nombra el binario del ejecutor que hay que lanzar. `ruta_puente` está
+  > eliminada y el test que la cubría, reescrito.
 - **Fecha:** 2026-08-28
 - **Cómo se decidió:** the what and the scope came from direction in issue
   [#57](https://github.com/anlaco/anvil/issues/57) ("the WASM executor is a
