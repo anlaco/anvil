@@ -6,13 +6,19 @@ Your step is a WIT component exporting `run` and `describe` (`anvil:step@0.4.0`)
 process loads it into wasmtime and turns it into an executor the engine can
 dispatch to.
 
-**It serves a working directory, not a file**
+**It serves a folder of modules, not a file**
 ([ADR-0025](../../docs/adr/0025-the-executor-is-a-department-modules-by-logical-name.md)).
-Point it at a directory and every `*.wasm` inside is a *module*, addressed by
-the **logical name** of its file stem: `multimetro.wasm` is `multimetro`, and
-a sequence names a step `multimetro/medir_voltaje`. Neither the extension nor
-the path ever reaches the YAML, so the department can reorganise its folders —
-or rewrite a module in another language — without editing anybody's sequence.
+Every `*.wasm` it serves is a *module*, addressed by the **logical name** of
+its file stem: `multimetro.wasm` is `multimetro`, and a sequence names a step
+`multimetro/medir_voltaje`. Neither the extension nor the path ever reaches the
+YAML, so the department can reorganise itself — or rewrite a module in another
+language — without editing anybody's sequence.
+
+**Told nothing, it serves the folder its own binary is in**
+([ADR-0027](../../docs/adr/0027-a-sequence-names-the-executor-not-the-module.md)).
+That is what makes a department a **copyable folder**: this binary with its
+`.wasm` beside it. A sequence points `path:` at *this executor* and never at a
+module, so where the modules live never leaks into it.
 
 The qualified name travels inside `StepRequest.name`, which is an opaque
 string as far as `paso.proto` is concerned: serving many modules costs no
@@ -32,14 +38,14 @@ your component — answers the contract echo.
 The bridge ships as a **file next to `anvil`** — the release carries both,
 and `make release` leaves them together in the target directory too
 ([ADR-0023](../../docs/adr/0023-the-bridge-ships-as-a-file-next-to-anvil.md)).
-For every `type: wasm` executor declared in the sequence, `anvil` looks the
-bridge up next to its own executable and spawns it itself: one process per
-declared `path` — a file or a whole directory of modules — on an ephemeral
-loopback port, with stdin piped so the bridge exits when the host dies.
-Nothing to install, nothing to start — and the
-same file you got with the release is the one you can copy to another
-machine and run by hand. If the file is missing, `anvil` stops with the
-path it looked at and how to get it there.
+For every `type: wasm` executor declared in the sequence, `anvil` spawns
+**the binary that sequence names in its `path:`** — one process per declared
+executor, on an ephemeral loopback port, with stdin piped so the bridge exits
+when the host dies. It is passed the port and nothing else: which modules it
+serves is its own business. Nothing to install, nothing to start — and the
+same file you got with the release is the one you copy into a department, or to
+another machine to run by hand. If the `path:` a sequence names is not there —
+or is a `.wasm` instead of the executor — `anvil` stops saying so.
 
 ## Running it by hand
 
@@ -47,13 +53,15 @@ The binary has a CLI of its own — useful to try a component without a
 sequence around it:
 
 ```sh
-anvil-exec-wasm (--wasm <path.wasm> | --modules <dir>...) \
+anvil-exec-wasm [--modules <dir>... | --wasm <path.wasm>] \
     [--port <port>] [--bind <ip>] [--list]
 ```
 
-`--modules` is repeatable and serves whole directories; `--wasm` serves a
-single file, and then steps keep their **bare** names — which is what every
-sequence written before ADR-0025 says, and it keeps working untouched.
+With neither flag it serves the folder it is in, which is what Anvil relies on.
+`--modules` is repeatable and points it at other directories; `--wasm` serves a
+single file and then steps keep their **bare** names — a by-hand facility only,
+since Anvil never passes it, so a step served through Anvil is always
+qualified.
 
 `--list` prints what is served — each module with its SHA-256 and each step
 with its signature — and exits without listening. It is the *enumerate* door
@@ -61,7 +69,7 @@ an editor needs, and the way to answer "which steps does this executor serve?"
 without starting a bench:
 
 ```sh
-anvil-exec-wasm --modules ejemplos/departamento/target/wasm32-wasip2/debug --list
+./ejemplos/departamento/dist/anvil-exec-wasm --list
 ```
 
 `--bind 0.0.0.0` is what makes the remote case (the executor on another
@@ -117,6 +125,12 @@ stderr, rather than sinking everyone else's (ADR-0021 §4).
 A single `--wasm` loads **eagerly**, on purpose: with one file pointed at by
 hand there are no others to protect, and finding out at the first step that it
 is not a component would be finding out with the unit already on the bench.
+
+Assembling a department is copying this binary and the modules into one folder.
+`make build` does it for the repo's example, in
+[`ejemplos/departamento/dist/`](../../ejemplos/departamento/). Use the
+**release** binary: the debug one carries an unoptimised wasmtime and weighs
+about thirteen times more.
 
 Two files with the same stem make the bridge refuse to start, naming both:
 serving the wrong module is worse than not starting.

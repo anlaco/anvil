@@ -168,21 +168,56 @@ check DIAG-5f "sin ejecutor embebido para -h/--validate" $?
 
 # ---- DIAG-5d: un .wasm que es módulo core, no componente ----
 # Los 8 bytes de cabecera son un módulo core válido y vacío: basta para que el
-# puente lo rechace, y el mensaje debe decir POR QUÉ (antes decía sólo
+# ejecutor lo rechace, y el mensaje debe decir POR QUÉ (antes decía sólo
 # "failed to parse WebAssembly module", que hizo culpar al toolchain).
-printf '\x00asm\x01\x00\x00\x00' >"$TMP/core.wasm"
-cat >"$TMP/coremod.yaml" <<'YAML'
+#
+# Desde ADR-0027 el `path` del YAML es el binario del ejecutor, así que el
+# módulo malo se pone DENTRO del departamento: se monta uno de mentira con una
+# copia del ejecutor y el core.wasm al lado.
+PUENTE=""
+for cand in packaging/anvil-host/target/release/anvil-exec-wasm \
+            packaging/anvil-host/target/debug/anvil-exec-wasm \
+            executors/wasm/target/release/anvil-exec-wasm \
+            executors/wasm/target/debug/anvil-exec-wasm; do
+  [ -x "$cand" ] && { PUENTE="$cand"; break; }
+done
+if [ -z "$PUENTE" ]; then
+  check DIAG-5d "un .wasm módulo core se diagnostica como tal (sin ejecutor: omitido)" 1
+else
+  mkdir -p "$TMP/depto"
+  cp "$PUENTE" "$TMP/depto/anvil-exec-wasm"
+  printf '\x00asm\x01\x00\x00\x00' >"$TMP/depto/core.wasm"
+  cat >"$TMP/coremod.yaml" <<'YAML'
 name: regresion_modulo_core
 executors:
   - name: dmm
     type: wasm
-    path: ./core.wasm
+    path: ./depto/anvil-exec-wasm
 main:
-  - name: medir
+  - name: core/medir
     executor: dmm
 YAML
-$A "$TMP/coremod.yaml" 2>&1 | grep -qiE 'módulo core|modulo core|core module'
-check DIAG-5d "un .wasm módulo core se diagnostica como tal" $?
+  $A "$TMP/coremod.yaml" 2>&1 | grep -qiE 'módulo core|modulo core|core module'
+  check DIAG-5d "un .wasm módulo core se diagnostica como tal" $?
+fi
+
+# ---- DIAG-5g: apuntar el `path` de un ejecutor wasm a un `.wasm` ----
+# El tropiezo nº1 viniendo de antes de ADR-0027. Es un fichero, así que pasa
+# cualquier comprobación de existencia, y `exec` fallaría con «Exec format
+# error» — que manda a mirar el toolchain en vez de la línea del YAML.
+printf '\x00asm\x0d\x00\x01\x00' >"$TMP/suelto.wasm"
+cat >"$TMP/pathwasm.yaml" <<'YAML'
+name: regresion_path_es_wasm
+executors:
+  - name: dmm
+    type: wasm
+    path: ./suelto.wasm
+main:
+  - name: x/medir
+    executor: dmm
+YAML
+$A "$TMP/pathwasm.yaml" 2>&1 | grep -qiE 'binario del ejecutor|executor.s binary'
+check DIAG-5g "path a un .wasm dice que se espera el binario del ejecutor" $?
 
 # ---- LEC-1: `resultado.*` fuera de `asigna` debe ser error de carga ----
 # La lección de producto (§5): este YAML cargaba, la precondición era un `false`

@@ -3,9 +3,11 @@
 Anvil is **one binary**: you download it and run it. Inside, it hosts
 `wasmtime` and the two WASM guests (engine + executor) in a sandbox,
 speaking gRPC over loopback. You need no `wasmtime` install nor any runtime
-— it is embedded. The download also carries `anvil-exec-wasm`, the
-executor that serves `.wasm` steps, as a file next to it (ADR-0023): `anvil`
-brings it up by itself when a sequence declares one. See
+— it is embedded. The download also carries `anvil-exec-wasm`, the executor
+that serves `.wasm` steps, as a file next to it (ADR-0023). You copy that file
+into a folder together with your `.wasm` modules — that folder is a
+*department* — and a sequence names its binary; `anvil` brings it up itself
+(ADR-0027). See
 [ADR-0011](adr/0011-distribucion-un-binario-hospeda-wasmtime.md) for the
 why.
 
@@ -375,23 +377,43 @@ install beyond the Rust toolchain.** Official reference: `ejemplos/hola-paso/`.
    directory in your project, no generated `bindings.rs` to keep, and no
    `cargo component` to install.
 
-5. Declare it in the YAML (`executors: [{ name: hola, type: wasm, path:
-   ./hola.wasm }]`, a step with `executor: hola`) and run
-   `./anvil sequence.yaml`. The host spawns the bridge, which loads your
+5. **Assemble a department**: a folder with the `anvil-exec-wasm` binary and
+   your `.wasm` beside it. That is what an executor is — it serves the modules
+   it finds next to itself
+   ([ADR-0027](adr/0027-a-sequence-names-the-executor-not-the-module.md)).
+
+   ```sh
+   mkdir -p mi-departamento
+   cp anvil-exec-wasm mi-departamento/
+   cp target/wasm32-wasip2/debug/hola.wasm mi-departamento/
+   ```
+
+6. Declare **the executor** in the YAML — its binary, not your module — and
+   name the step `<module>/<step>`:
+
+   ```yaml
+   executors:
+     - { name: instrumentos, type: wasm, path: mi-departamento/anvil-exec-wasm }
+   main:
+     - name: hola/medir_voltaje
+       executor: instrumentos
+   ```
+
+   Then `./anvil sequence.yaml`. The host spawns that binary, which loads your
    component (empty WASI sandbox: no files, no network) and translates
-   gRPC↔function.
+   gRPC↔function. If the executor is on another machine, declare it as
+   `type: grpc` with its host and port instead — the steps do not change.
 
 ### One executor, several modules (ADR-0025)
 
-Point `path` at a **directory** instead of a file and every `*.wasm` in it is a
-module the same executor serves. A module's name is its file stem, and a step
-is then named `<module>/<step>`:
+One executor serves every `*.wasm` it finds beside its own binary, and each is
+a module named after its file. A step is then named `<module>/<step>`:
 
 ```yaml
 executors:
   - name: instrumentos
     type: wasm
-    path: departamento/target/wasm32-wasip2/debug
+    path: departamento/dist/anvil-exec-wasm
 main:
   - name: multimetro/medir_voltaje
     executor: instrumentos
@@ -399,17 +421,18 @@ main:
     executor: instrumentos
 ```
 
-The extension and the path never appear in the sequence, so the folder can be
-reorganised — or a module rewritten in another language — without editing the
-YAML. `ejemplos/demo_departamento.yaml` is the worked example; pointing `path`
-at a single file still works and keeps bare step names
-(`ejemplos/demo_wasm.yaml`).
+The extension and the module's location never appear in the sequence, so a
+department can reorganise itself — or rewrite a module in another language —
+without editing any YAML. `ejemplos/demo_departamento.yaml` and
+`ejemplos/demo_wasm.yaml` are the worked examples, and `make build` assembles
+the department they use.
 
-To see what a department serves without writing a sequence first, ask the
-bridge directly:
+To see what a department serves without writing a sequence first, ask its
+executor directly — it needs no arguments, because it knows where its modules
+are:
 
 ```sh
-./anvil-exec-wasm --modules <dir> --list
+./mi-departamento/anvil-exec-wasm --list
 ```
 
 Your steps are ordinary functions, so their own unit tests call them directly:

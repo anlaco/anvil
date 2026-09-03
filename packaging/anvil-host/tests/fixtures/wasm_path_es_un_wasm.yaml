@@ -1,0 +1,11 @@
+# El tropiezo nº1 viniendo de antes de ADR-0027: apuntar `path` al `.wasm` en
+# vez de al binario del ejecutor. El fichero existe (es el fixture de al lado),
+# así que el cargador lo da por bueno y quien tiene que explicarlo es el host.
+name: wasm_path_es_un_wasm
+executors:
+  - name: dmm
+    type: wasm
+    path: ./no_es_componente.wasm
+main:
+  - name: multimetro/medir_voltaje
+    executor: dmm

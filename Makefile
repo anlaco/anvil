@@ -31,7 +31,7 @@ ANVIL_DEBUG   := packaging/anvil-host/target/debug/anvil
 ANVIL_RELEASE := packaging/anvil-host/target/release/anvil
 
 .PHONY: all build release test test-core test-bridge test-host test-executors \
-        test-executors-rust example check fmt run clean help
+        test-executors-rust example dept check fmt run clean help
 
 all: build
 
@@ -40,6 +40,7 @@ build: example
 	cargo build --target $(TARGET) $(GUESTS)
 	cargo build --manifest-path $(BRIDGE)
 	cargo build --manifest-path $(HOST)
+	@$(MAKE) --no-print-directory dept BRIDGE_BIN=executors/wasm/target/debug/anvil-exec-wasm
 	@echo "ready → $(ANVIL_DEBUG)"
 
 ## The reference step component (`ejemplos/hola-paso`), the one
@@ -51,12 +52,25 @@ example:
 	cargo build --target $(TARGET) --manifest-path $(EXAMPLE)
 	cargo build --target $(TARGET) --manifest-path $(DEPT)
 
+## Assembles the example **department** (ADR-0027): the executor's binary with
+## its modules beside it, which is what `path:` points at. It needs the bridge
+## already built, so `build`/`release` call it last and not as a dependency of
+## `example`.
+DIST := ejemplos/departamento/dist
+dept:
+	@mkdir -p $(DIST)
+	@cp $(BRIDGE_BIN) $(DIST)/
+	@cp ejemplos/departamento/target/$(TARGET)/debug/*.wasm $(DIST)/
+	@cp ejemplos/hola-paso/target/$(TARGET)/debug/*.wasm $(DIST)/
+	@echo "department ready → $(DIST)"
+
 ## Same, in release. The release binary starts in ~1 s; the debug one takes
 ## tens of seconds because wasmtime compiles the guests unoptimized.
 release: example
 	cargo build --release --target $(TARGET) $(GUESTS)
 	cargo build --release --manifest-path $(BRIDGE)
 	cargo build --release --manifest-path $(HOST)
+	@$(MAKE) --no-print-directory dept BRIDGE_BIN=executors/wasm/target/release/anvil-exec-wasm
 	@echo "ready → $(ANVIL_RELEASE)"
 
 test: test-core test-bridge test-host test-executors test-executors-rust
