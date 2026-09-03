@@ -8,6 +8,11 @@
   > report, so that half still needs a contract change and its own ADR. §7 was
   > already true and stays. §8–§9 (the pin) are not implemented. Nothing in
   > §Deferred was touched, and the Python executor is untouched.)*
+  > ⚠️ **Amended by [ADR-0027](0027-a-sequence-names-the-executor-not-the-module.md)
+  > the same day.** `path:` no longer points at the modules at all: it names the
+  > **executor's binary**, and the executor finds its modules next to itself.
+  > The single-file mode of §D2 (`--wasm`, bare step names) survives only as a
+  > by-hand facility — Anvil never uses it, so no sequence can reach it.
 - **Date:** 2026-09-02
 - **How it was decided:** in this repo, in a design conversation with
   management, starting from a question about the authoring experience: *"when I
