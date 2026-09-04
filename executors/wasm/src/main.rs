@@ -66,8 +66,8 @@ use wasmtime_wasi::{WasiCtx, WasiCtxView, WasiView};
 /// generates returns `Result<_, tonic::Status>` (176 bytes) from every method,
 /// and since clippy 1.98 the lint also reaches generated code. Boxing the
 /// error is not in our hands —tonic-build writes it— and the reasoning is the
-/// same as in `LoadedComponent::call`: it is tonic's canonical error type, and
-/// this is called once per step, not in a hot loop.
+/// same as in `LoadedComponent::describe`: it is tonic's canonical error type,
+/// and this is called once per step, not in a hot loop.
 #[allow(clippy::result_large_err)]
 pub mod pb {
     tonic::include_proto!("_");
@@ -307,20 +307,24 @@ impl LoadedComponent {
     }
 
     /// Calls the component's `run` and translates the result into the
-    /// contract's protobuf. A guest failure (panic, trap) is reported as
-    /// `Status::internal`: the engine sees it as a step error, and does not cut
-    /// the sequence over the network.
-    // `clippy::result_large_err`: the `Err` is `tonic::Status` (176 bytes),
-    // tonic's canonical error type. Boxing it just for this method would force
-    // unwrapping it at every point where tonic expects it, in exchange for
-    // nothing: this is called once per step, not in a hot loop.
-    #[allow(clippy::result_large_err)]
-    fn call(&mut self, name: &str, attempt: i32, inputs: &[Named]) -> Result<StepResult, Status> {
+    /// contract's protobuf.
+    ///
+    /// A guest failure (panic, trap) comes back as `Err` here — **the trap
+    /// text, not a `tonic::Status`** (issue #58). `wasi-grpc` v0.1's client has
+    /// no notion of a gRPC application-level error status (`leer_respuesta` in
+    /// `grpc.rs` only ever looks for a DATA frame): a trailers-only
+    /// `Status::internal` response reads to it as the stream closing with no
+    /// message at all, which is a transport-level `Error` in `motor` and
+    /// aborts the whole run — never the per-step `error` verdict ADR-0019
+    /// Rule 2 asks for. The caller ([`ModuleSet::call`]) is the one that turns
+    /// this into a `StepResult` and answers `Ok`, so the RPC always succeeds
+    /// and only the step's `status` says what happened.
+    fn call(&mut self, name: &str, attempt: i32, inputs: &[Named]) -> Result<StepResult, String> {
         let r = self
             .step
             .anvil_step_step()
             .call_run(&mut self.store, name, attempt, inputs)
-            .map_err(|e| Status::internal(format!("step '{name}' failed: {e}")))?;
+            .map_err(|e| format!("step '{name}' trapped: {e}"))?;
         Ok(StepResult {
             name: name.to_string(),
             status: r.status,
@@ -345,6 +349,15 @@ impl LoadedComponent {
     ///
     /// Called once, at start-up (ADR-0021 §3), and its cost is that of one WASM
     /// call: the component returns a list built at compile time by the SDK.
+    ///
+    /// Unlike `LoadedComponent::call` (issue #58), a trap here does not need
+    /// to become a `StepResult`: `ModuleSet::catalog` already treats an `Err`
+    /// as "this module does not describe itself" without taking any other
+    /// module's catalog down, which is the same shape ADR-0021 §4 already
+    /// asks for. So this keeps `Status`, tonic's canonical error type — it is
+    /// called once per module at start-up, not in a hot loop, so boxing it
+    /// just for this method would cost unwrapping at every point tonic
+    /// expects it, for nothing.
     #[allow(clippy::result_large_err)]
     fn describe(&mut self) -> Result<Vec<pb::StepSpec>, Status> {
         let specs = self
@@ -542,6 +555,50 @@ impl ModuleSet {
         Ok(m.loaded.as_mut().expect("just loaded"))
     }
 
+    /// Calls a step and always answers `Ok` (issue #58): a trap is not this
+    /// RPC's failure, it is the step's — the bench's problem, never the
+    /// unit's (ADR-0019, Rule 2) — so it comes back as a `StepResult` with
+    /// `status: "error"` naming the trap, exactly like any other step
+    /// failure the engine already knows how to judge and `cleanup` after.
+    ///
+    /// A trapped instance is not reused: `wasmtime` leaves it unable to
+    /// answer anything else ("cannot enter component instance" on the next
+    /// call), because a trap unwinds mid-execution and its `Store` can be
+    /// left in a state a fresh call cannot assume is sane. This drops the
+    /// module's `loaded` component so [`Self::component`] reloads a fresh
+    /// one **lazily, on the next call that needs it** — not eagerly, right
+    /// here — which is the same on-demand path `component` already takes for
+    /// a module nobody has used yet, so there is no second code path to keep
+    /// in sync. Lazy is cheap only because no component keeps process state
+    /// today (ADR-0022 §8); a stateful one would lose that state here, and
+    /// this comment is where that bill falls due.
+    fn call(
+        &mut self,
+        module: &str,
+        step: &str,
+        attempt: i32,
+        inputs: &[Named],
+    ) -> Result<StepResult, String> {
+        match self.component(module)?.call(step, attempt, inputs) {
+            Ok(result) => Ok(result),
+            Err(trap) => {
+                if let Some(m) = self.modules.get_mut(module) {
+                    m.loaded = None;
+                }
+                Ok(StepResult {
+                    name: step.to_string(),
+                    status: "error".to_string(),
+                    message: trap,
+                    measured_value: String::new(),
+                    limit_min: String::new(),
+                    limit_max: String::new(),
+                    outputs: Vec::new(),
+                    contract: CONTRACT,
+                })
+            }
+        }
+    }
+
     /// The catalog of every module, with each step's name qualified.
     ///
     /// A module that cannot be loaded, or that traps while describing itself,
@@ -550,7 +607,7 @@ impl ModuleSet {
     /// as unchecked, which is ADR-0021 §4 — not being checked is not the same
     /// as being fine, and it is said out loud.
     // `clippy::result_large_err`: the inner `Result` is `describe`'s, whose
-    // `Err` is `tonic::Status` — see the note on `LoadedComponent::call`.
+    // `Err` is `tonic::Status` — see the note on `LoadedComponent::describe`.
     #[allow(clippy::result_large_err)]
     fn catalog(&mut self) -> Vec<pb::StepSpec> {
         let names: Vec<String> = self.modules.keys().cloned().collect();
@@ -621,7 +678,10 @@ struct ExecutorService {
 #[tonic::async_trait]
 impl StepExecutor for ExecutorService {
     // `clippy::result_large_err`: the `Err` is `tonic::Status`, tonic's
-    // canonical error type — see the note on `LoadedComponent::call`.
+    // canonical error type — see the note on `LoadedComponent::describe`.
+    // (A step's own trap does not reach it: `ModuleSet::call`, issue #58,
+    // answers that `Ok`. Only a module that could not be loaded at all gets
+    // here as an `Err`.)
     #[allow(clippy::result_large_err)]
     async fn invoke(&self, request: Request<StepRequest>) -> Result<Response<StepResult>, Status> {
         let req = request.into_inner();
@@ -665,11 +725,12 @@ impl StepExecutor for ExecutorService {
             // and that is information about the bench, never about the unit
             // (ADR-0019, Rule 2).
             let (module, step) = set.resolve(&req.name).map_err(Status::invalid_argument)?;
-            let mut result = set.component(&module).map_err(Status::internal)?.call(
-                &step,
-                req.attempt,
-                &inputs,
-            )?;
+            // A trap comes back inside `result` (`status: "error"`), not as
+            // an `Err` here: only a module that could not even be loaded is
+            // this RPC's own failure (issue #58; see `ModuleSet::call`).
+            let mut result = set
+                .call(&module, &step, req.attempt, &inputs)
+                .map_err(Status::internal)?;
             // The engine routed on the qualified name and expects it back:
             // `StepResult.name` is what the report is written from.
             result.name = req.name.clone();
@@ -1022,6 +1083,63 @@ mod tests {
         assert!(err.contains("could not instantiate"), "{err}");
         assert!(err.contains(EXPECTED_RUN), "{err}");
         assert!(err.contains("attempt: u32"), "{err}");
+    }
+
+    /// Issue #58: a `panic!` inside a WASM step used to cut the whole run —
+    /// `wasi-grpc`'s client (v0.1, see `ModuleSet::call`'s doc comment) has no
+    /// notion of a gRPC application-level error, so a trailers-only
+    /// `Status::internal` read as the connection breaking, not as a step
+    /// result. The fix is that a trap never becomes an RPC failure: it comes
+    /// back as an ordinary `StepResult` with `status: "error"` naming the
+    /// trap, and the module is reloaded (lazily) so the *next* call — the
+    /// passing step, `bien`, exactly like the issue's own two-step repro —
+    /// still gets answered instead of hitting wasmtime's "cannot enter
+    /// component instance" on a trapped `Store`.
+    ///
+    /// Seen to fail: reverting `ModuleSet::call` to what `invoke` used to do
+    /// (`component(module)?.call(...)?` propagated straight to `Status`)
+    /// turns the first assertion into an `Err`, and this test goes red.
+    #[test]
+    fn a_trap_answers_error_and_the_next_call_still_works() {
+        let bytes = std::fs::read(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("tests/fixtures/traps_and_recovers.wasm"),
+        )
+        .expect("read fixture");
+        let engine = Engine::default();
+        let mut modules = BTreeMap::new();
+        modules.insert(
+            "traps_and_recovers".to_string(),
+            Module {
+                path: std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                    .join("tests/fixtures/traps_and_recovers.wasm"),
+                hash: String::new(),
+                loaded: Some(LoadedComponent::load(&engine, &bytes).expect("load fixture")),
+            },
+        );
+        let mut set = ModuleSet {
+            engine,
+            modules,
+            qualified: false,
+        };
+
+        let trapped = set
+            .call("traps_and_recovers", "revienta", 1, &[])
+            .expect("a trap must not be this RPC's own error");
+        assert_eq!(trapped.status, "error", "{trapped:?}");
+        // The guest's own panic text ("boom") does not survive the trap —
+        // wasmtime's error is a backtrace, not the payload — so what names
+        // the trap for whoever reads the report is the step and the fact
+        // that it trapped, not the original panic message.
+        assert!(trapped.message.contains("revienta"), "{}", trapped.message);
+        assert!(trapped.message.contains("trapped"), "{}", trapped.message);
+
+        // The trapped `Store` is gone; this call must load a fresh one rather
+        // than reuse it — that is the reinstantiation issue #58 asks for.
+        let ok = set
+            .call("traps_and_recovers", "bien", 1, &[])
+            .expect("the next call must still be served");
+        assert_eq!(ok.status, "pass", "{ok:?}");
     }
 
     /// A component broken **beyond** the header is not this diagnosis's

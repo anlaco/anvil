@@ -1,0 +1,15 @@
+[package]
+name = "traps_and_recovers"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+# The real SDK, not a hand-rolled binding (unlike `firma_no_casa-fuente`,
+# which needs to violate the WIT on purpose): this fixture is an ordinary,
+# correctly-built component that happens to panic.
+anvil-step = { path = "../../../../rust/anvil-step" }
+
+[lib]
+crate-type = ["cdylib"]
+
+[workspace]

@@ -13,6 +13,13 @@
 # load it without a wasm32-wasip2 build at test time.
 !executors/wasm/tests/fixtures/firma_no_casa.wasm
 executors/wasm/tests/fixtures/firma_no_casa-fuente/target/
+# Excepción: a real component built with the actual `anvil-step` SDK, one
+# step that panics and one that passes (issue #58), checked in alongside the
+# source that builds it (`traps_and_recovers-fuente/`) so
+# `a_trap_answers_error_and_the_next_call_still_works` can load it without a
+# wasm32-wasip2 build at test time.
+!executors/wasm/tests/fixtures/traps_and_recovers.wasm
+executors/wasm/tests/fixtures/traps_and_recovers-fuente/target/
 /target
 Cargo.lock
 # Salidas de smoke del CLI (./anvil ... --json ./out.json):
