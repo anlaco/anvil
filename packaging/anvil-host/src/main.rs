@@ -42,7 +42,7 @@
 
 use std::collections::{HashMap, HashSet};
 use std::net::{IpAddr, TcpListener, TcpStream};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::thread;
 use std::time::Duration;
 use wasmtime::component::{Component, Linker, ResourceTable};
@@ -214,6 +214,32 @@ fn ruta_de_secuencia(args: &[String]) -> Option<String> {
         }
     }
     None
+}
+
+/// The subset of `FLAGS_CON_VALOR` whose value is a filesystem path, as
+/// opposed to `--port` (a number) or `--executor` (a `name=addr` pair with no
+/// path in it).
+const FLAGS_DE_RUTA: [&str; 4] = ["--process-model", "--json", "--csv", "--limits"];
+
+/// Every path-valued argument bound for the engine guest: the sequence's own
+/// path plus the value of each `FLAGS_DE_RUTA` flag present. Used to decide
+/// which extra directories the host must preopen (issue #40): only the cwd
+/// is preopened under the guest name `"."`, so an **absolute** path does not
+/// match that preopen's prefix and WASI rejects it (`os error 44`) even when
+/// the file exists — see the preopen loop in `main`.
+fn rutas_de_argumentos(args: &[String]) -> Vec<String> {
+    let mut rutas: Vec<String> = ruta_de_secuencia(args).into_iter().collect();
+    let mut it = args.iter();
+    while let Some(a) = it.next() {
+        if FLAGS_DE_RUTA.contains(&a.as_str()) {
+            if let Some(v) = it.next() {
+                rutas.push(v.clone());
+            }
+        } else if FLAGS_CON_VALOR.contains(&a.as_str()) {
+            it.next();
+        }
+    }
+    rutas
 }
 
 /// Non-loopback IPs declared in the sequence YAML's `executors:` (only
@@ -583,6 +609,30 @@ fn main() {
     if let Ok(cwd) = std::env::current_dir() {
         let _ = wasi.preopened_dir(&cwd, ".", DirPerms::all(), FilePerms::all());
     }
+    // Issue #40: an absolute path argument (`--json /tmp/x.json`, or the
+    // sequence itself via `$PWD/...`) falls outside the cwd preopen above
+    // (guest name `"."`), so it must get its own preopen, named after its
+    // own parent directory, for the guest's unmodified argv string to
+    // resolve. A directory that does not exist cannot be preopened (ambient
+    // open fails) — that failure surfaces later as the guest's own I/O
+    // error, same as today.
+    let mut preopens_extra: HashSet<PathBuf> = HashSet::new();
+    for ruta in rutas_de_argumentos(&argv[1..]) {
+        let p = Path::new(&ruta);
+        if p.is_absolute() {
+            if let Some(padre) = p.parent() {
+                preopens_extra.insert(padre.to_path_buf());
+            }
+        }
+    }
+    for dir in &preopens_extra {
+        let _ = wasi.preopened_dir(
+            dir,
+            dir.to_string_lossy(),
+            DirPerms::all(),
+            FilePerms::all(),
+        );
+    }
     let wasi = wasi.build();
 
     // The engine runs on the main thread: its exit determines the host's.
@@ -615,7 +665,7 @@ fn main() {
 
 #[cfg(test)]
 mod tests {
-    use super::ruta_de_secuencia;
+    use super::{ruta_de_secuencia, rutas_de_argumentos};
 
     fn args(v: &[&str]) -> Vec<String> {
         v.iter().map(|s| s.to_string()).collect()
@@ -656,6 +706,34 @@ mod tests {
     #[test]
     fn sin_argumentos() {
         assert_eq!(ruta_de_secuencia(&[]), None);
+    }
+
+    #[test]
+    fn rutas_de_argumentos_recoge_secuencia_y_flags_de_ruta() {
+        let a = args(&[
+            "s.yaml",
+            "--json",
+            "o.json",
+            "--csv",
+            "o.csv",
+            "--limits",
+            "l.yaml",
+            "--process-model",
+            "pm.yaml",
+        ]);
+        let mut r = rutas_de_argumentos(&a);
+        r.sort();
+        let mut esperado = vec!["l.yaml", "o.csv", "o.json", "pm.yaml", "s.yaml"];
+        esperado.sort();
+        assert_eq!(r, esperado);
+    }
+
+    #[test]
+    fn rutas_de_argumentos_ignora_flags_sin_ruta() {
+        // `--port` and `--executor` take a value too, but it is not a path:
+        // it must not end up preopened as one.
+        let a = args(&["s.yaml", "--port", "9200", "--executor", "n=127.0.0.1:1"]);
+        assert_eq!(rutas_de_argumentos(&a), vec!["s.yaml".to_string()]);
     }
 
     #[test]

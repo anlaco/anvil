@@ -10,6 +10,16 @@ minors, with the change written down here.
 
 ## [Unreleased]
 
+### Fixed
+
+- **The CLI accepts absolute paths again** (#40): `--json`, `--csv`,
+  `--limits`, `--process-model` and the sequence path itself used to fail
+  with `os error 44` whenever the path was absolute, even for a file that
+  existed and was inside the current directory. Only the cwd was preopened
+  into the engine's WASI sandbox; an absolute path fell outside that
+  preopen's prefix. The host now also preopens each absolute path argument's
+  parent directory.
+
 ## [0.4.0] — 2026-09-03
 
 ### Breaking
