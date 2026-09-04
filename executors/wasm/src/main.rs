@@ -54,6 +54,7 @@ use std::thread;
 
 use sha2::{Digest, Sha256};
 use tonic::{transport::Server, Request, Response, Status};
+use wasmtime::component::types::{self, Type as CompType};
 use wasmtime::component::{bindgen, Component, Linker, ResourceTable};
 use wasmtime::{Engine, Store};
 use wasmtime_wasi::{WasiCtx, WasiCtxView, WasiView};
@@ -148,6 +149,135 @@ fn diagnose_not_a_component(bytes: &[u8]) -> Option<String> {
     None
 }
 
+/// The `anvil:step/step` interface's export key, as wit-bindgen/wasm-tools
+/// name it: `<package>/<interface>@<version>` (see `wit/anvil-step.wit`).
+const STEP_INTERFACE: &str = "anvil:step/step@0.4.0";
+
+/// The signatures `wit/anvil-step.wit` declares, spelled by hand for
+/// [`diagnose_signature_mismatch`] — this binary does not parse WIT text at
+/// runtime, so these are not read from the file. Keep them in step with the
+/// `run`/`describe` lines there.
+const EXPECTED_RUN: &str =
+    "run: func(name: string, attempt: s32, inputs: list<named>) -> step-result";
+const EXPECTED_DESCRIBE: &str = "describe: func() -> list<step-spec>";
+
+/// A component-model type, spelled close to its WIT syntax — deep enough to
+/// name a mismatched parameter's actual type (issue #24's `u32` instead of
+/// `s32`, or a `record` wrapping the arguments). Not a full WIT printer: past
+/// one level of nesting a composite type just names its shape.
+fn render_type(t: &CompType) -> String {
+    match t {
+        CompType::Bool => "bool".to_string(),
+        CompType::S8 => "s8".to_string(),
+        CompType::U8 => "u8".to_string(),
+        CompType::S16 => "s16".to_string(),
+        CompType::U16 => "u16".to_string(),
+        CompType::S32 => "s32".to_string(),
+        CompType::U32 => "u32".to_string(),
+        CompType::S64 => "s64".to_string(),
+        CompType::U64 => "u64".to_string(),
+        CompType::Float32 => "float32".to_string(),
+        CompType::Float64 => "float64".to_string(),
+        CompType::Char => "char".to_string(),
+        CompType::String => "string".to_string(),
+        CompType::List(l) => format!("list<{}>", render_type(&l.ty())),
+        CompType::Option(o) => format!("option<{}>", render_type(&o.ty())),
+        CompType::Record(r) => {
+            let fields = r
+                .fields()
+                .map(|f| format!("{}: {}", f.name, render_type(&f.ty)))
+                .collect::<Vec<_>>()
+                .join(", ");
+            format!("record {{ {fields} }}")
+        }
+        CompType::Map(_) => "map".to_string(),
+        CompType::Tuple(_) => "tuple".to_string(),
+        CompType::Variant(_) => "variant".to_string(),
+        CompType::Enum(_) => "enum".to_string(),
+        CompType::Result(_) => "result".to_string(),
+        CompType::Flags(_) => "flags".to_string(),
+        CompType::Own(_) | CompType::Borrow(_) => "resource".to_string(),
+        CompType::Future(_) => "future".to_string(),
+        CompType::Stream(_) => "stream".to_string(),
+        CompType::ErrorContext => "error-context".to_string(),
+    }
+}
+
+/// Renders a component-model function type as a WIT-like `name: func(...) ->
+/// ...` line, the same shape as [`EXPECTED_RUN`]/[`EXPECTED_DESCRIBE`] so the
+/// two read side by side.
+fn render_func(name: &str, f: &types::ComponentFunc) -> String {
+    let params = f
+        .params()
+        .map(|(n, t)| format!("{n}: {}", render_type(&t)))
+        .collect::<Vec<_>>()
+        .join(", ");
+    let results: Vec<String> = f.results().map(|t| render_type(&t)).collect();
+    let ret = match results.len() {
+        0 => String::new(),
+        1 => format!(" -> {}", results[0]),
+        _ => format!(" -> ({})", results.join(", ")),
+    };
+    format!("{name}: func({params}){ret}")
+}
+
+/// Finds a function exported by a component instance, by name.
+fn find_func(
+    instance: &types::ComponentInstance,
+    engine: &Engine,
+    name: &str,
+) -> Option<types::ComponentFunc> {
+    instance.exports(engine).find_map(|(n, e)| match e.ty {
+        types::ComponentItem::ComponentFunc(f) if n == name => Some(f),
+        _ => None,
+    })
+}
+
+/// Issue #24: wasmtime's own error on a signature mismatch — "failed to
+/// convert function to given type" — names neither the signature the host
+/// expected nor the one the component exports, so the first thing whoever
+/// writes their own component sees is a message with no pointer to what is
+/// wrong (BUG-06 of the beta). This inspects the component's *type* — no WASM
+/// runs, it is the same static info `wasm-tools component wit` would read —
+/// to say both, so the two can be compared by eye.
+///
+/// Always run/described side by side, even when one of the two turns out to
+/// match: a `render_func` line expands named types structurally (`list<named>`
+/// comes back as `list<record { name: string, value: variant }>`), so it
+/// never reads identical to [`EXPECTED_RUN`]/[`EXPECTED_DESCRIBE`]'s shorthand
+/// even for a correct component. Deciding "this one actually differs" would
+/// need a real WIT-aware comparison; showing both lines and letting the
+/// reader's eye do that is the honest alternative to a hand-rolled one that
+/// could itself be wrong.
+fn diagnose_signature_mismatch(component: &Component, engine: &Engine) -> String {
+    let ty = component.component_type();
+    let interface = ty.exports(engine).find_map(|(name, e)| match e.ty {
+        types::ComponentItem::ComponentInstance(i) if name == STEP_INTERFACE => Some(i),
+        _ => None,
+    });
+    let Some(interface) = interface else {
+        let found: Vec<&str> = ty.exports(engine).map(|(n, _)| n).collect();
+        return format!(
+            "the component does not export '{STEP_INTERFACE}'; it exports: {}",
+            if found.is_empty() {
+                "(nothing)".to_string()
+            } else {
+                found.join(", ")
+            }
+        );
+    };
+    [("run", EXPECTED_RUN), ("describe", EXPECTED_DESCRIBE)]
+        .iter()
+        .map(|(name, expected)| {
+            let found = find_func(&interface, engine, name)
+                .map(|f| render_func(name, &f))
+                .unwrap_or_else(|| format!("{name}: (not exported)"));
+            format!("expected  {expected}\nexports   {found}")
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
 impl LoadedComponent {
     fn load(engine: &Engine, bytes: &[u8]) -> Result<Self, String> {
         // Before instantiating anything: if the `.wasm` is not a component,
@@ -167,8 +297,12 @@ impl LoadedComponent {
         let mut store = Store::new(engine, state);
         let component =
             Component::from_binary(engine, bytes).map_err(|e| format!("invalid component: {e}"))?;
-        let step = AnvilStep::instantiate(&mut store, &component, &linker)
-            .map_err(|e| format!("could not instantiate: {e}"))?;
+        let step = AnvilStep::instantiate(&mut store, &component, &linker).map_err(|e| {
+            format!(
+                "could not instantiate: {e}\n{}",
+                diagnose_signature_mismatch(&component, engine)
+            )
+        })?;
         Ok(LoadedComponent { store, step })
     }
 
@@ -858,6 +992,36 @@ mod tests {
     #[test]
     fn a_component_does_not_trigger_the_diagnosis() {
         assert_eq!(diagnose_not_a_component(&COMPONENT_HEADER), None);
+    }
+
+    /// Issue #24: a component whose `run` takes `attempt: u32` instead of the
+    /// WIT's `s32` — the exact mistake BUG-06 made during the beta — used to
+    /// fail with wasmtime's bare "failed to convert function to given type"
+    /// and nothing else. `tests/fixtures/firma_no_casa.wasm` is a real
+    /// component built against a hand-edited copy of `wit/anvil-step.wit`
+    /// with that one line changed (everything else, `describe` included,
+    /// matches); regenerating it needs a `wit-bindgen`-based crate exporting
+    /// `anvil:step` with that edit, built for `wasm32-wasip2`.
+    ///
+    /// Seen to fail: reverting `LoadedComponent::load`'s call to
+    /// `diagnose_signature_mismatch` (or the function itself) leaves the
+    /// error at wasmtime's original wording, and this test goes red because
+    /// neither "expected" nor "u32" appear in it.
+    #[test]
+    fn a_signature_mismatch_names_both_sides() {
+        let bytes = std::fs::read(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("tests/fixtures/firma_no_casa.wasm"),
+        )
+        .expect("read fixture");
+        let engine = Engine::default();
+        let err = match LoadedComponent::load(&engine, &bytes) {
+            Ok(_) => panic!("the mismatched component must not load"),
+            Err(e) => e,
+        };
+        assert!(err.contains("could not instantiate"), "{err}");
+        assert!(err.contains(EXPECTED_RUN), "{err}");
+        assert!(err.contains("attempt: u32"), "{err}");
     }
 
     /// A component broken **beyond** the header is not this diagnosis's
