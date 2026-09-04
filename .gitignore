@@ -7,6 +7,12 @@
 # justamente lo que delataría al puente si alguien lo levantara bajo
 # `--validate` (issue anlaco/Anvil-Test#22).
 !packaging/anvil-host/tests/fixtures/no_es_componente.wasm
+# Excepción: a real component built with a deliberately wrong `run` signature
+# (issue #24), checked in alongside the source that builds it
+# (`firma_no_casa-fuente/`) so `a_signature_mismatch_names_both_sides` can
+# load it without a wasm32-wasip2 build at test time.
+!executors/wasm/tests/fixtures/firma_no_casa.wasm
+executors/wasm/tests/fixtures/firma_no_casa-fuente/target/
 /target
 Cargo.lock
 # Salidas de smoke del CLI (./anvil ... --json ./out.json):

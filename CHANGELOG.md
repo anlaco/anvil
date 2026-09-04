@@ -20,6 +20,13 @@ minors, with the change written down here.
   preopen's prefix. The host now also preopens each absolute path argument's
   parent directory.
 
+- **A WASM component whose interface does not match `anvil:step` now says
+  why** (#24): loading it used to fail with wasmtime's bare `failed to
+  convert function to given type`, naming neither the signature the bridge
+  expected nor the one the component exports. The bridge (`anvil-exec-wasm`)
+  now inspects the component's type and prints both `run`/`describe` lines
+  side by side.
+
 ## [0.4.0] — 2026-09-03
 
 ### Breaking
