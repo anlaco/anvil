@@ -12,6 +12,16 @@ minors, with the change written down here.
 
 ### Fixed
 
+- **A `panic!` in a WASM step no longer cuts the whole run** (#58): the trap
+  used to leave the run silent — `wasi-grpc`'s client (the sibling project
+  `motor` talks to executors with) has no notion of a gRPC application-level
+  error status, so the bridge's `Status::internal` response for a trap read
+  as the connection breaking, and the sequence aborted with no verdict and
+  no `cleanup`. The bridge (`anvil-exec-wasm`) now answers a trap as an
+  ordinary `StepResult` with `status: "error"` naming the trap — never an
+  RPC failure — and reloads the module lazily on its next call, since the
+  trapped instance cannot be reused.
+
 - **The CLI accepts absolute paths again** (#40): `--json`, `--csv`,
   `--limits`, `--process-model` and the sequence path itself used to fail
   with `os error 44` whenever the path was absolute, even for a file that
