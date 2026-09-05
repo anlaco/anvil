@@ -10,10 +10,12 @@
 // unpatchable Zip Slip advisory in through `weval` -> `decompress`. Transpiling
 // alone audits clean.
 
-import { readFile, rm } from "node:fs/promises";
-import { dirname, join, resolve } from "node:path";
+import { readdir, readFile, rm, stat } from "node:fs/promises";
+import { dirname, join, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { transpileBytes, writeFiles } from "@bytecodealliance/jco-transpile";
+
+import { checkFreshness, ENGINE_SOURCES } from "./freshness.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const EDITOR = resolve(HERE, "..");
@@ -23,6 +25,55 @@ const REPO = resolve(EDITOR, "..");
 // seconds just to start (see the note in the Makefile).
 const GUEST = join(REPO, "target", "wasm32-wasip2", "release", "anvil-guest.wasm");
 const OUT = join(EDITOR, "generated");
+
+// The editor and the command line must carry the same engine (ADR-0031), and
+// they can silently drift apart. Checked here because this is the one point a
+// stale guest gets in.
+const mtimeOf = async (path) => stat(path).then((s) => s.mtimeMs, () => null);
+
+/**
+ * The most recent modification time under a directory, ignoring build output.
+ *
+ * Throws rather than returning null on failure, and the caller does not catch
+ * it. "I could not check" must not read as "there is nothing to report" — that
+ * is the false green of ADR-0019's Rule 2, and this function got it wrong once
+ * already: it used the deprecated `Dirent.path`, which is `undefined` on Node
+ * 24, so every call threw, a `.catch(() => null)` swallowed it, and the guard
+ * silently passed everything.
+ */
+async function newestUnder(dir) {
+  let newest = 0;
+  const entries = await readdir(dir, { withFileTypes: true, recursive: true });
+  for (const entry of entries) {
+    if (!entry.isFile()) continue;
+    // `parentPath` only; `Dirent.path` is gone.
+    const full = join(entry.parentPath, entry.name);
+    if (full.includes(`${sep}target${sep}`)) continue;
+    const at = await mtimeOf(full);
+    if (at !== null && at > newest) newest = at;
+  }
+  if (newest === 0) {
+    throw new Error(`no source files found under ${dir} — is ENGINE_SOURCES out of date?`);
+  }
+  return newest;
+}
+
+const sourceMtimes = await Promise.all(
+  ENGINE_SOURCES.map((rel) => newestUnder(join(REPO, rel))),
+);
+
+const problem = checkFreshness({
+  guestMtime: await mtimeOf(GUEST),
+  sourceMtime: Math.max(...sourceMtimes),
+});
+
+if (problem?.fatal && !process.argv.includes("--allow-stale")) {
+  console.error(`\nengine guest out of date: ${problem.message}\n`);
+  process.exit(1);
+}
+if (problem && process.argv.includes("--allow-stale")) {
+  console.warn(`\nwarning, transpiling anyway: ${problem.message}\n`);
+}
 
 const wasm = await readFile(GUEST).catch(() => {
   throw new Error(

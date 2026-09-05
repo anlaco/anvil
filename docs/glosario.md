@@ -89,14 +89,30 @@ término de TestStand no se replica igual en Anvil, se dice explícitamente.
   [diseno/executores-lenguaje.md](diseno/executores-lenguaje.md) y
   [ADR-0012](adr/0012-executores-de-lenguaje-como-modulos.md).
 
-- **Cargador de `.wasm`.** El **host** (`anvil-host`) carga **módulos `.wasm`
-  propios por path** en runtime (modelo `.vi` de TestStand: compilar y
-  referenciar, sin recompilar). **M5-ext.2, implementado (ADR-0014/0015)**:
-  el host spawnea el **puente** `anvil-exec-wasm` (un fichero al lado de
+- **Puente** (*bridge*). **Desde el 05/09/2026 el término nombra el proceso
+  local que conecta el editor gráfico con los ejecutores** (ADR-0030): acepta
+  el WebSocket de la pestaña, abre las conexiones TCP reales contra los
+  ejecutores y retransmite en ambos sentidos, porque un navegador no tiene
+  sockets TCP. Es `anvil-host` **menos el motor**, ya que ahí el motor corre
+  en el navegador. Es además donde vive la frontera de red que hoy impone
+  wasmtime.
+
+  > **Aviso de vocabulario.** Hasta esa fecha «puente» nombraba a
+  > `anvil-exec-wasm`, y así lo dicen todavía ADR-0015, ADR-0023, el
+  > `CHANGELOG`, el `Makefile` y buena parte de `docs/`. Esos textos no se
+  > reescriben —los ADRs son inmutables—, pero **el término no se usa más con
+  > ese sentido**: `anvil-exec-wasm` es el **ejecutor WASM**, que es como ya lo
+  > llaman ADR-0025, ADR-0026 y ADR-0027. La corrección de los textos vivos es
+  > *boy scout*, no una migración.
+
+- **Ejecutor WASM** (`anvil-exec-wasm`). El **host** (`anvil-host`) carga
+  **módulos `.wasm` propios por path** en runtime (modelo `.vi` de TestStand:
+  compilar y referenciar, sin recompilar). **M5-ext.2, implementado
+  (ADR-0014/0015)**: el host spawnea el ejecutor WASM (un fichero al lado de
   `anvil`, ADR-0023),
   que carga el componente del usuario (interfaz WIT `anvil:paso`: una
-  función `run`, sin gRPC ni protobuf) y traduce gRPC↔función. El puente
-  corre con sandbox WASI vacío (el componente es una función pura); el
+  función `run`, sin gRPC ni protobuf) y traduce gRPC↔función. Corre
+  con sandbox WASI vacío (el componente es una función pura); el
   motor ve el endpoint como un `grpc` más (override `--executor` sintético)
   y nunca ejecuta `Wasm`. Agnóstico al origen del `.wasm` (C, Rust, Zig, un
   editor visual, un tercero). Ver
