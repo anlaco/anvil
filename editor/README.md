@@ -79,6 +79,32 @@ streams cannot be swapped for a capture. The browser build takes a plain
 `{ write }` handler and is what actually ships, so `src/wasi/` re-exports it by
 file path — the package's `exports` map admits no subpath that names it.
 
+## The engine runs on a worker thread
+
+`src/engine-pool.mjs` runs sequences on Web Workers, never on the page's own
+thread. The engine is a synchronous WASM component: on the main thread it
+freezes the interface — dead buttons, no way to abort — for as long as a
+sequence takes. That is invisible for the 80 ms a validate costs and
+unacceptable for a real run.
+
+It is written as a pool of one rather than as a single worker because that is
+the shape multi-UUT takes: one worker per unit under test, each with its own
+engine instance and no shared memory. Web Workers are real OS threads, so this
+is genuine parallelism — and the isolation is the property `docs/vision.md`
+wants and that TestStand's shared-memory threading does not give.
+
+It does **not** make the engine parallel. The engine is single-threaded
+(`crates/motor/src` has no `thread` or `spawn`) and in-sequence parallelism is
+post-MVP by decision (`docs/diseno/motor-de-ejecucion.md:137`). N workers are N
+sequences, not one sequence going faster — and a front end may not invent what
+the engine does not do (ADR-0031).
+
+**Abort is not solved.** `terminateAll()` kills the thread, which is the only
+stop available because the engine has no cancellation of its own. That is
+survivable while nothing is executed — a validate touches only memory. It will
+not be survivable once Run reaches hardware: killing the thread mid-sequence
+leaves the bench exactly as it was, with no `cleanup` run.
+
 ## Numbers are not localised
 
 Limit and retry fields are `type="text"`, not `type="number"`, on purpose. A

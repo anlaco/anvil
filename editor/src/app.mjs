@@ -12,18 +12,12 @@ import { EditorState } from "@codemirror/state";
 import { yaml as yamlLang } from "@codemirror/lang-yaml";
 
 import { SequenceDocument, PHASES, SCOPES, STEP_TYPES } from "./document.mjs";
-import { runEngine } from "./engine.mjs";
+import { browserPool, EngineHostError } from "./engine-pool.mjs";
 
-// The generated core modules are served alongside the app.
-const load = async (name) => {
-  const res = await fetch(`/generated/${name}`);
-  if (!res.ok) {
-    throw new Error(
-      `could not load ${name} (${res.status}). Run 'npm run transpile' first.`,
-    );
-  }
-  return new Uint8Array(await res.arrayBuffer());
-};
+// The engine runs on a worker thread, never on this one: it is a synchronous
+// WASM component, and on the main thread it would freeze the interface for as
+// long as a sequence takes. One worker for now; multi-UUT is more of them.
+const engine = browserPool({ max: 1 });
 
 const el = (id) => document.getElementById(id);
 
@@ -472,10 +466,9 @@ async function validate() {
   status("busy", "validating…");
   const name = state.filename ?? "sequence.yaml";
   try {
-    const { exitCode, stderr } = await runEngine({
+    const { exitCode, stderr } = await engine.run({
       args: [name, "--validate"],
       files: { [name]: doc.text },
-      load,
     });
     // The engine's own diagnostics, verbatim. Rewriting them here would mean
     // two sources for the same message, and the loader's is the one with the
@@ -485,8 +478,9 @@ async function validate() {
     status(exitCode === 0 ? "pass" : "fail", last || (exitCode === 0 ? "valid" : "rejected"));
   } catch (e) {
     // A host failure is not a verdict about the sequence, and must not read as
-    // one (ADR-0019, Rule 2).
-    status("error", `editor could not run the engine: ${e.message}`);
+    // one (ADR-0019, Rule 2). It gets its own colour, not "fail".
+    const what = e instanceof EngineHostError ? e.message : String(e?.message ?? e);
+    status("error", `editor could not run the engine: ${what}`);
   }
 }
 
