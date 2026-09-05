@@ -89,6 +89,25 @@ término de TestStand no se replica igual en Anvil, se dice explícitamente.
   [diseno/executores-lenguaje.md](diseno/executores-lenguaje.md) y
   [ADR-0012](adr/0012-executores-de-lenguaje-como-modulos.md).
 
+- **Cuña** (*shim*). Una capa fina que se mete entre dos piezas que no encajan,
+  para que encajen — como el calce que se pone bajo la pata de una mesa. En
+  Anvil hay exactamente una: la que le da al motor sus funciones WASI cuando
+  corre en un navegador (`editor/src/wasi/`).
+
+  El motor está compilado esperando que alguien le preste unas funciones
+  básicas —leer un fichero, saber la hora, abrir un socket—, y en el binario
+  quien se las presta es **wasmtime**. En el navegador no hay wasmtime, así que
+  se las presta JavaScript. Lo que hace que sea una cuña y no una reescritura
+  es que **el motor no se entera**: pide un socket TCP igual que siempre, y la
+  cuña traduce esa petición a un mensaje para el **puente**, porque un
+  navegador no tiene sockets. Sin ella el motor ni siquiera llega a arrancar
+  allí.
+
+  En el código se escribe *shim*, como todo lo que entra al repo (ver
+  `GLOSSARY.md`). Esta entrada existe porque el término se usó en ADRs y en
+  `editor/` antes de estar aquí, que es justo el orden que este fichero
+  pretende evitar.
+
 - **Puente** (*bridge*). **Desde el 05/09/2026 el término nombra el proceso
   local que conecta el editor gráfico con los ejecutores** (ADR-0030): acepta
   el WebSocket de la pestaña, abre las conexiones TCP reales contra los
