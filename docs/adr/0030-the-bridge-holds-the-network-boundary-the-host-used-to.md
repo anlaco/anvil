@@ -91,13 +91,29 @@ connection. The shim's check does not count.**
    remote-bench case belongs to the executors, which already have it
    (`executors/wasm/src/main.rs:818`), not to this.
 
-6. **The bridge refuses to be a general-purpose tunnel.** It carries gRPC to
+6. **The page must be cross-origin isolated, and that is not optional.**
+   Added on 2026-09-05, after building it. The engine's network calls are
+   *synchronous* — `blockingRead` returns bytes, `Pollable.block()` returns
+   nothing — and the only way to block a thread in JavaScript is
+   `Atomics.wait` on a `SharedArrayBuffer`, which browsers withhold unless the
+   page is cross-origin isolated. So the editor is served with
+   `Cross-Origin-Opener-Policy: same-origin` and
+   `Cross-Origin-Embedder-Policy: require-corp`, verified in Chrome: without
+   them `SharedArrayBuffer` does not exist at all, and with them a worker
+   blocks and is woken by another thread as intended.
+
+   The price is that every cross-origin resource then needs CORP/CORS headers,
+   and the editor cannot be embedded in a page that is not itself isolated.
+   The editor embeds everything it uses, so it pays nothing today; what it
+   gives up is being embeddable in someone else's application later.
+
+7. **The bridge refuses to be a general-purpose tunnel.** It carries gRPC to
    declared executors and nothing else. It is not a SOCKS proxy that happens
    to be written in Rust, and the temptation to make it one — "just let it
    connect anywhere, the editor knows what it is doing" — is the whole finding
    above, rewritten as a feature.
 
-7. **The native host stays the reference.** `packaging/anvil-host` remains how
+8. **The native host stays the reference.** `packaging/anvil-host` remains how
    Anvil is distributed and run (ADR-0011), and its boundary stays where it is.
    This ADR governs an additional host, not a replacement. A capability the
    browser path cannot honour is a reason to keep work in the native path, not

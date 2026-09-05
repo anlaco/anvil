@@ -37,6 +37,19 @@ export default defineConfig({
   plugins: [examples],
   server: {
     port: 5180,
+    // Cross-origin isolation, which is what makes `SharedArrayBuffer` exist.
+    // The engine asks for blocking network I/O — `blockingRead` returns bytes
+    // synchronously, `Pollable.block()` returns nothing — and the only way to
+    // block a thread in JavaScript is `Atomics.wait` on a SharedArrayBuffer,
+    // which the browser withholds unless the page is cross-origin isolated.
+    //
+    // The cost is that every cross-origin resource then needs CORP/CORS
+    // headers. The editor embeds everything it uses, so it pays nothing today;
+    // what it gives up is being embeddable in someone else's page later.
+    headers: {
+      "Cross-Origin-Opener-Policy": "same-origin",
+      "Cross-Origin-Embedder-Policy": "require-corp",
+    },
     // The engine is a 1.2 MB component transpiled into a 400 kB module; letting
     // Vite pre-bundle it costs a long pause on every cold start and buys
     // nothing, since it is already a single generated file.
