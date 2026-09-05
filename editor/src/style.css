@@ -1,0 +1,440 @@
+/*
+ * A test sequencer is an instrument, not a website: dense, fast to scan, and
+ * unsurprising to someone who has spent years in TestStand. Small type, real
+ * borders, no animation, verdict colours that mean what they mean everywhere
+ * else in Anvil (pass / fail / error / skipped).
+ */
+
+:root {
+  --bg: #f2f2ef;
+  --panel: #fbfbfa;
+  --ink: #16181b;
+  --muted: #5f6772;
+  --line: #cdd0cb;
+  --line-strong: #a9ada6;
+  --accent: #2c5a87;
+  --accent-ink: #fff;
+  --pass: #2e6b4b;
+  --fail: #97291d;
+  --error: #8a4b00;
+  --skipped: #6b7079;
+  --stale: #8a6a12;
+
+  --ui: ui-sans-serif, "Segoe UI", system-ui, sans-serif;
+  --mono: ui-monospace, "Cascadia Mono", "Consolas", monospace;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #16191c;
+    --panel: #1d2125;
+    --ink: #e6e8e4;
+    --muted: #99a1aa;
+    --line: #2f353b;
+    --line-strong: #454d55;
+    --accent: #6f9fc6;
+    --accent-ink: #10151a;
+    --pass: #6bbf92;
+    --fail: #e5796b;
+    --error: #d99a4e;
+    --skipped: #8b939c;
+    --stale: #d4b25e;
+  }
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  display: grid;
+  grid-template-rows: auto 1fr auto;
+  background: var(--bg);
+  color: var(--ink);
+  font: 13px/1.45 var(--ui);
+}
+
+/* ---------- toolbar ---------- */
+
+.toolbar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 4px 8px;
+  background: var(--panel);
+  border-bottom: 1px solid var(--line-strong);
+}
+
+.menus {
+  display: flex;
+  gap: 2px;
+}
+
+.menu {
+  position: relative;
+}
+
+.menu > button {
+  padding: 3px 10px;
+  background: none;
+  border: 1px solid transparent;
+  border-radius: 3px;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+.menu > button:hover,
+.menu > button[aria-expanded="true"] {
+  background: var(--bg);
+  border-color: var(--line);
+}
+
+.menu ul {
+  position: absolute;
+  z-index: 10;
+  top: 100%;
+  left: 0;
+  min-width: 150px;
+  margin: 2px 0 0;
+  padding: 3px;
+  list-style: none;
+  background: var(--panel);
+  border: 1px solid var(--line-strong);
+  border-radius: 3px;
+  box-shadow: 0 4px 12px rgb(0 0 0 / 0.16);
+}
+
+.menu li button {
+  display: block;
+  width: 100%;
+  padding: 4px 8px;
+  background: none;
+  border: 0;
+  border-radius: 2px;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.menu li button:hover {
+  background: var(--accent);
+  color: var(--accent-ink);
+}
+
+.views {
+  display: flex;
+  border: 1px solid var(--line-strong);
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+.views button {
+  padding: 3px 12px;
+  background: var(--panel);
+  border: 0;
+  color: var(--muted);
+  font: inherit;
+  cursor: pointer;
+}
+
+.views button + button {
+  border-left: 1px solid var(--line);
+}
+
+.views button[aria-selected="true"] {
+  background: var(--accent);
+  color: var(--accent-ink);
+}
+
+.filename {
+  flex: 1;
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: 12px;
+}
+
+.filename[data-dirty="true"]::after {
+  content: " •";
+  color: var(--stale);
+}
+
+.run {
+  padding: 4px 18px;
+  background: var(--accent);
+  border: 1px solid var(--accent);
+  border-radius: 3px;
+  color: var(--accent-ink);
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.run:disabled {
+  background: var(--panel);
+  border-color: var(--line);
+  color: var(--muted);
+  cursor: not-allowed;
+}
+
+/* ---------- panes ---------- */
+
+.panes {
+  display: grid;
+  grid-template-columns: 240px 1fr 260px;
+  min-height: 0;
+}
+
+.pane {
+  display: grid;
+  grid-template-rows: auto 1fr;
+  min-width: 0;
+  min-height: 0;
+  background: var(--panel);
+}
+
+.pane + .pane {
+  border-left: 1px solid var(--line-strong);
+}
+
+.pane h2 {
+  margin: 0;
+  padding: 5px 10px;
+  background: var(--bg);
+  border-bottom: 1px solid var(--line);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.scroll {
+  overflow: auto;
+  min-height: 0;
+}
+
+/* ---------- sequence list ---------- */
+
+.phase {
+  padding: 4px 10px 2px;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.step-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 3px 10px 3px 18px;
+  background: none;
+  border: 0;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.step-row:hover {
+  background: var(--bg);
+}
+
+.step-row[aria-current="true"] {
+  background: var(--accent);
+  color: var(--accent-ink);
+}
+
+.step-row .name {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--mono);
+}
+
+.step-row .kind {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.step-row[aria-current="true"] .kind {
+  color: var(--accent-ink);
+  opacity: 0.8;
+}
+
+.step-row[data-disabled="true"] .name {
+  text-decoration: line-through;
+  opacity: 0.55;
+}
+
+/* ---------- step editor ---------- */
+
+.fields {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 6px 12px;
+  align-content: start;
+  padding: 12px 14px;
+}
+
+.fields label {
+  color: var(--muted);
+  text-align: right;
+  padding-top: 3px;
+}
+
+.fields input,
+.fields select {
+  width: 100%;
+  max-width: 320px;
+  padding: 3px 6px;
+  background: var(--bg);
+  border: 1px solid var(--line-strong);
+  border-radius: 2px;
+  color: inherit;
+  font: inherit;
+  font-family: var(--mono);
+}
+
+.fields input:focus-visible,
+.fields select:focus-visible,
+.step-row:focus-visible,
+button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.fields .group {
+  grid-column: 1 / -1;
+  margin-top: 8px;
+  padding-top: 6px;
+  border-top: 1px solid var(--line);
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.fields .hint {
+  grid-column: 2;
+  margin: -2px 0 0;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.empty {
+  padding: 16px 14px;
+  color: var(--muted);
+}
+
+/* ---------- variables ---------- */
+
+.scope {
+  padding: 5px 10px 2px;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.var {
+  display: flex;
+  gap: 8px;
+  padding: 2px 10px 2px 18px;
+  font-family: var(--mono);
+  font-size: 12px;
+}
+
+.var .k {
+  color: var(--muted);
+}
+
+.var .v {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ---------- text view ---------- */
+
+#text-editor .cm-editor {
+  height: 100%;
+}
+
+#text-editor .cm-scroller {
+  font-family: var(--mono);
+  font-size: 12.5px;
+}
+
+/* ---------- status bar ---------- */
+
+.status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 10px;
+  background: var(--panel);
+  border-top: 1px solid var(--line-strong);
+  font-family: var(--mono);
+  font-size: 12px;
+}
+
+.light {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--skipped);
+  flex: none;
+}
+
+.light[data-state="pass"] {
+  background: var(--pass);
+}
+
+.light[data-state="fail"] {
+  background: var(--fail);
+}
+
+.light[data-state="error"] {
+  background: var(--error);
+}
+
+.light[data-state="stale"] {
+  background: var(--stale);
+}
+
+.light[data-state="busy"] {
+  background: var(--accent);
+}
+
+#status-text[data-state="fail"],
+#status-text[data-state="error"] {
+  color: var(--fail);
+}
+
+#status-text[data-state="stale"] {
+  color: var(--stale);
+}
+
+/* The staleness mark of AP-12: the step view is showing the last tree that
+ * parsed, not what is in the text right now. It has to be visible without
+ * being read — nobody reads a status bar while typing. */
+.panes[data-stale="true"] .sequence,
+.panes[data-stale="true"] .step .fields,
+.panes[data-stale="true"] .variables {
+  opacity: 0.45;
+}

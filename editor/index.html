@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Anvil Sequence Editor</title>
+    <link rel="stylesheet" href="/src/style.css" />
+  </head>
+  <body>
+    <!--
+      The TestStand layout, cut down to what the engine can actually do today
+      (AP-02, AP-04): a sequence list on the left, the step editor in the
+      middle, variables on the right, and a status bar that reports what the
+      engine says about the file as it is typed.
+    -->
+    <header class="toolbar">
+      <nav class="menus">
+        <div class="menu">
+          <button type="button" data-menu="file">File</button>
+          <ul hidden>
+            <li><button type="button" data-action="open">Open…</button></li>
+            <li><button type="button" data-action="save">Save</button></li>
+            <li><button type="button" data-action="save-as">Save As…</button></li>
+          </ul>
+        </div>
+        <div class="menu">
+          <button type="button" data-menu="view">View</button>
+          <ul hidden>
+            <li><button type="button" data-action="view-steps">Steps</button></li>
+            <li><button type="button" data-action="view-text">Text</button></li>
+          </ul>
+        </div>
+      </nav>
+
+      <div class="views" role="tablist" aria-label="Editor view">
+        <button type="button" role="tab" data-view="steps" aria-selected="true">Steps</button>
+        <button type="button" role="tab" data-view="text" aria-selected="false">Text</button>
+      </div>
+
+      <span class="filename" id="filename">no file</span>
+
+      <button type="button" class="run" id="run" disabled>
+        Run
+      </button>
+    </header>
+
+    <main class="panes">
+      <section class="pane sequence" aria-label="Sequence">
+        <h2>Sequence</h2>
+        <div id="sequence-list" class="scroll"></div>
+      </section>
+
+      <section class="pane step" aria-label="Step">
+        <h2 id="step-title">Step</h2>
+        <div id="step-editor" class="scroll"></div>
+        <div id="text-editor" class="scroll" hidden></div>
+      </section>
+
+      <section class="pane variables" aria-label="Variables">
+        <h2>Variables</h2>
+        <div id="variables" class="scroll"></div>
+      </section>
+    </main>
+
+    <footer class="status" id="status">
+      <span class="light" id="status-light" data-state="unknown"></span>
+      <span id="status-text">no file open</span>
+    </footer>
+
+    <script type="module" src="/src/app.mjs"></script>
+  </body>
+</html>

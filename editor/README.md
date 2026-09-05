@@ -5,8 +5,8 @@ The graphical sequence editor. It runs **the engine itself** — the same
 so a sequence can be loaded, validated and reported on with no wasmtime, no
 bridge and no bench (AP-07).
 
-Status: **milestone 1**. The engine runs and validates. There is no interface
-yet, and nothing executes steps.
+Status: **milestone 2**. It opens, edits, validates live and saves. Nothing
+executes steps yet: that needs the bridge (ADR-0030).
 
 ## Getting it running
 
@@ -16,7 +16,18 @@ cd editor
 npm install
 npm run transpile     # engine guest -> editor/generated/ (git-ignored)
 npm test
+npm run dev           # http://localhost:5180/
 ```
+
+`?open=<path>` opens a sequence over HTTP instead of through the file picker,
+and the dev server serves the repo's own `ejemplos/`:
+
+```
+http://localhost:5180/?open=/ejemplos/basica.yaml
+```
+
+That is dev-only, and it is how the editor gets exercised against the real
+fixtures — a browser's native file dialog cannot be driven from a test.
 
 `npm run transpile` must be re-run whenever the engine changes; `generated/` is
 build output and is not committed.
@@ -67,6 +78,16 @@ constraint and answers it the same way, with a `Store` per guest (ADR-0011).
 streams cannot be swapped for a capture. The browser build takes a plain
 `{ write }` handler and is what actually ships, so `src/wasi/` re-exports it by
 file path — the package's `exports` map admits no subpath that names it.
+
+## Numbers are not localised
+
+Limit and retry fields are `type="text"`, not `type="number"`, on purpose. A
+number input renders through the browser's locale, so on a Spanish machine a
+limit of `4.5` appears as `4,5` while the YAML says `4.5`. In a test sequencer
+that is not cosmetic — the decimal separator is the difference between 4.5 V
+and 45 V — so the field shows exactly what the file will contain. Input that
+does not parse as a number is refused and the field snaps back, rather than
+being written as something else.
 
 ## Sockets
 

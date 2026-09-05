@@ -10,6 +10,23 @@ minors, with the change written down here.
 
 ## [Unreleased]
 
+### Added
+
+- **A graphical sequence editor** (`editor/`), in the shape of TestStand's
+  layout cut down to what the engine can do today: a sequence list, a step
+  editor, a variables pane, and a status bar carrying the engine's own verdict
+  on the file as it is typed. It runs **the engine itself** — the same
+  `anvil-guest.wasm` the binary embeds — transpiled into JavaScript, so a
+  sequence is validated by the real loader with no bench and nothing installed.
+
+  Editing goes through the YAML document tree rather than a parallel model, so
+  comments, key order and formatting survive: changing a limit rewrites exactly
+  one line. Steps and text are two views of the same tree, and while the text
+  does not parse the step view shows the last tree that did, marked as such.
+
+  It does not execute anything yet — reaching an executor needs the bridge of
+  ADR-0030 — and it is not part of the release tarball.
+
 ### Fixed
 
 - **A `panic!` in a WASM step no longer cuts the whole run** (#58): the trap
