@@ -29,7 +29,12 @@ const el = (id) => document.getElementById(id);
 
 const ui = {
   panes: document.querySelector(".panes"),
+  palette: el("palette"),
   list: el("sequence-list"),
+  sequenceTitle: el("sequence-title"),
+  textPane: document.querySelector(".pane.text"),
+  sequencePane: document.querySelector(".pane.sequence"),
+  stepPane: document.querySelector(".pane.step"),
   stepTitle: el("step-title"),
   stepEditor: el("step-editor"),
   textEditor: el("text-editor"),
@@ -95,6 +100,64 @@ function renderSequence() {
       ui.list.append(row);
     }
   }
+}
+
+// What each step type is, in the words of someone deciding which to insert.
+// These four are the engine's own (crates/cargador/src/lib.rs:2191-2203); the
+// palette offers no fifth, because a step the loader does not know is a step
+// the editor must not be able to create (AP-04).
+const STEP_TYPE_DOC = {
+  grpc: "Calls a step served by an executor.",
+  statement: "Assigns to variables. The engine runs it; no executor involved.",
+  pass_fail: "Passes or fails on an expression.",
+  sequence_call: "Calls a subsequence.",
+};
+
+function renderPalette() {
+  ui.palette.replaceChildren();
+
+  const group = document.createElement("div");
+  group.className = "palette-group";
+  group.textContent = "Step Types";
+  ui.palette.append(group);
+
+  const phase = state.selected?.phase ?? "main";
+
+  for (const type of STEP_TYPES) {
+    // A type the document cannot take right now is offered greyed out with the
+    // reason, not hidden: hiding it would leave someone looking for a step type
+    // that TestStand has and wondering whether Anvil lacks it entirely.
+    const blocked = state.doc?.cannotAdd(type) ?? null;
+
+    const item = document.createElement("button");
+    item.type = "button";
+    item.className = "palette-item";
+    item.disabled = !state.doc || Boolean(blocked);
+    item.append(document.createTextNode(type));
+    const doc = document.createElement("small");
+    doc.textContent = blocked ? `Unavailable: ${blocked}.` : STEP_TYPE_DOC[type];
+    item.append(doc);
+    item.title = blocked
+      ? `Cannot insert a ${type} step: ${blocked}`
+      : `Insert a ${type} step at the end of ${phase}`;
+    item.addEventListener("click", () => {
+      const index = state.doc.addStep(phase, type);
+      state.selected = { phase, index };
+      afterEdit();
+    });
+    ui.palette.append(item);
+  }
+
+  const note = document.createElement("p");
+  note.className = "palette-note";
+  // The steps an executor serves are the other half of this palette, and they
+  // come from asking it (ADR-0021). That needs the bridge, so saying what is
+  // missing beats an empty list that looks like an executor with no steps —
+  // the distinction ADR-0019's Rule 2 is about.
+  note.textContent = state.doc
+    ? `Inserts at the end of ${phase}. Steps served by executors will appear here once the bridge can ask them for their catalog.`
+    : "Open a sequence to insert steps.";
+  ui.palette.append(note);
 }
 
 function field(parent, label, input, hint) {
@@ -246,7 +309,39 @@ function renderStep() {
     }
   }
 
+  group(fields, "Step");
+  const actions = document.createElement("div");
+  actions.className = "actions";
+  actions.append(
+    action("Move up", () => {
+      const to = doc.moveStep(sel.phase, sel.index, -1);
+      state.selected = { phase: sel.phase, index: to };
+      afterEdit();
+    }, sel.index === 0),
+    action("Move down", () => {
+      const to = doc.moveStep(sel.phase, sel.index, +1);
+      state.selected = { phase: sel.phase, index: to };
+      afterEdit();
+    }, sel.index === doc.steps(sel.phase).length - 1),
+    action("Delete", () => {
+      doc.removeStep(sel.phase, sel.index);
+      state.selected = null;
+      afterEdit();
+    }),
+  );
+  fields.append(actions);
+
   ui.stepEditor.append(fields);
+}
+
+function action(label, onClick, disabled = false) {
+  const b = document.createElement("button");
+  b.type = "button";
+  b.className = "action";
+  b.textContent = label;
+  b.disabled = disabled;
+  b.addEventListener("click", onClick);
+  return b;
 }
 
 function renderVariables() {
@@ -315,8 +410,12 @@ function renderText() {
 function setView(view) {
   state.view = view;
   const steps = view === "steps";
-  ui.stepEditor.hidden = !steps;
-  ui.textEditor.hidden = steps;
+  // The text view replaces the whole middle column — sequence and settings
+  // both — rather than just the lower pane: it is the same document seen
+  // another way, not a third panel.
+  ui.sequencePane.hidden = !steps;
+  ui.stepPane.hidden = !steps;
+  ui.textPane.hidden = steps;
   for (const b of document.querySelectorAll(".views button")) {
     b.setAttribute("aria-selected", String(b.dataset.view === view));
   }
@@ -328,6 +427,10 @@ function renderAll({ skipText = false } = {}) {
   ui.filename.textContent = state.filename ?? "no file";
   ui.filename.dataset.dirty = String(state.dirty);
   ui.run.disabled = !state.doc;
+  ui.sequenceTitle.textContent = state.doc?.name
+    ? `Sequence — ${state.doc.name}`
+    : "Sequence";
+  renderPalette();
   renderSequence();
   renderStep();
   renderVariables();

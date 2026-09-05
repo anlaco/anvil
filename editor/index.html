@@ -44,17 +44,33 @@
       </button>
     </header>
 
+    <!--
+      TestStand's arrangement: the sequence occupies the middle, the settings
+      of the selected step sit directly beneath it, variables are on the right,
+      and the insertion palette is on the left.
+    -->
     <main class="panes">
-      <section class="pane sequence" aria-label="Sequence">
-        <h2>Sequence</h2>
-        <div id="sequence-list" class="scroll"></div>
+      <section class="pane palette" aria-label="Insertion palette">
+        <h2>Insertion Palette</h2>
+        <div id="palette" class="scroll"></div>
       </section>
 
-      <section class="pane step" aria-label="Step">
-        <h2 id="step-title">Step</h2>
-        <div id="step-editor" class="scroll"></div>
-        <div id="text-editor" class="scroll" hidden></div>
-      </section>
+      <div class="middle">
+        <section class="pane sequence" aria-label="Sequence">
+          <h2 id="sequence-title">Sequence</h2>
+          <div id="sequence-list" class="scroll"></div>
+        </section>
+
+        <section class="pane step" aria-label="Step settings">
+          <h2 id="step-title">Step Settings</h2>
+          <div id="step-editor" class="scroll"></div>
+        </section>
+
+        <section class="pane text" aria-label="Text" hidden>
+          <h2>Text</h2>
+          <div id="text-editor" class="scroll"></div>
+        </section>
+      </div>
 
       <section class="pane variables" aria-label="Variables">
         <h2>Variables</h2>

@@ -188,8 +188,28 @@ body {
 
 .panes {
   display: grid;
-  grid-template-columns: 240px 1fr 260px;
+  grid-template-columns: 190px 1fr 250px;
   min-height: 0;
+}
+
+/* The middle column is TestStand's: the sequence on top, the settings of the
+ * selected step directly beneath it. The split is fixed rather than draggable
+ * for now — a resizer is worth having, but not before the panes are right. */
+.middle {
+  display: grid;
+  grid-template-rows: minmax(0, 1fr) minmax(0, 320px);
+  min-width: 0;
+  min-height: 0;
+  border-left: 1px solid var(--line-strong);
+  border-right: 1px solid var(--line-strong);
+}
+
+.middle .step {
+  border-top: 1px solid var(--line-strong);
+}
+
+.middle .text {
+  grid-row: 1 / -1;
 }
 
 .pane {
@@ -200,9 +220,15 @@ body {
   background: var(--panel);
 }
 
-.pane + .pane {
-  border-left: 1px solid var(--line-strong);
+/* `display: grid` above out-specifies the browser's own `[hidden]` rule, so a
+ * hidden pane would still be laid out. Anything that sets `display` has to say
+ * this, or `el.hidden = true` silently does nothing. */
+.pane[hidden] {
+  display: none;
 }
+
+/* The middle column carries its own borders; the outer panes take theirs from
+ * it, so no rule adds a second line between them. */
 
 .pane h2 {
   margin: 0;
@@ -219,6 +245,54 @@ body {
 .scroll {
   overflow: auto;
   min-height: 0;
+}
+
+/* ---------- insertion palette ---------- */
+
+.palette-group {
+  padding: 5px 10px 2px;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.palette-item {
+  display: block;
+  width: 100%;
+  padding: 4px 10px 4px 14px;
+  background: none;
+  border: 0;
+  color: inherit;
+  font: inherit;
+  font-family: var(--mono);
+  text-align: left;
+  cursor: pointer;
+}
+
+.palette-item:hover:not(:disabled) {
+  background: var(--accent);
+  color: var(--accent-ink);
+}
+
+.palette-item:disabled {
+  color: var(--muted);
+  cursor: not-allowed;
+}
+
+.palette-item small {
+  display: block;
+  font-family: var(--ui);
+  font-size: 11px;
+  opacity: 0.75;
+}
+
+.palette-note {
+  padding: 10px;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.4;
 }
 
 /* ---------- sequence list ---------- */
@@ -437,4 +511,31 @@ button:focus-visible {
 .panes[data-stale="true"] .step .fields,
 .panes[data-stale="true"] .variables {
   opacity: 0.45;
+}
+
+/* ---------- step actions ---------- */
+
+.fields .actions {
+  grid-column: 1 / -1;
+  display: flex;
+  gap: 6px;
+}
+
+.action {
+  padding: 3px 12px;
+  background: var(--panel);
+  border: 1px solid var(--line-strong);
+  border-radius: 3px;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+.action:hover:not(:disabled) {
+  background: var(--bg);
+}
+
+.action:disabled {
+  color: var(--muted);
+  cursor: not-allowed;
 }

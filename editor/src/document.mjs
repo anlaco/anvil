@@ -168,6 +168,148 @@ export class SequenceDocument {
     this.#reemit();
   }
 
+  /**
+   * Appends a step of the given type to a phase, and returns its index.
+   *
+   * The step is created with the fields its type *requires*, never fewer: the
+   * loader's coherence rules make `statement` mandatory on a statement step,
+   * `condition` on a pass_fail and `sequence` on a sequence_call
+   * (`crates/cargador/src/lib.rs:2297-2328`), and a step missing them is
+   * rejected at load. Inserting a step that makes the file invalid would break
+   * the rule that the editor cannot build what the loader refuses (AP-04), so
+   * the placeholders are part of the insert, not something to fill in later.
+   */
+  addStep(phase, type = "grpc") {
+    assertPhase(phase);
+    if (!STEP_TYPES.includes(type)) {
+      throw new Error(`unknown step type '${type}'`);
+    }
+    const why = this.cannotAdd(type);
+    if (why) throw new Error(why);
+
+    let seq = this.#doc.get(phase);
+    if (!isSeq(seq)) {
+      this.#doc.set(phase, []);
+      seq = this.#doc.get(phase);
+    }
+
+    const step = { name: uniqueName(this, type) };
+    // `type: grpc` is the default and writing it out adds noise to every diff.
+    if (type !== "grpc") step.type = type;
+
+    if (type === "statement") {
+      // A statement must assign to a declared variable, or the loader rejects
+      // the sequence (`validar_lvalues`, crates/cargador/src/lib.rs:1046). So
+      // inserting one declares its target when there is none to write to —
+      // found by inserting a statement into `basica.yaml`, which declares no
+      // `locals` at all, and watching the engine refuse the result.
+      const target = Object.keys(this.variables("locals"))[0] ?? "ok";
+      if (!(target in this.variables("locals"))) {
+        const locals = this.#doc.get("locals");
+        if (isMap(locals)) locals.set(target, false);
+        else this.#doc.set("locals", { [target]: false });
+      }
+      step.statement = `locals.${target} = true`;
+    }
+
+    if (type === "pass_fail") step.condition = "true";
+
+    if (type === "sequence_call") {
+      // A call must match the subsequence's signature, parameter for parameter
+      // — the loader checks it and rejects a call that is missing any
+      // (`el sequence call ... no encaja con la firma de ...`). And `args` may
+      // only name a local (crates/cargador/src/lib.rs:2259-2288). So inserting
+      // one wires every parameter to a local, declaring the ones that do not
+      // exist with the subsequence's own default as their initial value.
+      const name = this.subsequenceNames()[0];
+      step.sequence = name;
+      const params = this.subsequenceParameters(name);
+      if (Object.keys(params).length > 0) {
+        step.args = {};
+        for (const [param, initial] of Object.entries(params)) {
+          const local = `${name}_${param}`;
+          if (!(local in this.variables("locals"))) {
+            const locals = this.#doc.get("locals");
+            if (isMap(locals)) locals.set(local, initial);
+            else this.#doc.set("locals", { [local]: initial });
+          }
+          step.args[param] = `locals.${local}`;
+        }
+      }
+    }
+
+    // `createNode` makes a real YAML node. Adding the plain object works for
+    // emitting but leaves an item with no `get`, so the step view reads it back
+    // as unnamed until the document is re-parsed.
+    seq.add(this.#doc.createNode(step));
+    this.#reemit();
+    return seq.items.length - 1;
+  }
+
+  /** The subsequences this file declares, by name. */
+  subsequenceNames() {
+    const subs = this.#doc.get("subsequences");
+    return isMap(subs) ? subs.items.map((i) => String(i.key)) : [];
+  }
+
+  /**
+   * The `parameters` of one inline subsequence, with their declared initial
+   * values — which is the signature a call has to match.
+   */
+  subsequenceParameters(name) {
+    const subs = this.#doc.get("subsequences");
+    if (!isMap(subs)) return {};
+    const sub = subs.get(name);
+    const params = sub?.get?.("parameters");
+    return isMap(params) ? params.toJSON() : {};
+  }
+
+  /**
+   * Why a step of this type cannot be inserted right now, or null if it can.
+   *
+   * The editor must not be able to build a sequence the loader refuses (AP-04),
+   * and a `sequence_call` needs a subsequence to call: `sequence` is mandatory
+   * for that type (crates/cargador/src/lib.rs:2323-2328) and naming one that
+   * does not exist fails to load. So the palette refuses, and says why, rather
+   * than inserting something broken.
+   */
+  cannotAdd(type) {
+    if (type === "sequence_call" && this.subsequenceNames().length === 0) {
+      return "this sequence declares no subsequences to call";
+    }
+    return null;
+  }
+
+  /** Removes a step from a phase. */
+  removeStep(phase, index) {
+    assertPhase(phase);
+    const seq = this.#doc.get(phase);
+    if (!isSeq(seq) || !seq.items[index]) {
+      throw new Error(`no step at index ${index} of '${phase}'`);
+    }
+    seq.delete(index);
+    this.#reemit();
+  }
+
+  /**
+   * Moves a step within its phase by `delta` positions, and returns where it
+   * ended up. Order is execution order, so this is a real edit, not a view
+   * preference.
+   */
+  moveStep(phase, index, delta) {
+    assertPhase(phase);
+    const seq = this.#doc.get(phase);
+    if (!isSeq(seq) || !seq.items[index]) {
+      throw new Error(`no step at index ${index} of '${phase}'`);
+    }
+    const to = Math.max(0, Math.min(seq.items.length - 1, index + delta));
+    if (to === index) return index;
+    const [node] = seq.items.splice(index, 1);
+    seq.items.splice(to, 0, node);
+    this.#reemit();
+    return to;
+  }
+
   #stepNode(phase, index) {
     assertPhase(phase);
     const seq = this.#doc.get(phase);
@@ -192,6 +334,17 @@ export class SequenceDocument {
     this.#text = hadNewline ? emitted : emitted.replace(/\n$/, "");
     this.#stale = false;
     this.#error = null;
+  }
+}
+
+// Step names are how a sequence refers to a step and how the report names it,
+// so a new one must not silently collide with an existing one.
+function uniqueName(doc, type) {
+  const taken = new Set(doc.allSteps().map((s) => s.name));
+  const base = type === "grpc" ? "new_step" : `new_${type}`;
+  if (!taken.has(base)) return base;
+  for (let n = 2; ; n++) {
+    if (!taken.has(`${base}_${n}`)) return `${base}_${n}`;
   }
 }
 
