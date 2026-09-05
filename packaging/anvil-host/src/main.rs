@@ -49,6 +49,8 @@ use wasmtime::component::{Component, Linker, ResourceTable};
 use wasmtime::{Engine, Store};
 use wasmtime_wasi::{DirPerms, FilePerms, WasiCtx, WasiCtxBuilder, WasiCtxView, WasiView};
 
+mod bridge;
+
 /// Embedded guests (built for `wasm32-wasip2` and copied into `OUT_DIR` by
 /// `build.rs`). The bridge binary is NOT embedded: it ships as a file next to
 /// this one (ADR-0023), and from there it gets **copied into whatever folder
@@ -417,9 +419,13 @@ fn main() {
     // command line goes through to the engine guest as-is.
     let args: Vec<String> = std::env::args().skip(1).collect();
     let solo_loopback = args.iter().any(|a| a == "--loopback-only");
+    // `--bridge` serves the engine running in a browser instead of running one
+    // here (ADR-0030). Like `--loopback-only`, it is the host's own flag and is
+    // filtered out before the rest reaches the engine.
+    let modo_puente = args.iter().any(|a| a == "--bridge");
     let args_motor: Vec<String> = args
         .iter()
-        .filter(|a| *a != "--loopback-only")
+        .filter(|a| *a != "--loopback-only" && *a != "--bridge")
         .cloned()
         .collect();
 
@@ -598,6 +604,36 @@ fn main() {
     } else {
         None
     };
+
+    // --- Bridge mode: everything above already happened — the declared
+    // --- executors are up — and instead of running the engine here, we serve
+    // --- the one in the browser (ADR-0030). The engine is the same component
+    // --- either way (ADR-0031); only its host differs.
+    if modo_puente {
+        let listener = match TcpListener::bind("127.0.0.1:0") {
+            Ok(l) => l,
+            Err(e) => {
+                eprintln!("bridge: could not bind loopback: {e}");
+                std::process::exit(1);
+            }
+        };
+        let puerto = listener.local_addr().map(|a| a.port()).unwrap_or(0);
+        let token = bridge::mint_token();
+
+        // Printed for a person to copy, because that is how the editor gets it:
+        // from the terminal that started this. Loopback only, and the URL never
+        // leaves the machine.
+        println!("bridge listening on 127.0.0.1:{puerto}");
+        println!("open the editor with:");
+        println!("  http://localhost:5180/?bridge=ws://127.0.0.1:{puerto}/?token={token}");
+
+        let politica = bridge::Policy::new(ips_no_loopback);
+        if let Err(e) = bridge::serve(listener, &token, politica) {
+            eprintln!("bridge: {e}");
+            std::process::exit(1);
+        }
+        return;
+    }
 
     // --- Engine: inherits the host's args (sequence + flags), preopens cwd.
     // --- Its sandbox allows loopback + the declared non-loopback IPs.

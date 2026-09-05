@@ -24,8 +24,21 @@ minors, with the change written down here.
   one line. Steps and text are two views of the same tree, and while the text
   does not parse the step view shows the last tree that did, marked as such.
 
-  It does not execute anything yet — reaching an executor needs the bridge of
-  ADR-0030 — and it is not part of the release tarball.
+  It does not execute anything yet — reaching an executor needs the bridge —
+  and it is not part of the release tarball.
+
+- **`anvil <sequence.yaml> --bridge`**: serves an engine running in a browser
+  instead of running one here (ADR-0030). It starts the sequence's declared
+  executors exactly as a normal run does, then accepts one authenticated
+  WebSocket from the editor and relays its connections to real TCP, because a
+  browser has no sockets of its own.
+
+  It holds the network boundary wasmtime holds in the native path: loopback
+  plus exactly the non-loopback addresses the sequence declares, so nothing
+  leaves loopback without being declared. And it authenticates — a WebSocket
+  is not bound by the same-origin policy, so any page the user has open can
+  try the port, which on a machine wired to a power supply is not acceptable.
+  The token is printed at start-up, along with the URL to open.
 
 ### Fixed
 
