@@ -37,6 +37,16 @@
 //! | 0x03 | Failed | → editor  | reason, UTF-8               |
 //! | 0x04 | Data   | both      | bytes                       |
 //! | 0x05 | Close  | both      | none                        |
+//! | 0x06 | Hello  | → editor  | JSON, once on connect       |
+//!
+//! `Hello` is the first frame the bridge sends, and it carries the arguments
+//! the engine would have been given had it run here — the ephemeral port of the
+//! embedded executor, and an `--executor name=host:port` for each `type: wasm`
+//! one. The native host injects these into the guest's argv
+//! (`main.rs:548-576`); with the engine in a browser there is no argv to inject
+//! into, so they travel over the wire instead. Without them the engine falls
+//! back to port 9100 and cannot reach anything, which is exactly what happened
+//! the first time this ran end to end.
 //!
 //! `Failed` carries a reason because the editor shows it to a person: a
 //! refused address and an unreachable one are different problems, and a shim
@@ -59,6 +69,7 @@ const OPENED: u8 = 0x02;
 const FAILED: u8 = 0x03;
 const DATA: u8 = 0x04;
 const CLOSE: u8 = 0x05;
+const HELLO: u8 = 0x06;
 
 /// How long a read on the WebSocket waits before yielding the lock.
 ///
@@ -124,7 +135,12 @@ impl Shared {
 /// Runs the bridge until the editor disconnects.
 ///
 /// `listener` is already bound; `token` is what a connection must present.
-pub fn serve(listener: TcpListener, token: &str, policy: Policy) -> std::io::Result<()> {
+pub fn serve(
+    listener: TcpListener,
+    token: &str,
+    policy: Policy,
+    engine_args: &[String],
+) -> std::io::Result<()> {
     let policy = Arc::new(policy);
 
     for stream in listener.incoming() {
@@ -132,7 +148,7 @@ pub fn serve(listener: TcpListener, token: &str, policy: Policy) -> std::io::Res
         // One editor at a time. A second connection while one is live is far
         // more likely to be another page trying its luck than a second editor,
         // and the token check below is what decides.
-        if let Err(e) = session(stream, token, Arc::clone(&policy)) {
+        if let Err(e) = session(stream, token, Arc::clone(&policy), engine_args) {
             eprintln!("bridge: session ended: {e}");
         }
     }
@@ -143,7 +159,12 @@ pub fn serve(listener: TcpListener, token: &str, policy: Policy) -> std::io::Res
 // the handshake callback's signature is fixed by the library. Same reason the
 // WASM executor allows it on `describe` (executors/wasm/src/main.rs).
 #[allow(clippy::result_large_err)]
-fn session(stream: TcpStream, token: &str, policy: Arc<Policy>) -> Result<(), String> {
+fn session(
+    stream: TcpStream,
+    token: &str,
+    policy: Arc<Policy>,
+    engine_args: &[String],
+) -> Result<(), String> {
     let peer = stream.peer_addr().map_err(|e| e.to_string())?;
     if !peer.ip().is_loopback() {
         return Err(format!("refused a connection from {}", peer.ip()));
@@ -209,10 +230,14 @@ fn session(stream: TcpStream, token: &str, policy: Arc<Policy>) -> Result<(), St
     })?;
 
     eprintln!("bridge: editor connected from {peer}");
-    relay_session(socket, policy)
+    relay_session(socket, policy, engine_args)
 }
 
-fn relay_session(socket: WebSocket<TcpStream>, policy: Arc<Policy>) -> Result<(), String> {
+fn relay_session(
+    socket: WebSocket<TcpStream>,
+    policy: Arc<Policy>,
+    engine_args: &[String],
+) -> Result<(), String> {
     socket
         .get_ref()
         .set_read_timeout(Some(POLL))
@@ -223,6 +248,10 @@ fn relay_session(socket: WebSocket<TcpStream>, policy: Arc<Policy>) -> Result<()
         closed: AtomicBool::new(false),
     });
     let mut relays: HashMap<u32, Relay> = HashMap::new();
+
+    // Hand over the engine's arguments before anything else: the editor needs
+    // them to start the engine at all.
+    shared.send(HELLO, 0, json_args(engine_args).as_bytes());
 
     loop {
         if shared.closed.load(Ordering::Relaxed) {
@@ -364,6 +393,32 @@ fn pump(shared: Arc<Shared>, id: u32, mut tcp: TcpStream) {
         }
     }
     shared.send(CLOSE, id, &[]);
+}
+
+/// The engine's arguments as a JSON array.
+///
+/// Hand-rolled rather than pulling in a serialiser: it is a list of strings,
+/// and `crates/result_sink/src/json.rs` assembles its documents the same way
+/// for the same reason.
+fn json_args(args: &[String]) -> String {
+    let mut out = String::from("{\"args\":[");
+    for (i, a) in args.iter().enumerate() {
+        if i > 0 {
+            out.push(',');
+        }
+        out.push('"');
+        for c in a.chars() {
+            match c {
+                '"' => out.push_str("\\\""),
+                '\\' => out.push_str("\\\\"),
+                c if (c as u32) < 0x20 => out.push_str(&format!("\\u{:04x}", c as u32)),
+                c => out.push(c),
+            }
+        }
+        out.push('"');
+    }
+    out.push_str("]}");
+    out
 }
 
 /// Mints the per-session token.

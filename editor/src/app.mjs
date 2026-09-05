@@ -12,7 +12,7 @@ import { EditorState } from "@codemirror/state";
 import { yaml as yamlLang } from "@codemirror/lang-yaml";
 
 import { SequenceDocument, PHASES, SCOPES, STEP_TYPES } from "./document.mjs";
-import { browserPool, EngineHostError } from "./engine-pool.mjs";
+import { browserPool, connectBridge, EngineHostError } from "./engine-pool.mjs";
 
 // The engine runs on a worker thread, never on this one: it is a synchronous
 // WASM component, and on the main thread it would freeze the interface for as
@@ -50,6 +50,7 @@ const state = {
   view: "steps",
   text: null, // CodeMirror view
   validateTimer: null,
+  bridge: null, // the URL, once connected
 };
 
 // ---------------------------------------------------------------- rendering
@@ -420,7 +421,10 @@ function renderAll({ skipText = false } = {}) {
   ui.panes.dataset.stale = String(state.doc?.stale ?? false);
   ui.filename.textContent = state.filename ?? "no file";
   ui.filename.dataset.dirty = String(state.dirty);
-  ui.run.disabled = !state.doc;
+  ui.run.disabled = !state.doc || !engine.bridged;
+  ui.run.title = engine.bridged
+    ? "Run this sequence"
+    : "Run needs a bridge: start `anvil <sequence.yaml> --bridge` and open the URL it prints";
   ui.sequenceTitle.textContent = state.doc?.name
     ? `Sequence — ${state.doc.name}`
     : "Sequence";
@@ -482,6 +486,82 @@ async function validate() {
     const what = e instanceof EngineHostError ? e.message : String(e?.message ?? e);
     status("error", `editor could not run the engine: ${what}`);
   }
+}
+
+// ---------------------------------------------------------------- running
+
+/**
+ * Runs the open sequence for real.
+ *
+ * The engine invokes steps through the bridge, so this reaches actual
+ * executors and, through them, actual hardware. There is no live progress yet:
+ * the engine reports at the end, and streaming it as it goes is ADR-0029,
+ * unimplemented. So the button says "running…" and means it.
+ */
+async function run() {
+  if (!state.doc || !engine.bridged) return;
+
+  const name = state.filename ?? "sequence.yaml";
+  status("busy", `running ${name}…`);
+  ui.run.disabled = true;
+
+  try {
+    const { exitCode, stdout, stderr } = await engine.run({
+      // The bridge's arguments come first, the sequence last, matching how the
+      // native host builds argv (main.rs:604-608).
+      args: [...engine.engineArgs, name],
+      files: { [name]: state.doc.text },
+    });
+    // The verdict is the console sink's frozen header, `=== name: state ===`,
+    // and it goes to **stdout** (crates/result_sink/src/consola.rs); stderr
+    // carries the engine's logs. Taking the last line of the two concatenated
+    // showed "4 paso(s) comprobados contra el catálogo de su ejecutor" — a
+    // start-up note — as though it were the result.
+    //
+    // The text is the engine's own, never re-worded here: two renderings of one
+    // verdict drift, and then the editor and the CLI disagree (ADR-0031).
+    const report = `${stdout}\n${stderr}`.trim();
+    const verdict =
+      stdout
+        .split("\n")
+        .map((l) => l.trim())
+        .filter((l) => l.startsWith("===") && l.endsWith("==="))
+        .pop() ??
+      stdout.split("\n").filter(Boolean).pop() ??
+      `finished with exit ${exitCode}`;
+
+    status(exitCode === 0 ? "pass" : "fail", verdict);
+    // The full report goes to the console until there is somewhere to put it.
+    // A run's detail — per-step results, measurements, limits — needs a pane of
+    // its own, and that arrives with the live events of ADR-0029.
+    console.log(report);
+  } catch (e) {
+    const what = e instanceof EngineHostError ? e.message : String(e?.message ?? e);
+    status("error", `could not run: ${what}`);
+  } finally {
+    renderAll();
+  }
+}
+
+/**
+ * Connects to a bridge given as `?bridge=<ws url>`.
+ *
+ * That URL is what `anvil <sequence.yaml> --bridge` prints, token included.
+ * Without it the editor still opens, edits and validates — none of which needs
+ * a socket — and Run stays disabled saying why.
+ */
+async function openBridge(url) {
+  status("busy", "connecting to the bridge…");
+  try {
+    await engine.attachBridge(url, connectBridge);
+    state.bridge = url;
+    status("pass", "bridge connected — Run is available");
+  } catch (e) {
+    // Not being connected is a normal state, not a broken editor, so this says
+    // what is missing rather than looking like a crash.
+    status("error", e?.message ?? "could not connect to the bridge");
+  }
+  renderAll();
 }
 
 // ---------------------------------------------------------------- files
@@ -610,12 +690,7 @@ function wireMenus() {
     b.addEventListener("click", () => setView(b.dataset.view));
   }
 
-  ui.run.addEventListener("click", () => {
-    // The engine cannot invoke a step from here: reaching an executor needs the
-    // bridge (ADR-0030), which is not built. Saying so plainly beats a button
-    // that looks like it worked.
-    status("error", "Run needs the bridge, which is not implemented yet (ADR-0030).");
-  });
+  ui.run.addEventListener("click", run);
 }
 
 // ---------------------------------------------------------------- start
@@ -628,7 +703,14 @@ renderAll();
 // exercise it without driving the browser's native file dialog. A file opened
 // this way has no handle, so Save falls back to a download until it is saved
 // somewhere with Save As.
-const wanted = new URLSearchParams(location.search).get("open");
+const params = new URLSearchParams(location.search);
+
+// `?bridge=<ws url>` is what `anvil <sequence.yaml> --bridge` prints. Connecting
+// first means Run is already available by the time the file is on screen.
+const bridgeUrl = params.get("bridge");
+if (bridgeUrl) await openBridge(bridgeUrl);
+
+const wanted = params.get("open");
 if (wanted) {
   status("busy", `opening ${wanted}…`);
   try {

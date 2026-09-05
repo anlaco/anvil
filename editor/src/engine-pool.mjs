@@ -18,6 +18,9 @@ export class EnginePool {
   #busy = new Set();
   #queue = [];
   #nextId = 1;
+  #net = null;
+  #bridged = false;
+  #engineArgs = [];
 
   /**
    * `spawn` returns something with the Worker interface: `postMessage`,
@@ -31,6 +34,43 @@ export class EnginePool {
   /** Workers currently running something. */
   get running() {
     return this.#busy.size;
+  }
+
+  /**
+   * Connects this pool's engine worker to a bridge.
+   *
+   * One worker, one bridge, for now. Multi-UUT needs a channel and a network
+   * worker per engine worker — they cannot share, because the channel carries
+   * one blocking request at a time by construction — and that is left until
+   * there is a second unit to test.
+   */
+  async attachBridge(url, connect) {
+    if (this.#max !== 1) {
+      throw new Error("attaching a bridge to a pool of more than one is not implemented");
+    }
+    const worker = this.#idle.pop() ?? this.#spawn();
+    const { net, engineArgs } = await connect(worker, url);
+    this.#net = net;
+    this.#engineArgs = engineArgs ?? [];
+    this.#idle.push(worker);
+    this.#bridged = true;
+  }
+
+  /** Whether a bridge is attached and the engine can reach executors. */
+  get bridged() {
+    return this.#bridged;
+  }
+
+  /**
+   * The arguments the bridge says the engine needs — the ephemeral port of the
+   * embedded executor and an `--executor` for each declared one.
+   *
+   * They come from the bridge rather than being guessed here because it is the
+   * bridge that reserved those ports, exactly as the native host does before
+   * handing them to the guest as argv.
+   */
+  get engineArgs() {
+    return this.#engineArgs;
   }
 
   /** Runs the engine and resolves with `{ exitCode, stdout, stderr }`. */
@@ -100,6 +140,10 @@ export class EnginePool {
    */
   terminateAll() {
     for (const w of [...this.#busy, ...this.#idle]) w.terminate();
+    this.#net?.terminate();
+    this.#net = null;
+    this.#bridged = false;
+    this.#engineArgs = [];
     this.#busy.clear();
     this.#idle = [];
     for (const job of this.#queue.splice(0)) {
@@ -115,4 +159,59 @@ export function browserPool({ max = 1 } = {}) {
     spawn: () =>
       new Worker(new URL("./engine-worker.mjs", import.meta.url), { type: "module" }),
   });
+}
+
+/**
+ * Connects an engine worker to a bridge, so the engine can reach executors.
+ *
+ * Three threads and two channels: the engine's worker blocks on a
+ * `SharedArrayBuffer`, a network worker owns the WebSocket, and a
+ * `MessageChannel` carries requests directly between them without touching the
+ * page's thread — which may be busy painting, and which is not allowed to
+ * block anyway.
+ *
+ * Resolves when the WebSocket is up, and rejects with the reason when it is
+ * not. Without this the shim throws on the first socket call, which is exactly
+ * what should happen: no bridge means no executor, and saying so beats
+ * pretending a connection was refused (ADR-0019, Rule 2).
+ */
+export async function connectBridge(engineWorker, url) {
+  if (typeof SharedArrayBuffer === "undefined") {
+    throw new EngineHostError(
+      "SharedArrayBuffer is not available, so the engine cannot block on network " +
+        "calls. The page must be cross-origin isolated (COOP/COEP) — see ADR-0030.",
+    );
+  }
+
+  const control = new SharedArrayBuffer(4 * Int32Array.BYTES_PER_ELEMENT);
+  const data = new SharedArrayBuffer(1 << 20);
+  const channel = new MessageChannel();
+
+  const net = new Worker(new URL("./net-worker.mjs", import.meta.url), { type: "module" });
+
+  const started = new Promise((resolve, reject) => {
+    net.onmessage = ({ data: m }) => {
+      if (m.started) resolve(m.engineArgs ?? []);
+      else reject(new EngineHostError(m.error ?? "the network worker did not start"));
+    };
+    net.onerror = (e) =>
+      reject(new EngineHostError(e?.message ?? "the network worker died on start"));
+  });
+
+  net.postMessage({ op: "start", control, data, url, port: channel.port2 }, [channel.port2]);
+  const engineArgs = await started;
+
+  const wired = new Promise((resolve) => {
+    const previous = engineWorker.onmessage;
+    engineWorker.onmessage = (e) => {
+      if (e.data?.bridge === "ready") {
+        engineWorker.onmessage = previous;
+        resolve();
+      }
+    };
+  });
+  engineWorker.postMessage({ op: "bridge", control, data, port: channel.port1 }, [channel.port1]);
+  await wired;
+
+  return { net, engineArgs };
 }

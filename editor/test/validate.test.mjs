@@ -67,10 +67,10 @@ test("a sequence with no main is rejected", async () => {
 
 test("the network is refused rather than faked", async () => {
   // `--validate --with-executors` connects (crates/motor/src/bin/anvil.rs:288-305),
-  // and this host has no sockets until the bridge lands (ADR-0030). What matters
-  // is that it fails loudly: a stub answering "connection refused" would let a
-  // missing host read as an executor that was asked and said no — ADR-0019's
-  // Rule 2, exactly.
+  // and with no bridge attached there is nothing to connect through (ADR-0030).
+  // What matters is that it fails loudly and says what is missing: answering
+  // "connection refused" would let an absent *host* read as an executor that
+  // was asked and said no — ADR-0019's Rule 2, exactly.
   const yaml = await readFile(join(REPO, "ejemplos", "basica.yaml"), "utf8");
 
   await assert.rejects(
@@ -79,7 +79,7 @@ test("the network is refused rather than faked", async () => {
         args: ["basica.yaml", "--validate", "--with-executors"],
         files: { "basica.yaml": yaml },
       }),
-    /wasi:sockets is not available/,
-    "reaching the network in this host must throw, not degrade quietly",
+    /no bridge is connected/,
+    "reaching the network with no bridge must throw, not degrade quietly",
   );
 });

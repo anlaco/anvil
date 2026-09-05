@@ -5,8 +5,11 @@ The graphical sequence editor. It runs **the engine itself** — the same
 so a sequence can be loaded, validated and reported on with no wasmtime, no
 bridge and no bench (AP-07).
 
-Status: **milestone 2**. It opens, edits, validates live and saves. Nothing
-executes steps yet: that needs the bridge (ADR-0030).
+Status: **milestone 4, partly**. It opens, edits, validates live, saves and
+**runs** — the engine in the tab invokes real steps through the bridge and
+reports the same verdict the CLI does. What is missing is live progress: the
+report arrives at the end, and streaming it as it goes is ADR-0029,
+unimplemented.
 
 ## Getting it running
 
@@ -115,16 +118,49 @@ and 45 V — so the field shows exactly what the file will contain. Input that
 does not parse as a number is refused and the field snaps back, rather than
 being written as something else.
 
-## Sockets
+## Sockets, and the three threads it takes
 
-`src/wasi/sockets.mjs` is deliberately unimplemented and throws. The engine
-reaches executors over gRPC on raw TCP (ADR-0006), and browsers have no TCP at
-all, so the real implementation must tunnel to a bridge over a WebSocket
-(ADR-0030). Nothing on the current path needs it: `--validate` opens no socket.
+The engine reaches executors over gRPC on raw TCP (ADR-0006), a browser has no
+TCP, and — the hard part — the engine's calls are **synchronous**:
+`blockingRead` returns bytes, `Pollable.block()` returns nothing. There is
+exactly one way to block a thread in JavaScript, `Atomics.wait` on a
+`SharedArrayBuffer`, and it is forbidden on the page's own thread.
 
-It throws rather than returning an error value on purpose. A stub that quietly
-answered "connection refused" would let a *missing host* read as an executor
-that was asked and said no — the false red of ADR-0019's Rule 2.
+So a run spans three threads:
+
+```
+main thread          the interface. Never blocks, never runs the engine.
+engine worker        the engine. Blocks in Atomics.wait during a socket call.
+network worker       owns the WebSocket to the bridge. Wakes the engine.
+```
+
+`src/wasi/channel.mjs` is the shared memory between the last two;
+`src/net-worker.mjs` speaks the bridge's frame format;
+`src/wasi/sockets.mjs` is the WASI implementation that blocks.
+
+Two consequences worth knowing. The page **must** be cross-origin isolated or
+`SharedArrayBuffer` does not exist, which is why `vite.config.mjs` sets
+COOP/COEP. And with no bridge attached the shim **throws**, naming what is
+missing: answering "connection refused" would let an absent host read as an
+executor that was asked and said no — the false red of ADR-0019's Rule 2.
+
+The streams handed to the engine are built with the shim's own `_create`, not
+hand-rolled: the generated module checks `ret instanceof InputStream` and
+refuses anything else.
+
+## Running against a bridge
+
+```sh
+anvil ejemplos/basica.yaml --bridge      # prints a URL with a token
+```
+
+Open the URL it prints, adding `&open=/ejemplos/basica.yaml`. Run is disabled
+until a bridge is attached, and says so on hover.
+
+The bridge sends the engine's arguments — the embedded executor's ephemeral
+port, an `--executor` per declared one — in its first frame, because there is
+no argv to inject them into when the engine runs in a browser. Without them the
+engine falls back to port 9100 and reaches nothing.
 
 ## Tests
 

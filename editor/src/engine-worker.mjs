@@ -20,6 +20,7 @@
 // not do (ADR-0031).
 
 import { runEngine } from "./engine.mjs";
+import { useBridge } from "./wasi/sockets.mjs";
 
 // Fetched here rather than passed in: the bytes are large and the worker can
 // read them itself.
@@ -32,6 +33,15 @@ const load = async (name) => {
 };
 
 self.onmessage = async ({ data }) => {
+  // Wiring the bridge is a message of its own, sent once before any run: the
+  // socket shim needs the shared channel and the port to the network worker
+  // before the engine can reach anything (ADR-0030).
+  if (data.op === "bridge") {
+    useBridge({ control: data.control, data: data.data, port: data.port });
+    self.postMessage({ bridge: "ready" });
+    return;
+  }
+
   const { id, args, files } = data;
   try {
     const result = await runEngine({ args, files, load });

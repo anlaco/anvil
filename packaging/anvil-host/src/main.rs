@@ -487,6 +487,11 @@ fn main() {
         .to_path_buf();
     let mut ejecutores_wasm: Vec<EjecutorWasm> = Vec::new();
     let mut overrides_motor: Vec<String> = Vec::new();
+    // How many arguments came from the user. Everything appended past this
+    // point is synthetic — the `--executor` overrides and the `--port` — and in
+    // bridge mode only those travel: the engine in the browser supplies the
+    // sequence itself, and sending the user's positional too would hand it two.
+    let args_del_usuario = args_motor.len();
     let mut args_motor_final: Vec<String> = args_motor;
     // Computed over `args_motor` (still without the synthetic `--executor`
     // flags, which is exactly what this block produces). It makes no
@@ -627,8 +632,17 @@ fn main() {
         println!("open the editor with:");
         println!("  http://localhost:5180/?bridge=ws://127.0.0.1:{puerto}/?token={token}");
 
+        // The engine gets its arguments over the wire instead of through argv:
+        // there is no argv to inject into when it runs in a browser. These are
+        // the same synthetic `--port` and `--executor` the native path builds
+        // above; without them the engine falls back to 9100 and reaches nothing.
         let politica = bridge::Policy::new(ips_no_loopback);
-        if let Err(e) = bridge::serve(listener, &token, politica) {
+        if let Err(e) = bridge::serve(
+            listener,
+            &token,
+            politica,
+            &args_motor_final[args_del_usuario..],
+        ) {
             eprintln!("bridge: {e}");
             std::process::exit(1);
         }
