@@ -99,7 +99,21 @@ AGPL-3.0-or-later (ver [`docs/licencia.md`](docs/licencia.md)).
 git commit -s -m "feat: ..."
 ```
 
-El `-s` añade la línea `Signed-off-by:`. No se exige CLA en esta fase.
+El `-s` añade la línea `Signed-off-by:`.
+
+**Hoy el DCO es lo único que se pide.** Está previsto añadir un acuerdo de
+contribución —del tipo del [FLA-2.0 de la FSFE][fla]— que permita a Anvil
+conceder **licencias adicionales** a quien no pueda usar AGPL, y que a cambio
+comprometa a Anvil a seguir publicando bajo AGPL, con **reversión de los
+derechos a sus autores** si alguna vez dejara de hacerlo. La dirección está
+decidida en [ADR-0032](docs/adr/0032-contributions-come-with-a-reversion-clause.md);
+el texto no está adoptado ni revisado, así que **no se pide firmar nada**. Esta
+nota está aquí para que nadie contribuya sin saber hacia dónde va.
+
+Tu autoría es tuya en cualquier caso: tu nombre queda en la historia y en el
+`Signed-off-by`.
+
+[fla]: https://fsfe.org/activities/fla/fla.en.html
 
 ## Flujo de PR
 
