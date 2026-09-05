@@ -73,7 +73,7 @@ release: example
 	@$(MAKE) --no-print-directory dept BRIDGE_BIN=executors/wasm/target/release/anvil-exec-wasm
 	@echo "ready → $(ANVIL_RELEASE)"
 
-test: test-core test-bridge test-host test-executors test-executors-rust
+test: test-core test-bridge test-host test-executors test-executors-rust test-editor
 
 ## Tests of the core workspace (no network and no compiled guests needed).
 test-core:
@@ -104,6 +104,22 @@ test-executors:
 		cd executors/python && python3 -m unittest discover -p 'test_*.py'; \
 	else \
 		echo "no python3: Python executor tests skipped"; \
+	fi
+
+## Tests of the editor: the engine guest run in a JavaScript host. Needs the
+## release guest built (`make release`) and the transpiler output, which is
+## build artifact and not committed — so it transpiles first. Without node, a
+## warning is printed and we carry on, like the Python one: the core does not
+## depend on it.
+test-editor:
+	@if command -v node >/dev/null 2>&1; then \
+		if [ -f target/$(TARGET)/release/anvil-guest.wasm ]; then \
+			cd editor && npm run --silent transpile && node --test 'test/*.test.mjs'; \
+		else \
+			echo "no release guest: editor tests skipped (run 'make release' first)"; \
+		fi; \
+	else \
+		echo "no node: editor tests skipped"; \
 	fi
 
 ## Format and lints of the three workspaces, exactly what CI will demand.
