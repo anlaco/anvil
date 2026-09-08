@@ -24,8 +24,14 @@ minors, with the change written down here.
   one line. Steps and text are two views of the same tree, and while the text
   does not parse the step view shows the last tree that did, marked as such.
 
-  It does not execute anything yet — reaching an executor needs the bridge —
-  and it is not part of the release tarball.
+  It also **runs** the sequence: with `anvil <sequence.yaml> --bridge` serving
+  the executors, the engine in the tab invokes real steps and reports the same
+  verdict the CLI does. What it does not do yet is show progress as it goes —
+  the report arrives whole, at the end
+  ([ADR-0029](docs/adr/0029-the-engine-streams-its-execution-as-ndjson.md) is
+  unimplemented).
+
+  It is not part of the release tarball.
 
 - **`anvil <sequence.yaml> --bridge`**: serves an engine running in a browser
   instead of running one here (ADR-0030). It starts the sequence's declared
