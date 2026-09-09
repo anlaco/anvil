@@ -627,6 +627,22 @@ async function run() {
 }
 
 /**
+ * Says the bridge is gone, and stops offering what needs it.
+ *
+ * The pool has already cleared `bridged` by the time this runs, so repainting
+ * is what takes Run away. Saying nothing and leaving the button armed would
+ * offer a run that cannot happen — and the failure would only show up on the
+ * next click, worded as if the sequence were at fault.
+ */
+function bridgeLost(reason) {
+  state.bridge = null;
+  // Not while a run is on screen: that run's own outcome is the more useful
+  // thing to be looking at, and `run()` reports the failure itself.
+  if (!state.runInFlight) status("error", `${reason} — Run is no longer available`);
+  renderAll();
+}
+
+/**
  * Connects to a bridge given as `?bridge=<ws url>`.
  *
  * That URL is what `anvil <sequence.yaml> --bridge` prints, token included.
@@ -636,7 +652,7 @@ async function run() {
 async function openBridge(url) {
   status("busy", "connecting to the bridge…");
   try {
-    await engine.attachBridge(url, connectBridge);
+    await engine.attachBridge(url, connectBridge, bridgeLost);
     state.bridge = url;
     status("pass", "bridge connected — Run is available");
   } catch (e) {

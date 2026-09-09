@@ -168,6 +168,12 @@ export async function runEngine({ args = [], files = {}, load, onStderrLine }) {
     } else {
       throw e;
     }
+  } finally {
+    // The guest has exited, so what it left open closes with it — which is what
+    // the kernel does for the native host and what nothing does here. An exit
+    // runs no destructors, so the engine never drops its own sockets; leaving
+    // them open holds the executor for good. See closeOpenSockets.
+    socketsShim.closeOpenSockets();
   }
 
   return { exitCode, stdout: out.text(), stderr: err.text() };

@@ -44,12 +44,25 @@ export class EnginePool {
    * one blocking request at a time by construction — and that is left until
    * there is a second unit to test.
    */
-  async attachBridge(url, connect) {
+  async attachBridge(url, connect, onLost) {
     if (this.#max !== 1) {
       throw new Error("attaching a bridge to a pool of more than one is not implemented");
     }
     const worker = this.#idle.pop() ?? this.#spawn();
-    const { net, engineArgs } = await connect(worker, url);
+    // `onLost` fires if the socket goes later. The pool forgets the bridge
+    // first, so that by the time anyone is told, `bridged` already says no —
+    // a caller that repaints on the notice must not paint a Run that cannot run.
+    //
+    // The network worker itself is kept: it is what answers "not connected to a
+    // bridge" to anything the engine asks from here on. Terminating it would
+    // leave those requests with nobody to answer them, and the engine parked in
+    // `Atomics.wait` until the channel's 120 s last resort (channel.mjs).
+    const lost = (reason) => {
+      this.#bridged = false;
+      this.#engineArgs = [];
+      onLost?.(reason);
+    };
+    const { net, engineArgs } = await connect(worker, url, lost);
     this.#net = net;
     this.#engineArgs = engineArgs ?? [];
     this.#idle.push(worker);
@@ -181,7 +194,7 @@ export function browserPool({ max = 1 } = {}) {
  * what should happen: no bridge means no executor, and saying so beats
  * pretending a connection was refused (ADR-0019, Rule 2).
  */
-export async function connectBridge(engineWorker, url) {
+export async function connectBridge(engineWorker, url, onLost) {
   if (typeof SharedArrayBuffer === "undefined") {
     throw new EngineHostError(
       "SharedArrayBuffer is not available, so the engine cannot block on network " +
@@ -206,6 +219,13 @@ export async function connectBridge(engineWorker, url) {
 
   net.postMessage({ op: "start", control, data, url, port: channel.port2 }, [channel.port2]);
   const engineArgs = await started;
+
+  // The start-up handler is done; from here the only thing the network worker
+  // has to say is that the socket went. Without this the message lands on a
+  // promise that has already settled and nobody hears it.
+  net.onmessage = ({ data: m }) => {
+    if (m.lost) onLost?.(m.reason);
+  };
 
   const wired = new Promise((resolve) => {
     const previous = engineWorker.onmessage;

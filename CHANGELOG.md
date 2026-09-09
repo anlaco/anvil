@@ -94,6 +94,28 @@ minors, with the change written down here.
 
 ### Fixed
 
+- **The editor can run a sequence more than once per bridge** (#61): the
+  second Run used to hang for good, with the status line frozen on
+  `running <file>…` — which reads as "still going" rather than "gone".
+
+  The engine is a `wasi:cli/run` guest that states its verdict by exiting,
+  and an exit runs no destructors: it never drops its sockets. Natively that
+  costs nothing, because the process ends and the kernel closes them. In the
+  editor there is no process — the guest is one instance inside a page that
+  stays up — so the socket shim never sent the bridge a `close` and the relay
+  outlived the run that opened it. The step executor serves one connection at
+  a time, so that leftover connection held it for good and the next run's
+  connection sat unread in the accept queue. The shim now closes what the
+  guest left open when it exits.
+
+  The bridge's own `editor disconnected`, reported alongside this, was a red
+  herring: it is the browser closing the page at the end, not during the run.
+
+- **The editor says when the bridge goes away**, instead of going on offering
+  Run: losing the socket now clears the connection and puts the reason in the
+  status bar. Before, the button stayed armed and the failure only surfaced on
+  the next click, worded as though the sequence were at fault.
+
 - **A `panic!` in a WASM step no longer cuts the whole run** (#58): the trap
   used to leave the run silent — `wasi-grpc`'s client (the sibling project
   `motor` talks to executors with) has no notion of a gRPC application-level

@@ -19,6 +19,9 @@ import { BlockingClient, EOS, ERROR, OK } from "./channel.mjs";
 let client = null;
 let nextId = 1;
 
+/** Sockets the guest has open, so they can be closed when it exits. */
+const open = new Set();
+
 /** Wires the shim to the network worker. Called from engine-worker.mjs. */
 export function useBridge({ control, data, port }) {
   client = new BlockingClient({ control, data, port });
@@ -86,6 +89,7 @@ export class TcpSocket {
     if (this.#closed) throw new Error("socket is closed");
     ask({ op: "connect", id: this.#id, target: formatAddress(remoteAddress) });
     this.#connected = true;
+    open.add(this);
   }
 
   finishConnect() {
@@ -145,6 +149,7 @@ export class TcpSocket {
   drop() {
     if (this.#closed) return;
     this.#closed = true;
+    open.delete(this);
     if (this.#connected && client) {
       try {
         ask({ op: "close", id: this.#id });
@@ -153,6 +158,26 @@ export class TcpSocket {
       }
     }
   }
+}
+
+/**
+ * Closes whatever the guest left open, and is called when it exits.
+ *
+ * The engine states its verdict by exiting, and an exit runs no destructors: it
+ * never drops its sockets, so nothing here ever sends the bridge a `close`.
+ * Natively that costs nothing — the process ends and the kernel closes its
+ * sockets. In the editor the guest is one short-lived instance inside a page
+ * that stays up, so the relay on the far side of the bridge outlives it.
+ *
+ * That is worse than a leak. The step executor serves one connection at a time
+ * (crates/ejecutor_pasos/src/main.rs:90-104), so a connection a finished run
+ * left behind keeps it busy for good and the next run's connection waits in the
+ * accept queue for ever. That is the second Run that never returns (#61): the
+ * engine blocks on a read the executor will never get to.
+ */
+export function closeOpenSockets() {
+  // Copied first: `drop` removes from the set as it goes.
+  for (const socket of [...open]) socket.drop();
 }
 
 export const tcp = { TcpSocket };

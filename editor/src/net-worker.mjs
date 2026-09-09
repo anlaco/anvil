@@ -154,7 +154,7 @@ function connect(url) {
         ),
       );
     ws.onmessage = (e) => onFrame(new Uint8Array(e.data));
-    ws.onclose = () => {
+    ws.onclose = (event) => {
       // Everything in flight dies with the socket; anything blocked has to be
       // released or the engine's thread never comes back.
       for (const [, conn] of connections) {
@@ -167,6 +167,16 @@ function connect(url) {
       }
       connections.clear();
       socket = null;
+      // And the page is told, because it is the page that offers Run. An editor
+      // that keeps offering it once the bridge is gone is offering something it
+      // cannot do, which is the same class of defect as a run that reports
+      // nothing (ADR-0019, Rule 3).
+      self.postMessage({
+        lost: true,
+        reason: event.wasClean
+          ? "the bridge closed the connection"
+          : "the connection to the bridge was lost",
+      });
     };
   });
 }
