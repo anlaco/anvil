@@ -89,6 +89,32 @@ wasmtime embedded (ADR-0011), the `wasmtime` CLI kept for debugging
    the run. A blocked or closed stderr must never stop a sequence with a unit
    on the bench.
 
+> **Extended by [ADR-0033](0033-identity-on-the-event-stream-is-the-execution.md)
+> (2026-09-09):** points 4, 5 and 6 are completed there, and **two** sentences of
+> the Scope above are contradicted. In short: the `event` key alone does not say
+> *which* step a line is about, and the answer is that **identity is the
+> execution, not the step** — `run_id`, `step_run_id` and `parent_run_id`, minted
+> by the engine, with the name and the position demoted to attributes. Point 5's
+> permission to skip lines and point 6's best-effort delivery are only honourable
+> if loss is *detectable*, so the envelope gains a monotonic `seq`, allocated
+> before each write is attempted — and, because a gap needs a line on both sides
+> and an aborted run never reaches `on_fin_secuencia`, a `plan` on
+> `sequence_start` to say what was declared. Point 5's lack of a version field is
+> patched where it does not stretch: a `final` flag and an `events_version`. The
+> forgery that a shared fd 2 allows is fixed at its source rather than by a check
+> on the wire.
+>
+> Contradicted: **"does not change the `ResultSink` lifecycle"** — the hook
+> signatures change, though the hook order does not; and **"adds no import to the
+> engine guest's world"** — it adds `wasi:random/random`, a `wasi:cli`-world
+> standard, so the property that made this ADR reject a *private* import (the
+> guest stays runnable by any host) is intact, but the promise as worded is not.
+>
+> Also corrected there: point 6's "a blocked or closed stderr must never stop a
+> sequence" **cannot be delivered from the guest** — in the pinned
+> `wasmtime-wasi`, the stdio stream's `check_write` returns a constant permit and
+> `write` blocks. ADR-0033 §4a states the real exposure instead.
+
 7. **The channel is one-way.** Nothing on it can pause, resume, abort or
    otherwise steer the engine. Driving the engine is a separate contract, is
    what breakpoint debugging will need, and is deliberately not decided here.
