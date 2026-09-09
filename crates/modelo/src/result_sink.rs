@@ -32,8 +32,8 @@
 //! (`on_inicio_paso`, `on_resultado`, `on_fin_paso`) se disparan igual y
 //! quedan listos para sinks de log/UI en vivo futuros; los sinks de formato
 //! los ignoran. Los tres llevan una [`IdentidadPaso`]: la identidad de esa
-//! ejecución concreta, acuñada por el motor (ADR-0033). Esta es una adaptación del lifecycle propuesto en
-//! `docs/diseno/reportes.md` (doc marcado como "propuesta").
+//! ejecución concreta, acuñada por el motor (ADR-0033). Es una adaptación
+//! del lifecycle de `docs/diseno/reportes.md`.
 //!
 //! ## Errores: best-effort, sin `Result`
 //!
