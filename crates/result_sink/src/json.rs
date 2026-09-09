@@ -74,7 +74,16 @@ impl<W: Write> ResultSink for SinkJson<W> {
 /// símbolo (`">="`, …) o `null`; `fase` como `"setup"`/`"main"`/`"cleanup"`,
 /// que la sella el motor. Si el paso es un **sequence call** (M4b),
 /// anida `sub_pasos` con la misma estructura, recursivamente.
-fn paso_a_json(p: &ResultadoStep) -> Value {
+pub(crate) fn paso_a_json(p: &ResultadoStep) -> Value {
+    paso_a_json_con(p, true)
+}
+
+/// El mismo objeto, con o sin `sub_steps`. El cable de eventos lo pide
+/// **plano** (ADR-0033 §3): los hijos ya viajaron como líneas propias, y
+/// anidarlos aquí los enviaría dos veces, en dos formas, hasta profundidad
+/// 64. Se parametriza en vez de construir y descartar para no pagar el
+/// árbol entero en cada `step_result` de un `sequence_call`.
+pub(crate) fn paso_a_json_con(p: &ResultadoStep, anidar: bool) -> Value {
     let base = json!({
         "name": p.nombre,
         "status": p.estado,
@@ -92,12 +101,15 @@ fn paso_a_json(p: &ResultadoStep) -> Value {
         "inputs": nombrados_a_json(&p.parametros),
         "outputs": nombrados_a_json(&p.salidas),
     });
+    if !anidar {
+        return base;
+    }
     match &p.sub_pasos {
         Some(sub) => {
             let mut obj = base.as_object().unwrap().clone();
             obj.insert(
                 "sub_steps".into(),
-                Value::Array(sub.iter().map(paso_a_json).collect()),
+                Value::Array(sub.iter().map(|s| paso_a_json_con(s, true)).collect()),
             );
             Value::Object(obj)
         }

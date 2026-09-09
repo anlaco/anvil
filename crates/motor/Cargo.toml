@@ -12,6 +12,7 @@ cargador.workspace = true
 result_sink.workspace = true
 prost.workspace = true
 wasi-grpc.workspace = true
+getrandom.workspace = true
 
 [[bin]]
 name = "basica_datos"

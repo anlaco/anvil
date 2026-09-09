@@ -18,8 +18,8 @@ mod entorno;
 
 use modelo::proto::{StepRequest, StepResult, Value as ProtoValue, CONTRACT, ROUTE_INVOKE};
 use modelo::{
-    Asignacion, DefinicionPaso, DefinicionSecuencia, EntradaPaso, Fase, Limite, Programa,
-    ResultSink, ResultadoSecuencia, ResultadoStep, TipoEjecutor, TipoPaso,
+    Asignacion, DefinicionPaso, DefinicionSecuencia, EntradaPaso, Fase, IdentidadPaso, Limite,
+    Programa, ResultSink, ResultadoSecuencia, ResultadoStep, TipoEjecutor, TipoPaso,
 };
 use prost::Message;
 use wasi_grpc::grpc::Cliente;
@@ -421,7 +421,7 @@ impl Motor {
         };
         let entorno = EntornoMotor::desde_definicion(&programa.raiz);
         let (secuencia, _) =
-            ejecuta_secuencia_interna(self, &programa.raiz, entorno, sink, &programa, 0, true)?;
+            ejecuta_secuencia_interna(self, &programa.raiz, entorno, sink, &programa, RAIZ)?;
         Ok(secuencia)
     }
 
@@ -438,7 +438,7 @@ impl Motor {
     ) -> Result<ResultadoSecuencia, Error> {
         let entorno = EntornoMotor::desde_definicion(&programa.raiz);
         let (secuencia, _) =
-            ejecuta_secuencia_interna(self, &programa.raiz, entorno, sink, programa, 0, true)?;
+            ejecuta_secuencia_interna(self, &programa.raiz, entorno, sink, programa, RAIZ)?;
         Ok(secuencia)
     }
 }
@@ -666,6 +666,47 @@ fn lee_salidas(e: &Expresion) -> bool {
 /// ante un ciclo que escapara a la detección del cargador).
 const PROFUNDIDAD_MAX: usize = 64;
 
+/// El arranque: sin padre, sin ruta, y la raíz sí dispara los hooks de
+/// secuencia.
+const RAIZ: Anidamiento<'static> = Anidamiento {
+    profundidad: 0,
+    es_raiz: true,
+    padre: None,
+    ruta_padre: &[],
+};
+
+/// Acuña la identidad de una ejecución de paso: 128 bits, en hexadecimal
+/// (ADR-0033 §1). La acuña el motor porque es el único que sabe qué
+/// invocación es esta, en el único momento en que la respuesta es cierta.
+///
+/// Es **opaca**: se compara por igualdad y nada más. Si `getrandom` falla
+/// —no debería: en wasip2 es una llamada al host— se cae a un contador, que
+/// sigue siendo único dentro de la corrida, que es lo único que se promete.
+fn nuevo_step_run_id() -> String {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static RESPALDO: AtomicU64 = AtomicU64::new(0);
+    let mut b = [0u8; 16];
+    if getrandom::fill(&mut b).is_err() {
+        let n = RESPALDO.fetch_add(1, Ordering::Relaxed);
+        b[..8].copy_from_slice(&n.to_be_bytes());
+    }
+    b.iter().map(|x| format!("{x:02x}")).collect()
+}
+
+/// De dónde cuelga una secuencia: lo que un `sequence_call` le pasa a la
+/// subsecuencia que invoca. Va junto porque son una sola idea —la posición
+/// de esta secuencia dentro del árbol de ejecución— y porque separarlos
+/// dejaba a `ejecuta_secuencia_interna` con nueve argumentos.
+struct Anidamiento<'a> {
+    profundidad: usize,
+    /// Sólo la raíz dispara `on_inicio/on_fin_secuencia`.
+    es_raiz: bool,
+    /// `step_run_id` del `sequence_call` que envuelve, o `None` en la raíz.
+    padre: Option<&'a str>,
+    /// Ruta ordinal de la secuencia que envuelve, desde la raíz.
+    ruta_padre: &'a [(Fase, usize)],
+}
+
 /// Núcleo recursivo compartido por la raíz y las subsecuencias. Devuelve
 /// el `ResultadoSecuencia` **y** el `EntornoMotor` final (para que un
 /// sequence call padre extraiga los `parameters` finales y los copie de
@@ -683,25 +724,33 @@ fn ejecuta_secuencia_interna<I: InvocaPasos>(
     mut entorno: EntornoMotor,
     sink: &mut impl ResultSink,
     programa: &Programa,
-    profundidad: usize,
-    es_raiz: bool,
+    anid: Anidamiento,
 ) -> Result<(ResultadoSecuencia, EntornoMotor), Error> {
+    let Anidamiento {
+        profundidad,
+        es_raiz,
+        padre,
+        ruta_padre,
+    } = anid;
     if es_raiz {
         sink.on_inicio_secuencia(def);
     }
     let mut secuencia = ResultadoSecuencia::nueva(&def.nombre);
-    // El contexto sólo cambia de fase entre secciones.
-    let ctx = |fase| Contexto {
+    // El contexto cambia de fase entre secciones y de ordinal en cada paso.
+    let ctx = |fase, indice| Contexto {
         def_en_curso: def,
         programa,
         profundidad,
         fase,
+        indice,
+        padre,
+        ruta_padre,
     };
 
     // --- Setup: corren todos. Un saltado no estropea el setup. ---
     let mut setup_ok = true;
-    for p in &def.pasos_setup {
-        let r = corre_un_paso(inv, p, &mut entorno, sink, &ctx(Fase::Setup))?;
+    for (indice, p) in def.pasos_setup.iter().enumerate() {
+        let r = corre_un_paso(inv, p, &mut entorno, sink, &ctx(Fase::Setup, indice))?;
         let fallo = !r.paso() && r.estado != "skipped";
         secuencia.registra(r.clone());
         if fallo {
@@ -718,8 +767,8 @@ fn ejecuta_secuencia_interna<I: InvocaPasos>(
     // resultados con definiciones a posteriori.
     let mut veredicto_evaluado = false;
     if setup_ok {
-        for p in &def.pasos_main {
-            let r = corre_un_paso(inv, p, &mut entorno, sink, &ctx(Fase::Main))?;
+        for (indice, p) in def.pasos_main.iter().enumerate() {
+            let r = corre_un_paso(inv, p, &mut entorno, sink, &ctx(Fase::Main, indice))?;
             let fallo = !r.paso() && r.estado != "skipped";
             if p.tipo == TipoPaso::PassFail && r.estado != "skipped" {
                 veredicto_evaluado = true;
@@ -732,8 +781,8 @@ fn ejecuta_secuencia_interna<I: InvocaPasos>(
     }
 
     // --- Cleanup siempre. pause_on_fail NO corta el Cleanup. ---
-    for p in &def.pasos_cleanup {
-        let r = corre_un_paso(inv, p, &mut entorno, sink, &ctx(Fase::Cleanup))?;
+    for (indice, p) in def.pasos_cleanup.iter().enumerate() {
+        let r = corre_un_paso(inv, p, &mut entorno, sink, &ctx(Fase::Cleanup, indice))?;
         secuencia.registra(r.clone());
     }
 
@@ -770,6 +819,14 @@ struct Contexto<'a> {
     programa: &'a Programa,
     profundidad: usize,
     fase: Fase,
+    /// Ordinal del paso dentro de su fase. Es una **pista** de dónde está en
+    /// el programa tal como se cargó, no una clave (ADR-0033 §4d).
+    indice: usize,
+    /// `step_run_id` del `sequence_call` que envuelve a esta secuencia, o
+    /// `None` en la raíz.
+    padre: Option<&'a str>,
+    /// Ruta ordinal de la secuencia que contiene este paso, desde la raíz.
+    ruta_padre: &'a [(Fase, usize)],
 }
 
 /// Corre un solo paso (Setup/Main/Cleanup comparten esta lógica): disable,
@@ -786,7 +843,23 @@ fn corre_un_paso<I: InvocaPasos>(
     sink: &mut impl ResultSink,
     ctx: &Contexto,
 ) -> Result<ResultadoStep, Error> {
-    sink.on_inicio_paso(p);
+    // La identidad se acuña aquí, que es el instante en que el motor decide
+    // invocar este paso: antes no existe la invocación, y después ya habría
+    // que reconstruirla (ADR-0033 §1).
+    let step_run_id = nuevo_step_run_id();
+    let mut ruta: Vec<(Fase, usize)> = Vec::with_capacity(ctx.ruta_padre.len() + 1);
+    ruta.extend_from_slice(ctx.ruta_padre);
+    ruta.push((ctx.fase, ctx.indice));
+    let id = IdentidadPaso {
+        step_run_id: &step_run_id,
+        parent_run_id: ctx.padre,
+        depth: ctx.profundidad,
+        fase: ctx.fase,
+        sequence: &ctx.def_en_curso.nombre,
+        path: &ruta,
+    };
+
+    sink.on_inicio_paso(p, &id);
     let sella = |mut r: ResultadoStep| {
         r.fase = ctx.fase;
         r
@@ -795,8 +868,8 @@ fn corre_un_paso<I: InvocaPasos>(
     // (a) disable: se salta sin invocar ni evaluar nada.
     if p.disable {
         let r = sella(ResultadoStep::nuevo(&p.nombre, "skipped", "disable"));
-        sink.on_resultado(&r);
-        sink.on_fin_paso(p);
+        sink.on_resultado(&r, &id);
+        sink.on_fin_paso(p, &id);
         return Ok(r);
     }
 
@@ -808,8 +881,8 @@ fn corre_un_paso<I: InvocaPasos>(
             VeredictoPre::Continua => {}
             VeredictoPre::Salta(r) => {
                 let r = sella(*r);
-                sink.on_resultado(&r);
-                sink.on_fin_paso(p);
+                sink.on_resultado(&r, &id);
+                sink.on_fin_paso(p, &id);
                 return Ok(r);
             }
         }
@@ -835,7 +908,9 @@ fn corre_un_paso<I: InvocaPasos>(
             }
             Err(r) => *r,
         },
-        TipoPaso::SequenceCall => ejecuta_sequence_call(inv, p, ent, sink, ctx)?,
+        TipoPaso::SequenceCall => {
+            ejecuta_sequence_call(inv, p, ent, sink, ctx, &step_run_id, &ruta)?
+        }
     };
 
     // (d) asigna (RF-31): tras un paso Grpc o SequenceCall, vuelca campos
@@ -858,8 +933,8 @@ fn corre_un_paso<I: InvocaPasos>(
     // El `sequence_call` lleva la fase del padre; sus `sub_pasos` ya vienen
     // sellados con la suya por la ejecución de la subsecuencia.
     let r = sella(r);
-    sink.on_resultado(&r);
-    sink.on_fin_paso(p);
+    sink.on_resultado(&r, &id);
+    sink.on_fin_paso(p, &id);
     Ok(r)
 }
 
@@ -874,6 +949,8 @@ fn ejecuta_sequence_call<I: InvocaPasos>(
     ent: &mut EntornoMotor,
     sink: &mut impl ResultSink,
     ctx: &Contexto,
+    step_run_id: &str,
+    ruta: &[(Fase, usize)],
 ) -> Result<ResultadoStep, Error> {
     let destino = p.secuencia.as_deref().expect("validado en a_definicion");
 
@@ -964,8 +1041,12 @@ fn ejecuta_sequence_call<I: InvocaPasos>(
         sub_entorno,
         sink,
         ctx.programa,
-        ctx.profundidad + 1,
-        false,
+        Anidamiento {
+            profundidad: ctx.profundidad + 1,
+            es_raiz: false,
+            padre: Some(step_run_id),
+            ruta_padre: ruta,
+        },
     )?;
 
     // (5) Salida by-reference: copia `parameters.P` (final) → `locals.campo`
@@ -1553,7 +1634,7 @@ mod tests {
             ..Default::default()
         };
         let entorno = EntornoMotor::desde_definicion(def);
-        ejecuta_secuencia_interna(inv, def, entorno, &mut SinkNulo, &programa, 0, true).unwrap()
+        ejecuta_secuencia_interna(inv, def, entorno, &mut SinkNulo, &programa, RAIZ).unwrap()
     }
 
     /// Un paso `Grpc` con `asigna` sobre `valor_medido`.
@@ -1759,8 +1840,7 @@ mod tests {
             entorno,
             &mut sink,
             &programa,
-            0,
-            true,
+            RAIZ,
         )
         .unwrap();
 
@@ -1808,8 +1888,7 @@ mod tests {
             entorno,
             &mut sink,
             &programa,
-            0,
-            true,
+            RAIZ,
         )
         .unwrap();
 
@@ -1871,8 +1950,7 @@ mod tests {
             entorno,
             &mut sink,
             &programa,
-            0,
-            true,
+            RAIZ,
         )
         .unwrap();
 
@@ -1929,8 +2007,7 @@ mod tests {
             entorno,
             &mut sink,
             &programa,
-            0,
-            true,
+            RAIZ,
         )
         .unwrap();
 
@@ -1965,8 +2042,7 @@ mod tests {
             entorno,
             &mut sink,
             &programa,
-            0,
-            true,
+            RAIZ,
         )
         .unwrap();
 
@@ -2010,8 +2086,7 @@ mod tests {
             entorno,
             &mut sink,
             &programa,
-            0,
-            true,
+            RAIZ,
         )
         .unwrap();
 
@@ -2073,8 +2148,7 @@ mod tests {
             entorno,
             &mut sink,
             &programa,
-            0,
-            true,
+            RAIZ,
         )
         .unwrap();
         assert_eq!(
@@ -2201,8 +2275,7 @@ mod tests {
             entorno,
             &mut sink,
             &programa,
-            0,
-            true,
+            RAIZ,
         )
         .unwrap();
         assert_eq!(sec.pasos[0].mensaje, "embebido", "sin ejecutor → embebido");
@@ -2248,8 +2321,7 @@ mod tests {
             entorno,
             &mut sink,
             &programa,
-            0,
-            true,
+            RAIZ,
         )
         .unwrap();
 
@@ -2296,8 +2368,7 @@ mod tests {
             entorno,
             &mut sink,
             &programa,
-            0,
-            true,
+            RAIZ,
         )
         .unwrap();
 
@@ -2346,8 +2417,7 @@ mod tests {
             entorno,
             &mut sink,
             &programa,
-            0,
-            true,
+            RAIZ,
         )
         .unwrap();
 
@@ -2392,8 +2462,7 @@ mod tests {
             entorno,
             &mut sink,
             &programa,
-            0,
-            true,
+            RAIZ,
         )
         .unwrap();
 
@@ -2438,8 +2507,7 @@ mod tests {
             entorno,
             &mut sink,
             &programa,
-            0,
-            true,
+            RAIZ,
         )
         .unwrap();
 
@@ -2481,8 +2549,7 @@ mod tests {
             entorno,
             &mut sink,
             &programa,
-            0,
-            true,
+            RAIZ,
         )
         .unwrap();
 
@@ -2503,7 +2570,7 @@ mod tests {
         vistos: Vec<(String, Fase)>,
     }
     impl modelo::ResultSink for SinkEspia {
-        fn on_resultado(&mut self, r: &ResultadoStep) {
+        fn on_resultado(&mut self, r: &ResultadoStep, _: &IdentidadPaso) {
             self.vistos.push((r.nombre.clone(), r.fase));
         }
     }
@@ -2546,8 +2613,7 @@ mod tests {
             entorno,
             &mut sink,
             &programa,
-            0,
-            true,
+            RAIZ,
         )
         .unwrap();
 
@@ -2615,8 +2681,7 @@ mod tests {
             entorno,
             &mut sink,
             &programa,
-            0,
-            true,
+            RAIZ,
         )
         .unwrap();
 

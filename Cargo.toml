@@ -40,7 +40,13 @@ noyalib = "0.0.18"
 # `serde_json` se linka solo en `result_sink` (sinks JSON/CSV), puro Rust y
 # compila a `wasm32-wasip2`. No se añade `serde` con derive a `modelo`: el
 # JSON se ensambla a mano (ver `crates/result_sink/src/json.rs`).
-serde_json = "1"
+serde_json = { version = "1", features = ["preserve_order"] }
+# `getrandom` da los 128 bits de cada `step_run_id` (ADR-0033 §1). Se elige
+# la 0.3 y no la ruta directa por `wasi:random`: sus stubs fuera de wasm32
+# son `unreachable!()`, y `motor` también se prueba nativamente con
+# `cargo test`. La 0.3 trae backend para `wasm32-wasip2` y para linux sin
+# cfg ni RUSTFLAGS, que es lo que hace que las dos compilaciones convivan.
+getrandom = "0.3"
 
 # `wasi-grpc` is a separate, public project (github.com/anlaco/wasi-grpc).
 # Referenced by git tag so a lone clone of this repo can build (#25) — no

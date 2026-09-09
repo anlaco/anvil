@@ -5,7 +5,7 @@ use std::collections::HashMap;
 
 pub mod proto;
 pub mod result_sink;
-pub use result_sink::{ResultSink, SinkCompuesto};
+pub use result_sink::{IdentidadPaso, ResultSink, SinkCompuesto};
 
 /// Un operador de comparación para un `Limite::Comparacion`.
 ///

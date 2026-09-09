@@ -14,9 +14,11 @@
 
 pub mod consola;
 pub mod csv;
+pub mod events;
 pub mod json;
 pub mod reintento;
 
 pub use consola::SinkConsola;
 pub use csv::SinkCsv;
+pub use events::{SinkEventos, EVENTS_VERSION};
 pub use json::SinkJson;

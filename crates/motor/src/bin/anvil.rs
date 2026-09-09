@@ -13,6 +13,7 @@
 //!   --with-executors        con --validate: además pregunta a los ejecutores qué
 //!                           pasos ofrecen y comprueba las firmas (ADR-0021)
 //!   --quiet                 silencia el reporte de consola y los logs stderr
+//!   --events                vuelca la ejecución como NDJSON a stderr
 //!   --help / --version      ayuda y versión
 //!
 //! El resultado se vierte a `ResultSink`s (M2): consola salvo `--quiet`, y
@@ -30,7 +31,7 @@ use cargador::{
 };
 use modelo::{Programa, ResultSink};
 use motor::Motor;
-use result_sink::{SinkConsola, SinkCsv, SinkJson};
+use result_sink::{SinkConsola, SinkCsv, SinkEventos, SinkJson};
 use std::fs::File;
 use std::thread;
 use std::time::Duration;
@@ -69,6 +70,10 @@ struct Cli {
     /// the executors up.
     with_executors: bool,
     quiet: bool,
+    /// ADR-0029/ADR-0033: vierte la ejecución como NDJSON a stderr, una línea
+    /// por evento, mientras corre. No lo silencia `--quiet`: son preguntas
+    /// distintas, y «eventos sin ruido de consola» es la combinación esperada.
+    events: bool,
 }
 
 fn usage() {
@@ -83,6 +88,7 @@ fn usage() {
 --validate              carga y valida sin ejecutar ni conectar\n  \
 --with-executors        con --validate: conecta y comprueba las firmas contra los\n                          catálogos de los ejecutores (ADR-0021)\n  \
 --quiet                 silencia el reporte de consola y logs stderr\n  \
+--events                vuelca la ejecución como NDJSON a stderr, una línea\n                          por evento, mientras corre. Lleva los mismos datos\n                          que --json (direcciones de instrumento incluidas)\n                          y --quiet NO lo silencia\n  \
 -h, --help              muestra esta ayuda\n  \
 -V, --version           muestra la versión"
     );
@@ -104,6 +110,7 @@ fn parse_cli(args: Vec<String>) -> Result<Cli, AccionEarlyExit> {
         validate: false,
         with_executors: false,
         quiet: false,
+        events: false,
     };
     let mut args = args.into_iter();
     while let Some(arg) = args.next() {
@@ -113,6 +120,7 @@ fn parse_cli(args: Vec<String>) -> Result<Cli, AccionEarlyExit> {
             "--validate" => cli.validate = true,
             "--with-executors" => cli.with_executors = true,
             "--quiet" => cli.quiet = true,
+            "--events" => cli.events = true,
             "--process-model" | "--json" | "--csv" | "--limits" | "--executor" | "--port" => {
                 let valor = match args.next() {
                     Some(v) => v,
@@ -166,6 +174,16 @@ fn parse_cli(args: Vec<String>) -> Result<Cli, AccionEarlyExit> {
         ));
     }
     Ok(cli)
+}
+
+/// Identifica la corrida. Aleatorio para que dos motores escribiendo al
+/// mismo fd 2 no se pisen los contadores; no autentica nada.
+fn nuevo_run_id() -> String {
+    let mut b = [0u8; 16];
+    if getrandom::fill(&mut b).is_err() {
+        return "0".repeat(32);
+    }
+    b.iter().map(|x| format!("{x:02x}")).collect()
 }
 
 fn main() {
@@ -358,7 +376,18 @@ fn main() {
     } else {
         Some(SinkConsola::nuevo(std::io::stdout()))
     };
+    // El `run_id` acota el `seq`: dos motores escribiendo al mismo fd 2 dan
+    // dos contadores desde 0, y un lector que no los separe ve huecos que no
+    // existen. No es un secreto ni autentica nada (ADR-0033 §4c).
+    let mut eventos = if cli.events {
+        Some(SinkEventos::nuevo(std::io::stderr(), nuevo_run_id()))
+    } else {
+        None
+    };
     let mut sinks: Vec<&mut dyn ResultSink> = Vec::new();
+    if let Some(e) = eventos.as_mut() {
+        sinks.push(e);
+    }
     if let Some(c) = consola.as_mut() {
         sinks.push(c);
     }

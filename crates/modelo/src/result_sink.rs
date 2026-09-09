@@ -14,9 +14,9 @@
 //!
 //! ```text
 //! on_inicio_secuencia(def)          # lo que se va a correr
-//!   on_inicio_paso(paso)            # antes de invocar el paso
-//!   on_resultado(resultado)         # el ResultadoStep que devolvió
-//!   on_fin_paso(paso)               # cierra el paso
+//!   on_inicio_paso(paso, id)        # antes de invocar el paso
+//!   on_resultado(resultado, id)     # el ResultadoStep que devolvió
+//!   on_fin_paso(paso, id)           # cierra el paso
 //! on_fin_secuencia(resultado)       # lo que quedó, con estado agregado
 //! ```
 //!
@@ -31,7 +31,8 @@
 //! agregado, que solo se conoce al final. Los hooks de streaming
 //! (`on_inicio_paso`, `on_resultado`, `on_fin_paso`) se disparan igual y
 //! quedan listos para sinks de log/UI en vivo futuros; los sinks de formato
-//! los ignoran. Esta es una adaptación del lifecycle propuesto en
+//! los ignoran. Los tres llevan una [`IdentidadPaso`]: la identidad de esa
+//! ejecución concreta, acuñada por el motor (ADR-0033). Esta es una adaptación del lifecycle propuesto en
 //! `docs/diseno/reportes.md` (doc marcado como "propuesta").
 //!
 //! ## Errores: best-effort, sin `Result`
@@ -41,7 +42,30 @@
 //! tragan sus errores de IO y, si quieren, los loguean a stderr —nunca a
 //! stdout, que es territorio del sink de consola.
 
-use crate::{DefinicionPaso, DefinicionSecuencia, ResultadoSecuencia, ResultadoStep};
+use crate::{DefinicionPaso, DefinicionSecuencia, Fase, ResultadoSecuencia, ResultadoStep};
+
+/// La identidad de **esta ejecución de este paso**, acuñada por el motor
+/// (ADR-0033 §1): es el único que sabe qué invocación es esta, en el único
+/// momento en que la respuesta es cierta. El nombre y la posición viajan
+/// aquí como *descripción*, nunca como clave.
+///
+/// `step_run_id` es opaco: se compara por igualdad, nunca se ordena ni se
+/// interpreta. `parent_run_id` es el `step_run_id` del `sequence_call` que
+/// envuelve a este paso, y es `None` en la raíz — se **afirma** en cada
+/// línea en vez de reconstruirse con una pila, para que perder una línea
+/// cueste un nodo y no el árbol (ADR-0033 §2).
+pub struct IdentidadPaso<'a> {
+    pub step_run_id: &'a str,
+    pub parent_run_id: Option<&'a str>,
+    pub depth: usize,
+    pub fase: Fase,
+    /// Nombre de la secuencia que contiene el paso.
+    pub sequence: &'a str,
+    /// Ruta ordinal desde la raíz, incluido este paso: `[(Main, 1), (Setup, 0)]`.
+    /// Es una **pista** de dónde está en el programa tal como se cargó, no una
+    /// clave (ADR-0033 §4d).
+    pub path: &'a [(Fase, usize)],
+}
 
 /// Un consumidor del resultado de la secuencia. Ver la doc del módulo.
 pub trait ResultSink {
@@ -50,15 +74,15 @@ pub trait ResultSink {
     fn on_inicio_secuencia(&mut self, _secuencia: &DefinicionSecuencia) {}
 
     /// Antes de invocar un paso. Útil para sinks de log/streaming.
-    fn on_inicio_paso(&mut self, _paso: &DefinicionPaso) {}
+    fn on_inicio_paso(&mut self, _paso: &DefinicionPaso, _id: &IdentidadPaso) {}
 
     /// El resultado que devolvió un paso ya corrido.
-    fn on_resultado(&mut self, _resultado: &ResultadoStep) {}
+    fn on_resultado(&mut self, _resultado: &ResultadoStep, _id: &IdentidadPaso) {}
 
     /// Cierra un paso. En el MVP lleva la definición del paso que acaba
     /// de terminar; un sink futuro podría querer también el resultado
     /// aquí (lo ya recibió en `on_resultado`).
-    fn on_fin_paso(&mut self, _paso: &DefinicionPaso) {}
+    fn on_fin_paso(&mut self, _paso: &DefinicionPaso, _id: &IdentidadPaso) {}
 
     /// Al terminar la secuencia. Recibe el `ResultadoSecuencia` agregado
     /// (con `estado()` y todos los `pasos`): es lo que los sinks de
@@ -86,21 +110,21 @@ impl<'a> ResultSink for SinkCompuesto<'a> {
         }
     }
 
-    fn on_inicio_paso(&mut self, paso: &DefinicionPaso) {
+    fn on_inicio_paso(&mut self, paso: &DefinicionPaso, id: &IdentidadPaso) {
         for s in &mut self.sinks {
-            s.on_inicio_paso(paso);
+            s.on_inicio_paso(paso, id);
         }
     }
 
-    fn on_resultado(&mut self, resultado: &ResultadoStep) {
+    fn on_resultado(&mut self, resultado: &ResultadoStep, id: &IdentidadPaso) {
         for s in &mut self.sinks {
-            s.on_resultado(resultado);
+            s.on_resultado(resultado, id);
         }
     }
 
-    fn on_fin_paso(&mut self, paso: &DefinicionPaso) {
+    fn on_fin_paso(&mut self, paso: &DefinicionPaso, id: &IdentidadPaso) {
         for s in &mut self.sinks {
-            s.on_fin_paso(paso);
+            s.on_fin_paso(paso, id);
         }
     }
 
@@ -131,13 +155,13 @@ mod tests {
         fn on_inicio_secuencia(&mut self, _: &DefinicionSecuencia) {
             self.inicios_secuencia += 1;
         }
-        fn on_inicio_paso(&mut self, _: &DefinicionPaso) {
+        fn on_inicio_paso(&mut self, _: &DefinicionPaso, _: &IdentidadPaso) {
             self.inicios_paso += 1;
         }
-        fn on_resultado(&mut self, _: &ResultadoStep) {
+        fn on_resultado(&mut self, _: &ResultadoStep, _: &IdentidadPaso) {
             self.resultados += 1;
         }
-        fn on_fin_paso(&mut self, _: &DefinicionPaso) {
+        fn on_fin_paso(&mut self, _: &DefinicionPaso, _: &IdentidadPaso) {
             self.fines_paso += 1;
         }
         fn on_fin_secuencia(&mut self, _: &ResultadoSecuencia) {
@@ -165,8 +189,16 @@ mod tests {
         let def = DefinicionSecuencia::default();
         c.on_inicio_secuencia(&def);
         let paso = DefinicionPaso::nuevo("x", 1);
-        c.on_inicio_paso(&paso);
-        c.on_fin_paso(&paso);
+        let id = IdentidadPaso {
+            step_run_id: "0001",
+            parent_run_id: None,
+            depth: 0,
+            fase: Fase::Main,
+            sequence: "s",
+            path: &[(Fase::Main, 0)],
+        };
+        c.on_inicio_paso(&paso, &id);
+        c.on_fin_paso(&paso, &id);
         c.on_fin_secuencia(&ResultadoSecuencia::default());
 
         assert_eq!(a.inicios_secuencia, 1);

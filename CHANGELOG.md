@@ -12,6 +12,33 @@ minors, with the change written down here.
 
 ### Added
 
+- **`anvil <sequence.yaml> --events`**: writes the run to stderr as NDJSON,
+  one object per line, while it runs — `sequence_start`, `step_start`,
+  `step_result`, `step_end`, `sequence_end`. It is what a live view needs, and
+  it is readable by hand:
+
+  ```sh
+  anvil ejemplos/basica.yaml --events 2>&1 >/dev/null
+  ```
+
+  **Identity on the line is the execution, not the step**
+  ([ADR-0033](docs/adr/0033-identity-on-the-event-stream-is-the-execution.md)):
+  each step carries a `step_run_id` minted by the engine and the
+  `parent_run_id` of the `sequence_call` that contains it, asserted on every
+  line rather than rebuilt from a stack — so losing one line costs one node,
+  not the tree. The name and the `locator` ride along as description: the
+  loader does not enforce unique step names, so keying on one points at the
+  wrong step.
+
+  `sequence_start` carries a `plan` of every declared step, and every line a
+  monotonic `seq`. Together they answer the question you ask after an abort:
+  a step in the `plan` with no lines and no gap in `seq` **did not run**, as
+  opposed to *its lines were lost*.
+
+  `--quiet` does not silence it. The payload is the same one `--json` writes,
+  evaluated parameters included, so it carries instrument addresses and
+  channels — and unlike `--json`, it goes wherever stderr goes.
+
 - **A graphical sequence editor** (`editor/`), in the shape of TestStand's
   layout cut down to what the engine can do today: a sequence list, a step
   editor, a variables pane, and a status bar carrying the engine's own verdict
@@ -45,6 +72,14 @@ minors, with the change written down here.
   is not bound by the same-origin policy, so any page the user has open can
   try the port, which on a machine wired to a power supply is not acceptable.
   The token is printed at start-up, along with the URL to open.
+
+### Changed
+
+- **The `--json` report's keys now come out in the order they are written**
+  (`name`, `status`, `phase`, `message`, the measurement, …) instead of
+  alphabetically. The report says the same things; only the order moved. It is
+  the same ordering the event stream needs so that a person reading a wrapped
+  terminal reaches the verdict without reading to the end of the line.
 
 ### Fixed
 
