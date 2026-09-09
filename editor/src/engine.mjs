@@ -58,12 +58,27 @@ async function compile(load) {
  * that build; the Node build routes stdio through an I/O worker whose streams
  * cannot be swapped.
  */
-function capture() {
+function capture(onLine) {
   const chunks = [];
+  // Chunk boundaries are not line boundaries: Rust's stderr is unbuffered, so
+  // one `write_all` can reach the shim in pieces and two lines can arrive
+  // together. The tail of a chunk is held until its newline shows up, and the
+  // decoder is told the stream continues — otherwise a multi-byte character
+  // straddling a boundary decodes as a replacement char.
+  const decoder = onLine ? new TextDecoder() : null;
+  let pending = "";
   return {
     handler: {
       write(contents) {
         chunks.push(contents.slice());
+        if (!onLine) return;
+        pending += decoder.decode(contents, { stream: true });
+        let nl;
+        while ((nl = pending.indexOf("\n")) >= 0) {
+          const line = pending.slice(0, nl);
+          pending = pending.slice(nl + 1);
+          if (line) onLine(line);
+        }
       },
     },
     text() {
@@ -116,16 +131,22 @@ export function fileTree(files) {
  * a failure: for `--validate` it means the sequence was rejected, and the reason
  * is in `stderr`.
  *
+ * `onStderrLine` is called with each complete stderr line **as it is written**,
+ * which is what makes live progress possible: with `--events` those lines are
+ * the NDJSON of ADR-0033. The full text still comes back at the end, so a caller
+ * that only wants the report can ignore it. The callback runs inside the guest's
+ * synchronous `run()`, so it must be cheap — hand the line on and return.
+ *
  * A **fresh instance per call**. The guest is a `wasi:cli/run` command that
  * starts, runs and exits; running it twice on one instance traps with
  * `unreachable`. The native host has the same constraint and answers it the
  * same way, with a `Store` per guest (ADR-0011).
  */
-export async function runEngine({ args = [], files = {}, load }) {
+export async function runEngine({ args = [], files = {}, load, onStderrLine }) {
   const modules = await compile(load);
 
   const out = capture();
-  const err = capture();
+  const err = capture(onStderrLine);
 
   cliShim._setArgs(["anvil", ...args]);
   cliShim._setStdout(out.handler);

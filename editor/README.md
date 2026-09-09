@@ -7,9 +7,20 @@ bridge and no bench (AP-07).
 
 Status: **milestone 4, partly**. It opens, edits, validates live, saves and
 **runs** — the engine in the tab invokes real steps through the bridge and
-reports the same verdict the CLI does. What is missing is live progress: the
-report arrives at the end, and streaming it as it goes is ADR-0029,
-unimplemented.
+reports the same verdict the CLI does — and the run is **visible while it
+happens**: the row being executed lights up, and each row keeps the verdict it
+produced.
+
+Live progress comes from `--events`, the engine's NDJSON stream (ADR-0029,
+ADR-0033). Each line reaches the page as it is written, and the state machine
+that reads it is `src/run-state.mjs` — kept out of the DOM on purpose, because
+lighting up the wrong row while a unit is on the bench is the failure that
+matters, and a pure function is what can be asserted line by line.
+
+Two honest limits. A step inside a **subsequence has no row here**: the step
+list is flat per phase, so the call stays lit and the status bar names what is
+running under it. And if the stream loses a line, the view **says so** rather
+than showing a run that looks complete.
 
 ## Getting it running
 

@@ -44,7 +44,16 @@ self.onmessage = async ({ data }) => {
 
   const { id, args, files } = data;
   try {
-    const result = await runEngine({ args, files, load });
+    // Each stderr line crosses to the main thread as it is produced. The guest
+    // runs synchronously, so this worker's event loop is blocked while it does —
+    // but `postMessage` from a worker is not: the message queues and the main
+    // thread picks it up, which is what lets the interface paint mid-run.
+    const result = await runEngine({
+      args,
+      files,
+      load,
+      onStderrLine: (line) => self.postMessage({ id, line }),
+    });
     self.postMessage({ id, ok: true, result });
   } catch (e) {
     // A host failure is not a verdict about the sequence and must not be

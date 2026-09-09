@@ -13,6 +13,7 @@ import { yaml as yamlLang } from "@codemirror/lang-yaml";
 
 import { SequenceDocument, PHASES, SCOPES, STEP_TYPES } from "./document.mjs";
 import { browserPool, connectBridge, EngineHostError } from "./engine-pool.mjs";
+import { applyEvent, newRunState, rowKey } from "./run-state.mjs";
 
 // The engine runs on a worker thread, never on this one: it is a synchronous
 // WASM component, and on the main thread it would freeze the interface for as
@@ -51,7 +52,36 @@ const state = {
   text: null, // CodeMirror view
   validateTimer: null,
   bridge: null, // the URL, once connected
+  /**
+   * What the engine is doing right now, fed by the NDJSON of `--events`.
+   * The state machine that reads it lives in ./run-state.mjs, out of the DOM so
+   * it can be asserted line by line.
+   */
+  run: null,
 };
+
+/**
+ * The half of the run that has no row: what is happening inside a subsequence,
+ * and whether the stream lost anything. Both go to the status bar because
+ * neither belongs on a step row — the editor has no rows for a subsequence's
+ * steps, and a gap belongs to the stream, not to a step.
+ */
+function renderRunStatus() {
+  const r = state.run;
+  if (!r) return;
+  const partes = [];
+  if (r.nested) partes.push(`inside: ${r.nested}`);
+  if (r.lost) partes.push(`${r.lost} event line(s) lost`);
+  if (partes.length) status("busy", partes.join(" — "));
+}
+
+/** Feeds one raw stderr line to the run state and repaints if it moved. */
+function onEvent(line) {
+  if (!state.run) return;
+  if (!applyEvent(state.run, line)) return;
+  renderSequence();
+  renderRunStatus();
+}
 
 // ---------------------------------------------------------------- rendering
 
@@ -76,6 +106,16 @@ function renderSequence() {
         state.selected?.phase === phase && state.selected?.index === step.index;
       row.setAttribute("aria-current", String(current));
 
+      // What the engine says about this row, if a run is on: `running` is the
+      // step being executed, the rest is the verdict it already produced.
+      const r = state.run;
+      if (r) {
+        const running = r.current?.phase === phase && r.current?.index === step.index;
+        const verdict = r.results.get(rowKey(phase, step.index));
+        if (running) row.dataset.run = "running";
+        else if (verdict) row.dataset.run = verdict;
+      }
+
       const name = document.createElement("span");
       name.className = "name";
       name.textContent = step.name ?? "(unnamed)";
@@ -86,7 +126,17 @@ function renderSequence() {
       // three are the ones worth seeing at a glance.
       kind.textContent = step.type === "grpc" ? "" : step.type;
 
-      row.append(name, kind);
+      // A mark, not just a colour: a row that says pass or fail by hue alone is
+      // unreadable to whoever cannot tell the hues apart, and this gets read
+      // next to a bench.
+      const mark = document.createElement("span");
+      mark.className = "run-mark";
+      const rs = row.dataset.run;
+      const MARKS = { running: "▶", pass: "✓", fail: "✕", error: "!", skipped: "–" };
+      mark.textContent = rs ? (MARKS[rs] ?? "?") : "";
+      if (rs) mark.title = rs;
+
+      row.append(name, kind, mark);
       row.addEventListener("click", () => {
         state.selected = { phase, index: step.index };
         renderSequence();
@@ -494,9 +544,14 @@ async function validate() {
  * Runs the open sequence for real.
  *
  * The engine invokes steps through the bridge, so this reaches actual
- * executors and, through them, actual hardware. There is no live progress yet:
- * the engine reports at the end, and streaming it as it goes is ADR-0029,
- * unimplemented. So the button says "running…" and means it.
+ * executors and, through them, actual hardware.
+ *
+ * Progress is live: `--events` makes the engine narrate the run as NDJSON on
+ * stderr (ADR-0029, ADR-0033), and each line reaches this thread as it is
+ * written, so the row being executed lights up while it runs. The rows are found
+ * by the `locator`, which is a **hint** at where a step sits in the file — the
+ * identity on the wire is the execution, and a hint is all a row needs. What is
+ * never inferred here is a verdict: that is the report and the exit code.
  */
 async function run() {
   if (!state.doc || !engine.bridged) return;
@@ -504,13 +559,17 @@ async function run() {
   const name = state.filename ?? "sequence.yaml";
   status("busy", `running ${name}…`);
   ui.run.disabled = true;
+  state.run = newRunState();
+  renderSequence();
 
   try {
     const { exitCode, stdout, stderr } = await engine.run({
       // The bridge's arguments come first, the sequence last, matching how the
-      // native host builds argv (main.rs:604-608).
-      args: [...engine.engineArgs, name],
+      // native host builds argv (main.rs:604-608). `--events` is what makes the
+      // run visible while it happens.
+      args: [...engine.engineArgs, "--events", name],
       files: { [name]: state.doc.text },
+      onLine: onEvent,
     });
     // The verdict is the console sink's frozen header, `=== name: state ===`,
     // and it goes to **stdout** (crates/result_sink/src/consola.rs); stderr
@@ -530,7 +589,16 @@ async function run() {
       stdout.split("\n").filter(Boolean).pop() ??
       `finished with exit ${exitCode}`;
 
-    status(exitCode === 0 ? "pass" : "fail", verdict);
+    if (state.run) {
+      state.run.current = null;
+      state.run.nested = null;
+    }
+    // A stream that lost lines leaves rows that never got their verdict. Saying
+    // so beats a view that looks complete and is not.
+    const perdidas = state.run?.lost
+      ? ` (${state.run.lost} event line(s) lost — some rows may be blank)`
+      : "";
+    status(exitCode === 0 ? "pass" : "fail", verdict + perdidas);
     // The full report goes to the console until there is somewhere to put it.
     // A run's detail — per-step results, measurements, limits — needs a pane of
     // its own, and that arrives with the live events of ADR-0029.

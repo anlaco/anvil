@@ -39,6 +39,17 @@ minors, with the change written down here.
   evaluated parameters included, so it carries instrument addresses and
   channels — and unlike `--json`, it goes wherever stderr goes.
 
+- **The editor shows the run while it happens.** The row being executed lights
+  up and each row keeps the verdict it produced, fed by `--events` — the engine
+  narrates, the editor paints, and nothing about the run is re-derived in
+  JavaScript.
+
+  A step inside a subsequence has no row of its own, so the call stays lit and
+  the status bar names what is running under it: the alternative is to move the
+  highlight to a row that is not what is running, which next to a bench is worse
+  than saying nothing. And if the stream loses a line, the editor says so
+  instead of showing a run that looks complete.
+
 - **A graphical sequence editor** (`editor/`), in the shape of TestStand's
   layout cut down to what the engine can do today: a sequence list, a step
   editor, a variables pane, and a status bar carrying the engine's own verdict

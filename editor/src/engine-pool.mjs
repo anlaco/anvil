@@ -74,9 +74,9 @@ export class EnginePool {
   }
 
   /** Runs the engine and resolves with `{ exitCode, stdout, stderr }`. */
-  run({ args = [], files = {} }) {
+  run({ args = [], files = {}, onLine }) {
     return new Promise((resolve, reject) => {
-      this.#queue.push({ args, files, resolve, reject });
+      this.#queue.push({ args, files, onLine, resolve, reject });
       this.#pump();
     });
   }
@@ -102,6 +102,12 @@ export class EnginePool {
 
     worker.onmessage = ({ data }) => {
       if (data.id !== id) return;
+      // A line is progress, not an answer: the job is still running, so the
+      // worker is not released and the handler stays installed.
+      if (data.line !== undefined) {
+        job.onLine?.(data.line);
+        return;
+      }
       worker.onmessage = null;
       this.#busy.delete(worker);
       this.#idle.push(worker);

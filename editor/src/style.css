@@ -539,3 +539,70 @@ button:focus-visible {
   color: var(--muted);
   cursor: not-allowed;
 }
+
+/* ----------------------------------------------------- run state on a row
+ *
+ * What the engine is doing, on the row it is doing it to. Three rules keep
+ * this readable next to a bench:
+ *
+ * - The mark carries the meaning, the colour only reinforces it. A row that
+ *   says pass or fail by hue alone is unreadable to whoever cannot tell the
+ *   hues apart, and this gets read in a hurry.
+ * - The running row is the only animated thing on screen, so the eye finds it
+ *   without hunting.
+ * - Selection still wins: `aria-current` is where the user is, and a run must
+ *   not move it or hide it.
+ */
+.run-mark {
+  margin-left: auto;
+  font-size: 11px;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+}
+
+.step-row[data-run="running"] {
+  background: color-mix(in srgb, var(--accent) 22%, transparent);
+}
+
+.step-row[data-run="running"] .run-mark {
+  color: var(--accent);
+  animation: run-pulse 1s ease-in-out infinite;
+}
+
+.step-row[data-run="pass"] .run-mark {
+  color: var(--pass);
+}
+
+.step-row[data-run="fail"] .run-mark {
+  color: var(--fail);
+}
+
+.step-row[data-run="error"] .run-mark {
+  color: var(--error);
+}
+
+.step-row[data-run="skipped"] .run-mark {
+  color: var(--skipped);
+}
+
+/* A verdict left over from a finished run stays visible, but dimmer than the
+ * live one: it is history, not what is happening. */
+.step-row[data-run="fail"] {
+  background: color-mix(in srgb, var(--fail) 12%, transparent);
+}
+
+.step-row[data-run="error"] {
+  background: color-mix(in srgb, var(--error) 12%, transparent);
+}
+
+@keyframes run-pulse {
+  50% {
+    opacity: 0.25;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .step-row[data-run="running"] .run-mark {
+    animation: none;
+  }
+}
