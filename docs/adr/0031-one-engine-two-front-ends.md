@@ -53,6 +53,16 @@ differently.
 ends over it, and neither may contain a second implementation of anything the
 engine does.**
 
+> **Narrowed by [ADR-0034](0034-the-engine-is-a-service-and-the-front-ends-are-clients.md)
+> (2026-09-09):** this holds of the **artefact** — it stays the same core
+> module in both places, and the ban on a second implementation is untouched.
+> What ADR-0034 admits is that the two hosts will not offer the same
+> **capabilities**: parallelism inside a sequence needs threads a transpiled
+> core does not have, so the browser is a subset of the native host. That
+> divergence is declared in the protocol handshake, not left for the user to
+> discover. And "two front ends" becomes the floor rather than the count: a
+> VS Code plugin is a third, reaching the engine through the same interface.
+
 1. **No second loader, no second validator, no second evaluator.** Whether a
    sequence is valid, what a field means, what an expression evaluates to and
    how a verdict is reached are answered by running the engine, never by code

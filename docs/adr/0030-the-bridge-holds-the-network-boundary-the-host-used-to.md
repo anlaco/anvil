@@ -65,6 +65,17 @@ finding.
 **The bridge enforces the boundary the host used to, and authenticates every
 connection. The shim's check does not count.**
 
+> **Extended by [ADR-0034](0034-the-engine-is-a-service-and-the-front-ends-are-clients.md)
+> (2026-09-09):** nothing decided here is contradicted — whenever the engine is
+> hosted outside `packaging/anvil-host`, which is still the browser case, the
+> boundary lives at the bridge. What changes is the bridge's **job**. Here it is
+> a byte relay that understands nothing of what it carries, existing so the
+> tab's engine has a network. Once the engine can run natively as a service, the
+> bridge is also the door to the engine — a better fit for something that
+> already holds a token and is pinned to loopback. Note also that ADR-0034 §g
+> puts the web IDE on `http://127.0.0.1` served by the engine itself, so the
+> page and the bridge share an origin family they did not share here.
+
 1. **The address check moves to the bridge, unchanged in meaning.** The bridge
    allows loopback plus exactly the non-loopback IPs declared in the
    sequence's `executors:`, reusing `ips_no_loopback_declaradas`
