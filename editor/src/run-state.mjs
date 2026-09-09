@@ -113,6 +113,34 @@ export function applyEvent(state, line) {
 }
 
 /**
+ * Whether Run may be offered, and what to say when it may not.
+ *
+ * A pure function because the bug it guards was exactly one missing term: the
+ * button was computed from the bridge alone, so **any repaint during a run** —
+ * inserting a step, saving, typing — re-armed it and offered a second run over
+ * an engine that takes one sequence at a time.
+ *
+ * The title is part of the answer, not decoration: a control that is refused
+ * without saying why reads as broken.
+ */
+export function runButton({ hasDoc, bridged, inFlight }) {
+  if (inFlight) {
+    return {
+      disabled: true,
+      title: "A run is in flight; the engine takes one sequence at a time",
+    };
+  }
+  if (!bridged) {
+    return {
+      disabled: true,
+      title:
+        "Run needs a bridge: start `anvil <sequence.yaml> --bridge` and open the URL it prints",
+    };
+  }
+  return { disabled: !hasDoc, title: "Run this sequence" };
+}
+
+/**
  * The steps the sequence declared that produced no lines at all.
  *
  * Only answerable while `lost` is 0: a step with no lines and no gap in the

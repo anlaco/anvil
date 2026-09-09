@@ -11,7 +11,7 @@
 import { strict as assert } from "node:assert";
 import { test } from "node:test";
 
-import { applyEvent, neverRan, newRunState, rowKey } from "../src/run-state.mjs";
+import { applyEvent, neverRan, newRunState, rowKey, runButton } from "../src/run-state.mjs";
 
 const ev = (o) => JSON.stringify(o);
 
@@ -168,4 +168,32 @@ test("sequence_end closes the run without inventing a verdict", () => {
   // The aggregate status is on the line and deliberately not stored: the
   // verdict is the report and the exit code, not something the view derives.
   assert.equal(s.results.size, 0);
+});
+
+test("Run is not offered while a run is in flight", () => {
+  // The bug this guards: the button was computed from the bridge alone, so any
+  // repaint during a run — inserting a step was how it was found — re-armed it
+  // and offered a second run over an engine that takes one sequence at a time.
+  const enVuelo = runButton({ hasDoc: true, bridged: true, inFlight: true });
+  assert.equal(enVuelo.disabled, true);
+  assert.match(enVuelo.title, /in flight/);
+
+  const listo = runButton({ hasDoc: true, bridged: true, inFlight: false });
+  assert.equal(listo.disabled, false);
+});
+
+test("a refused Run says which of the two things is missing", () => {
+  // A control that is refused without saying why reads as broken, and the two
+  // reasons need different actions from whoever is at the bench.
+  const sinPuente = runButton({ hasDoc: true, bridged: false, inFlight: false });
+  assert.equal(sinPuente.disabled, true);
+  assert.match(sinPuente.title, /--bridge/);
+
+  const sinFichero = runButton({ hasDoc: false, bridged: true, inFlight: false });
+  assert.equal(sinFichero.disabled, true);
+
+  // In flight wins over no bridge: it is the more recent truth, and it is the
+  // one that says "wait" rather than "go and start something".
+  const ambos = runButton({ hasDoc: true, bridged: false, inFlight: true });
+  assert.match(ambos.title, /in flight/);
 });

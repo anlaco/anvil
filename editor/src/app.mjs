@@ -13,7 +13,7 @@ import { yaml as yamlLang } from "@codemirror/lang-yaml";
 
 import { SequenceDocument, PHASES, SCOPES, STEP_TYPES } from "./document.mjs";
 import { browserPool, connectBridge, EngineHostError } from "./engine-pool.mjs";
-import { applyEvent, newRunState, rowKey } from "./run-state.mjs";
+import { applyEvent, newRunState, rowKey, runButton } from "./run-state.mjs";
 
 // The engine runs on a worker thread, never on this one: it is a synchronous
 // WASM component, and on the main thread it would freeze the interface for as
@@ -58,6 +58,16 @@ const state = {
    * it can be asserted line by line.
    */
   run: null,
+  /**
+   * True from the click on Run until the engine comes back.
+   *
+   * It is separate from `run` because that one outlives the run: the verdicts
+   * stay on the rows afterwards. This is what `renderAll` needs, and without it
+   * any repaint — inserting a step, saving, typing — recomputed the button from
+   * `bridged` alone and re-armed it **mid-run**, offering a second concurrent
+   * run over the same engine and bridge.
+   */
+  runInFlight: false,
 };
 
 /**
@@ -471,10 +481,13 @@ function renderAll({ skipText = false } = {}) {
   ui.panes.dataset.stale = String(state.doc?.stale ?? false);
   ui.filename.textContent = state.filename ?? "no file";
   ui.filename.dataset.dirty = String(state.dirty);
-  ui.run.disabled = !state.doc || !engine.bridged;
-  ui.run.title = engine.bridged
-    ? "Run this sequence"
-    : "Run needs a bridge: start `anvil <sequence.yaml> --bridge` and open the URL it prints";
+  const boton = runButton({
+    hasDoc: !!state.doc,
+    bridged: engine.bridged,
+    inFlight: state.runInFlight,
+  });
+  ui.run.disabled = boton.disabled;
+  ui.run.title = boton.title;
   ui.sequenceTitle.textContent = state.doc?.name
     ? `Sequence — ${state.doc.name}`
     : "Sequence";
@@ -558,8 +571,9 @@ async function run() {
 
   const name = state.filename ?? "sequence.yaml";
   status("busy", `running ${name}…`);
-  ui.run.disabled = true;
+  state.runInFlight = true;
   state.run = newRunState();
+  ui.run.disabled = true;
   renderSequence();
 
   try {
@@ -607,6 +621,7 @@ async function run() {
     const what = e instanceof EngineHostError ? e.message : String(e?.message ?? e);
     status("error", `could not run: ${what}`);
   } finally {
+    state.runInFlight = false;
     renderAll();
   }
 }
