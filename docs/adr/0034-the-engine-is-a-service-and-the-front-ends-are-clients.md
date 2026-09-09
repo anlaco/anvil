@@ -189,7 +189,17 @@ the engine keeps a watchdog: if the controlling client disappears, what happens
 to energised hardware is a decision the engine makes, not an accident.
 
 **g. When there is a bench, the engine serves the web IDE itself, from
-loopback.** A page served from `http://127.0.0.1:<port>` talking to the engine
+loopback.**
+
+> **Narrowed by [ADR-0035](0035-the-clients-of-the-engine-and-how-anvil-reaches-a-bench.md)
+> (2026-09-10):** loopback is written here as the rule; it is the **default**.
+> An operator interface on a tablet, and an engineer debugging against the bench
+> from their own machine, both cross the local network — so ADR-0035 §f keeps
+> the engine on loopback unless told otherwise at start-up, and makes exposing
+> *operation* and exposing *control* two separate switches, both off by
+> default. What does not change: when both ends are on one machine, this is the
+> shape, and it is what avoids Chrome's Local Network Access prompt.
+ A page served from `http://127.0.0.1:<port>` talking to the engine
 on the same host is loopback-to-loopback and exempt from Chrome's Local Network
 Access; it is also a secure context, so no mixed content and no certificates.
 GitHub Pages stays the home of the pure-WASM demo, which touches nothing local.
