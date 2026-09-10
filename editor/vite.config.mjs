@@ -37,6 +37,11 @@ export default defineConfig({
   plugins: [examples],
   server: {
     port: 5180,
+    // Fail instead of sliding to 5181: the Electron shell loads this exact
+    // port (`editor/electron/main.mjs`), so a dev server that quietly moved
+    // leaves the window pointed at whatever else is on 5180 — an older run
+    // of this same editor, answering plausibly and wrongly.
+    strictPort: true,
     // Cross-origin isolation, which is what makes `SharedArrayBuffer` exist.
     // The engine asks for blocking network I/O — `blockingRead` returns bytes
     // synchronously, `Pollable.block()` returns nothing — and the only way to

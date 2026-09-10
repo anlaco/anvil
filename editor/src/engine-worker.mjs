@@ -24,8 +24,23 @@ import { useBridge } from "./wasi/sockets.mjs";
 
 // Fetched here rather than passed in: the bytes are large and the worker can
 // read them itself.
+//
+// Spelled out one `new URL(…, import.meta.url)` per module, rather than built
+// from the name, because that literal form is what the bundler rewrites: in
+// dev these resolve to `/generated/…` and in a build to the hashed copies it
+// emitted beside this worker. A template string does not get rewritten, so a
+// packaged editor asked for `/generated/anvil.core.wasm` — a path that only
+// exists behind the dev server — and could not run the engine at all.
+const CORE_URLS = {
+  "anvil.core.wasm": new URL("../generated/anvil.core.wasm", import.meta.url),
+  "anvil.core2.wasm": new URL("../generated/anvil.core2.wasm", import.meta.url),
+  "anvil.core3.wasm": new URL("../generated/anvil.core3.wasm", import.meta.url),
+};
+
 const load = async (name) => {
-  const res = await fetch(`/generated/${name}`);
+  const url = CORE_URLS[name];
+  if (!url) throw new Error(`unknown core module ${name}`);
+  const res = await fetch(url);
   if (!res.ok) {
     throw new Error(`could not load ${name} (${res.status}). Run 'npm run transpile' first.`);
   }
