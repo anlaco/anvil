@@ -118,6 +118,11 @@ it, which gives a window with no address bar, an icon and a menu entry.
 Double-clicking a sequence is a **packaging** matter — a `.desktop` file with
 its `MimeType` on Linux, registry entries on Windows, a thin `.app` bundle on
 macOS — not a reason to adopt a UI framework.
+> **Narrowed by [ADR-0036](0036-the-sequence-editor-is-wrapped-by-tauri-not-the-browser.md)
+> for Windows**: browser-application-mode assumes a capable, already-installed
+> browser on a machine this project does not control, which does not hold for
+> "someone downloaded the editor" the way it holds for a developer's own
+> computer. The Windows Sequence Editor is wrapped by Tauri instead.
 
 ## Alternatives rejected
 
@@ -131,6 +136,10 @@ macOS — not a reason to adopt a UI framework.
 - **Tauri.** Lighter than Electron because it uses the system webview, and in
   Rust like the rest. Deferred on the same reasoning, plus an artefact to build,
   sign and update per platform and three different webviews to support.
+  > **Reversed for Windows by
+  > [ADR-0036](0036-the-sequence-editor-is-wrapped-by-tauri-not-the-browser.md)**:
+  > the reasoning here still holds and is accepted as a real cost, but it is
+  > outweighed by a reliability requirement §i did not account for.
 - **One executable containing Chromium and wasmtime.** Rejected outright, not
   deferred. It fuses the IDE and the engine back into a single artefact, which
   is what ADR-0034 separated, and it forces a production bench to carry a
