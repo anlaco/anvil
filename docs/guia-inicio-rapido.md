@@ -457,10 +457,11 @@ and [ADR-0024](adr/0024-the-signature-is-the-catalog-in-rust-too.md).
 
 ## Continuous integration
 
-`.github/workflows/ci.yml` runs on every push to `main` and on every PR:
-`make check` (fmt + clippy for the three workspaces), the core tests, `make
-release`, the host tests and the beta regression (informational while defects
-remain open).
+`.github/workflows/ci.yml` runs on every push to `main` and on every PR. Its
+`ci` job (Linux) does `make check` (fmt + clippy for the three workspaces),
+the core tests, `make release`, the host tests and the beta regression
+(informational while defects remain open). A second job, `ci-windows`,
+verifies the same build and the Sequence Editor on Windows — see below.
 
 The only non-obvious part is how CI gets the sibling repo. The workflow uses
 a **read-only deploy key** (the public one installed on `wasi-grpc` as
@@ -487,6 +488,18 @@ shred -u /tmp/k /tmp/k.pub
 
 When `wasi-grpc` stabilizes and gets published, the dependency becomes a
 version and all of this goes away.
+
+**`ci-windows`** (ADR-0036) runs the same idea on `windows-latest`, compiled
+natively rather than cross-compiled — the runner already carries MSVC Build
+Tools, which resolves the same `zstd-sys` dependency Linux needs `musl-gcc`
+for. Besides `make release` and the host/bridge tests, it smoke-tests things
+the Linux job has no reason to: that `anvil.exe --bridge` actually opens its
+loopback relay (a real WebSocket handshake against the printed port, not
+just "the process is alive"), that the editor's Vite dev server starts under
+Git Bash, and that the Sequence Editor's Electron installer builds and its
+packaged binary starts (ADR-0037). It skips `make check` (same source the Linux job
+already lints) and the beta regression script (Linux-only shell, and it
+regresses named defects already covered there).
 
 ## Troubleshooting
 

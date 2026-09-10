@@ -13,6 +13,11 @@
 #
 # Needs the musl target (`rustup target add x86_64-unknown-linux-musl`) and the
 # WASM guests, which are built here in the order ADR-0011/ADR-0015 require.
+#
+# Windows sibling: packaging/package.ps1 (ADR-0036). It packages the same
+# engine binaries for x86_64-pc-windows-msvc. The Sequence Editor is a
+# separate download on both platforms — an Electron app built by
+# `npm run app:build` in `editor/` (ADR-0037), not part of this tarball.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 

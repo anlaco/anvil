@@ -38,6 +38,23 @@ Linux x86_64, any libc. The [release page][rel] publishes the SHA256 of the
 downloaded alongside. The `.yaml` files ship in the package because
 `subsecuencia.yaml` invokes `medir_fuentes.yaml` by relative path.
 
+**Windows** (ADR-0036): the [release page][rel] also publishes
+`anvil-vX.Y.Z-x86_64-windows.zip` — the same engine, `anvil.exe` and
+`anvil-exec-wasm.exe`, statically linked against the CRT so it needs no
+Visual C++ redistributable installed. Same contents and same commands as
+above, with `.exe`.
+
+## Sequence Editor
+
+The engine binary above runs a sequence headless — CI, a bench, scripting.
+To write one, download the Sequence Editor instead: an Electron app wrapping
+the same editor that also runs standalone in any browser (`editor/`,
+ADR-0031). It carries its own Chromium, so it needs no browser installed and
+behaves the same on Linux and Windows (ADR-0037) — the reason it is not the
+system's webview is that on Linux that would mean depending on whichever
+`libwebkit2gtk` the machine happens to have. To run it from source: `cd
+editor && npm install && npm run app`.
+
 [rel]: https://github.com/anlaco/anvil/releases/latest
 
 ## Building from source
@@ -79,7 +96,11 @@ want for development. The **binary that gets published** in the releases is
 another matter: it is built for the `x86_64-unknown-linux-musl` target so it
 runs on any Linux. It requires a C compiler for musl, because `wasmtime`
 drags in `zstd-sys`; `musl-gcc` or `zig cc -target x86_64-linux-musl` work
-after `rustup target add x86_64-unknown-linux-musl`. The bridge must be
+after `rustup target add x86_64-unknown-linux-musl`. On Windows the
+equivalent target is `x86_64-pc-windows-msvc`, built natively (no
+cross-compiling): a runner or machine with the MSVC Build Tools already
+resolves the same `zstd-sys` dependency, and `packaging/package.ps1` is the
+Windows sibling of `packaging/package.sh` (ADR-0036). The bridge must be
 copied to `executors/wasm/target/release/` before building the host: its
 `build.rs` looks for the artifacts there, and does not consider the
 target-triple subdirectory.

@@ -16,6 +16,10 @@
 # The four workspaces are deliberately independent (the core does not drag in
 # wasmtime, ADR-0011; the Rust step SDK links nothing of Anvil's, ADR-0024),
 # hence the `--manifest-path` calls.
+#
+# These recipes are POSIX-portable and also run on Windows under Git Bash
+# (ADR-0036, `.github/workflows/ci.yml`'s `ci-windows` job) — no separate
+# Windows recipes exist.
 
 HOST    := packaging/anvil-host/Cargo.toml
 BRIDGE  := executors/wasm/Cargo.toml

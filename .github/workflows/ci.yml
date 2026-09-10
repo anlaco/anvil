@@ -104,3 +104,177 @@ jobs:
       - name: Beta regression
         working-directory: anvil
         run: ./docs/qa/regresion/run.sh
+
+  # Windows verification for the Sequence Editor and the engine (ADR-0036).
+  # Compiles natively on `windows-latest` rather than cross-compiling: the
+  # runner already carries MSVC Build Tools, which resolves the same C
+  # dependency (wasmtime → zstd-sys) that Linux needs musl-gcc for, and the
+  # result also has to run on this platform, so cross-compiling would buy
+  # nothing. `make check` (fmt/clippy) is deliberately not repeated here: it
+  # is the same source the `ci` job already lints, so it would only cost
+  # time without telling us anything new about Windows. `docs/qa/regresion`
+  # is also skipped — it regresses named beta defects already covered on
+  # Linux, not "does this work on Windows".
+  ci-windows:
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Checkout anvil
+        uses: actions/checkout@v5
+        with:
+          path: anvil
+
+      - name: Checkout wasi-grpc (sibling repo)
+        uses: actions/checkout@v5
+        with:
+          repository: anlaco/wasi-grpc
+          ssh-key: ${{ secrets.WASI_GRPC_DEPLOY_KEY }}
+          path: wasi-grpc
+
+      - name: Toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-wasip2
+
+      - name: Cargo cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            anvil
+            anvil/packaging/anvil-host
+            anvil/executors/wasm
+            anvil/executors/rust
+            anvil/ejemplos/hola-paso
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      # windows-latest does not carry `make`; Git Bash does not either.
+      - name: Install make
+        shell: pwsh
+        run: choco install make -y
+
+      - name: Build release
+        working-directory: anvil
+        run: make release
+
+      - name: Core tests
+        working-directory: anvil
+        run: cargo test
+
+      - name: Bridge tests
+        working-directory: anvil
+        run: make test-bridge
+
+      # Mirrors the Linux job's "Host tests" step: `--release`, not
+      # `make test-host`, because the debug host recompiles wasmtime's guests
+      # unoptimized and takes far longer to start than the tests are worth.
+      - name: Host tests
+        working-directory: anvil
+        run: cargo test --release --manifest-path packaging/anvil-host/Cargo.toml
+
+      # "Ejercer es la única forma de saber": a build that only compiles is
+      # not verified. Runs the actual binary and greps a stable string from
+      # its report. `basica.yaml` judges `fail` by design (a voltage out of
+      # range) — exit code 1 here means the engine judged correctly, not
+      # that something crashed, so the check is on the report line, not on
+      # the exit code.
+      - name: "Smoke: anvil.exe runs a sequence"
+        working-directory: anvil
+        run: |
+          ./packaging/anvil-host/target/release/anvil.exe ejemplos/basica.yaml | tee run.out || true
+          grep -q "=== basica: fail ===" run.out
+
+      # `--bridge` opens a loopback relay for the editor's WASM-hosted engine
+      # to reach real instruments (packaging/anvil-host/src/main.rs:617-649,
+      # packaging/anvil-host/src/bridge.rs). A process that stays alive is
+      # not proof it is listening — this opens a real WebSocket against the
+      # printed port with Node, which is already on the runner for the
+      # editor steps below.
+      - name: "Smoke: --bridge listens"
+        working-directory: anvil
+        run: |
+          ./packaging/anvil-host/target/release/anvil.exe ejemplos/basica.yaml --bridge > bridge.out 2>&1 &
+          PID=$!
+          for i in $(seq 1 50); do
+            grep -q "bridge listening on" bridge.out && break
+            sleep 0.2
+          done
+          URL=$(grep -oE 'ws://[0-9.]+:[0-9]+/\?token=[A-Za-z0-9._-]+' bridge.out | head -1)
+          test -n "$URL"
+          # Node 22's built-in `WebSocket` (no "ws" package needed) — a real
+          # handshake against the relay in packaging/anvil-host/src/bridge.rs,
+          # not just "the process is still alive".
+          node -e "
+            const sock = new WebSocket('$URL');
+            sock.addEventListener('open', () => { console.log('bridge socket opened'); sock.close(); process.exit(0); });
+            sock.addEventListener('error', (e) => { console.error(e); process.exit(1); });
+            setTimeout(() => { console.error('timed out'); process.exit(1); }, 5000);
+          " || { kill $PID; exit 1; }
+          kill $PID
+
+      - name: Editor tests (transpile + node --test)
+        working-directory: anvil
+        run: make test-editor
+
+      # Ensures Vite itself starts under Windows/Git Bash before trusting
+      # the Electron shell (which wraps the same dev server) to do so.
+      - name: "Smoke: editor dev server responds"
+        working-directory: anvil/editor
+        run: |
+          npm ci
+          npm run dev &
+          PID=$!
+          for i in $(seq 1 50); do
+            curl -sf http://localhost:5180/ > /dev/null && break
+            sleep 0.2
+          done
+          curl -sf http://localhost:5180/ > /dev/null
+          kill $PID
+
+      - name: Build the Electron installer
+        working-directory: anvil/editor
+        run: |
+          npm ci
+          npm run app:build -- --win nsis
+
+      # No display on this runner, so this cannot click anything real — the
+      # bar here is "the packaged shell starts and does not crash", which is
+      # still more than "it compiled". A person with a Windows machine still
+      # has to confirm it opens, looks right, and the file dialogs work
+      # (plan's verification step 8) — this smoke does not replace that.
+      - name: "Smoke: packaged editor starts and can run the engine"
+        working-directory: anvil/editor
+        run: |
+          EXE=$(find ../dist-app/win-unpacked -maxdepth 1 -name '*.exe' | head -1)
+          test -n "$EXE"
+          ANVIL_EDITOR_DEBUG_PORT=9222 "$EXE" > shell.log 2>&1 &
+          PID=$!
+          for i in $(seq 1 50); do
+            curl -sf http://127.0.0.1:9222/json > /dev/null && break
+            sleep 0.2
+          done
+          # More than "it started": the engine cannot run without
+          # `SharedArrayBuffer`, so the packaged app has to be cross-origin
+          # isolated or the editor is a window that validates nothing
+          # (ADR-0037 §b). This is the check ADR-0036 §e asked for and did
+          # not get.
+          node scripts/shot.mjs packaged.png 'JSON.stringify({coi: crossOriginIsolated, sab: typeof SharedArrayBuffer})'
+          node -e "
+            const out = require('fs').readFileSync('shell.log', 'utf8');
+            if (!/sharedArrayBuffer\":\"function/.test(out)) {
+              console.error('packaged shell has no SharedArrayBuffer:'); console.error(out); process.exit(1);
+            }
+          "
+          kill $PID
+
+      - name: Packaged editor screenshot
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: packaged-editor-windows
+          path: anvil/editor/packaged.png
+          if-no-files-found: ignore

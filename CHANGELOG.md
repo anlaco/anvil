@@ -12,6 +12,24 @@ minors, with the change written down here.
 
 ### Added
 
+- **Windows support** ([ADR-0036](docs/adr/0036-the-sequence-editor-is-wrapped-by-tauri-not-the-browser.md)):
+  the engine now also builds for `x86_64-pc-windows-msvc`, statically linked
+  against the CRT so it needs no Visual C++ redistributable
+  (`packaging/package.ps1`, the Windows sibling of `packaging/package.sh`).
+  Verified on a `windows-latest` GitHub Actions runner (`ci-windows` job):
+  the engine runs a sequence and its `--bridge` relay accepts a real
+  connection. File-type registration and a stable-port loopback service
+  remain open — ADR-0035 §d/§e, [#67](https://github.com/anlaco/anvil/issues/67).
+
+- **A downloadable Sequence Editor**
+  ([ADR-0037](docs/adr/0037-the-editors-shell-is-electron-because-linux-is-the-first-platform.md)):
+  the editor now ships as a desktop app — an AppImage and a `.deb` on Linux,
+  an NSIS installer on Windows — wrapping the same SPA that still runs
+  standalone in any browser. It carries its own Chromium, so it needs no
+  browser installed and behaves identically on both platforms. Opening a
+  sequence starts the engine's `--bridge` itself, so there is no second
+  terminal to run: `cd editor && npm install && npm run app`.
+
 - **`anvil <sequence.yaml> --events`**: writes the run to stderr as NDJSON,
   one object per line, while it runs — `sequence_start`, `step_start`,
   `step_result`, `step_end`, `sequence_end`. It is what a live view needs, and
@@ -86,6 +104,27 @@ minors, with the change written down here.
 
 ### Changed
 
+- **The Sequence Editor's shell is Electron, not Tauri**
+  ([ADR-0037](docs/adr/0037-the-editors-shell-is-electron-because-linux-is-the-first-platform.md),
+  supersedes [ADR-0036](docs/adr/0036-the-sequence-editor-is-wrapped-by-tauri-not-the-browser.md)
+  §a/§b/§c/§e). ADR-0036 chose Tauri under a Windows-first reading; the
+  ordering is Linux first, and on Linux Tauri does not carry a runtime — the
+  compiled shell linked against the system's `libwebkit2gtk-4.1`, `libgtk-3`,
+  `libsoup-3.0` and `libjavascriptcoregtk-4.1`, which contradicts the
+  "nothing installed on the system" promise the engine's own binaries make.
+  Two further faults found by building it: WebKitGTK ships `SharedArrayBuffer`
+  disabled — the engine cannot run without it — and its webview exposes no
+  inspector any tool can attach to. The packaged Electron app is
+  cross-origin isolated and has `SharedArrayBuffer`, verified by running it,
+  not by reading documentation.
+
+- **The editor's production build works.** Two faults that only ever appeared
+  outside the dev server, and so had never been hit: the engine's core WASM
+  modules were fetched from `/generated/…`, a path that exists only behind
+  Vite, so a packaged editor could not start the engine at all; and `?open=`
+  fetched the sequence over HTTP instead of reading the file, so it 404'd in
+  a packaged build. Vite's dev server now also refuses to slide off port 5180
+  rather than serving the shell's window from a stale process on it.
 - **The `--json` report's keys now come out in the order they are written**
   (`name`, `status`, `phase`, `message`, the measurement, …) instead of
   alphabetically. The report says the same things; only the order moved. It is

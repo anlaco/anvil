@@ -24,6 +24,18 @@ anvil/        # este repo
 wasi-grpc/    # la pila gRPC, github.com/anlaco/wasi-grpc
 ```
 
+En Windows, el mismo flujo aplica bajo Git Bash — el `Makefile` es
+POSIX-portable y así es como lo ejerce el job `ci-windows` (ADR-0036). Para
+el Sequence Editor, además de lo de arriba hace falta Node; Electron y
+`electron-builder`, que son con lo que se abre la ventana y se construye el
+instalador (ADR-0037), los trae `npm install` dentro de `editor/`.
+
+En Linux, Chromium no arranca sin su sandbox y necesita que
+`editor/node_modules/electron/dist/chrome-sandbox` sea de root con el bit
+setuid (`sudo chown root:root …` y `sudo chmod 4755 …`). `npm run app` lo
+comprueba y dice el comando exacto si falta; para saltarlo en una sesión de
+desarrollo, `ANVIL_EDITOR_NO_SANDBOX=1 npm run app`.
+
 Compilar:
 
 ```sh
