@@ -17,6 +17,7 @@ export class EnginePool {
   #idle = [];
   #busy = new Set();
   #queue = [];
+  #waiting = [];
   #nextId = 1;
   #net = null;
   #bridged = false;
@@ -48,7 +49,14 @@ export class EnginePool {
     if (this.#max !== 1) {
       throw new Error("attaching a bridge to a pool of more than one is not implemented");
     }
-    const worker = this.#idle.pop() ?? this.#spawn();
+    // Waits for the pool's worker rather than making one of its own. The
+    // editor attaches the bridge while it is validating the sequence it just
+    // opened, so this runs with the only worker busy about as often as not —
+    // and spawning here put a second worker in a pool of one, with the bridge
+    // on the worker that was about to be pushed back as idle and the next Run
+    // taking the other. The symptom was Run failing with "no bridge is
+    // connected" one line under a status bar saying it was connected.
+    const worker = await this.#reserve();
     // `onLost` fires if the socket goes later. The pool forgets the bridge
     // first, so that by the time anyone is told, `bridged` already says no —
     // a caller that repaints on the notice must not paint a Run that cannot run.
@@ -62,11 +70,35 @@ export class EnginePool {
       this.#engineArgs = [];
       onLost?.(reason);
     };
-    const { net, engineArgs } = await connect(worker, url, lost);
-    this.#net = net;
-    this.#engineArgs = engineArgs ?? [];
+    try {
+      const { net, engineArgs } = await connect(worker, url, lost);
+      this.#net = net;
+      this.#engineArgs = engineArgs ?? [];
+      this.#bridged = true;
+    } finally {
+      // Back to the pool either way: a bridge that failed to connect must not
+      // cost the editor its engine.
+      this.#release(worker);
+    }
+  }
+
+  /**
+   * A worker to use outside a job, honouring the pool's maximum: an existing
+   * idle one, a new one if the pool is not yet full, otherwise whatever comes
+   * free next.
+   */
+  async #reserve() {
+    while (this.#idle.length === 0 && this.#busy.size >= this.#max) {
+      await new Promise((resume) => this.#waiting.push(resume));
+    }
+    return this.#idle.pop() ?? this.#spawn();
+  }
+
+  /** Returns a worker to the pool and wakes whoever was waiting for one. */
+  #release(worker) {
+    this.#busy.delete(worker);
     this.#idle.push(worker);
-    this.#bridged = true;
+    this.#waiting.shift()?.();
   }
 
   /** Whether a bridge is attached and the engine can reach executors. */
@@ -122,8 +154,7 @@ export class EnginePool {
         return;
       }
       worker.onmessage = null;
-      this.#busy.delete(worker);
-      this.#idle.push(worker);
+      this.#release(worker);
 
       if (data.ok) job.resolve(data.result);
       else job.reject(new EngineHostError(data.error));
@@ -135,7 +166,10 @@ export class EnginePool {
     // settles and the interface waits forever on a thread that is gone.
     worker.onerror = (e) => {
       worker.onmessage = null;
+      // Not released: a worker that died is not idle. Anyone waiting for one
+      // is woken anyway, since the pool now has room to make a fresh one.
       this.#busy.delete(worker);
+      this.#waiting.shift()?.();
       job.reject(new EngineHostError(e?.message ?? "the engine worker died"));
       this.#pump();
     };
@@ -165,6 +199,9 @@ export class EnginePool {
     this.#engineArgs = [];
     this.#busy.clear();
     this.#idle = [];
+    // Anything parked waiting for a worker is woken to find the pool empty and
+    // room to spawn, rather than left holding a promise nobody will settle.
+    for (const resume of this.#waiting.splice(0)) resume();
     for (const job of this.#queue.splice(0)) {
       job.reject(new EngineHostError("the engine was stopped"));
     }

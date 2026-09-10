@@ -153,3 +153,41 @@ test("terminating rejects what was queued rather than dropping it", { timeout: 5
 
   await assert.rejects(() => queued, (e) => e instanceof EngineHostError && /stopped/.test(e.message));
 });
+
+// The editor opens a sequence and starts the engine at the same time: it
+// validates (a run) and attaches the bridge, and which finishes first is a
+// matter of how long a file read takes. When the bridge arrived while the
+// validate was still in flight, `attachBridge` spawned a worker of its own
+// rather than waiting — leaving two workers in a pool of one, the bridge on
+// the wrong one, and Run failing with "no bridge is connected" underneath a
+// status bar that had just said the bridge was connected.
+test("a bridge attached mid-run lands on the worker that runs next", async () => {
+  const workers = [];
+  const pool = new EnginePool({
+    max: 1,
+    spawn: () => {
+      const w = fakeWorker();
+      workers.push(w);
+      return w;
+    },
+  });
+
+  // A run in flight: this worker has been given the job and has not answered.
+  const running = pool.run({ args: [] });
+  await Promise.resolve();
+  assert.equal(workers.length, 1, "the run should be on the pool's only worker");
+
+  const attaching = pool.attachBridge(
+    "ws://127.0.0.1:1/?token=x",
+    async () => ({ net: {}, engineArgs: ["--executor=127.0.0.1:2"] }),
+    () => {},
+  );
+
+  // The validate comes back, freeing the worker.
+  workers[0].onmessage?.({ data: { id: 1, ok: true, result: { exitCode: 0, stdout: "", stderr: "" } } });
+  await running;
+  await attaching;
+
+  assert.equal(workers.length, 1, "the bridge went to a second worker, so the next run has none");
+  assert.equal(pool.bridged, true);
+});
