@@ -898,12 +898,26 @@ const wanted = params.get("open");
 if (wanted) {
   status("busy", `opening ${wanted}…`);
   try {
-    // Inside the shell this is a filesystem path and there is no server to
-    // ask: `fetch` only worked because Vite's dev middleware happened to be
-    // serving the repo's `ejemplos/`, so a packaged build failed here with a
-    // 404 and no way for the person to tell why.
-    const handle = inShell() ? shellHandle(wanted) : null;
-    const text = handle ? await (await handle.getFile()).text() : await fetchText(wanted);
+    // Inside the shell this is usually a filesystem path and there is no
+    // server to ask: `fetch` only worked because Vite's dev middleware
+    // happened to be serving the repo's `ejemplos/`, so a packaged build
+    // failed here with a 404 and no way for the person to tell why.
+    //
+    // Both are still tried, in that order, because both are real: a packaged
+    // shell is handed an absolute path, and `npm run app` in the dev tree is
+    // handed `/ejemplos/…`, which means nothing to the filesystem and
+    // everything to the dev server.
+    let handle = inShell() ? shellHandle(wanted) : null;
+    let text;
+    try {
+      text = handle ? await (await handle.getFile()).text() : await fetchText(wanted);
+    } catch (fromDisk) {
+      if (!handle) throw fromDisk;
+      // Dropped on purpose: a sequence the dev server handed over has no
+      // file to write back to, and saying so beats saving somewhere else.
+      handle = null;
+      text = await fetchText(wanted);
+    }
     loadText(text, wanted.split(/[\\/]/).pop(), handle);
     // Same as opening through the dialog: on the same machine the editor
     // starts the engine itself rather than asking for a second terminal.
