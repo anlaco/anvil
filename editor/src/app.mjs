@@ -15,6 +15,24 @@ import { SequenceDocument, PHASES, SCOPES, STEP_TYPES } from "./document.mjs";
 import { browserPool, connectBridge, EngineHostError } from "./engine-pool.mjs";
 import { applyEvent, newRunState, rowKey, runButton } from "./run-state.mjs";
 
+// The shell forwards this window's console to its own stdout by itself
+// (ADR-0037 §e, `editor/electron/main.mjs`), so the page carries no
+// shell-specific logging code. What it does say, once, is what it woke up
+// with: the engine cannot run without `SharedArrayBuffer`, and a shell that
+// silently fails to provide it is the single most expensive way for this to
+// break (ADR-0030, ADR-0031).
+if (window.anvil) {
+  console.log(
+    "shell capabilities:",
+    JSON.stringify({
+      url: location.href,
+      crossOriginIsolated: window.crossOriginIsolated,
+      sharedArrayBuffer: typeof SharedArrayBuffer,
+      secureContext: window.isSecureContext,
+    }),
+  );
+}
+
 // The engine runs on a worker thread, never on this one: it is a synchronous
 // WASM component, and on the main thread it would freeze the interface for as
 // long as a sequence takes. One worker for now; multi-UUT is more of them.
@@ -510,6 +528,10 @@ function status(stateName, text) {
   ui.statusLight.dataset.state = stateName;
   ui.statusText.dataset.state = stateName;
   ui.statusText.textContent = text;
+  // The status bar is where this editor says what went wrong, so it is also
+  // the trail worth having off-screen: inside the shell this reaches the
+  // process's stdout (ADR-0037 §e), and in a browser it is one console line.
+  console.log(`[status:${stateName}] ${text}`);
 }
 
 function scheduleValidate() {
@@ -671,7 +693,65 @@ const PICKER = {
   ],
 };
 
+// `window.anvil` is injected by the shell's preload
+// (`editor/electron/preload.cjs`) and exists whether or not the File System
+// Access API also happens to. Checked first so a packaged build never falls
+// through to the download fallback, which makes no sense once there is a
+// real filesystem and a native dialog underneath the page (ADR-0037 §d).
+const inShell = () => Boolean(window.anvil);
+
+// A handle shaped like the two methods the rest of this file uses from a
+// `FileSystemFileHandle` (`getFile()`, `createWritable()`), so `loadText`
+// and `saveFile` do not need to know which world they are in.
+function shellHandle(path) {
+  return {
+    name: path.split(/[\\/]/).pop(),
+    async getFile() {
+      const text = await window.anvil.readTextFile(path);
+      return { name: this.name, text: async () => text };
+    },
+    async createWritable() {
+      return {
+        async write(text) {
+          await window.anvil.writeTextFile(path, text);
+        },
+        async close() {},
+      };
+    },
+  };
+}
+
+// Same machine, no second terminal: asks the Rust side to start
+// `anvil <sequence_path> --bridge` itself and connects to the URL it
+// prints, through the same `openBridge` a `?bridge=` link already uses.
+// Stopgap in `startBridge` (electron/main.mjs) — it finds `anvil` by a
+// dev-tree-only path, not something that survives packaging (issue #67).
+async function connectLocalBridge(sequencePath) {
+  try {
+    status("busy", "starting the engine…");
+    const url = await window.anvil.startBridge(sequencePath);
+    await openBridge(url);
+  } catch (e) {
+    status("error", e?.message ?? "could not start the local engine");
+  }
+}
+
+async function fetchText(url) {
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
+  return res.text();
+}
+
 async function openFile() {
+  if (inShell()) {
+    const path = await window.anvil.openDialog();
+    if (!path) return;
+    const handle = shellHandle(path);
+    const file = await handle.getFile();
+    loadText(await file.text(), file.name, handle);
+    await connectLocalBridge(path);
+    return;
+  }
   if (window.showOpenFilePicker) {
     const [handle] = await window.showOpenFilePicker(PICKER);
     const file = await handle.getFile();
@@ -713,14 +793,19 @@ async function saveFile({ forceDialog = false } = {}) {
 
   let handle = state.handle;
   if (!handle || forceDialog) {
-    if (!window.showSaveFilePicker) {
+    if (inShell()) {
+      const path = await window.anvil.saveDialog(state.filename ?? "sequence.yaml");
+      if (!path) return;
+      handle = shellHandle(path);
+    } else if (window.showSaveFilePicker) {
+      handle = await window.showSaveFilePicker({
+        ...PICKER,
+        suggestedName: state.filename ?? "sequence.yaml",
+      });
+    } else {
       downloadFallback();
       return;
     }
-    handle = await window.showSaveFilePicker({
-      ...PICKER,
-      suggestedName: state.filename ?? "sequence.yaml",
-    });
     state.handle = handle;
     state.filename = handle.name;
   }
@@ -813,9 +898,16 @@ const wanted = params.get("open");
 if (wanted) {
   status("busy", `opening ${wanted}…`);
   try {
-    const res = await fetch(wanted);
-    if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
-    loadText(await res.text(), wanted.split("/").pop(), null);
+    // Inside the shell this is a filesystem path and there is no server to
+    // ask: `fetch` only worked because Vite's dev middleware happened to be
+    // serving the repo's `ejemplos/`, so a packaged build failed here with a
+    // 404 and no way for the person to tell why.
+    const handle = inShell() ? shellHandle(wanted) : null;
+    const text = handle ? await (await handle.getFile()).text() : await fetchText(wanted);
+    loadText(text, wanted.split(/[\\/]/).pop(), handle);
+    // Same as opening through the dialog: on the same machine the editor
+    // starts the engine itself rather than asking for a second terminal.
+    if (inShell() && !bridgeUrl) await connectLocalBridge(wanted);
   } catch (e) {
     status("error", `could not open ${wanted}: ${e.message}`);
   }

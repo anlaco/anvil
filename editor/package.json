@@ -3,13 +3,16 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
-  "description": "Graphical sequence editor for Anvil. Runs the engine guest in the browser.",
+  "description": "Graphical sequence editor for Anvil. Runs the engine guest in a plain browser, or wrapped by Electron for download (ADR-0037).",
   "license": "AGPL-3.0-or-later",
   "scripts": {
     "transpile": "node scripts/transpile.mjs",
     "test": "node --test 'test/*.test.mjs'",
     "dev": "vite",
-    "build": "vite build"
+    "build": "vite build",
+    "app": "node scripts/dev-app.mjs",
+    "app:build": "npm run build && electron-builder",
+    "shot": "node scripts/shot.mjs"
   },
   "dependencies": {
     "@bytecodealliance/preview2-shim": "^0.23.0",
@@ -19,6 +22,35 @@
   },
   "devDependencies": {
     "@bytecodealliance/jco-transpile": "^0.12.1",
+    "electron": "^40.10.6",
+    "electron-builder": "^26.15.3",
     "vite": "^8.2.2"
+  },
+  "main": "electron/main.mjs",
+  "build": {
+    "appId": "org.anlaco.anvil.editor",
+    "productName": "Anvil Sequence Editor",
+    "copyright": "AGPL-3.0-or-later",
+    "directories": {
+      "output": "../dist-app",
+      "buildResources": "electron/resources"
+    },
+    "files": [
+      "electron/**/*",
+      "dist/**/*",
+      "package.json"
+    ],
+    "linux": {
+      "target": [
+        "AppImage",
+        "deb"
+      ],
+      "category": "Development"
+    },
+    "win": {
+      "target": [
+        "nsis"
+      ]
+    }
   }
 }

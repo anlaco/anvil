@@ -25,6 +25,18 @@
   engine itself (ADR-0035 §b, §d, §g), never wrapped by Tauri.
 
 ## Context
+
+> **Superseded in part by [ADR-0037](0037-the-editors-shell-is-electron-because-linux-is-the-first-platform.md) (2026-09-10):** §a, §b, §c and §e
+> below are replaced — the shell is **Electron**, on every platform. The
+> reason is not a flaw in the reasoning here but a fact this ADR did not
+> have: the platform ordering is **Linux first, Windows second**, and §b's
+> reliability argument (bundle the runtime so the user needs nothing
+> installed) is Windows-only. On Linux Tauri does the opposite — the compiled
+> shell links against the system's `libwebkit2gtk-4.1`, `libgtk-3`,
+> `libsoup-3.0` and `libjavascriptcoregtk-4.1`. What survives: §d (the
+> three-branch file access, with its native branch re-pointed) and §e's
+> clause that the operator interface is not wrapped by anything.
+
 ADR-0035 §i decided the Sequence Editor would be "wrapped by the browser, not
 a framework" — the engine serves the page, the browser opens it in
 application mode. That reasoning assumes a browser worth installing as an app
@@ -70,6 +82,18 @@ here** — to be confirmed by actually running the built app and checking
 `SharedArrayBuffer` exists, not assumed from documentation). The dev flow
 (`tauri dev`, which wraps Vite) keeps getting them from the existing
 `vite.config.mjs` headers unchanged.
+
+> **Contradicted by [ADR-0037](0037-the-editors-shell-is-electron-because-linux-is-the-first-platform.md) (2026-09-10):** the premise §e correctly
+> flags as unverified turned out to be **false on Linux**, and it was found
+> by building this shell, not by reading more documentation. WebKitGTK ships
+> `SharedArrayBuffer` disabled outright: the page was already
+> `crossOriginIsolated: true` and `SharedArrayBuffer` was still `undefined`
+> until `JSC_useSharedArrayBuffer=1` was set on the process before the
+> webview started (`editor/src-tauri/src/main.rs:126-135`). Cross-origin
+> isolation alone is sufficient on Chromium, which is what ADR-0037 §b
+> relies on; on WebKitGTK it is not, and the workaround is an unstable
+> JavaScriptCore option applied to a library the user supplies.
+
 **d. Where the SPA depends on a browser-only capability not guaranteed
 inside a webview — the File System Access API used for opening and saving a
 sequence (`editor/src/app.mjs:675-681,716-720`) — a Tauri-native path is
@@ -92,6 +116,13 @@ on a bench — is packaged.
   the reliability gap that motivated revisiting this decision at a fraction
   of Electron's per-platform size, without taking on an independent browser
   security-patch cadence.
+
+  > **Reversed by [ADR-0037](0037-the-editors-shell-is-electron-because-linux-is-the-first-platform.md) (2026-09-10):** both halves of this still
+  > hold — Electron is heavier and does take on the Chromium-patch cadence,
+  > and ADR-0037 accepts that cost explicitly in its Consequences §b. What
+  > changed is the other side of the scale: under Linux-first, Tauri does
+  > **not** answer the reliability gap at all, because on Linux it ships no
+  > runtime to answer it with.
 - **Keeping ADR-0035 §i's browser-application-mode.** Rejected specifically
   because it assumes a capable, already-installed, up-to-date browser on a
   machine this project does not control — true of a developer's own
@@ -132,3 +163,12 @@ and confirms `SharedArrayBuffer` is actually available inside the packaged
 app, this ADR's technical premise rests on documentation, not on having run
 the code — which is exactly the distinction this repo's own rules ask not to
 blur.
+
+> **Closed by [ADR-0037](0037-the-editors-shell-is-electron-because-linux-is-the-first-platform.md) (2026-09-10):** the gap §e names was closed, in
+> the opposite direction from the one expected. It was not a `windows-latest`
+> CI job that closed it but building the shell on Linux, where the premise
+> fails. ADR-0037 §b inherits the same obligation — it must be confirmed by
+> running the packaged app and reading `crossOriginIsolated` and
+> `typeof SharedArrayBuffer` inside it, not by trusting Chromium's
+> documentation — and it is not to be treated as settled until that is
+> recorded there.
