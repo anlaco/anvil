@@ -174,6 +174,16 @@ function wireIpc() {
   });
 
   ipcMain.handle("anvil:read-text", (_event, file) => readFile(file, "utf8"));
+
+  // Separate from the one above because "there is no such file" is an answer
+  // here, not a failure: `?open=` is handed either a real path or the dev
+  // server's `/ejemplos/…`, and it has no way to tell which until it looks.
+  // Rejecting for the expected case made Electron print a handler error on
+  // every single start, in the log this shell exists to keep readable.
+  // Anything else — a permission, a bad encoding — still throws.
+  ipcMain.handle("anvil:read-text-if-any", async (_event, file) =>
+    existsSync(file) ? readFile(file, "utf8") : null,
+  );
   ipcMain.handle("anvil:write-text", (_event, file, text) => writeFile(file, text, "utf8"));
   ipcMain.handle("anvil:start-bridge", (_event, sequencePath) => startBridge(sequencePath));
 }

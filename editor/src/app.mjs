@@ -907,17 +907,12 @@ if (wanted) {
     // shell is handed an absolute path, and `npm run app` in the dev tree is
     // handed `/ejemplos/…`, which means nothing to the filesystem and
     // everything to the dev server.
-    let handle = inShell() ? shellHandle(wanted) : null;
-    let text;
-    try {
-      text = handle ? await (await handle.getFile()).text() : await fetchText(wanted);
-    } catch (fromDisk) {
-      if (!handle) throw fromDisk;
-      // Dropped on purpose: a sequence the dev server handed over has no
-      // file to write back to, and saying so beats saving somewhere else.
-      handle = null;
-      text = await fetchText(wanted);
-    }
+    let text = inShell() ? await window.anvil.readTextFileIfAny(wanted) : null;
+    // A handle only when it came off the filesystem: a sequence the dev
+    // server handed over has no file to write back to, and saying so beats
+    // saving somewhere else.
+    const handle = text === null ? null : shellHandle(wanted);
+    if (text === null) text = await fetchText(wanted);
     loadText(text, wanted.split(/[\\/]/).pop(), handle);
     // Same as opening through the dialog: on the same machine the editor
     // starts the engine itself rather than asking for a second terminal.

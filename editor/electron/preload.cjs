@@ -17,6 +17,8 @@ contextBridge.exposeInMainWorld("anvil", {
   /** Native save dialog. Resolves to a path, or null if it was dismissed. */
   saveDialog: (defaultName) => ipcRenderer.invoke("anvil:save-dialog", defaultName),
   readTextFile: (path) => ipcRenderer.invoke("anvil:read-text", path),
+  /** The text, or null if there is no such file. Other failures still throw. */
+  readTextFileIfAny: (path) => ipcRenderer.invoke("anvil:read-text-if-any", path),
   writeTextFile: (path, text) => ipcRenderer.invoke("anvil:write-text", path, text),
   /** Starts `anvil <path> --bridge`; resolves to the `ws://` URL it prints. */
   startBridge: (path) => ipcRenderer.invoke("anvil:start-bridge", path),
