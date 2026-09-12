@@ -97,26 +97,48 @@ internal static class Naming
     {
         foreach (var reference in symbol.DeclaringSyntaxReferences)
         {
-            var trivia = reference.GetSyntax()
-                .GetLeadingTrivia()
+            var leading = reference.GetSyntax().GetLeadingTrivia();
+
+            // With documentation parsing on, the comment is structured.
+            var structured = leading
                 .Select(t => t.GetStructure())
                 .OfType<Microsoft.CodeAnalysis.CSharp.Syntax.DocumentationCommentTriviaSyntax>()
                 .FirstOrDefault();
-            if (trivia is null)
+            if (structured is not null)
             {
-                continue;
+                return Wrap(structured.ToFullString());
             }
 
-            var text = string.Join(
-                "\n",
-                trivia.ToFullString()
-                    .Split('\n')
-                    .Select(l => l.TrimStart().TrimStart('/').Trim()));
-            return "<member>" + text + "</member>";
+            // With it off — which is the default in a user's own project, since
+            // nobody sets GenerateDocumentationFile to get a catalog — the same
+            // `///` lines arrive as plain single-line comments and
+            // GetStructure() gives nothing. Read them as text instead: a step's
+            // description must not depend on an MSBuild property the author
+            // never heard of.
+            var raw = leading
+                .Where(t => t.IsKind(Microsoft.CodeAnalysis.CSharp.SyntaxKind.SingleLineDocumentationCommentTrivia)
+                    || t.IsKind(Microsoft.CodeAnalysis.CSharp.SyntaxKind.SingleLineCommentTrivia))
+                .Select(t => t.ToFullString())
+                .Where(l => l.TrimStart().StartsWith("///", StringComparison.Ordinal))
+                .ToList();
+
+            if (raw.Count > 0)
+            {
+                return Wrap(string.Join("\n", raw));
+            }
         }
 
         return null;
     }
+
+    private static string Wrap(string commentText) =>
+        "<member>"
+        + string.Join(
+            "\n",
+            commentText
+                .Split('\n')
+                .Select(l => l.TrimStart().TrimStart('/').Trim()))
+        + "</member>";
 
     private static string FirstLine(string? text)
     {

@@ -17,11 +17,22 @@ internal static class Harness
         internal IEnumerable<string> Ids => Diagnostics.Select(d => d.Id);
     }
 
-    internal static Result Run(string source)
+    internal static Result Run(string source) => Run(source, DocumentationMode.Parse);
+
+    /// <summary>
+    /// Runs the generator with the compilation parsing documentation the way a
+    /// given project would.
+    /// </summary>
+    /// <remarks>
+    /// A user's own project does not set GenerateDocumentationFile, so its
+    /// compilation parses `///` as plain comments and the structured trivia is
+    /// not there. The generator has to find the description anyway.
+    /// </remarks>
+    internal static Result Run(string source, DocumentationMode mode)
     {
         var compilation = CSharpCompilation.Create(
             "StepsUnderTest",
-            [CSharpSyntaxTree.ParseText(source)],
+            [CSharpSyntaxTree.ParseText(source, new CSharpParseOptions(documentationMode: mode))],
             References,
             new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary));
 

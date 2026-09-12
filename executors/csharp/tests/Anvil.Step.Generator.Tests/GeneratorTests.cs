@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 ANLACO
 
+using Microsoft.CodeAnalysis;
 using Xunit;
 
 namespace Anvil.Step.Generator.Tests;
@@ -48,6 +49,32 @@ public class GeneratorTests
 
         Assert.Contains("Measures the rail voltage.", result.Source, StringComparison.Ordinal);
         Assert.Contains("What it should read, in volts.", result.Source, StringComparison.Ordinal);
+    }
+
+    // Found by writing a hello-world outside this repo. Inside it, every
+    // project inherits GenerateDocumentationFile=true from Directory.Build.props
+    // and the comment arrives as structured trivia. A user's own project sets
+    // no such thing, the `///` lines arrive as plain comments, and the catalog
+    // came out with no descriptions at all — silently, since an undocumented
+    // step is still a valid step.
+    [Fact]
+    public void The_doc_comment_is_found_even_when_the_project_does_not_generate_docs()
+    {
+        var result = Harness.Run(
+            """
+            using Anvil.Step;
+            public static class Saludo
+            {
+                /// <summary>Saluda a quien se le diga.</summary>
+                /// <param name="aQuien">A quién saludar.</param>
+                [Step]
+                public static Outcome Hola(string aQuien = "mundo") => Outcome.Passed();
+            }
+            """,
+            DocumentationMode.None);
+
+        Assert.Contains("Saluda a quien se le diga.", result.Source, StringComparison.Ordinal);
+        Assert.Contains("A quién saludar.", result.Source, StringComparison.Ordinal);
     }
 
     // The sequence writes the parameter name in `inputs:`, so it follows the
