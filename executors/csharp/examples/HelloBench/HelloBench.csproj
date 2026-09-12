@@ -1,0 +1,28 @@
+<!-- SPDX-License-Identifier: Apache-2.0 -->
+<!-- Copyright 2026 ANLACO -->
+<!--
+  What a user's own project looks like. The process is theirs: they reference
+  the package, mark their methods, and this executable listens (ADR-0038 §2).
+
+  Outside this repo the two references below are a single
+  <PackageReference Include="Anvil.Step" />, which carries the generator with
+  it. Here they are project references so the repo builds against its own
+  source.
+-->
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <RootNamespace>HelloBench</RootNamespace>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../../src/Anvil.Step/Anvil.Step.csproj" />
+    <ProjectReference Include="../../src/Anvil.Step.Generator/Anvil.Step.Generator.csproj"
+                      OutputItemType="Analyzer"
+                      ReferenceOutputAssembly="false" />
+  </ItemGroup>
+
+</Project>

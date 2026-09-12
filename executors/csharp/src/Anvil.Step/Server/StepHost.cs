@@ -76,12 +76,24 @@ public static class StepHost
         }
 
         var builder = WebApplication.CreateBuilder();
-        builder.Logging.ClearProviders();
+
+        // Quiet by default: the executor's stderr belongs to whoever is running
+        // the sequence. `ANVIL_STEP_LOG=1` gives the host's own logging back,
+        // because an executor that cannot say why it failed is one you debug by
+        // guessing.
+        if (Environment.GetEnvironmentVariable("ANVIL_STEP_LOG") is null)
+        {
+            builder.Logging.ClearProviders();
+        }
         builder.Services.AddGrpc();
-        builder.Services.AddSingleton(registry);
-        builder.Services.AddSingleton(objects);
-        builder.Services.AddSingleton(options.Options);
-        builder.Services.AddSingleton<StepExecutorService>();
+
+        // Built here rather than left to the container. Resolving it by type
+        // needs a public constructor, and this one is internal — which failed
+        // as a 200 with an empty stream, read by the engine as "it does not
+        // describe its catalog". A service this process owns outright has no
+        // business being discovered by reflection.
+        builder.Services.AddSingleton(
+            new StepExecutorService(registry, objects, options.Options));
         builder.WebHost.ConfigureKestrel(kestrel =>
             kestrel.Listen(
                 System.Net.IPAddress.Parse(options.Bind),

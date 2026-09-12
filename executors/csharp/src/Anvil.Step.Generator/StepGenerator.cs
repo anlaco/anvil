@@ -1,0 +1,170 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 ANLACO
+
+using System.Collections.Immutable;
+using System.Text;
+using Microsoft.CodeAnalysis;
+using Microsoft.CodeAnalysis.Text;
+
+namespace Anvil.Step.Generator;
+
+/// <summary>
+/// Turns a marked method into a catalog entry, at compile time.
+/// </summary>
+/// <remarks>
+/// <para>
+/// The signature is the catalog (ADR-0024): names, types and which inputs are
+/// required come from the method's own parameters, and the description from the
+/// <c>///</c> comment its author already wrote. Nothing is written twice, so
+/// nothing can drift.
+/// </para>
+/// <para>
+/// Built here and not by reflection at start-up, so a parameter the contract
+/// cannot carry is a red squiggle in the author's editor rather than a step
+/// that quietly fails to appear in the catalog (ADR-0038 §5).
+/// </para>
+/// </remarks>
+[Generator]
+public sealed class StepGenerator : IIncrementalGenerator
+{
+    private const string StepAttribute = "Anvil.Step.StepAttribute";
+
+    /// <inheritdoc/>
+    public void Initialize(IncrementalGeneratorInitializationContext context)
+    {
+        var steps = context.SyntaxProvider
+            .ForAttributeWithMetadataName(
+                StepAttribute,
+                predicate: static (node, _) => node is Microsoft.CodeAnalysis.CSharp.Syntax.MethodDeclarationSyntax,
+                transform: static (ctx, _) => (IMethodSymbol)ctx.TargetSymbol)
+            .Collect();
+
+        context.RegisterSourceOutput(steps, Emit);
+    }
+
+    private static void Emit(SourceProductionContext context, ImmutableArray<IMethodSymbol> methods)
+    {
+        var models = new List<StepModel>();
+        var seen = new HashSet<string>(StringComparer.Ordinal);
+
+        foreach (var group in methods.GroupBy<IMethodSymbol, INamedTypeSymbol>(
+                     m => m.ContainingType, SymbolEqualityComparer.Default))
+        {
+            var owner = group.Key;
+            var module = ModuleOf(owner, context);
+            if (module is null)
+            {
+                continue;
+            }
+
+            var opener = Opener(owner, context);
+
+            // The constructor publishes `<module>/open` by itself, so nobody has
+            // to write plumbing to get the bench open (ADR-0038 §3).
+            if (opener is not null)
+            {
+                Add(models, seen, context, StepModel.FromConstructor(module, opener, owner));
+            }
+
+            foreach (var method in group)
+            {
+                var model = StepModel.FromMethod(module, method, owner, opener is not null, context);
+                if (model is not null)
+                {
+                    Add(models, seen, context, model);
+                }
+            }
+        }
+
+        if (methods.Length == 0)
+        {
+            context.ReportDiagnostic(Diagnostic.Create(Diagnostics.NoSteps, Location.None));
+        }
+
+        context.AddSource("AnvilSteps.g.cs", SourceText.From(Render(models), Encoding.UTF8));
+    }
+
+    private static void Add(
+        List<StepModel> models,
+        HashSet<string> seen,
+        SourceProductionContext context,
+        StepModel? model)
+    {
+        if (model is null)
+        {
+            return;
+        }
+
+        if (!seen.Add(model.Qualified))
+        {
+            context.ReportDiagnostic(Diagnostic.Create(
+                Diagnostics.DuplicateName, model.Location, model.Qualified));
+            return;
+        }
+
+        models.Add(model);
+    }
+
+    private static string? ModuleOf(INamedTypeSymbol type, SourceProductionContext context)
+    {
+        var declared = type.GetAttributes()
+            .FirstOrDefault(a => a.AttributeClass?.ToDisplayString() == "Anvil.Step.StepModuleAttribute")
+            ?.ConstructorArguments.FirstOrDefault().Value as string;
+
+        // Derived by default, declared only as an override: renaming a module
+        // must not mean editing its steps (ADR-0026, ADR-0038 §4).
+        var module = declared ?? Naming.SnakeCase(type.Name);
+
+        if (Naming.IsUnusable(module))
+        {
+            context.ReportDiagnostic(Diagnostic.Create(
+                Diagnostics.BadName, type.Locations.FirstOrDefault(), module));
+            return null;
+        }
+
+        return module;
+    }
+
+    private static IMethodSymbol? Opener(INamedTypeSymbol type, SourceProductionContext context)
+    {
+        var found = type.InstanceConstructors
+            .Where(c => c.GetAttributes().Any(
+                a => a.AttributeClass?.ToDisplayString() == "Anvil.Step.StepConstructorAttribute"))
+            .ToList();
+
+        if (found.Count > 1)
+        {
+            context.ReportDiagnostic(Diagnostic.Create(
+                Diagnostics.TooManyConstructors, type.Locations.FirstOrDefault(), type.Name));
+            return found[0];
+        }
+
+        return found.Count == 1 ? found[0] : null;
+    }
+
+    private static string Render(List<StepModel> models)
+    {
+        var sb = new StringBuilder();
+        sb.AppendLine("// <auto-generated/>");
+        sb.AppendLine("// SPDX-License-Identifier: Apache-2.0");
+        sb.AppendLine("#nullable enable");
+        sb.AppendLine();
+        sb.AppendLine("namespace Anvil.Step.Generated;");
+        sb.AppendLine();
+        sb.AppendLine("/// <summary>The steps this assembly serves, read off their signatures.</summary>");
+        sb.AppendLine("public static class AnvilSteps");
+        sb.AppendLine("{");
+        sb.AppendLine("    /// <summary>Fills a registry with them.</summary>");
+        sb.AppendLine("    /// <param name=\"registry\">The registry to fill.</param>");
+        sb.AppendLine("    public static void Register(global::Anvil.Step.Registry registry)");
+        sb.AppendLine("    {");
+        foreach (var model in models)
+        {
+            model.Render(sb);
+        }
+
+        sb.AppendLine("    }");
+        sb.AppendLine("}");
+        return sb.ToString();
+    }
+}
