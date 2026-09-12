@@ -159,7 +159,7 @@ async function startBridge(sequencePath) {
 function wireIpc() {
   ipcMain.handle("anvil:open-dialog", async (event) => {
     const { canceled, filePaths } = await dialog.showOpenDialog(BrowserWindow.fromWebContents(event.sender), {
-      filters: [{ name: "Anvil sequence", extensions: ["yaml", "yml"] }],
+      filters: [{ name: "Anvil sequence", extensions: ["yseq", "yaml", "yml"] }],
       properties: ["openFile"],
     });
     return canceled ? null : filePaths[0];
@@ -167,8 +167,8 @@ function wireIpc() {
 
   ipcMain.handle("anvil:save-dialog", async (event, defaultName) => {
     const { canceled, filePath } = await dialog.showSaveDialog(BrowserWindow.fromWebContents(event.sender), {
-      defaultPath: defaultName ?? "sequence.yaml",
-      filters: [{ name: "Anvil sequence", extensions: ["yaml", "yml"] }],
+      defaultPath: defaultName ?? "sequence.yseq",
+      filters: [{ name: "Anvil sequence", extensions: ["yseq", "yaml", "yml"] }],
     });
     return canceled ? null : filePath;
   });

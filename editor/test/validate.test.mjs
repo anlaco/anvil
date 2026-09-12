@@ -83,3 +83,21 @@ test("the network is refused rather than faked", async () => {
     "reaching the network with no bridge must throw, not degrade quietly",
   );
 });
+
+// The editor offers a new document as `sequence.yseq` and hands the engine that
+// name (ADR-0039). The engine guest is the same loader as the binary, so a
+// `.yseq` must load like a `.yaml` here too — and a sequence_call naming a
+// `.yseq` sibling with no slash must be read as a file, not as an inline name.
+test("a .yseq sequence validates, and its .yseq subsequence is found as a file", async () => {
+  const parent =
+    "name: parent\nmain:\n  - name: c\n    type: sequence_call\n    sequence: child.yseq\n";
+  const child = "name: child\nmain:\n  - name: m\n    type: grpc\n";
+
+  const { exitCode, stderr } = await runEngine({
+    args: ["sequence.yseq", "--validate"],
+    files: { "sequence.yseq": parent, "child.yseq": child },
+  });
+
+  assert.equal(exitCode, 0, `expected a clean exit, got ${exitCode}:\n${stderr}`);
+  assert.match(stderr, /1 subsecuencia\(s\) externa\(s\)/);
+});
