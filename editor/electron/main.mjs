@@ -242,6 +242,14 @@ function createWindow() {
 // Chromium's remote debugging port, off unless asked for. This is what makes
 // the shell inspectable from outside itself on every platform (ADR-0037 §e)
 // — the thing the Linux WebKitGTK webview could not offer at all.
+//
+// Known wart: Chromium opens this listener without `FD_CLOEXEC`, so the
+// engine's bridge — spawned by `startBridge` below — inherits the descriptor.
+// A bridge that outlives its window keeps the port bound, and the next editor
+// silently starts with no debug port at all. If a session claims it cannot
+// reach the port, look for an orphaned `anvil --bridge` before believing
+// anything else. Development-only, so it is documented rather than worked
+// around.
 if (process.env.ANVIL_EDITOR_DEBUG_PORT) {
   app.commandLine.appendSwitch("remote-debugging-port", process.env.ANVIL_EDITOR_DEBUG_PORT);
 }
