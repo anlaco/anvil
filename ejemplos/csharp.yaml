@@ -1,0 +1,47 @@
+# The C# executor, doing what ejemplos/referencia.yaml does with the Python one:
+# open a bench object, work through the reference, and cut the output in cleanup.
+#
+# Bring the executor up first — the process is the user's, so Anvil does not
+# start it (ADR-0038 §2):
+#
+#   dotnet run --project executors/csharp/examples/HelloBench -- --port 9201
+name: csharp
+
+executors:
+  - { name: csharp, type: grpc, host: 127.0.0.1, port: 9201 }
+
+locals:
+  # A reference is the only variable with no initial value: it cannot be written
+  # by hand, only declared as coming from an executor (ADR-0022 §3).
+  psu: { type: reference, executor: csharp }
+
+setup:
+  - name: psu/open
+    executor: csharp
+    inputs: { resource: "TCPIP::10.0.0.5" }
+    assign:
+      psu: result.outputs.psu
+
+main:
+  - name: rail/measure_voltage
+    executor: csharp
+    inputs: { nominal: 5.0 }
+    limit: { type: range, min: 4.5, max: 5.5 }
+
+  - name: rail/check_led
+    executor: csharp
+
+  - name: psu/set_voltage
+    executor: csharp
+    inputs: { psu: '${locals.psu}', volts: 12.0 }
+
+  # The limit lives here and the engine applies it, not the step (ADR-0008).
+  - name: psu/measure_current
+    executor: csharp
+    inputs: { psu: '${locals.psu}' }
+    limit: { type: range, min: 0.0, max: 0.80 }
+
+cleanup:
+  - name: psu/output_off
+    executor: csharp
+    inputs: { psu: '${locals.psu}' }

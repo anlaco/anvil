@@ -1,0 +1,53 @@
+<!-- SPDX-License-Identifier: Apache-2.0 -->
+<!-- Copyright 2026 ANLACO -->
+<!--
+  The package a step author references. It goes inside their code, so it is
+  Apache-2.0 and not the repo's AGPL (ADR-0004, ADR-0038).
+
+  Multi-target: `net8.0` so a user is not dragged onto the newest runtime,
+  `net10.0` because that is what this machine runs and therefore what gets
+  exercised.
+-->
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFrameworks>net8.0;net10.0</TargetFrameworks>
+    <RootNamespace>Anvil.Step</RootNamespace>
+    <AssemblyName>Anvil.Step</AssemblyName>
+    <PackageId>Anvil.Step</PackageId>
+    <Description>Write a step for Anvil in C#: mark a method, run your own process.</Description>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Anvil.Step.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+    <PackageReference Include="Google.Protobuf" Version="3.28.3" />
+    <PackageReference Include="Grpc.AspNetCore.Server" Version="2.66.0" />
+    <PackageReference Include="Grpc.Tools" Version="2.66.0" PrivateAssets="all" />
+  </ItemGroup>
+
+  <!--
+    The contract, compiled from its one source of truth. Not copied here: a
+    second copy is a copy that can drift, and paso.proto is hand-mirrored
+    against crates/modelo/src/proto.rs already (ADR-0006).
+
+    `Access="Internal"` is load-bearing. paso.proto has no `package` and no
+    `csharp_namespace`, so protoc would put `Value`, `Reference`, `StepRequest`
+    and `Catalog` in the *global* namespace of a package that goes inside the
+    user's code, where a `Value` of their own would collide with ours. Emitting
+    them internal locks them inside this assembly instead — and leaves the
+    user's project with no compile-time coupling to protobuf at all. The
+    alternative was adding an option to paso.proto, which is public surface we
+    do not need to touch for a C#-only problem (ADR-0038, Alternatives).
+  -->
+  <ItemGroup>
+    <Protobuf Include="../../../../crates/modelo/paso.proto"
+              GrpcServices="Server"
+              Access="Internal"
+              Link="Protos/paso.proto" />
+  </ItemGroup>
+
+</Project>

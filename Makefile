@@ -35,7 +35,7 @@ ANVIL_DEBUG   := packaging/anvil-host/target/debug/anvil
 ANVIL_RELEASE := packaging/anvil-host/target/release/anvil
 
 .PHONY: all build release test test-core test-bridge test-host test-executors \
-        test-executors-rust example dept check fmt run clean help
+        test-executors-rust test-executors-csharp example dept check fmt run clean help
 
 all: build
 
@@ -77,7 +77,8 @@ release: example
 	@$(MAKE) --no-print-directory dept BRIDGE_BIN=executors/wasm/target/release/anvil-exec-wasm
 	@echo "ready → $(ANVIL_RELEASE)"
 
-test: test-core test-bridge test-host test-executors test-executors-rust test-editor
+test: test-core test-bridge test-host test-executors test-executors-rust \
+      test-executors-csharp test-editor
 
 ## Tests of the core workspace (no network and no compiled guests needed).
 test-core:
@@ -108,6 +109,16 @@ test-executors:
 		cd executors/python && python3 -m unittest discover -p 'test_*.py'; \
 	else \
 		echo "no python3: Python executor tests skipped"; \
+	fi
+
+## Tests of the C# step-executor SDK (`Anvil.Step`) and its source generator.
+## Without dotnet, a warning is printed and we carry on, like the Python and
+## editor suites: the core does not depend on it.
+test-executors-csharp:
+	@if command -v dotnet >/dev/null 2>&1; then \
+		DOTNET_NOLOGO=1 dotnet test executors/csharp/Anvil.Step.sln -v quiet; \
+	else \
+		echo "no dotnet: C# executor tests skipped"; \
 	fi
 
 ## Tests of the editor: the engine guest run in a JavaScript host. Needs the
@@ -147,6 +158,11 @@ check: build
 	cargo clippy --manifest-path $(RUSTSDK) --all-targets -- -D warnings
 	cargo clippy --target $(TARGET) --manifest-path $(EXAMPLE) -- -D warnings
 	cargo clippy --target $(TARGET) --manifest-path $(DEPT) -- -D warnings
+	@if command -v dotnet >/dev/null 2>&1; then \
+		DOTNET_NOLOGO=1 dotnet format executors/csharp/Anvil.Step.sln --verify-no-changes; \
+	else \
+		echo "no dotnet: C# format check skipped"; \
+	fi
 
 ## Applies the format (what `check` verifies).
 fmt:

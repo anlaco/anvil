@@ -81,6 +81,26 @@ jobs:
         working-directory: anvil
         run: make test-executors-rust
 
+      # The C# step SDK. 10.0.x and not 8.0.x: the package multi-targets both,
+      # but the machines this is developed on run 10, and CI testing a runtime
+      # nobody uses locally is CI testing something else.
+      - name: .NET toolchain
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+
+      # Called directly and not through `make test-executors-csharp`: the
+      # Makefile skips the suite with a warning when dotnet is missing, which
+      # is right on a developer's machine and wrong here, where it would
+      # silently retire the tests.
+      - name: C# step SDK tests
+        working-directory: anvil
+        run: dotnet test executors/csharp/Anvil.Step.sln -v quiet
+
+      - name: C# format
+        working-directory: anvil
+        run: dotnet format executors/csharp/Anvil.Step.sln --verify-no-changes
+
       # Builds in release and runs the host tests: in debug wasmtime compiles
       # the guests unoptimized and the binary takes ~26 s to start
       # (~1.2 s in release), which would make any test that runs it unviable.

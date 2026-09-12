@@ -12,6 +12,19 @@ minors, with the change written down here.
 
 ### Added
 
+- **A C# step executor** ([ADR-0038](docs/adr/0038-the-csharp-step-sdk-is-hosted-by-the-users-own-process.md)):
+  you write a step as a method marked `[Step]` on an ordinary class — no base
+  type to inherit — and the catalog is read off the signature at **compile
+  time**, so a parameter the contract cannot carry is an error in your editor
+  rather than a step missing from the catalog. A marked constructor publishes
+  its own `open` step, and instance steps receive the object reference resolved
+  for them (ADR-0022). Unlike the Python executor, the server process is
+  **yours**: the SDK is a library you reference, and your executable listens —
+  so there is no `--steps`, because your catalog is compiled in. Lives in
+  [`executors/csharp/`](executors/csharp/) under Apache-2.0 like its siblings,
+  with [`ejemplos/csharp.yaml`](ejemplos/csharp.yaml) as the worked example.
+  The contract is untouched and stays at version 4.
+
 - **Windows support** ([ADR-0036](docs/adr/0036-the-sequence-editor-is-wrapped-by-tauri-not-the-browser.md)):
   the engine now also builds for `x86_64-pc-windows-msvc`, statically linked
   against the CRT so it needs no Visual C++ redistributable

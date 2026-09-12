@@ -1,0 +1,39 @@
+<!-- SPDX-License-Identifier: Apache-2.0 -->
+<!-- Copyright 2026 ANLACO -->
+<!--
+  The source generator that turns a marked method into a catalog entry
+  (ADR-0038 §5).
+
+  `netstandard2.0` is not a preference, it is what Roslyn loads. A generator
+  built for a modern target framework **is not loaded by the compiler and
+  nothing is said about it**: the catalog would simply come out empty, which
+  is a legal answer on the wire (`describes = true` with zero steps) and
+  therefore a silent one. That is the failure mode this whole SDK is written
+  against, so the target stays here and is not "modernised".
+-->
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>netstandard2.0</TargetFramework>
+    <RootNamespace>Anvil.Step.Generator</RootNamespace>
+    <AssemblyName>Anvil.Step.Generator</AssemblyName>
+    <IsRoslynComponent>true</IsRoslynComponent>
+    <EnforceExtendedAnalyzerRules>true</EnforceExtendedAnalyzerRules>
+    <IncludeBuildOutput>false</IncludeBuildOutput>
+    <!-- netstandard2.0 has no nullable annotations on the BCL surface the
+         generator touches; the analyzers still run. -->
+    <Nullable>annotations</Nullable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.CodeAnalysis.CSharp" Version="4.8.0" PrivateAssets="all" />
+  </ItemGroup>
+
+  <!-- Roslyn's own rule tracking: a diagnostic id this package ships is a
+       promise, and RS2008 exists so one is not added or dropped by accident. -->
+  <ItemGroup>
+    <AdditionalFiles Include="AnalyzerReleases.Shipped.md" />
+    <AdditionalFiles Include="AnalyzerReleases.Unshipped.md" />
+  </ItemGroup>
+
+</Project>
