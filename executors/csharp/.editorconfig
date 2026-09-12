@@ -1,0 +1,20 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 ANLACO
+root = true
+
+[*.cs]
+indent_style = space
+indent_size = 4
+end_of_line = lf
+insert_final_newline = true
+
+# A measurement crosses the wire as text, and the engine parses it with
+# `s.parse::<f64>()` (crates/modelo/src/proto.rs:412-418), which takes a
+# decimal point and nothing else. Under a Spanish locale `double.ToString()`
+# writes "0,8", the parse yields nothing, the limit is then never evaluated
+# (crates/motor/src/lib.rs:1238-1239) and the step's own `pass` stands.
+#
+# A false green out of the operator's locale. These are errors, not warnings.
+dotnet_diagnostic.CA1305.severity = error
+dotnet_diagnostic.CA1304.severity = error
+dotnet_diagnostic.CA1310.severity = error

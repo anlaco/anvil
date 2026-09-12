@@ -1,0 +1,21 @@
+<!-- SPDX-License-Identifier: Apache-2.0 -->
+<!-- Copyright 2026 ANLACO -->
+<!--
+  The package a step author references. It goes inside their code, so it is
+  Apache-2.0 and not the repo's AGPL (ADR-0004, ADR-0038).
+
+  Multi-target: `net8.0` so a user is not dragged onto the newest runtime,
+  `net10.0` because that is what this machine runs and therefore what gets
+  exercised.
+-->
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFrameworks>net8.0;net10.0</TargetFrameworks>
+    <RootNamespace>Anvil.Step</RootNamespace>
+    <AssemblyName>Anvil.Step</AssemblyName>
+    <PackageId>Anvil.Step</PackageId>
+    <Description>Write a step for Anvil in C#: mark a method, run your own process.</Description>
+  </PropertyGroup>
+
+</Project>

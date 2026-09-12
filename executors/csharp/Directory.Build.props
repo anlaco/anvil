@@ -1,0 +1,24 @@
+<!-- SPDX-License-Identifier: Apache-2.0 -->
+<!-- Copyright 2026 ANLACO -->
+<!--
+  Shared settings for every project under executors/csharp/.
+
+  `TreatWarningsAsErrors` is not tidiness here. This SDK writes measurements
+  that a test report is later reconstructed from, and the one defect that
+  cannot be seen from outside — a number formatted under the operator's
+  locale — surfaces as an analyzer warning (CA1305) and nothing else. A
+  warning nobody reads is how that reaches a bench (ADR-0038 §6).
+-->
+<Project>
+  <PropertyGroup>
+    <LangVersion>latest</LangVersion>
+    <Nullable>enable</Nullable>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <EnableNETAnalyzers>true</EnableNETAnalyzers>
+    <Deterministic>true</Deterministic>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <Authors>ANLACO</Authors>
+    <Copyright>Copyright 2026 ANLACO</Copyright>
+    <PackageLicenseExpression>Apache-2.0</PackageLicenseExpression>
+  </PropertyGroup>
+</Project>
