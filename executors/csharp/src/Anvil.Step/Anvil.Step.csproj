@@ -18,4 +18,8 @@
     <Description>Write a step for Anvil in C#: mark a method, run your own process.</Description>
   </PropertyGroup>
 
+  <ItemGroup>
+    <InternalsVisibleTo Include="Anvil.Step.Tests" />
+  </ItemGroup>
+
 </Project>
