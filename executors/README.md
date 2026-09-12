@@ -14,6 +14,7 @@ The Rust one is the exception: your steps compile to a WASM component that the
 | [`python/`](python/) | The first one. You write a step as a function and drop it in a folder. |
 | [`rust/`](rust/) | The Rust SDK. You annotate a function with `#[step]` and compile to WASM; there is no server to run. |
 | [`wasm/`](wasm/) | The WASM bridge. Serves the components the Rust SDK produces; Anvil brings it up by itself. |
+| [`csharp/`](csharp/) | The C# SDK. You mark a method with `[Step]`; the server is your own process, and the catalog is compiled from the signature. |
 | LabVIEW, MATLAB, … | Future ones. Each in its own subdirectory, with the same shape. |
 
 They are **alternatives, not layers**: you pick the one you need, you can run
