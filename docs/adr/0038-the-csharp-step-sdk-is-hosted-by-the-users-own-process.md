@@ -315,8 +315,27 @@ ADR-0026.
   `describes = true` with zero steps is a valid answer, and therefore silent.
   The same hazard applies to steps living in a lazily-loaded referenced
   assembly, so the generator also emits an explicit registration hook.
-- **Not verified at the time of writing.** Nothing here has been exercised: no
-  C# executor has yet been driven by the engine, the start-up time and binary
-  size are unmeasured, and the behaviour of a hard abort against an external
-  executor is unknown — as is, still, the fate of references orphaned by one
-  (ADR-0022). This section is to be amended with the end-to-end run.
+- **Exercised end to end**, against `anvil 0.4.0` with
+  `ejemplos/csharp.yaml` and the example executor in
+  `executors/csharp/examples/HelloBench`. The engine read the catalog
+  (`6 paso(s) comprobados contra el catálogo de su ejecutor`), ran setup, main
+  and cleanup, minted and spent an object reference, and applied the
+  sequence's limit: with the supply set to 20 V the run answered
+  `[fail] psu/measure_current: 1.25 fuera de rango [0, 0.8]`.
+- **The false green of §Context was reproduced, not argued.** With the executor
+  started under `LC_ALL=es_ES.utf8`, that same sequence answers `fail`
+  correctly. Replacing the invariant culture with the current one in the SDK's
+  one formatting site and running it again, unchanged in every other respect,
+  the run answers **`=== csharp: pass ===`** — no warning, no measurement on the
+  report, nothing to notice. This is why §6 is a build error and not a
+  convention.
+- **Two defects found by running it and not by reading it**, both silent from
+  outside: the gRPC service was being resolved by the dependency container,
+  which needs a public constructor while ours is internal, and failed as HTTP
+  200 with an empty stream — read by the engine as "it does not describe its
+  catalog"; and the executor had no way to log, so that failure had nowhere to
+  show itself (`ANVIL_STEP_LOG`).
+- **Still not verified:** start-up time and binary size are unmeasured; the
+  behaviour of a hard abort against an external executor is untested, as is the
+  fate of the references orphaned by one, which ADR-0022 leaves open; the
+  package has not been published, and `ci-windows` does not run this suite.
