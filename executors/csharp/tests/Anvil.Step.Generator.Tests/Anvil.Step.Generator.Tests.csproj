@@ -1,0 +1,30 @@
+<!-- SPDX-License-Identifier: Apache-2.0 -->
+<!-- Copyright 2026 ANLACO -->
+<!--
+  Tests of the generator, run by driving the real Roslyn compiler over source
+  written here. Not a copy of its logic: a test that reimplements what it
+  should be testing passes every reading of the diff and proves nothing
+  (ADR-0021, Consequences).
+-->
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <RootNamespace>Anvil.Step.Generator.Tests</RootNamespace>
+    <IsPackable>false</IsPackable>
+    <GenerateDocumentationFile>false</GenerateDocumentationFile>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.11.1" />
+    <PackageReference Include="xunit" Version="2.9.2" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="2.8.2" />
+    <PackageReference Include="Microsoft.CodeAnalysis.CSharp" Version="4.8.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../../src/Anvil.Step/Anvil.Step.csproj" />
+    <ProjectReference Include="../../src/Anvil.Step.Generator/Anvil.Step.Generator.csproj" />
+  </ItemGroup>
+
+</Project>
