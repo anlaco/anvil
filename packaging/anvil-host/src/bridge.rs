@@ -57,7 +57,8 @@ use std::collections::HashMap;
 use std::io::{Read, Write};
 use std::net::{IpAddr, SocketAddr, TcpListener, TcpStream};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::mpsc;
+use std::sync::Arc;
 use std::time::Duration;
 
 use tungstenite::handshake::server::{ErrorResponse, Request, Response};
@@ -71,11 +72,13 @@ const DATA: u8 = 0x04;
 const CLOSE: u8 = 0x05;
 const HELLO: u8 = 0x06;
 
-/// How long a read on the WebSocket waits before yielding the lock.
+/// How long a read on the WebSocket waits before the loop looks at its outbox.
 ///
-/// The socket is shared between the frame reader and every connection's relay
-/// thread, so the reader cannot simply block on it forever holding the lock.
-/// Short enough to stay responsive, long enough not to spin.
+/// One thread owns the socket, so this is not a lock hand-over: it is how long
+/// an outgoing frame can sit in the queue while the reader waits for an
+/// incoming one. That makes it the relay's worst-case added latency, and it is
+/// bounded by construction — which the shared-mutex arrangement it replaced
+/// was not.
 const POLL: Duration = Duration::from_millis(5);
 
 /// What the bridge will let the engine connect to.
@@ -111,24 +114,37 @@ struct Relay {
     tcp: TcpStream,
 }
 
-/// The shared WebSocket, and the flag that tells relay threads to stop.
+/// Where relay threads hand frames to the one thread that owns the socket, and
+/// the flag that tells them to stop.
+///
+/// **Why a queue and not a shared socket.** This used to be a
+/// `Mutex<WebSocket<..>>` that the frame reader and every connection's relay
+/// thread competed for. Rust's mutexes are not fair, and the reader asked for
+/// it again the instant it let go — so a relay thread holding bytes the engine
+/// was blocked waiting for could lose the race repeatedly. Measured through
+/// the relay, a loopback echo averaged 932 ms and stalled as long as 10.7 s;
+/// from the editor, twenty runs of `ejemplos/basica.yaml` ranged from 99 ms to
+/// 32 s. A sequencer that drives hardware cannot have an unbounded pause
+/// between two steps, and nothing underneath would have caught it: the engine
+/// has no per-step deadline and `wasi-grpc` has no deadlines at all.
 struct Shared {
-    socket: Mutex<WebSocket<TcpStream>>,
+    outbox: mpsc::Sender<Vec<u8>>,
     closed: AtomicBool,
 }
 
 impl Shared {
-    /// Sends one frame. Errors are swallowed on purpose: a relay thread that
-    /// cannot write has nothing useful to do about it, and the reader will
-    /// notice the socket is gone.
+    /// Queues one frame for the socket's owner to write. Never blocks on the
+    /// network, so a relay thread's next `read` is not held up by whatever the
+    /// socket is doing.
+    ///
+    /// Errors are swallowed on purpose: a relay thread whose queue is gone has
+    /// nothing useful to do about it, and the loop will notice the socket is.
     fn send(&self, kind: u8, id: u32, payload: &[u8]) {
         let mut frame = Vec::with_capacity(5 + payload.len());
         frame.push(kind);
         frame.extend_from_slice(&id.to_be_bytes());
         frame.extend_from_slice(payload);
-        if let Ok(mut s) = self.socket.lock() {
-            let _ = s.send(Message::Binary(frame.into()));
-        }
+        let _ = self.outbox.send(frame);
     }
 }
 
@@ -234,7 +250,7 @@ fn session(
 }
 
 fn relay_session(
-    socket: WebSocket<TcpStream>,
+    mut socket: WebSocket<TcpStream>,
     policy: Arc<Policy>,
     engine_args: &[String],
 ) -> Result<(), String> {
@@ -243,8 +259,11 @@ fn relay_session(
         .set_read_timeout(Some(POLL))
         .map_err(|e| e.to_string())?;
 
+    // This thread owns the socket for the rest of the session; everyone else
+    // reaches it through `outbox`.
+    let (outbox, queued) = mpsc::channel::<Vec<u8>>();
     let shared = Arc::new(Shared {
-        socket: Mutex::new(socket),
+        outbox,
         closed: AtomicBool::new(false),
     });
     let mut relays: HashMap<u32, Relay> = HashMap::new();
@@ -258,9 +277,18 @@ fn relay_session(
             break;
         }
 
+        // Outgoing first: these are answers something is already blocked on,
+        // and the read below is willing to wait `POLL` for a frame that may
+        // never come.
+        while let Ok(frame) = queued.try_recv() {
+            if socket.send(Message::Binary(frame.into())).is_err() {
+                shared.closed.store(true, Ordering::Relaxed);
+                break;
+            }
+        }
+
         let message = {
-            let mut s = shared.socket.lock().map_err(|_| "socket poisoned")?;
-            match s.read() {
+            match socket.read() {
                 Ok(m) => Some(m),
                 Err(tungstenite::Error::Io(e))
                     if matches!(

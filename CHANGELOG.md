@@ -104,6 +104,24 @@ minors, with the change written down here.
 
 ### Changed
 
+- **The bridge no longer stalls the engine for seconds at a time.** Its relay
+  shared one `Mutex<WebSocket>` between the frame reader and every
+  connection's relay thread. Rust's mutexes are not fair and the reader asked
+  for it again the instant it let go, so a relay thread holding bytes the
+  engine was blocked waiting for could lose the race repeatedly — starvation,
+  not slowness. One thread now owns the socket and the others hand it frames
+  through a queue, which bounds the added latency by `POLL` instead of leaving
+  it open-ended.
+
+  Measured, 200 loopback echoes through the relay: mean 932 ms and a worst case
+  of 10.7 s before, **mean 6.0 ms and worst 7.1 ms** after. From the editor, 20
+  runs of `ejemplos/basica.yaml`: median 7.3 s and a worst case of 32.2 s
+  before, **median 103 ms and worst 358 ms** after. This mattered beyond
+  comfort — the engine has no per-step deadline and `wasi-grpc` has no
+  deadlines at all, so nothing under a stalled exchange would have caught it
+  short of the editor's 120 s last resort, and an unbounded pause between two
+  steps is a bench left in a state nobody chose.
+
 - **The Sequence Editor's shell is Electron, not Tauri**
   ([ADR-0037](docs/adr/0037-the-editors-shell-is-electron-because-linux-is-the-first-platform.md),
   supersedes [ADR-0036](docs/adr/0036-the-sequence-editor-is-wrapped-by-tauri-not-the-browser.md)
