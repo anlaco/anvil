@@ -118,8 +118,10 @@ file to see whether it has `main:` would make the loader's path-or-name rule
 depend on the filesystem, and still leave the operating system with no way to
 associate the file with the editor, which is half the reason for this ADR.
 
-**A different extension** (`.anvil`, `.seq`, `.aseq`). `.seq` is generic
-enough that other tools use it (second-hand, not surveyed here); `.anvil` hides that the file
+**A different extension** (`.anvil`, `.seq`, `.aseq`). `.seq` is TestStand's own sequence
+file (`docs/diseno/formato-de-secuencia.md:268`), the product Anvil competes
+with, and borrowing it would invite exactly the confusion this ADR is for;
+`.anvil` hides that the file
 is YAML, which §2 wants visible. `.yseq` keeps both halves of what the file is
 — **Y**AML, and a **seq**uence — in four letters. The choice was made by the
 person who develops here, and nothing found contradicts it.

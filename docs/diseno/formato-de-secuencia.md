@@ -139,8 +139,8 @@ Una subsecuencia se declara de dos formas:
   (`secuencia: ./medir_fuentes.yaml`). Reutilizable desde varias secuencias.
 
 Convención para distinguir nombre vs path en `secuencia`: si contiene `/` o
-termina en `.yaml`/`.yml` → path (relativo al directorio del archivo que lo
-contiene); si no → nombre (inline). El cargador resuelve los paths, valida
+termina en `.yseq`, `.yaml` o `.yml` → path (relativo al directorio del archivo
+que lo contiene); si no → nombre (inline). El cargador resuelve los paths, valida
 lvalues y firma, y detecta ciclos al cargar (fail-fast); el motor no abre
 ficheros. Ver ADR-0010.
 - El subconjunto es **estricto** (`deny_unknown_fields`): un campo no reconocido
@@ -269,6 +269,23 @@ puede emparejar `parametros` ↔ `parameters` (post-MVP: librería de PMs).
   diff. JSON es legible pero sin comentarios.
 - **Comentarios** (`#`): documentar por qué un límite es ese.
 - **Versionable** en Git limpio.
+
+## Extensión del fichero: `.yseq` (ADR-0039)
+
+Una secuencia puede llamarse `algo.yseq`, además de `.yaml` o `.yml`. El
+contenido es el mismo YAML, con el mismo cargador y el mismo schema: la
+extensión dice **para qué es** el fichero, no que sea otro formato.
+
+- `anvil algo.yseq` funciona igual que con `.yaml`: el cargador nunca miró la
+  extensión.
+- En un `sequence_call`, `secuencia: hija.yseq` es un path, sin necesidad de
+  `./` (ver la convención de arriba).
+- El editor ofrece `.yseq` primero en sus diálogos y propone `sequence.yseq`
+  para un documento nuevo; un fichero que ya tiene nombre lo conserva.
+
+Existe porque `.yaml` no se puede reclamar en la máquina de nadie: una
+asociación de tipo de fichero para abrir secuencias con doble clic (#67) exige
+una extensión propia. No se renombra ninguna secuencia existente.
 
 ## Sidecar de límites (post-MVP)
 
