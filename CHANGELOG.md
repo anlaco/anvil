@@ -12,6 +12,13 @@ minors, with the change written down here.
 
 ### Added
 
+- **`.yseq`, a sequence's own extension** ([ADR-0039](docs/adr/0039-a-sequence-file-may-end-in-yseq.md)):
+  a sequence may be named `something.yseq` as well as `.yaml` or `.yml`. The
+  content is the same YAML. A `sequence_call` naming `child.yseq` now finds the
+  file without needing `./`, the editor lists `.yseq` in its dialogs and offers
+  it for a new sequence. No existing sequence is renamed, and `.yaml`/`.yml`
+  keep working.
+
 - **A C# step executor** ([ADR-0038](docs/adr/0038-the-csharp-step-sdk-is-hosted-by-the-users-own-process.md)):
   you write a step as a method marked `[Step]` on an ordinary class — no base
   type to inherit — and the catalog is read off the signature at **compile

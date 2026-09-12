@@ -1264,12 +1264,17 @@ pub fn cargar_de_archivo(ruta: &str) -> Result<DefinicionSecuencia, ErrorCarga> 
 }
 
 /// ¿Es `destino` un path (archivo externo) y no un nombre (inline)?
-/// Convención de M4b: si contiene `/` o `\`, o termina en `.yaml`/`.yml` →
-/// path relativo al directorio del archivo que lo referencia; si no, es un
-/// nombre de subsecuencia inline del mismo archivo.
+/// Convención de M4b: si contiene `/` o `\`, o termina en `.yseq`, `.yaml` o
+/// `.yml` → path relativo al directorio del archivo que lo referencia; si no,
+/// es un nombre de subsecuencia inline del mismo archivo. `.yseq` es la
+/// extensión propia de una secuencia y sigue siendo YAML (ADR-0039).
 pub fn es_path(destino: &str) -> bool {
     let t = destino.trim();
-    t.contains('/') || t.contains('\\') || t.ends_with(".yaml") || t.ends_with(".yml")
+    t.contains('/')
+        || t.contains('\\')
+        || t.ends_with(".yseq")
+        || t.ends_with(".yaml")
+        || t.ends_with(".yml")
 }
 
 /// Directorio que contiene a `ruta` (su `parent`), o "" si no tiene.
@@ -2913,6 +2918,40 @@ main:
             matches!(&err, ErrorCarga::Diagnostico(m) if m.contains("subsequences.init")),
             "{err}"
         );
+    }
+
+    /// A sequence file may end in `.yseq`, alongside `.yaml` and `.yml`
+    /// (ADR-0039). Without a slash, anything else is an inline name.
+    #[test]
+    fn a_yseq_destination_is_a_path() {
+        assert!(es_path("hija.yseq"));
+        assert!(es_path("hija.yaml"));
+        assert!(es_path("hija.yml"));
+        assert!(!es_path("init_comun"), "a bare name stays inline");
+    }
+
+    /// The case that was run and failed before ADR-0039: a `sequence_call`
+    /// naming a `.yseq` file with no slash was read as an inline subsequence
+    /// that does not exist.
+    #[test]
+    fn a_sequence_call_resolves_a_yseq_file_without_a_slash() {
+        let dir = std::env::temp_dir().join(format!("anvil_adr39_{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(
+            dir.join("child.yseq"),
+            "name: child\nmain:\n  - name: m\n    type: grpc\n",
+        )
+        .unwrap();
+        let parent = dir.join("parent.yseq");
+        std::fs::write(
+            &parent,
+            "name: parent\nmain:\n  - name: c\n    type: sequence_call\n    sequence: child.yseq\n",
+        )
+        .unwrap();
+
+        let program = cargar_programa_de_archivo(parent.to_str().unwrap())
+            .expect("a .yseq subsequence with no slash must load as a file");
+        assert_eq!(program.archivos.len(), 1, "the child was loaded as a file");
     }
 
     /// `cargar_programa_de_archivo` resuelve un archivo externo por path,

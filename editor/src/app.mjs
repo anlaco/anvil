@@ -553,7 +553,7 @@ async function validate() {
   }
 
   status("busy", "validating…");
-  const name = state.filename ?? "sequence.yaml";
+  const name = state.filename ?? NEW_SEQUENCE_NAME;
   try {
     const { exitCode, stderr } = await engine.run({
       args: [name, "--validate"],
@@ -591,7 +591,7 @@ async function validate() {
 async function run() {
   if (!state.doc || !engine.bridged) return;
 
-  const name = state.filename ?? "sequence.yaml";
+  const name = state.filename ?? NEW_SEQUENCE_NAME;
   status("busy", `running ${name}…`);
   state.runInFlight = true;
   state.run = newRunState();
@@ -687,11 +687,18 @@ async function openBridge(url) {
 
 // ---------------------------------------------------------------- files
 
+// `.yseq` first: it is a sequence's own extension and is still YAML inside.
+// `.yaml` and `.yml` stay, because sequences already exist under them
+// (ADR-0039).
 const PICKER = {
   types: [
-    { description: "Anvil sequence", accept: { "application/yaml": [".yaml", ".yml"] } },
+    { description: "Anvil sequence", accept: { "application/yaml": [".yseq", ".yaml", ".yml"] } },
   ],
 };
+
+// What a document with no filename yet is offered as. A file that already has
+// a name keeps it (ADR-0039 §3).
+const NEW_SEQUENCE_NAME = "sequence.yseq";
 
 // `window.anvil` is injected by the shell's preload
 // (`editor/electron/preload.cjs`) and exists whether or not the File System
@@ -763,7 +770,7 @@ async function openFile() {
   // editor says which mode it is in rather than pretending Save works.
   const input = document.createElement("input");
   input.type = "file";
-  input.accept = ".yaml,.yml";
+  input.accept = ".yseq,.yaml,.yml";
   input.addEventListener("change", async () => {
     const file = input.files?.[0];
     if (file) loadText(await file.text(), file.name, null);
@@ -794,13 +801,13 @@ async function saveFile({ forceDialog = false } = {}) {
   let handle = state.handle;
   if (!handle || forceDialog) {
     if (inShell()) {
-      const path = await window.anvil.saveDialog(state.filename ?? "sequence.yaml");
+      const path = await window.anvil.saveDialog(state.filename ?? NEW_SEQUENCE_NAME);
       if (!path) return;
       handle = shellHandle(path);
     } else if (window.showSaveFilePicker) {
       handle = await window.showSaveFilePicker({
         ...PICKER,
-        suggestedName: state.filename ?? "sequence.yaml",
+        suggestedName: state.filename ?? NEW_SEQUENCE_NAME,
       });
     } else {
       downloadFallback();
@@ -822,7 +829,7 @@ function downloadFallback() {
   const blob = new Blob([state.doc.text], { type: "application/yaml" });
   const a = document.createElement("a");
   a.href = URL.createObjectURL(blob);
-  a.download = state.filename ?? "sequence.yaml";
+  a.download = state.filename ?? NEW_SEQUENCE_NAME;
   a.click();
   URL.revokeObjectURL(a.href);
   state.dirty = false;
