@@ -157,14 +157,17 @@ fn una_asigna_tras_un_error_no_borra_la_variable_que_lee_el_cleanup() {
     // nombre inexistente ya no llegaría a ejercitar la `asigna`.
     let s = corre_con_reporte("packaging/anvil-host/tests/fixtures/asigna_tras_error.yaml");
     let stdout = String::from_utf8_lossy(&s.stdout);
+    // stderr too: on windows-latest this came back with exit 1 and an empty
+    // stdout, which says anvil died before reporting and nothing about why.
+    let stderr = String::from_utf8_lossy(&s.stderr);
     assert_eq!(
         codigo(&s),
         1,
-        "el paso que no pudo medir deja la secuencia en `error`. stdout:\n{stdout}"
+        "el paso que no pudo medir deja la secuencia en `error`. stdout:\n{stdout}\nstderr:\n{stderr}"
     );
     assert!(
         stdout.contains("[pass] check_valor: condición cumplida"),
-        "la variable que el cleanup va a usar no se toca si el paso dio error. stdout:\n{stdout}"
+        "la variable que el cleanup va a usar no se toca si el paso dio error. stdout:\n{stdout}\nstderr:\n{stderr}"
     );
 }
 

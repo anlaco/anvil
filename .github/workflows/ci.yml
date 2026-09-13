@@ -236,6 +236,14 @@ jobs:
           " || { kill $PID; exit 1; }
           kill $PID
 
+      # Before the editor tests and not after: `make test-editor` transpiles
+      # with @bytecodealliance/jco-transpile, and running it with no
+      # node_modules failed with ERR_MODULE_NOT_FOUND. One install serves
+      # every editor step below.
+      - name: Install editor dependencies
+        working-directory: anvil/editor
+        run: npm ci
+
       - name: Editor tests (transpile + node --test)
         working-directory: anvil
         run: make test-editor
@@ -245,7 +253,6 @@ jobs:
       - name: "Smoke: editor dev server responds"
         working-directory: anvil/editor
         run: |
-          npm ci
           npm run dev &
           PID=$!
           for i in $(seq 1 50); do
@@ -257,9 +264,7 @@ jobs:
 
       - name: Build the Electron installer
         working-directory: anvil/editor
-        run: |
-          npm ci
-          npm run app:build -- --win nsis
+        run: npm run app:build -- --win nsis
 
       # No display on this runner, so this cannot click anything real — the
       # bar here is "the packaged shell starts and does not crash", which is

@@ -18,8 +18,9 @@
 # hence the `--manifest-path` calls.
 #
 # These recipes are POSIX-portable and also run on Windows under Git Bash
-# (ADR-0036, `.github/workflows/ci.yml`'s `ci-windows` job) — no separate
-# Windows recipes exist.
+# (ADR-0036), which `.github/workflows/ci.yml`'s `ci-windows` job exercises —
+# no separate Windows recipes exist. The one platform difference they carry
+# is `EXE`, below.
 
 HOST    := packaging/anvil-host/Cargo.toml
 BRIDGE  := executors/wasm/Cargo.toml
@@ -31,8 +32,13 @@ DEPT    := ejemplos/departamento/Cargo.toml
 GUESTS  := -p motor -p ejecutor_pasos
 TARGET  := wasm32-wasip2
 
-ANVIL_DEBUG   := packaging/anvil-host/target/debug/anvil
-ANVIL_RELEASE := packaging/anvil-host/target/release/anvil
+# Windows names every executable with `.exe`; `OS` is `Windows_NT` there,
+# Git Bash included, and unset elsewhere. Without it `dept` copied a bridge
+# that does not exist under that name.
+EXE := $(if $(filter Windows_NT,$(OS)),.exe,)
+
+ANVIL_DEBUG   := packaging/anvil-host/target/debug/anvil$(EXE)
+ANVIL_RELEASE := packaging/anvil-host/target/release/anvil$(EXE)
 
 .PHONY: all build release test test-core test-bridge test-host test-executors \
         test-executors-rust test-executors-csharp example dept check fmt run clean help
@@ -44,7 +50,7 @@ build: example
 	cargo build --target $(TARGET) $(GUESTS)
 	cargo build --manifest-path $(BRIDGE)
 	cargo build --manifest-path $(HOST)
-	@$(MAKE) --no-print-directory dept BRIDGE_BIN=executors/wasm/target/debug/anvil-exec-wasm
+	@$(MAKE) --no-print-directory dept BRIDGE_BIN=executors/wasm/target/debug/anvil-exec-wasm$(EXE)
 	@echo "ready → $(ANVIL_DEBUG)"
 
 ## The reference step component (`ejemplos/hola-paso`), the one
@@ -74,7 +80,7 @@ release: example
 	cargo build --release --target $(TARGET) $(GUESTS)
 	cargo build --release --manifest-path $(BRIDGE)
 	cargo build --release --manifest-path $(HOST)
-	@$(MAKE) --no-print-directory dept BRIDGE_BIN=executors/wasm/target/release/anvil-exec-wasm
+	@$(MAKE) --no-print-directory dept BRIDGE_BIN=executors/wasm/target/release/anvil-exec-wasm$(EXE)
 	@echo "ready → $(ANVIL_RELEASE)"
 
 test: test-core test-bridge test-host test-executors test-executors-rust \

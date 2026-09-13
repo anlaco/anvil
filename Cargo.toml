@@ -51,4 +51,4 @@ getrandom = "0.3"
 # `wasi-grpc` is a separate, public project (github.com/anlaco/wasi-grpc).
 # Referenced by git tag so a lone clone of this repo can build (#25) — no
 # sibling checkout required.
-wasi-grpc = { git = "https://github.com/anlaco/wasi-grpc", tag = "v0.1.0" }
+wasi-grpc = { git = "https://github.com/anlaco/wasi-grpc", tag = "v0.1.1" }

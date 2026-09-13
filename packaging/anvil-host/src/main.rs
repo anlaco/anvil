@@ -699,7 +699,12 @@ fn main() {
             if let Some(code) = e.downcast_ref::<wasmtime_wasi::I32Exit>() {
                 code.0
             } else {
-                eprintln!("el motor falló: {e}");
+                // `{e:?}` and not `{e}`: for a wasmtime error the Display form
+                // prints the wasm backtrace and stops, and the chain of causes
+                // — what actually trapped — is only in the Debug form. On the
+                // windows-latest runner that left a trap in `blocking_read`
+                // with no reason attached.
+                eprintln!("el motor falló: {e:?}");
                 1
             }
         }

@@ -36,10 +36,15 @@ minors, with the change written down here.
   the engine now also builds for `x86_64-pc-windows-msvc`, statically linked
   against the CRT so it needs no Visual C++ redistributable
   (`packaging/package.ps1`, the Windows sibling of `packaging/package.sh`).
-  Verified on a `windows-latest` GitHub Actions runner (`ci-windows` job):
-  the engine runs a sequence and its `--bridge` relay accepts a real
-  connection. File-type registration and a stable-port loopback service
-  remain open — ADR-0035 §d/§e, [#67](https://github.com/anlaco/anvil/issues/67).
+  On a `windows-latest` GitHub Actions runner (`ci-windows` job) the release
+  build, the core, bridge, host and editor tests pass, the engine runs a
+  sequence, its `--bridge` relay accepts a real connection, and the Electron
+  installer builds and its packaged editor starts. **That job had never
+  passed until the fixes listed under Fixed**; an earlier version of this
+  entry claimed it had. `packaging/package.ps1` itself has not been run yet,
+  so the static-CRT package is still unverified. File-type registration and a
+  stable-port loopback service remain open — ADR-0035 §d/§e,
+  [#67](https://github.com/anlaco/anvil/issues/67).
 
 - **A downloadable Sequence Editor**
   ([ADR-0037](docs/adr/0037-the-editors-shell-is-electron-because-linux-is-the-first-platform.md)):
@@ -170,6 +175,19 @@ minors, with the change written down here.
   terminal reaches the verdict without reading to the end of the line.
 
 ### Fixed
+
+- **Windows: the engine no longer crashes at random talking to an executor.**
+  wasmtime's `blocking_read` and `blocking_flush` trap after ten spurious
+  readiness wake-ups, and on Windows that happened often enough to take the
+  engine or the embedded executor down mid-RPC. Fixed in `wasi-grpc` v0.1.1,
+  which now waits for readiness itself; Anvil depends on that tag.
+- **Windows: a cycle between a process model and the user's sequence is
+  detected again.** Normalising an absolute path dropped the drive letter, so
+  one file got two keys and the cycle through it went unseen.
+- **The Sequence Editor keeps a file's line endings.** Re-emitting a CRLF
+  sequence in LF turned a one-value edit into a diff of every line.
+- **Windows: `make release` finds the bridge as `anvil-exec-wasm.exe`.** The
+  host's build script and the Makefile looked for the name without `.exe`.
 
 - **The editor can run a sequence more than once per bridge** (#61): the
   second Run used to hang for good, with the status line frozen on
