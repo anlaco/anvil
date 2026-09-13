@@ -1,0 +1,9 @@
+name: python
+
+executors:
+  - { name: py, type: grpc, host: 127.0.0.1, port: 9101 }
+
+main:
+  - name: board/measure_rail
+    executor: py
+    limit: { type: range, min: 4.75, max: 5.25 }

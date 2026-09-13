@@ -1,0 +1,3 @@
+$ anvil sequences/first.yseq 2>&1 | tail -n 2
+conexión cerrada; esperando otra
+no se pudo conectar a los ejecutores de pasos (embebido en 127.0.0.1:33973): WASI socket error: ErrorCode { code: 14, name: "connection-refused", message: "The TCP connection was forcefully rejected" }

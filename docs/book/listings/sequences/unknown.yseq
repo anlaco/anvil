@@ -1,0 +1,8 @@
+name: unknown
+
+executors:
+  - { name: bench, type: grpc, host: 127.0.0.1, port: 9201 }
+
+main:
+  - name: board/measure_rial
+    executor: bench

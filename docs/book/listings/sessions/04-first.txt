@@ -1,0 +1,12 @@
+$ anvil sequences/first.yseq
+ejecutor de pasos escuchando en 40243
+secuencia 'first' cargada (1 pasos en main, 0 subsecuencia(s) externa(s), 1 ejecutor(es))
+motor conectado
+conectado a los ejecutores de pasos (embebido en 127.0.0.1:40243)
+catálogo pedido
+1 paso(s) comprobados contra el catálogo de su ejecutor
+=== first: pass ===
+  [pass] board/measure_rail: 
+conexión cerrada; esperando otra
+$ echo $?
+0

@@ -1,0 +1,5 @@
+$ anvil sequences/phases.yseq 2>/dev/null
+=== phases: fail ===
+  [pass] fixture/power_on: 
+  [fail] fixture/measure_settling_rail: 4.1 fuera de rango [4.75, 5.25]
+  [pass] fixture/power_off: 

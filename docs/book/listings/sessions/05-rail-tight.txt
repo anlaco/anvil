@@ -1,0 +1,5 @@
+$ anvil sequences/rail-tight.yseq 2>/dev/null
+=== rail_tight: fail ===
+  [fail] board/measure_rail: 4.98 fuera de rango [5, 5.25]
+$ echo $?
+1
