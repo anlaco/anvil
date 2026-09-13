@@ -6,6 +6,7 @@
 # What is built:
 #   - Linux   the engine, statically linked against musl  (packaging/package.sh)
 #   - Windows the engine, static CRT                      (packaging/package.ps1)
+#   - Linux   the Sequence Editor, AppImage and .deb      (editor/, ADR-0037)
 #   - Windows the Sequence Editor installer, NSIS         (editor/, ADR-0037)
 #
 # The Windows pieces are built on windows-latest because package.ps1 compiles
@@ -82,10 +83,37 @@ jobs:
           "$D/anvil" --version | grep -F "$VERSION"
           "$D/anvil" --validate "$D/ejemplos/basica.yaml"
 
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      # The CHANGELOG promises the editor as an AppImage and a .deb on Linux
+      # (ADR-0037 puts Linux first), so the Linux job builds them too, from
+      # the release guest package.sh has just built — one engine in both
+      # downloads (ADR-0031).
+      - name: Build the Sequence Editor (AppImage, deb)
+        working-directory: editor
+        run: |
+          npm ci
+          npm run transpile
+          npm run app:build -- --linux AppImage deb -c.extraMetadata.version="$VERSION"
+          ls ../dist-app
+
+      - name: Name the downloads
+        run: |
+          mkdir -p upload
+          cp "dist/anvil-v$VERSION-x86_64-linux-musl.tar.gz" upload/
+          APPIMAGE=$(ls dist-app/*"$VERSION"*.AppImage | head -1)
+          DEB=$(ls dist-app/*"$VERSION"*.deb | head -1)
+          test -n "$APPIMAGE" && test -n "$DEB"
+          cp "$APPIMAGE" "upload/anvil-editor-v$VERSION-x86_64-linux.AppImage"
+          cp "$DEB" "upload/anvil-editor-v$VERSION-amd64.deb"
+          ls -l upload
+
       - uses: actions/upload-artifact@v4
         with:
           name: linux
-          path: dist/anvil-v${{ env.VERSION }}-x86_64-linux-musl.tar.gz
+          path: upload/*
           if-no-files-found: error
 
   windows:
