@@ -1,0 +1,42 @@
+name: board
+
+executors:
+  - { name: bench, type: grpc, host: 127.0.0.1, port: 9201 }
+
+locals:
+  ch_3v3: 3
+  v_3v3: 0.0
+  ch_1v1: 1
+  v_1v1: 0.0
+
+subsequences:
+  power_up:
+    setup:
+      - name: fixture/power_on
+        executor: bench
+    main:
+      - name: board/check_led
+        executor: bench
+
+main:
+  - name: power_up
+    type: sequence_call
+    sequence: power_up
+
+  - name: measure_3v3
+    type: sequence_call
+    sequence: ./rail-check.yseq
+    args: { channel: locals.ch_3v3, volts: locals.v_3v3 }
+
+  - name: measure_1v1
+    type: sequence_call
+    sequence: ./rail-check.yseq
+    args: { channel: locals.ch_1v1, volts: locals.v_1v1 }
+
+  - name: rails_in_spec
+    type: pass_fail
+    condition: 'locals.v_3v3 > 3.2 && locals.v_3v3 < 3.4 && locals.v_1v1 > 1.0 && locals.v_1v1 < 1.2'
+
+cleanup:
+  - name: fixture/power_off
+    executor: bench

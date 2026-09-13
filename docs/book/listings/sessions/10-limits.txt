@@ -1,0 +1,3 @@
+$ anvil sequences/judging.yseq --limits sequences/judging.limits.yaml 2>/dev/null
+=== judging: fail ===
+  [fail] board/measure_rail: 4.98 fuera de rango [5, 5.1]

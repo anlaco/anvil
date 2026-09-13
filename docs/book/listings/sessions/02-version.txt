@@ -1,0 +1,2 @@
+$ anvil --version
+anvil 0.5.0

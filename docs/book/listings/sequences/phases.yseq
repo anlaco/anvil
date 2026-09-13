@@ -1,0 +1,21 @@
+name: phases
+
+executors:
+  - { name: bench, type: grpc, host: 127.0.0.1, port: 9201 }
+
+setup:
+  - name: fixture/power_on
+    executor: bench
+
+main:
+  - name: fixture/measure_settling_rail
+    executor: bench
+    retries: 3
+    limit: { type: range, min: 4.75, max: 5.25 }
+
+  - name: board/check_led
+    executor: bench
+
+cleanup:
+  - name: fixture/power_off
+    executor: bench

@@ -1,0 +1,5 @@
+$ anvil sequences/judging.yseq 2>/dev/null
+=== judging: pass ===
+  [pass] board/measure_rail: 
+  [pass] board/measure_leakage: 
+  [pass] board/check_led: 

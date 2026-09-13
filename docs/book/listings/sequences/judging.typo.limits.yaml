@@ -1,0 +1,4 @@
+board/measure_rial:
+  type: range
+  min: 5.0
+  max: 5.1

@@ -10,6 +10,17 @@ minors, with the change written down here.
 
 ## [Unreleased]
 
+### Added
+
+- **The Anvil Book** ([`docs/book/`](docs/book/README.md)): a guide to using
+  Anvil from nothing — installing, writing steps in C#, sequences, limits,
+  phases and retries, variables, references, subsequences, reports, and what
+  changes in Python and Rust. Written against 0.5.0. Every file it asks the
+  reader to write and every terminal session it shows lives under
+  `docs/book/listings/`, and `docs/book/check.sh` runs the sessions again
+  against a release and checks each file is still quoted word for word. The
+  Sequence Editor chapter is not written yet.
+
 ## [0.5.0] — 2026-09-13
 
 ### Added

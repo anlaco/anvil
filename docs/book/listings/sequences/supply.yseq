@@ -1,0 +1,29 @@
+name: supply
+
+executors:
+  - { name: bench, type: grpc, host: 127.0.0.1, port: 9201 }
+
+locals:
+  psu: { type: reference, executor: bench }
+
+setup:
+  - name: psu/open
+    executor: bench
+    inputs: { resource: "TCPIP::192.168.0.50::5025::SOCKET" }
+    assign:
+      psu: result.outputs.psu
+
+main:
+  - name: psu/set_voltage
+    executor: bench
+    inputs: { psu: '${locals.psu}', volts: 12.0 }
+
+  - name: psu/measure_current
+    executor: bench
+    inputs: { psu: '${locals.psu}' }
+    limit: { type: range, min: 0.5, max: 0.8 }
+
+cleanup:
+  - name: psu/output_off
+    executor: bench
+    inputs: { psu: '${locals.psu}' }

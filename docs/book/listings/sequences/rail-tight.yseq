@@ -1,0 +1,9 @@
+name: rail_tight
+
+executors:
+  - { name: bench, type: grpc, host: 127.0.0.1, port: 9201 }
+
+main:
+  - name: board/measure_rail
+    executor: bench
+    limit: { type: range, min: 5.0, max: 5.25 }
