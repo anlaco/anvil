@@ -36,7 +36,6 @@ jobs:
         uses: actions/checkout@v5
         with:
           repository: anlaco/wasi-grpc
-          ref: fix/spurious-readiness  # TEMPORARY: verification only, reverted before merge
           ssh-key: ${{ secrets.WASI_GRPC_DEPLOY_KEY }}
           path: wasi-grpc
 
@@ -151,7 +150,6 @@ jobs:
         uses: actions/checkout@v5
         with:
           repository: anlaco/wasi-grpc
-          ref: fix/spurious-readiness  # TEMPORARY: verification only, reverted before merge
           ssh-key: ${{ secrets.WASI_GRPC_DEPLOY_KEY }}
           path: wasi-grpc
 
