@@ -105,7 +105,22 @@ fn main() {
         "executors/wasm/",
         "cargo build --manifest-path executors/wasm/Cargo.toml",
     );
-    let path = |p: &str| repo_root.join(dir).join("target").join(p).join(name);
+    // A build with `--target` (what `packaging/package.sh` and `package.ps1`
+    // do) leaves the bridge under `target/<triple>/<profile>/`, and a plain
+    // one under `target/<profile>/`. Looking only in the second made the
+    // packaging scripts fail on a clean checkout with the bridge they had just
+    // built (#72); a warm machine hid it with a leftover plain build. The
+    // triple of the host being built is looked at first.
+    let triple = env::var("TARGET").expect("TARGET");
+    let bridge_target = repo_root.join(dir).join("target");
+    let path = |p: &str| {
+        let with_triple = bridge_target.join(&triple).join(p).join(name);
+        if with_triple.exists() {
+            with_triple
+        } else {
+            bridge_target.join(p).join(name)
+        }
+    };
     let src = if path(&profile).exists() {
         path(&profile)
     } else if path(fallback).exists() {
@@ -121,12 +136,16 @@ fn main() {
         );
         process::exit(1);
     };
-    // Where cargo will leave this crate's binaries: an explicit
-    // CARGO_TARGET_DIR wins; the default is the crate's own target/.
-    let target_dir = env::var("CARGO_TARGET_DIR")
-        .map(PathBuf::from)
-        .unwrap_or_else(|_| crate_dir.join("target"));
-    let dst = target_dir.join(&profile).join(name);
+    // Where cargo will leave this crate's binaries. Read off OUT_DIR, which is
+    // `<target-dir>[/<triple>]/<profile>/build/<pkg>/out`, rather than rebuilt
+    // from CARGO_TARGET_DIR and PROFILE: with `--target` the binary goes under
+    // the triple, and the bridge placed in `target/<profile>/` was no longer
+    // next to the `anvil` it belongs to.
+    let dst = out_dir
+        .ancestors()
+        .nth(3)
+        .expect("OUT_DIR is <profile dir>/build/<pkg>/out")
+        .join(name);
     std::fs::create_dir_all(dst.parent().expect("target dir parent"))
         .expect("create the host's binary directory");
     std::fs::copy(&src, &dst).expect("place the bridge next to the anvil binary");
