@@ -211,7 +211,7 @@ conexión cerrada; esperando otra
 
 Anvil checks `assign` against the outputs a step declares in its catalog, and
 the C# SDK has no way yet to declare them — only the `open` step of chapter 8
-declares one. So the check refuses the sequence before it runs. Until that is
+declares one ([#77](https://github.com/anlaco/anvil/issues/77)). So the check refuses the sequence before it runs. Until that is
 fixed, use named outputs from C# for the report only, and pass values between
 steps through `result.measured_value` or `result.status`.
 

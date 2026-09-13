@@ -81,8 +81,9 @@ $ anvil sequences/phases.yseq 2>/dev/null
 That sequence has `retries: 3` on `fixture/measure_settling_rail`, and the step
 reads 4.97 V from its second attempt on. Yet the report shows 4.1 and `fail`.
 
-This is how 0.5.0 behaves: **`retries` repeats a step only while the step
-itself does not pass.** The limit is applied once, after the last attempt. A
+This is how 0.5.0 behaves
+([#76](https://github.com/anlaco/anvil/issues/76)): **`retries` repeats a step
+only while the step itself does not pass.** The limit is applied once, after the last attempt. A
 step that returns a measurement has passed as far as retries are concerned, so
 it is not called again, and the limit then fails the first value.
 

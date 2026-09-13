@@ -27,7 +27,7 @@ sequences, run them, and read what Anvil says back.
 10. [Reports and running unattended](10-reports-and-unattended.md)
 11. The Sequence Editor — *not written yet*. In 0.5.0 the packaged editor
     opens, but it cannot run a sequence
-    ([#67](https://github.com/anlaco/anvil/issues/67)).
+    ([#80](https://github.com/anlaco/anvil/issues/80)).
 12. [Steps in Python and Rust](12-other-languages.md)
 13. [When something goes wrong](13-troubleshooting.md)
 

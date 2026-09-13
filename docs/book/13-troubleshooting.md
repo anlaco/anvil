@@ -17,7 +17,8 @@ no se pudo conectar a los ejecutores de pasos (embebido en 127.0.0.1:33973): WAS
 "Could not connect to the step executors … connection refused". Two things in
 that message are misleading. It names `embebido`, the engine's built-in
 executor, and a port that is not the one you declared — but the executor that
-refused is yours, `bench` on 9201. When you see `connection-refused`, check
+refused is yours, `bench` on 9201
+([#78](https://github.com/anlaco/anvil/issues/78)). When you see `connection-refused`, check
 first that every `grpc` executor in the sequence is running:
 
 ```console
@@ -47,7 +48,8 @@ If you start a C# executor while another one holds the port, it prints its
 usual `anvil C# executor: … on 127.0.0.1:9201` line and then stops with
 `Unhandled exception. System.IO.IOException: Failed to bind to address
 http://127.0.0.1:9201: address already in use.` and a stack trace. Believe the
-exception, not the first line.
+exception, not the first line
+([#79](https://github.com/anlaco/anvil/issues/79)).
 
 ## I changed a step and nothing changed
 
