@@ -44,9 +44,14 @@ jobs:
 
       # El SHA de las notas tiene que ser el del fichero que está colgado, no
       # el del que se subió desde el portátil.
+      #
+      # `--ignore-missing`: desde v0.5.0 el SHA256SUMS lista también las
+      # descargas de Windows, que aquí no se bajan. Sin él, `-c` falla por
+      # ficheros ausentes y un Release correcto sale rojo. Si no queda ninguna
+      # línea comprobada (el tarball no casa con nada), `-c` sigue fallando.
       - name: Comprobar SHA256
         working-directory: dist
-        run: sha256sum -c SHA256SUMS
+        run: sha256sum -c --ignore-missing SHA256SUMS
 
       # El guion va en un fichero y se monta: metido a mano en `docker run
       # sh -c '...'` habría que escapar comillas dentro de comillas dentro de

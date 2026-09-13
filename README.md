@@ -26,16 +26,17 @@ are statically linked against musl: they need no Rust, no cargo, no glibc,
 nothing installed on the system.
 
 ```sh
-curl -LO https://github.com/anlaco/anvil/releases/download/v0.4.0/anvil-v0.4.0-x86_64-linux-musl.tar.gz
-tar xzf anvil-v0.4.0-x86_64-linux-musl.tar.gz
-cd anvil-v0.4.0-x86_64-linux-musl
+curl -LO https://github.com/anlaco/anvil/releases/download/v0.5.0/anvil-v0.5.0-x86_64-linux-musl.tar.gz
+tar xzf anvil-v0.5.0-x86_64-linux-musl.tar.gz
+cd anvil-v0.5.0-x86_64-linux-musl
 
 ./anvil ejemplos/subsecuencia.yaml --json ./out.json --csv ./out.csv
 ```
 
-Linux x86_64, any libc. The [release page][rel] publishes the SHA256 of the
-`.tar.gz`; to check it, `sha256sum -c SHA256SUMS` with the second asset
-downloaded alongside. The `.yaml` files ship in the package because
+Linux x86_64, any libc. The [release page][rel] publishes one `SHA256SUMS`
+for every download; to check the tarball, download it alongside and run
+`sha256sum -c --ignore-missing SHA256SUMS` (it lists the Windows downloads
+too, which you did not fetch). The `.yaml` files ship in the package because
 `subsecuencia.yaml` invokes `medir_fuentes.yaml` by relative path.
 
 **Windows** (ADR-0036): the [release page][rel] also publishes
@@ -52,7 +53,10 @@ the same editor that also runs standalone in any browser (`editor/`,
 ADR-0031). It carries its own Chromium, so it needs no browser installed and
 behaves the same on Linux and Windows (ADR-0037) — the reason it is not the
 system's webview is that on Linux that would mean depending on whichever
-`libwebkit2gtk` the machine happens to have. To run it from source: `cd
+`libwebkit2gtk` the machine happens to have. The [release page][rel]
+publishes it as `anvil-editor-vX.Y.Z-x86_64-linux.AppImage`,
+`anvil-editor-vX.Y.Z-amd64.deb` and
+`anvil-editor-vX.Y.Z-x86_64-windows-setup.exe`. To run it from source: `cd
 editor && npm install && npm run app`.
 
 [rel]: https://github.com/anlaco/anvil/releases/latest

@@ -40,3 +40,6 @@ __pycache__/
 # Instrucciones de agente: son locales, no parte del producto.
 CLAUDE.md
 dist/
+
+# electron-builder output for the Sequence Editor downloads (editor/package.json, directories.output).
+/dist-app/

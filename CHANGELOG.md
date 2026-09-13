@@ -10,6 +10,8 @@ minors, with the change written down here.
 
 ## [Unreleased]
 
+## [0.5.0] — 2026-09-13
+
 ### Added
 
 - **`.yseq`, a sequence's own extension** ([ADR-0039](docs/adr/0039-a-sequence-file-may-end-in-yseq.md)):
@@ -958,6 +960,7 @@ primera campaña de betatesting externa.
 - *Private vulnerability reporting* no puede activarse mientras el
   repositorio sea privado; hasta entonces vale el correo de `SECURITY.md`.
 
+[0.5.0]: https://github.com/anlaco/anvil/releases/tag/v0.5.0
 [0.4.0]: https://github.com/anlaco/anvil/releases/tag/v0.4.0
 [0.3.0]: https://github.com/anlaco/anvil/releases/tag/v0.3.0
 [0.2.0]: https://github.com/anlaco/anvil/releases/tag/v0.2.0
