@@ -4,7 +4,7 @@ How you write a step in a language that is not Anvil's own. Most of these are
 a gRPC server speaking the [`paso.proto`](../crates/modelo/paso.proto)
 contract; the engine sees an endpoint, dispatches by name→endpoint and does not
 know what sits behind ([ADR-0012](../docs/adr/0012-executores-de-lenguaje-como-modulos.md)).
-The Rust one is the exception: your steps compile to a WASM component that the
+The WASM one is the exception: your steps compile to a WASM component that the
 [bridge](wasm/) loads and serves, so there is nothing of yours to keep running
 ([ADR-0015](../docs/adr/0015-el-wasm-del-usuario-es-una-funcion-puenteado-a-grpc.md),
 [ADR-0024](../docs/adr/0024-the-signature-is-the-catalog-in-rust-too.md)).
@@ -13,7 +13,7 @@ The Rust one is the exception: your steps compile to a WASM component that the
 |---|---|
 | [`python/`](python/) | The first one. You write a step as a function and drop it in a folder. |
 | [`rust/`](rust/) | The Rust SDK. You annotate a function with `#[step]` and compile to WASM; there is no server to run. |
-| [`wasm/`](wasm/) | The WASM bridge. Serves the components the Rust SDK produces; Anvil brings it up by itself. |
+| [`wasm/`](wasm/) | The WASM bridge. Serves any component that exports the `anvil:step` WIT world — today the Rust SDK is what writes them; Anvil brings it up by itself. |
 | [`csharp/`](csharp/) | The C# SDK. You mark a method with `[Step]`; the server is your own process, and the catalog is compiled from the signature. |
 | LabVIEW, MATLAB, … | Future ones. Each in its own subdirectory, with the same shape. |
 

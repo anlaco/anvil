@@ -13,7 +13,17 @@ why.
 
 ## For the end user
 
-Download the `anvil` binary and run:
+Download the package for your platform from the
+[release page](https://github.com/anlaco/anvil/releases/latest):
+`anvil-vX.Y.Z-x86_64-linux-musl.tar.gz` for Linux (statically linked, any
+libc) or `anvil-vX.Y.Z-x86_64-windows.zip` for Windows (static CRT, no
+Visual C++ redistributable). Both carry `anvil`, `anvil-exec-wasm` and the
+example sequences; on Windows the binaries end in `.exe` and the commands
+below are the same. To *write* sequences rather than only run them, the same
+page has the Sequence Editor as an AppImage, a `.deb` and a Windows
+installer.
+
+Then run:
 
 ```sh
 ./anvil <sequence.yaml> [--process-model <pm.yaml>] [--json <path>] \
@@ -40,8 +50,14 @@ Examples (the repo's own are in `ejemplos/` and `process_models/`):
 ./anvil ejemplos/demo_ejecutores.yaml --validate --with-executors
 ```
 
+A sequence file may end in `.yseq` as well as `.yaml` or `.yml`: it is the
+same YAML, with an extension that says what the file is for, and a
+`sequence_call` finds `child.yseq` without needing `./`
+([ADR-0039](adr/0039-a-sequence-file-may-end-in-yseq.md)).
+
 The console prints the textual report to **stdout** (diagnostics go to
-stderr, so they do not pollute it). `--json`/`--csv` dump to a file.
+stderr, so they do not pollute it — `anvil --version` included, for now:
+[#75](https://github.com/anlaco/anvil/issues/75)). `--json`/`--csv` dump to a file.
 `--process-model` wraps the sequence in a Sequential PM (RF-38, ADR-0016);
 `--validate` loads and validates without executing; `--quiet` silences the
 console. There are no dependencies to install.
@@ -62,6 +78,14 @@ console. There are no dependencies to install.
 > you decorate a function with `@step` and drop the file where `--steps`
 > points ([ADR-0021](adr/0021-el-ejecutor-describe-su-catalogo.md); the how,
 > in [`executors/python/README.md`](../executors/python/README.md)).
+>
+> **Writing your steps in C#**: mark a method with `[Step]` in your own
+> project, reference the SDK, and your executable listens on gRPC — the
+> catalog is compiled from the signatures
+> ([ADR-0038](adr/0038-the-csharp-step-sdk-is-hosted-by-the-users-own-process.md);
+> the how, in [`executors/csharp/README.md`](../executors/csharp/README.md),
+> with [`ejemplos/csharp.yaml`](../ejemplos/csharp.yaml) as the worked
+> example).
 
 ## For developers (build from source)
 
@@ -72,18 +96,14 @@ console. There are no dependencies to install.
 - No `wasmtime` needed: the host embeds it as a library. (The `wasmtime` CLI
   is only needed if you want to run the guests loose for debugging — see
   below.)
-- **The sibling repo [`wasi-grpc`](https://github.com/anlaco/wasi-grpc)
-  cloned next to** this one: `motor` and `ejecutor_pasos` reference it with
-  `path = "../wasi-grpc"` (dogfooding, see `Cargo.toml`). Without it cargo
-  **does not even read the workspace** — it fails before compiling anything,
-  with a `failed to load manifest for workspace member`. The expected layout
-  is:
-
-  ```
-  ..../
-    anvil/
-    wasi-grpc/
-  ```
+- Nothing else to clone. [`wasi-grpc`](https://github.com/anlaco/wasi-grpc),
+  the gRPC stack the guests use, is a git dependency pinned to a tag
+  (`Cargo.toml`, `wasi-grpc = { git = …, tag = "v0.1.1" }`); cargo fetches it.
+  To develop both at once against a local checkout, override it with a
+  `[patch."https://github.com/anlaco/wasi-grpc"]` section instead of editing
+  the dependency. (Older instructions asked for a sibling clone; that stopped
+  being true when the dependency moved to a tag, #25 — CI still carries the
+  leftover, #71.)
 
 ### Building
 
@@ -127,7 +147,7 @@ step-1 command.
 ### Tests (no network)
 
 ```sh
-make test                  # 369 core + 9 bridge + 26 host
+make test                  # core, bridge, host, the Python, Rust and C# step SDKs, the editor
 cargo test                 # core only: modelo, cargador, expr, motor, sinks
 cargo test -p motor        # sequence call with a mock (no gRPC)
 ```
@@ -362,9 +382,10 @@ install beyond the Rust toolchain.** Official reference: `ejemplos/hola-paso/`.
    the step's** ("I could not measure"). A step that blew up is never a failed
    unit (ADR-0019, Rule 2).
 
-   Prefer `Result` over `panic!` or `unwrap()`: a component compiled to WASM
-   aborts on a panic, and an aborted component takes the run with it — see
-   *Known limitations* below.
+   Prefer `Result` over `panic!` or `unwrap()`. A panic no longer takes the
+   run with it (#58), but the step comes back as `error` with a WebAssembly
+   backtrace for a message, where a `Result` says what actually went wrong —
+   see *Known limitations* below.
 
 4. Compile it to a component:
 
@@ -441,12 +462,13 @@ to nothing.
 
 ### Known limitations
 
-- **A `panic!` in a step cuts the run**
-  ([#58](https://github.com/anlaco/anvil/issues/58)). WASM aborts, the
-  component's instance is gone and the bridge does not reinstantiate it, so the
-  engine sees the stream close without an answer. Verified 2026-09-01. Return an
-  `Outcome::error` or a `Result` instead. (A `println!` used to do the same and
-  no longer does.)
+- **A `panic!` in a step ends the phase, not the run.** It used to cut the
+  whole run ([#58](https://github.com/anlaco/anvil/issues/58), fixed after
+  0.4.0). Run against 0.5.0 on 2026-09-13, a step that panics comes back as
+  `error` with the WebAssembly trap in its message, the rest of `main` is
+  skipped as after any error, and `cleanup` still runs. The message is a
+  twenty-line backtrace, though, so return an `Outcome::error` or a `Result`
+  that says why.
 - **No object references** (ADR-0022 §8): a component is a function with no
   state between calls, so it cannot hold an open instrument session. A step
   that needs one is served from a `grpc` executor of its own process, such as
@@ -458,36 +480,30 @@ and [ADR-0024](adr/0024-the-signature-is-the-catalog-in-rust-too.md).
 ## Continuous integration
 
 `.github/workflows/ci.yml` runs on every push to `main` and on every PR. Its
-`ci` job (Linux) does `make check` (fmt + clippy for the three workspaces),
-the core tests, `make release`, the host tests and the beta regression
+`ci` job (Linux) does `make check` (fmt + clippy for the Rust workspaces), the
+core tests, the Rust step SDK tests, the C# step SDK tests and
+`dotnet format`, `make release`, the host tests and the beta regression
 (informational while defects remain open). A second job, `ci-windows`,
 verifies the same build and the Sequence Editor on Windows — see below.
 
-The only non-obvious part is how CI gets the sibling repo. The workflow uses
-a **read-only deploy key** (the public one installed on `wasi-grpc` as
-"anvil CI", the private one in this repo's `WASI_GRPC_DEPLOY_KEY` secret),
-which was needed when `wasi-grpc` was private: the `GITHUB_TOKEN` GitHub
-gives each job only covers the repo itself.
+**A leftover worth knowing about.** Both jobs still check `wasi-grpc` out next
+to this repo with a read-only deploy key (`WASI_GRPC_DEPLOY_KEY`), from when
+the dependency was a relative path and the repository was private. Neither is
+true any more: `wasi-grpc` is public, and the workspace takes it by git tag,
+so cargo fetches it and the sibling checkout is not used at all — a `ref:` on
+that checkout changes nothing. Removing it is
+[#71](https://github.com/anlaco/anvil/issues/71).
 
-**`wasi-grpc` is public now**, so the key is redundant and a plain checkout
-would do. It stays because it works and removing it is touching CI for
-nothing; when it gets touched for another reason, it gets simplified.
-
-The job reproduces the sibling layout with two checkouts (`path: anvil` and
-`path: wasi-grpc`), because the dependency is by relative path.
-
-**To rotate it:**
-
-```sh
-ssh-keygen -t ed25519 -N "" -C "anvil CI" -f /tmp/k
-gh repo deploy-key add /tmp/k.pub --repo anlaco/wasi-grpc --title "anvil CI"
-gh secret set WASI_GRPC_DEPLOY_KEY --repo anlaco/anvil < /tmp/k
-gh repo deploy-key delete <old-id> --repo anlaco/wasi-grpc
-shred -u /tmp/k /tmp/k.pub
-```
-
-When `wasi-grpc` stabilizes and gets published, the dependency becomes a
-version and all of this goes away.
+**Releases** are built by `.github/workflows/release.yml`, each download on
+the platform it is for: the Linux engine (`packaging/package.sh`, musl), the
+Windows engine (`packaging/package.ps1`, static CRT) and the Sequence Editor
+as an AppImage, a `.deb` and an NSIS installer. Every engine package is
+smoke-run before upload. Pushing a `release/**` branch builds the artifacts
+only; running the workflow by hand with a version that matches the manifests
+creates a **draft** Release, with one `SHA256SUMS` and that version's
+CHANGELOG section as notes. Nothing publishes by itself: a person reads the
+draft and publishes it, which triggers `verifica-release.yml` — it downloads
+the Linux tarball and runs it in clean Debian and Alpine containers.
 
 **`ci-windows`** (ADR-0036) runs the same idea on `windows-latest`, compiled
 natively rather than cross-compiled — the runner already carries MSVC Build
@@ -503,16 +519,17 @@ regresses named defects already covered there).
 
 ## Troubleshooting
 
-- **`failed to load manifest for workspace member 'crates/ejecutor_pasos'`**
-  → the sibling repo `wasi-grpc` is missing next to this one (see
-  Prerequisites).
-- **`Falta el artifact '…'`** while building the host → `make build` (or
-  `make release`) from the root, which chains the three steps in order.
+- **`Missing artifact '…'`** while building the host → `make build` (or
+  `make release`) from the root, which chains the three steps in order. The
+  host's build script looks for the bridge both under
+  `executors/wasm/target/<profile>/` and under
+  `executors/wasm/target/<target-triple>/<profile>/`, so a `--target` build
+  of the bridge is found too.
 - **`no se pudo cargar la secuencia`** → the YAML path does not exist or is
-  not accessible (the host preopens the current directory). For the same
-  reason, `--json` and `--csv` can only write **inside the current
-  directory**: an absolute path elsewhere gives `No such file or directory
-  (os error 44)`.
+  not accessible. Absolute paths work — for the sequence, `--json` and
+  `--csv` — since #40 (checked against 0.5.0: a sequence and both reports
+  outside the current directory); an `os error 44` points at a directory
+  that does not exist.
 - **`usa 'resultado.valor_medido' en 'precondicion', donde no está
   disponible`** → `resultado.*` only lives inside the step's own `asigna`:
   a precondition is evaluated *before* invoking it, so there is no result to
@@ -526,13 +543,15 @@ regresses named defects already covered there).
   process, so you can launch N `anvil` in parallel. If you pin `--port`, that
   port serves the executor **and** the engine, so two processes with the same
   `--port` do collide — that is what you asked for.
-- **`no se encontró el ejecutor WASM en '…'`** → a sequence declares a
-  `type: wasm` executor and the bridge file is not next to the `anvil`
-  binary. `anvil` looks for `anvil-exec-wasm` beside itself (ADR-0023):
-  `make release` leaves it there, or copy it from
-  `executors/wasm/target/`. A copied `anvil` alone — without the bridge —
-  runs sequences without `type: wasm` executors and stops with this message
-  on the first one that declares one.
+- **`el ejecutor '…' es 'wasm' y su 'path' '…' no existe`** → a `type: wasm`
+  executor's `path:` names a file that is not there. `path` is **the
+  executor's binary** — a department's `anvil-exec-wasm` — relative to the
+  YAML file, not to where you launch `anvil` from (ADR-0027). The package
+  ships one assembled in `ejemplos/departamento/dist/`.
+- **`el ejecutor '…' declara 'path: ….wasm', que es un módulo '.wasm'`** →
+  `path` points at a module instead of at the executor. Point it at the
+  `anvil-exec-wasm` in the folder where the `.wasm` modules are; the executor
+  finds them beside itself.
 
 ## Next reading
 

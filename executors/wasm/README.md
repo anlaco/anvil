@@ -96,11 +96,14 @@ which the Python executor does serve: a component is a function with no state
 between calls, so it has nowhere to keep an open instrument session, and a
 reference that reaches the bridge is rejected with that as the reason.
 
-And one thing it gets wrong: a component that **traps** —a `panic!`, an
-`unwrap()` that fails— takes its instance with it, and the bridge does not
-reinstantiate, so the engine sees the stream close without an answer and the
-run is cut. Verified 2026-09-01, tracked as
-[#58](https://github.com/anlaco/anvil/issues/58).
+A component that **traps** —a `panic!`, an `unwrap()` that fails— no longer
+cuts the run ([#58](https://github.com/anlaco/anvil/issues/58), fixed after
+0.4.0). The step answers `error` naming the trap, and the trapped instance is
+dropped and reloaded lazily on the module's next call (`src/main.rs`,
+`ModuleSet::call`). Run against 0.5.0: a step that panics comes back as
+`error`, and the same module then answers the `cleanup` steps normally. The
+message is the WebAssembly backtrace, so a step should still return `error`
+itself and say why.
 
 There is no compatibility shim: the version lives in the package name and
 travels with the artifact — wasmtime refuses to instantiate a component that
@@ -137,7 +140,10 @@ serving the wrong module is worse than not starting.
 
 ## Reference
 
-Steps are written with the [Rust SDK](../rust/): `#[step]` on a function and
+The bridge serves **any** WebAssembly component that exports the
+`anvil:step@0.4.0` world in [`wit/`](wit/), whatever produced it — which
+language wrote it is opaque to it (ADR-0013). The authoring surface written on
+top of it today is the [Rust SDK](../rust/): `#[step]` on a function and
 `cargo build --target wasm32-wasip2`. The complete hello-world is
 [`ejemplos/hola-paso/`](../../ejemplos/hola-paso/), the official reference for
 the [quick-start guide](../../docs/guia-inicio-rapido.md#writing-your-own-step-in-rust-adr-0015-adr-0024).

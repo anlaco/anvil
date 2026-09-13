@@ -66,18 +66,16 @@ editor && npm install && npm run app`.
 Only needed if you are going to touch the code; to *use* Anvil, download the
 binary above.
 
-> **Before building: clone `wasi-grpc` next to this repo.** The gRPC stack is
-> referenced by relative path and is not published on crates.io yet, so
-> without it `cargo` **cannot even read the manifest**. The repo is public
-> and Apache-2.0: cloning it is all it takes.
->
-> ```sh
-> git clone https://github.com/anlaco/anvil
-> git clone https://github.com/anlaco/wasi-grpc   # sibling, not inside
-> cd anvil
-> ```
->
-> It is a stopgap and is acknowledged as such: [#25](https://github.com/anlaco/anvil/issues/25).
+A clone of this repository is all it takes. The gRPC stack,
+[`wasi-grpc`](https://github.com/anlaco/wasi-grpc), is a git dependency
+pinned to a tag, and cargo fetches it (#25). To build against a local
+checkout of it while working on both, use a `[patch]` section rather than
+editing the dependency.
+
+```sh
+git clone https://github.com/anlaco/anvil
+cd anvil
+```
 
 ```sh
 make release   # WASM guests → bridge → host, in that order
@@ -104,10 +102,10 @@ after `rustup target add x86_64-unknown-linux-musl`. On Windows the
 equivalent target is `x86_64-pc-windows-msvc`, built natively (no
 cross-compiling): a runner or machine with the MSVC Build Tools already
 resolves the same `zstd-sys` dependency, and `packaging/package.ps1` is the
-Windows sibling of `packaging/package.sh` (ADR-0036). The bridge must be
-copied to `executors/wasm/target/release/` before building the host: its
-`build.rs` looks for the artifacts there, and does not consider the
-target-triple subdirectory.
+Windows sibling of `packaging/package.sh` (ADR-0036). Both scripts build the
+bridge for their target triple, and the host's `build.rs` finds it there
+(#72). Releases are built by `.github/workflows/release.yml`, which runs each
+script on the platform it is for and drafts the Release.
 
 `make build` does the same in debug. Use it for development, but expect that
 binary to **start in tens of seconds**: wasmtime compiles the guests
@@ -146,9 +144,15 @@ packaging/
                    (its own workspace; the core drags no wasmtime)
 executors/
   python/          the Python executor: a downloadable module (ADR-0012)
+  rust/            the Rust step SDK: `#[step]` on a function, compiled to
+                   a WASM component (ADR-0024)
   wasm/            the WASM executor: the gRPC ↔ user's `.wasm` component
                    bridge (ADR-0015); its own workspace, shipped as a file
                    next to `anvil` (ADR-0023)
+  csharp/          the C# step SDK: `[Step]` on a method, served by the
+                   user's own process (ADR-0038)
+editor/            the Sequence Editor: a browser SPA, wrapped by Electron
+                   for download (ADR-0031, ADR-0037)
 ```
 
 The gRPC stack lives apart, in
@@ -180,8 +184,8 @@ meaning to:
 ## Verify
 
 ```sh
-make test               # 369 core tests + 9 bridge + 26 host + the Python executor's
-make check              # clippy for the three workspaces
+make test               # core, bridge, host, the Python, Rust and C# step SDKs, the editor
+make check              # fmt + clippy for the Rust workspaces, dotnet format for C#
 ```
 
 ## License
