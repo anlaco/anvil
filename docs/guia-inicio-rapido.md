@@ -526,10 +526,10 @@ regresses named defects already covered there).
   `executors/wasm/target/<target-triple>/<profile>/`, so a `--target` build
   of the bridge is found too.
 - **`no se pudo cargar la secuencia`** → the YAML path does not exist or is
-  not accessible (the host preopens the current directory). For the same
-  reason, `--json` and `--csv` can only write **inside the current
-  directory**: an absolute path elsewhere gives `No such file or directory
-  (os error 44)`.
+  not accessible. Absolute paths work — for the sequence, `--json` and
+  `--csv` — since #40 (checked against 0.5.0: a sequence and both reports
+  outside the current directory); an `os error 44` points at a directory
+  that does not exist.
 - **`usa 'resultado.valor_medido' en 'precondicion', donde no está
   disponible`** → `resultado.*` only lives inside the step's own `asigna`:
   a precondition is evaluated *before* invoking it, so there is no result to
