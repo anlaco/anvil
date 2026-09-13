@@ -68,6 +68,29 @@ test("the header comments survive an edit", async () => {
   assert.deepEqual(commentsAfter, commentsBefore, "no comment may be dropped or reworded");
 });
 
+// A sequence saved on Windows usually has CRLF line endings — git checks the
+// repo's own files out that way there, and so does a Windows editor. The
+// emitter writes `\n`, and re-emitting in LF turned a one-value change into a
+// diff of every line: 26 of 26 in `basica.yaml`, caught on windows-latest.
+// The CRLF copy is built here, so the test does not depend on how git happened
+// to check the fixture out.
+test("a CRLF file keeps its line endings, so an edit is still one line", async () => {
+  const original = (await basica()).replace(/\r\n/g, "\n").replace(/\n/g, "\r\n");
+  const doc = new SequenceDocument(original);
+
+  const index = doc.steps("main").findIndex((s) => s.name === "medir_voltaje");
+  doc.setStepLimit("main", index, "max", 6.5);
+
+  const changed = changedLines(original, doc.text);
+  assert.equal(changed.length, 1, `expected exactly one changed line, got ${changed.length}`);
+  assert.equal(doc.text.replace(/\r\n/g, "").includes("\n"), false, "no bare LF may be introduced");
+  assert.equal(
+    /\r\n$/.test(doc.text),
+    /\r\n$/.test(original),
+    "the trailing line break stays as the file had it",
+  );
+});
+
 test("the step view reads the loader's vocabulary", async () => {
   const doc = new SequenceDocument(await basica());
 

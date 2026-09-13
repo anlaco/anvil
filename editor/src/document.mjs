@@ -328,10 +328,17 @@ export class SequenceDocument {
   // would append a line nobody asked to change, in a file reviewed as a diff.
   // Whether a file should end in a newline is not this editor's opinion to
   // impose on someone else's file.
+  //
+  // Nor which line break it uses. The emitter writes `\n`; a file saved on
+  // Windows is CRLF, and re-emitting it in LF made a one-value edit a diff of
+  // every line. The file's first line break decides, and the whole text is
+  // written back with it.
   #reemit() {
-    const emitted = String(this.#doc);
+    const crlf = /^[^\n]*\r\n/.test(this.#text);
     const hadNewline = /\n$/.test(this.#text);
-    this.#text = hadNewline ? emitted : emitted.replace(/\n$/, "");
+    let emitted = String(this.#doc).replace(/\r\n/g, "\n");
+    if (!hadNewline) emitted = emitted.replace(/\n$/, "");
+    this.#text = crlf ? emitted.replace(/\n/g, "\r\n") : emitted;
     this.#stale = false;
     this.#error = null;
   }
