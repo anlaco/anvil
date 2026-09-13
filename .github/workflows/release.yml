@@ -1,0 +1,216 @@
+# Builds a release's downloads on the platform each one is for, and puts them
+# in a **draft** Release for a person to read and publish. Nothing here
+# publishes: `verifica-release.yml` runs on publish and checks the Linux
+# tarball in clean containers, so the order is build → draft → look → publish.
+#
+# What is built:
+#   - Linux   the engine, statically linked against musl  (packaging/package.sh)
+#   - Windows the engine, static CRT                      (packaging/package.ps1)
+#   - Windows the Sequence Editor installer, NSIS         (editor/, ADR-0037)
+#
+# The Windows pieces are built on windows-latest because package.ps1 compiles
+# natively for x86_64-pc-windows-msvc; nothing is cross-compiled.
+#
+# Two ways in:
+#   - pushing a `release/**` branch builds the artifacts and stops, so the
+#     packaging is exercised before anything reaches main;
+#   - running it by hand with a version builds them and creates the draft.
+name: Release
+
+on:
+  push:
+    branches: ["release/**"]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version, without the v (e.g. 0.5.0). Must match the manifests."
+        required: true
+      draft:
+        description: "Create the draft Release (unticked: build the artifacts only)"
+        type: boolean
+        default: true
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  linux:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      # One version for every artifact, taken from the host's manifest — the
+      # number `anvil --version` prints. A hand-run version that disagrees with
+      # it stops here rather than shipping a file whose name lies about it.
+      - name: Version
+        env:
+          INPUT: ${{ inputs.version }}
+        run: |
+          MANIFEST=$(grep -m1 '^version' packaging/anvil-host/Cargo.toml | cut -d'"' -f2)
+          if [ -n "$INPUT" ] && [ "$INPUT" != "$MANIFEST" ]; then
+            echo "::error::version $INPUT asked for, but the manifests say $MANIFEST"
+            exit 1
+          fi
+          echo "VERSION=$MANIFEST" >> "$GITHUB_ENV"
+
+      - name: Toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-wasip2, x86_64-unknown-linux-musl
+
+      - name: musl linker
+        run: sudo apt-get update && sudo apt-get install -y musl-tools
+
+      - name: Cargo cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            .
+            packaging/anvil-host
+            executors/wasm
+            ejemplos/hola-paso
+            ejemplos/departamento
+
+      - name: Package the engine
+        run: ./packaging/package.sh "$VERSION"
+
+      # The package must run what it says it runs before it is uploaded:
+      # the binary answers its version and loads a sequence.
+      - name: "Smoke: the packaged anvil"
+        run: |
+          D="dist/anvil-v$VERSION-x86_64-linux-musl"
+          "$D/anvil" --version | grep -F "$VERSION"
+          "$D/anvil" --validate "$D/ejemplos/basica.yaml"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux
+          path: dist/anvil-v${{ env.VERSION }}-x86_64-linux-musl.tar.gz
+          if-no-files-found: error
+
+  windows:
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Version
+        env:
+          INPUT: ${{ inputs.version }}
+        run: |
+          MANIFEST=$(grep -m1 '^version' packaging/anvil-host/Cargo.toml | cut -d'"' -f2)
+          if [ -n "$INPUT" ] && [ "$INPUT" != "$MANIFEST" ]; then
+            echo "::error::version $INPUT asked for, but the manifests say $MANIFEST"
+            exit 1
+          fi
+          echo "VERSION=$MANIFEST" >> "$GITHUB_ENV"
+
+      - name: Toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-wasip2, x86_64-pc-windows-msvc
+
+      - name: Cargo cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            .
+            packaging/anvil-host
+            executors/wasm
+            ejemplos/hola-paso
+            ejemplos/departamento
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Package the engine
+        shell: pwsh
+        run: ./packaging/package.ps1 $env:VERSION
+
+      - name: "Smoke: the packaged anvil.exe"
+        run: |
+          D="dist/anvil-v$VERSION-x86_64-windows"
+          "$D/anvil.exe" --version | grep -F "$VERSION"
+          "$D/anvil.exe" --validate "$D/ejemplos/basica.yaml"
+
+      # The editor embeds the engine guest transpiled to JavaScript, and
+      # `generated/` is not committed: it is transpiled here from the release
+      # guest package.ps1 has just built, so both downloads carry one engine
+      # (ADR-0031). The installer's version comes from the same manifest —
+      # editor/package.json stays at 0.0.0 and is not the source of truth.
+      - name: Build the Sequence Editor installer
+        working-directory: editor
+        run: |
+          npm ci
+          npm run transpile
+          npm run app:build -- --win nsis -c.extraMetadata.version="$VERSION"
+          ls ../dist-app
+
+      # electron-builder names it after the product, spaces included; the
+      # release names every download the same way.
+      - name: Name the installer like the other downloads
+        run: |
+          SRC=$(ls dist-app/*Setup*"$VERSION"*.exe | head -1)
+          test -n "$SRC"
+          mkdir -p upload
+          cp dist/anvil-v$VERSION-x86_64-windows.zip upload/
+          cp "$SRC" "upload/anvil-editor-v$VERSION-x86_64-windows-setup.exe"
+          ls -l upload
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows
+          path: upload/*
+          if-no-files-found: error
+
+  draft:
+    needs: [linux, windows]
+    if: github.event_name == 'workflow_dispatch' && inputs.draft
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      VERSION: ${{ inputs.version }}
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: assets
+          merge-multiple: true
+
+      # One SHA256SUMS for every download. verifica-release.yml checks it with
+      # only the tarball downloaded, which is why it uses --ignore-missing.
+      - name: SHA256SUMS
+        working-directory: assets
+        run: |
+          sha256sum * > SHA256SUMS
+          cat SHA256SUMS
+
+      # The notes are this version's CHANGELOG section, so what the Release
+      # page says and what the repo records cannot drift.
+      - name: Notes from the CHANGELOG
+        run: |
+          awk -v v="$VERSION" '
+            $0 ~ "^## \\[" v "\\]" { on = 1; next }
+            on && /^## \[/ { exit }
+            on { print }
+          ' CHANGELOG.md > notes.md
+          test -s notes.md || { echo "::error::no '## [$VERSION]' section in CHANGELOG.md"; exit 1; }
+
+      - name: Create the draft
+        run: |
+          if gh release view "v$VERSION" >/dev/null 2>&1; then
+            echo "::error::a release v$VERSION already exists"
+            exit 1
+          fi
+          gh release create "v$VERSION" \
+            --draft \
+            --target "$GITHUB_SHA" \
+            --title "v$VERSION" \
+            --notes-file notes.md \
+            assets/*
