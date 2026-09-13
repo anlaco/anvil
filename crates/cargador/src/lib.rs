@@ -1301,7 +1301,11 @@ pub fn normalizar_path(base: &Path, rel: &Path) -> PathBuf {
                 out.pop();
             }
             std::path::Component::Normal(p) => out.push(p),
-            std::path::Component::RootDir => out = PathBuf::from("/"),
+            // Pushed, not assigned: on Windows an absolute path is
+            // `Prefix("C:")` then `RootDir`, and assigning "/" here dropped the
+            // drive — the same file then got two keys and a cycle through it
+            // went unseen. `push` of a root keeps the prefix already in `out`.
+            std::path::Component::RootDir => out.push(comp.as_os_str()),
             std::path::Component::Prefix(p) => out = PathBuf::from(p.as_os_str()),
         }
     }
