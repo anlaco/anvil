@@ -4598,7 +4598,27 @@ cleanup:
             dir.join("usuario.yaml").to_str().unwrap(),
         )
         .unwrap_err();
-        assert!(matches!(err, ErrorCarga::Validacion(ref m) if m.contains("ciclo")));
+        assert!(
+            matches!(err, ErrorCarga::Validacion(ref m) if m.contains("ciclo")),
+            "expected a cycle error, got: {err:?}"
+        );
+    }
+
+    /// On Windows an absolute path arrives as `Prefix("C:")` followed by
+    /// `RootDir`, and the canonical key must keep the drive: the PM is keyed
+    /// from its absolute path while `./pm.yaml` is resolved against a
+    /// directory that carries it, and the two have to be the same string or
+    /// a cycle through them is never seen.
+    #[cfg(windows)]
+    #[test]
+    fn an_absolute_windows_path_keeps_its_drive() {
+        let key = normalizar_path(Path::new(r"C:\seq"), Path::new(r"C:\seq\pm.yaml"));
+        assert_eq!(key, PathBuf::from(r"C:\seq\pm.yaml"));
+        assert_eq!(
+            normalizar_path(Path::new(r"C:\seq"), Path::new(r".\pm.yaml")),
+            key,
+            "the same file, reached relatively, must get the same key"
+        );
     }
 
     #[test]
