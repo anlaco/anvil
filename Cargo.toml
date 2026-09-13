@@ -51,4 +51,6 @@ getrandom = "0.3"
 # `wasi-grpc` is a separate, public project (github.com/anlaco/wasi-grpc).
 # Referenced by git tag so a lone clone of this repo can build (#25) — no
 # sibling checkout required.
-wasi-grpc = { git = "https://github.com/anlaco/wasi-grpc", tag = "v0.1.0" }
+# TEMPORARY: v0.1.0 plus only the readiness fix, to verify it on Windows.
+# Back to a tag before merge.
+wasi-grpc = { git = "https://github.com/anlaco/wasi-grpc", branch = "fix/spurious-readiness-on-v0.1.0" }
