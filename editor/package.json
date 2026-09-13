@@ -5,6 +5,11 @@
   "type": "module",
   "description": "Graphical sequence editor for Anvil. Runs the engine guest in a plain browser, or wrapped by Electron for download (ADR-0037).",
   "license": "AGPL-3.0-or-later",
+  "homepage": "https://github.com/anlaco/anvil",
+  "author": {
+    "name": "ANLACO",
+    "email": "anlaco@proton.me"
+  },
   "scripts": {
     "transpile": "node scripts/transpile.mjs",
     "test": "node --test 'test/*.test.mjs'",
@@ -45,12 +50,18 @@
         "AppImage",
         "deb"
       ],
-      "category": "Development"
+      "category": "Development",
+      "executableName": "anvil-editor",
+      "maintainer": "ANLACO <anlaco@proton.me>"
     },
     "win": {
       "target": [
         "nsis"
       ]
+    },
+    "deb": {
+      "packageName": "anvil-editor",
+      "artifactName": "anvil-editor_${version}_${arch}.${ext}"
     }
   }
 }
