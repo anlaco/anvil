@@ -88,8 +88,20 @@ fn main() {
     // --- in development exactly as it does in the release tarball (ADR-0023).
     // --- `main.rs` looks it up there at spawn time and fails with a named
     // --- path if it is missing.
+    //
+    // On Windows cargo leaves the bridge as `anvil-exec-wasm.exe`, and looking
+    // for the bare name failed on a `windows-latest` runner with the bridge
+    // built one step earlier. The target the host is built for decides it —
+    // `CARGO_CFG_TARGET_OS`, not `cfg!(windows)`, which would describe the
+    // machine running this script.
+    let exe = if env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("windows") {
+        ".exe"
+    } else {
+        ""
+    };
+    let bridge = format!("anvil-exec-wasm{exe}");
     let (name, dir, command) = (
-        "anvil-exec-wasm",
+        bridge.as_str(),
         "executors/wasm/",
         "cargo build --manifest-path executors/wasm/Cargo.toml",
     );
