@@ -104,8 +104,9 @@ The distinction that matters most is between the two reds:
 
 A step that blew up is never a failed unit
 ([ADR-0019](../../docs/adr/0019-que-hace-anvil-cuando-no-puede-juzgar.md),
-Rule 2). Prefer `?` and `Result` over `panic!` and `unwrap()` — see the
-limitations below.
+Rule 2). Prefer `?` and `Result` over `panic!` and `unwrap()`: a panic no
+longer cuts the run, but the step then reports a WebAssembly backtrace instead
+of a reason.
 
 ### Testing your steps
 
@@ -120,10 +121,12 @@ needs neither WASM nor Anvil.
   open instrument session. A step that needs one is served from a `grpc`
   executor of its own process, such as the Python one.
 - **Executor options** (`--option key=value`): they are not in the WIT.
-- **`panic!` as an error path.** WASM aborts, the instance is gone and the
-  bridge does not reinstantiate it, so the run is cut
-  ([#58](https://github.com/anlaco/anvil/issues/58)). Verified 2026-09-01.
-  Return an `Outcome::error` or a `Result`.
+- **`panic!` as an error path** works, but badly. Since the fix for
+  [#58](https://github.com/anlaco/anvil/issues/58) the step comes back as
+  `error` and the bridge reloads the module for its next call, so the run is
+  no longer cut (checked against 0.5.0, 2026-09-13). What reaches the report
+  is the trap's backtrace, not a reason: return an `Outcome::error` or a
+  `Result` that says what went wrong.
 
 ## Layout
 
