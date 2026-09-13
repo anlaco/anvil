@@ -18,8 +18,9 @@
 # hence the `--manifest-path` calls.
 #
 # These recipes are POSIX-portable and also run on Windows under Git Bash
-# (ADR-0036, `.github/workflows/ci.yml`'s `ci-windows` job) — no separate
-# Windows recipes exist.
+# (ADR-0036), which `.github/workflows/ci.yml`'s `ci-windows` job exercises —
+# no separate Windows recipes exist. The one platform difference they carry
+# is `EXE`, below.
 
 HOST    := packaging/anvil-host/Cargo.toml
 BRIDGE  := executors/wasm/Cargo.toml
