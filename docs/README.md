@@ -18,6 +18,10 @@ writing them in any language.
 
 ## To start right away
 
+**[The Anvil Book](book/README.md)** — learn to use Anvil from nothing: install
+it, write steps in C#, write and run sequences, read the reports. Every command
+in it is checked against the release it names.
+
 **[guia-inicio-rapido.md](guia-inicio-rapido.md)** — download or build Anvil,
 run a sequence, and write your own step. For the steps themselves, by
 language: [Python](../executors/python/README.md),
@@ -43,6 +47,7 @@ The rest goes deeper by area. If a term is not clear, it is in the
 ```
 docs/
 ├─ README.md                  this index
+├─ book/                      The Anvil Book: learning to use Anvil, checked by check.sh
 ├─ glosario.md                domain vocabulary (TestStand + Anvil)
 ├─ vision.md                   vision, value proposition, competition, MVP scope
 ├─ requisitos.md              functional and non-functional requirements (light SRS)

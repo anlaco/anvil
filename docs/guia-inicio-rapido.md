@@ -13,6 +13,9 @@ why.
 
 ## For the end user
 
+To learn Anvil step by step rather than look up a command, follow
+[The Anvil Book](book/README.md).
+
 Download the package for your platform from the
 [release page](https://github.com/anlaco/anvil/releases/latest):
 `anvil-vX.Y.Z-x86_64-linux-musl.tar.gz` for Linux (statically linked, any

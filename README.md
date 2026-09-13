@@ -15,6 +15,9 @@ The product documentation (vision, requirements, architecture, ADRs, domain
 design, licensing and roadmap) lives in [`docs/`](docs/README.md). Start at
 [`docs/vision.md`](docs/vision.md).
 
+To learn to *use* Anvil from nothing — install it, write steps in C#, write and
+run sequences, read the reports — follow [The Anvil Book](docs/book/README.md).
+
 ## Run the example
 
 **One binary** (`anvil`, ADR-0011) hosts wasmtime and the two WASM guests in
