@@ -12,8 +12,9 @@ import { readFile } from "node:fs/promises";
 import { createInterface } from "node:readline";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { app, BrowserWindow, dialog, ipcMain, protocol, shell } from "electron";
+import { app, BrowserWindow, dialog, ipcMain, Menu, protocol, shell } from "electron";
 import { writeFile } from "node:fs/promises";
+import updater from "electron-updater";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const REPO = path.resolve(HERE, "../..");
@@ -154,7 +155,7 @@ async function startBridge(sequencePath) {
 // ---------------------------------------------------------------- the IPC
 
 // Everything the page can reach, and nothing else (ADR-0037 §c). The
-// renderer has no Node: these five handlers are the whole surface, which is
+// renderer has no Node: these handlers are the whole surface, which is
 // what `editor/src-tauri/capabilities/default.json` used to enumerate.
 function wireIpc() {
   ipcMain.handle("anvil:open-dialog", async (event) => {
@@ -186,6 +187,139 @@ function wireIpc() {
   );
   ipcMain.handle("anvil:write-text", (_event, file, text) => writeFile(file, text, "utf8"));
   ipcMain.handle("anvil:start-bridge", (_event, sequencePath) => startBridge(sequencePath));
+  ipcMain.handle("anvil:stop-bridge", () => killBridge());
+  ipcMain.on("anvil:work-state", (_event, state) => {
+    work = { running: Boolean(state?.running), dirty: Boolean(state?.dirty) };
+    offerRestart();
+  });
+}
+
+// ------------------------------------------------------------ the updates
+
+/** What the page says it is in the middle of; `offerRestart` reads it. */
+let work = { running: false, dirty: false };
+/** The version downloaded and waiting for a restart, if any. */
+let downloaded = null;
+/** Whether the restart question is on screen or was already answered. */
+let asked = false;
+
+// Updates come from the published GitHub Releases — never a draft, so a
+// release under review reaches nobody — and download on their own. Installing
+// is the part that is never done behind anyone's back: this app drives
+// equipment, and a restart in the middle of a run leaves a bench wherever the
+// run had it, with no `cleanup`. So the question waits until nothing is
+// running, and "Later" installs when the editor is next closed.
+//
+// Only the NSIS installer and the AppImage update themselves. A `.deb` belongs
+// to the system's package manager, and a dev tree to git.
+function startUpdates() {
+  const updatable = process.platform === "win32" || Boolean(process.env.APPIMAGE);
+  if (!app.isPackaged || !updatable) return;
+
+  const { autoUpdater } = updater;
+  autoUpdater.autoDownload = true;
+  autoUpdater.autoInstallOnAppQuit = true;
+  // Its own trail on this process's stdout, like the renderer's (ADR-0037 §e).
+  autoUpdater.logger = { info: log, warn: log, error: log, debug: () => {} };
+
+  // Where to look instead of the Release page. It is how the whole path —
+  // check, download, install over the running copy — gets exercised against
+  // a local server without publishing anything.
+  if (process.env.ANVIL_EDITOR_UPDATE_URL) {
+    autoUpdater.setFeedURL({ provider: "generic", url: process.env.ANVIL_EDITOR_UPDATE_URL });
+  }
+
+  autoUpdater.on("update-downloaded", (info) => {
+    downloaded = info.version;
+    offerRestart();
+  });
+  // No network, or GitHub down, is not something to interrupt anyone for: the
+  // editor works exactly as it did, and the next start tries again.
+  autoUpdater.on("error", (e) => log(`update check failed: ${e?.message ?? e}`));
+  autoUpdater.checkForUpdates().catch(() => {});
+}
+
+function log(message) {
+  console.log(`[updater] ${message}`);
+}
+
+async function offerRestart() {
+  if (!downloaded || asked || work.running) return;
+  const window = BrowserWindow.getAllWindows()[0];
+  if (!window) return;
+  asked = true;
+  log(`${downloaded} downloaded; asking whether to restart now`);
+
+  const { response } = await dialog.showMessageBox(window, {
+    type: "info",
+    title: "Update ready",
+    message: `Anvil Sequence Editor ${downloaded} is ready to install.`,
+    detail: work.dirty
+      ? "Restarting now discards the changes you have not saved. Later installs it when you close the editor."
+      : "Restart now to use it, or Later to install it when you close the editor.",
+    buttons: ["Restart now", "Later"],
+    defaultId: work.dirty ? 1 : 0,
+    cancelId: 1,
+  });
+  // A run may have started while the question was on screen.
+  if (response === 0 && !work.running) {
+    killBridge();
+    updater.autoUpdater.quitAndInstall();
+  }
+}
+
+// --------------------------------------------------------------- the menu
+
+// The native menu bar, and the only one inside the shell: the page's own
+// File/View menus exist for a plain browser, which has no menu of its own to
+// put them in, and `app.mjs` hides them when `window.anvil` is there. Two bars
+// saying the same thing was how it looked on Windows before this.
+//
+// Each item only names an action; what the action does stays in `app.mjs`,
+// next to the page's own menus, so the two cannot come to mean different
+// things.
+function buildMenu() {
+  const send = (action) => (_item, window) => window?.webContents.send("anvil:menu", action);
+  const item = (label, action, accelerator) => ({ label, accelerator, click: send(action) });
+
+  Menu.setApplicationMenu(
+    Menu.buildFromTemplate([
+      ...(process.platform === "darwin" ? [{ role: "appMenu" }] : []),
+      {
+        label: "&File",
+        submenu: [
+          item("&New", "new", "CmdOrCtrl+N"),
+          item("&Open…", "open", "CmdOrCtrl+O"),
+          { type: "separator" },
+          item("&Save", "save", "CmdOrCtrl+S"),
+          item("Save &As…", "save-as", "CmdOrCtrl+Shift+S"),
+          { type: "separator" },
+          process.platform === "darwin" ? { role: "close" } : { role: "quit" },
+        ],
+      },
+      // Undo, cut, copy and paste in the text view and in every field of the
+      // step settings: without the role, those shortcuts stop working on
+      // Windows and Linux the moment a custom menu replaces the default one.
+      { role: "editMenu" },
+      {
+        label: "&View",
+        submenu: [
+          item("S&teps", "view-steps"),
+          item("Te&xt", "view-text"),
+          { type: "separator" },
+          { role: "reload" },
+          { role: "toggleDevTools" },
+          { type: "separator" },
+          { role: "resetZoom" },
+          { role: "zoomIn" },
+          { role: "zoomOut" },
+          { type: "separator" },
+          { role: "togglefullscreen" },
+        ],
+      },
+      { role: "windowMenu" },
+    ]),
+  );
 }
 
 // -------------------------------------------------------------- the window
@@ -257,7 +391,9 @@ if (process.env.ANVIL_EDITOR_DEBUG_PORT) {
 app.whenReady().then(() => {
   if (!isDev) serveDist();
   wireIpc();
+  buildMenu();
   createWindow();
+  startUpdates();
   app.on("activate", () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
   });

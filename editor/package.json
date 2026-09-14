@@ -23,6 +23,7 @@
     "@bytecodealliance/preview2-shim": "^0.23.0",
     "@codemirror/lang-yaml": "^6.1.3",
     "codemirror": "^6.0.2",
+    "electron-updater": "^6.8.9",
     "yaml": "^2.9.0"
   },
   "devDependencies": {
@@ -45,6 +46,14 @@
       "dist/**/*",
       "package.json"
     ],
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "anlaco",
+        "repo": "anvil",
+        "releaseType": "release"
+      }
+    ],
     "linux": {
       "target": [
         "AppImage",
@@ -62,6 +71,12 @@
     "deb": {
       "packageName": "anvil-editor",
       "artifactName": "anvil-editor_${version}_${arch}.${ext}"
+    },
+    "nsis": {
+      "artifactName": "anvil-editor-v${version}-x86_64-windows-setup.${ext}"
+    },
+    "appImage": {
+      "artifactName": "anvil-editor-v${version}-x86_64-linux.${ext}"
     }
   }
 }

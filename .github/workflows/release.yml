@@ -9,6 +9,10 @@
 #   - Linux   the Sequence Editor, AppImage and .deb      (editor/, ADR-0037)
 #   - Windows the Sequence Editor installer, NSIS         (editor/, ADR-0037)
 #
+# The editor's `latest.yml` (Windows) and `latest-linux.yml` (AppImage) go up
+# with them: an installed editor reads them from the latest *published*
+# Release to update itself, so publishing the draft is what ships an update.
+#
 # The Windows pieces are built on windows-latest because package.ps1 compiles
 # natively for x86_64-pc-windows-msvc; nothing is cross-compiled.
 #
@@ -98,17 +102,33 @@ jobs:
         run: |
           npm ci
           npm run transpile
-          npm run app:build -- --linux AppImage deb -c.extraMetadata.version="$VERSION"
+          npm run app:build -- --linux AppImage deb --publish never -c.extraMetadata.version="$VERSION"
           ls ../dist-app
 
+      # ADR-0031 on what actually ships: the engine modules packed into the
+      # editor must be, byte for byte, inside the anvil in the tarball. The
+      # AppImage and the .deb are both packed from linux-unpacked/.
+      - name: "Check: the editor and anvil carry the same engine"
+        working-directory: editor
+        run: |
+          node scripts/same-engine.mjs \
+            ../dist-app/linux-unpacked/resources/app.asar \
+            "../dist/anvil-v$VERSION-x86_64-linux-musl/anvil"
+
+      # The AppImage already carries its download name (`appImage.artifactName`
+      # in editor/package.json), and it has to: `latest-linux.yml` is what an
+      # installed editor reads to update itself, and it names the file it was
+      # written for. Renaming the AppImage here would publish an update that is
+      # announced and then fails to download.
       - name: Name the downloads
         run: |
           mkdir -p upload
           cp "dist/anvil-v$VERSION-x86_64-linux-musl.tar.gz" upload/
-          APPIMAGE=$(ls dist-app/*"$VERSION"*.AppImage | head -1)
+          APPIMAGE="dist-app/anvil-editor-v$VERSION-x86_64-linux.AppImage"
           DEB=$(ls dist-app/*"$VERSION"*.deb | head -1)
-          test -n "$APPIMAGE" && test -n "$DEB"
-          cp "$APPIMAGE" "upload/anvil-editor-v$VERSION-x86_64-linux.AppImage"
+          test -f "$APPIMAGE" && test -n "$DEB" && test -f dist-app/latest-linux.yml
+          grep -F "anvil-editor-v$VERSION-x86_64-linux.AppImage" dist-app/latest-linux.yml
+          cp "$APPIMAGE" dist-app/latest-linux.yml upload/
           cp "$DEB" "upload/anvil-editor-v$VERSION-amd64.deb"
           ls -l upload
 
@@ -177,18 +197,30 @@ jobs:
         run: |
           npm ci
           npm run transpile
-          npm run app:build -- --win nsis -c.extraMetadata.version="$VERSION"
+          npm run app:build -- --win nsis --publish never -c.extraMetadata.version="$VERSION"
           ls ../dist-app
 
-      # electron-builder names it after the product, spaces included; the
-      # release names every download the same way.
-      - name: Name the installer like the other downloads
+      # ADR-0031 on what actually ships; the installer is packed from
+      # win-unpacked/.
+      - name: "Check: the editor and anvil.exe carry the same engine"
+        working-directory: editor
         run: |
-          SRC=$(ls dist-app/*Setup*"$VERSION"*.exe | head -1)
-          test -n "$SRC"
+          node scripts/same-engine.mjs \
+            ../dist-app/win-unpacked/resources/app.asar \
+            "../dist/anvil-v$VERSION-x86_64-windows/anvil.exe"
+
+      # Named at build time (`nsis.artifactName` in editor/package.json), not
+      # here, for the same reason as the AppImage: `latest.yml` names the
+      # installer an installed editor downloads to update itself. The blockmap
+      # lets that download fetch only what changed.
+      - name: Collect the installer and its update metadata
+        run: |
+          SETUP="dist-app/anvil-editor-v$VERSION-x86_64-windows-setup.exe"
+          test -f "$SETUP" && test -f "$SETUP.blockmap" && test -f dist-app/latest.yml
+          grep -F "anvil-editor-v$VERSION-x86_64-windows-setup.exe" dist-app/latest.yml
           mkdir -p upload
           cp dist/anvil-v$VERSION-x86_64-windows.zip upload/
-          cp "$SRC" "upload/anvil-editor-v$VERSION-x86_64-windows-setup.exe"
+          cp "$SETUP" "$SETUP.blockmap" dist-app/latest.yml upload/
           ls -l upload
 
       - uses: actions/upload-artifact@v4

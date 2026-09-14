@@ -2,7 +2,7 @@
 //
 // CommonJS on purpose: a sandboxed preload has no ESM loader, and the
 // sandbox is the point — the renderer gets no Node, no `require`, no
-// filesystem and no child processes, only the five calls below, each of
+// filesystem and no child processes, only the calls below, each of
 // which is a message to a handler in `main.mjs` that this repo wrote and can
 // enumerate. This is what replaced `src-tauri/capabilities/default.json`.
 //
@@ -22,4 +22,16 @@ contextBridge.exposeInMainWorld("anvil", {
   writeTextFile: (path, text) => ipcRenderer.invoke("anvil:write-text", path, text),
   /** Starts `anvil <path> --bridge`; resolves to the `ws://` URL it prints. */
   startBridge: (path) => ipcRenderer.invoke("anvil:start-bridge", path),
+  /** Stops the bridge `startBridge` started, if there is one. */
+  stopBridge: () => ipcRenderer.invoke("anvil:stop-bridge"),
+  /**
+   * Calls `listener(action)` for each item picked from the native menu. The
+   * action is the same name the page's own menus carry in `data-action`.
+   */
+  onMenu: (listener) => ipcRenderer.on("anvil:menu", (_event, action) => listener(action)),
+  /**
+   * Tells the shell whether a run is in flight and whether there are unsaved
+   * changes, so an update never offers to restart on top of either.
+   */
+  setWorkState: (state) => ipcRenderer.send("anvil:work-state", state),
 });

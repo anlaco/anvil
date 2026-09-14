@@ -264,7 +264,7 @@ jobs:
 
       - name: Build the Electron installer
         working-directory: anvil/editor
-        run: npm run app:build -- --win nsis
+        run: npm run app:build -- --win nsis --publish never
 
       # No display on this runner, so this cannot click anything real — the
       # bar here is "the packaged shell starts and does not crash", which is

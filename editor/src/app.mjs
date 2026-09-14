@@ -56,6 +56,7 @@ const ui = {
   statusLight: el("status-light"),
   statusText: el("status-text"),
   run: el("run"),
+  menus: document.querySelector(".menus"),
 };
 
 const state = {
@@ -495,9 +496,17 @@ function setView(view) {
   if (!steps) renderText();
 }
 
+// The shell holds a downloaded update back while either is true
+// (`offerRestart` in electron/main.mjs): restarting under a run leaves the
+// bench wherever it was, and restarting over unsaved changes loses them.
+function reportWork() {
+  window.anvil?.setWorkState({ running: state.runInFlight, dirty: state.dirty });
+}
+
 function renderAll({ skipText = false } = {}) {
+  reportWork();
   ui.panes.dataset.stale = String(state.doc?.stale ?? false);
-  ui.filename.textContent = state.filename ?? "no file";
+  ui.filename.textContent = state.filename ?? (state.doc ? NEW_SEQUENCE_NAME : "no file");
   ui.filename.dataset.dirty = String(state.dirty);
   const boton = runButton({
     hasDoc: !!state.doc,
@@ -594,6 +603,7 @@ async function run() {
   const name = state.filename ?? NEW_SEQUENCE_NAME;
   status("busy", `running ${name}…`);
   state.runInFlight = true;
+  reportWork();
   state.run = newRunState();
   ui.run.disabled = true;
   renderSequence();
@@ -657,10 +667,13 @@ async function run() {
  * next click, worded as if the sequence were at fault.
  */
 function bridgeLost(reason) {
+  const expected = state.bridge === null;
   state.bridge = null;
   // Not while a run is on screen: that run's own outcome is the more useful
-  // thing to be looking at, and `run()` reports the failure itself.
-  if (!state.runInFlight) status("error", `${reason} — Run is no longer available`);
+  // thing to be looking at, and `run()` reports the failure itself. Nor when
+  // the editor stopped the bridge itself (`newFile`): that is not news, and
+  // it would land on top of what the engine says about the new document.
+  if (!state.runInFlight && !expected) status("error", `${reason} — Run is no longer available`);
   renderAll();
 }
 
@@ -699,6 +712,13 @@ const PICKER = {
 // What a document with no filename yet is offered as. A file that already has
 // a name keeps it (ADR-0039 §3).
 const NEW_SEQUENCE_NAME = "sequence.yseq";
+
+// What File ▸ New starts from: the least the loader reads as a sequence. It is
+// not a valid one yet — `main` may not be empty
+// (crates/cargador/src/lib.rs:2138) — and that is left for the engine to say
+// in the status bar rather than papered over with a placeholder step nobody
+// asked for: the first step inserted from the palette makes it valid.
+const NEW_SEQUENCE_TEXT = "name: sequence\nmain: []\n";
 
 // `window.anvil` is injected by the shell's preload
 // (`editor/electron/preload.cjs`) and exists whether or not the File System
@@ -778,6 +798,24 @@ async function openFile() {
   input.click();
 }
 
+async function newFile() {
+  // Stopping the bridge under a run would leave the bench wherever the run
+  // had it, with no `cleanup` (engine-pool.mjs, `terminateAll`).
+  if (state.runInFlight) {
+    status("error", "a run is in flight — wait for it to finish before starting a new sequence");
+    return;
+  }
+  // The bridge was started for the file that was open: its executors and its
+  // network allowance are that file's (packaging/anvil-host/src/main.rs). A
+  // Run of a different sequence through it would reach the wrong equipment,
+  // so the new document starts without one. Saving it gives it its own.
+  if (inShell() && state.bridge) {
+    state.bridge = null;
+    await window.anvil.stopBridge();
+  }
+  loadText(NEW_SEQUENCE_TEXT, null, null);
+}
+
 function loadText(text, filename, handle) {
   state.doc = new SequenceDocument(text);
   state.handle = handle;
@@ -799,11 +837,13 @@ async function saveFile({ forceDialog = false } = {}) {
   if (!state.doc) return;
 
   let handle = state.handle;
+  let savedAs = null;
   if (!handle || forceDialog) {
     if (inShell()) {
       const path = await window.anvil.saveDialog(state.filename ?? NEW_SEQUENCE_NAME);
       if (!path) return;
       handle = shellHandle(path);
+      savedAs = path;
     } else if (window.showSaveFilePicker) {
       handle = await window.showSaveFilePicker({
         ...PICKER,
@@ -823,6 +863,9 @@ async function saveFile({ forceDialog = false } = {}) {
   state.dirty = false;
   renderAll();
   status("pass", `saved ${state.filename}`);
+  // A document that had no file had no bridge either (`newFile`); now that it
+  // is somewhere on disk, it gets one the same way an opened file does.
+  if (savedAs && !state.bridge) await connectLocalBridge(savedAs);
 }
 
 function downloadFallback() {
@@ -865,6 +908,7 @@ function wireMenus() {
   });
 
   const actions = {
+    new: newFile,
     open: openFile,
     save: () => saveFile(),
     "save-as": () => saveFile({ forceDialog: true }),
@@ -876,6 +920,13 @@ function wireMenus() {
     const action = e.target.closest?.("[data-action]")?.dataset.action;
     if (action && actions[action]) actions[action]();
   });
+
+  // Inside the shell the native menu bar carries these same actions, so the
+  // page's own bar would be a second copy of it.
+  if (inShell()) {
+    ui.menus.hidden = true;
+    window.anvil.onMenu((action) => actions[action]?.());
+  }
 
   for (const b of document.querySelectorAll(".views button")) {
     b.addEventListener("click", () => setView(b.dataset.view));
