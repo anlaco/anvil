@@ -1,0 +1,64 @@
+name: Book
+
+# Renders The Anvil Book (docs/book/) with mdBook and publishes it to the
+# `gh-pages` branch, which GitHub Pages serves at https://anlaco.github.io/anvil/.
+# anlaco.github.io stays the presentation site; everything about Anvil lives
+# under /anvil/.
+#
+# `gh-pages` holds only generated HTML, one commit per publication, so what is
+# online can be read, diffed and reverted like any other branch. Nobody edits
+# it by hand: the source is docs/book/ on main.
+#
+# This only renders. Whether the book is still true is check.sh's job, run
+# against a release by hand (docs/book/README.md): it needs the release
+# tarball and dotnet, which this workflow has no business downloading.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "docs/book/**"
+      - ".github/workflows/book.yml"
+  workflow_dispatch:
+
+# One publication at a time; a newer push supersedes an older one in flight.
+concurrency:
+  group: book
+  cancel-in-progress: true
+
+env:
+  # Pinned, so a new mdBook cannot change the published book without a commit.
+  MDBOOK_VERSION: v0.5.4
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install mdBook
+        run: |
+          curl -sSL "https://github.com/rust-lang/mdBook/releases/download/${MDBOOK_VERSION}/mdbook-${MDBOOK_VERSION}-x86_64-unknown-linux-musl.tar.gz" \
+            | tar xz -C "$RUNNER_TEMP"
+          "$RUNNER_TEMP/mdbook" --version
+
+      - name: Build
+        run: '"$RUNNER_TEMP/mdbook" build docs/book'
+
+      # A fresh single-commit branch each time: the history of the book is on
+      # main, and keeping every rendering of it would only grow the repository.
+      # `.nojekyll` stops Pages from running Jekyll over mdBook's output.
+      - name: Publish to gh-pages
+        working-directory: target/book
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          touch .nojekyll
+          git init -q -b gh-pages
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -q -s -m "docs: The Anvil Book, rendered from ${GITHUB_SHA::7}"
+          git push -q -f "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" gh-pages

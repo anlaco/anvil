@@ -48,8 +48,8 @@ they are printed and explains what they say.
 
 Every command in these chapters has been run against the release named above,
 and none of the output was written by hand. The files you are asked to write
-live in [`listings/`](listings/), the terminal sessions in
-[`listings/sessions/`](listings/sessions/), and [`check.sh`](check.sh) runs
+live in [`listings/`](https://github.com/anlaco/anvil/tree/main/docs/book/listings), the terminal sessions in
+[`listings/sessions/`](https://github.com/anlaco/anvil/tree/main/docs/book/listings/sessions), and [`check.sh`](https://github.com/anlaco/anvil/blob/main/docs/book/check.sh) runs
 every session again and checks that each file still appears word for word in
 a chapter:
 

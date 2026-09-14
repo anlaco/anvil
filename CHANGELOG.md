@@ -19,7 +19,10 @@ minors, with the change written down here.
   reader to write and every terminal session it shows lives under
   `docs/book/listings/`, and `docs/book/check.sh` runs the sessions again
   against a release and checks each file is still quoted word for word. The
-  Sequence Editor chapter is not written yet.
+  Sequence Editor chapter is not written yet. The same Markdown is rendered
+  with mdBook (`mdbook build docs/book`), and `.github/workflows/book.yml`
+  publishes it to the `gh-pages` branch, served at
+  <https://anlaco.github.io/anvil/>.
 
 ## [0.5.0] — 2026-09-13
 
