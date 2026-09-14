@@ -55,6 +55,14 @@ El límite es una **regla de aceptación adicional**, no una absolución:
   `"{valor} {op} {esperado} no cumplido"`).
 - Si no hay `valor_medido` (pass/fail, action sin medida), el límite no aplica.
 
+> **Narrowed by [ADR-0040](0040-a-step-type-says-how-a-step-is-judged-not-what-it-calls.md)
+> (2026-09-15):** a limit belongs to a `numeric_limit` step, and on one a
+> missing measurement is `error`, not a limit that silently does not apply —
+> run against 0.6.0, an impossible limit on a step with no measurement passed.
+> The limit's shape also becomes TestStand's (`comparison: GELE, low, high`…).
+> What does not change: the engine evaluates the limit, `paso.proto` does not
+> carry it, and a limit only ever turns a `pass` into a `fail`.
+
 ## ¿Es compatible con ADR-0005?
 
 Sí. ADR-0005 dice que el motor **no conoce el dominio** (qué instrumento, qué

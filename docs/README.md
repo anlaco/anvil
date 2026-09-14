@@ -55,7 +55,7 @@ docs/
 ├─ contrato-grpc.md           semantics of the step contract over paso.proto
 ├─ licencia.md                dual AGPL / Apache licensing strategy
 ├─ roadmap.md                 milestones M0 → M4+ with MVP vs. post-MVP
-├─ adr/                       decisions already made (immutable), 0001–0039
+├─ adr/                       decisions already made (immutable), 0001–0040
 │                             see "The ADRs, by area" below
 ├─ planes/                    milestone plans (m4-nucleo, m4b, m5-ext)
 ├─ qa/                        campaign reports + executable checks
@@ -102,6 +102,10 @@ Anvil does when it cannot judge) and
 - **0.5.0** — [0038](adr/0038-the-csharp-step-sdk-is-hosted-by-the-users-own-process.md)
   (steps in C#) and [0039](adr/0039-a-sequence-file-may-end-in-yseq.md) (the
   `.yseq` extension).
+- **Step types** — [0040](adr/0040-a-step-type-says-how-a-step-is-judged-not-what-it-calls.md):
+  a step's `type` says how it is judged (`action`, `pass_fail`,
+  `numeric_limit`, TestStand's), and what it calls is its `module`. Accepted,
+  not implemented.
 - **Governance** — 0032: contributions and the reversion clause (a direction,
   not yet in force).
 

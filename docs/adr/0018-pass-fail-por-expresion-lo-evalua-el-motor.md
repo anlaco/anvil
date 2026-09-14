@@ -121,6 +121,12 @@ formato ya es código. Anvil es declarativo (ADR-0002).
   precedente de `sequence_call`, en vez de aceptarlo e ignorarlo.
 - **Un `pass_fail` no admite `asigna`** (no produce `resultado.*` que volcar) ni
   `limite` (no mide) ni `ejecutor` (es motor-side). Todos, error de carga.
+
+> **Narrowed by [ADR-0040](0040-a-step-type-says-how-a-step-is-judged-not-what-it-calls.md)
+> (2026-09-15):** a `pass_fail` may now call a module (`module` and `executor`),
+> as TestStand's Pass/Fail Test does; `condition` becomes optional when it does,
+> and `assign` works on it then. What does not change: without a module it is
+> this ADR's expression step, and a `limit` on it is still a load error.
 - **Sin severidades intermedias** al estilo `Inconclusive` de OpenTAP: los
   estados siguen siendo `paso`/`fallo`/`error`/`saltado` (RNF-08).
 - **El mensaje del reporte no reproduce la expresión** que falló («condición no
