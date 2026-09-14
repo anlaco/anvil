@@ -29,4 +29,9 @@ contextBridge.exposeInMainWorld("anvil", {
    * action is the same name the page's own menus carry in `data-action`.
    */
   onMenu: (listener) => ipcRenderer.on("anvil:menu", (_event, action) => listener(action)),
+  /**
+   * Tells the shell whether a run is in flight and whether there are unsaved
+   * changes, so an update never offers to restart on top of either.
+   */
+  setWorkState: (state) => ipcRenderer.send("anvil:work-state", state),
 });

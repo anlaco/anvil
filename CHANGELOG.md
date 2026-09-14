@@ -30,6 +30,17 @@ minors, with the change written down here.
   of the file that was open, so Run cannot reach that file's executors; saving
   the new sequence starts one of its own.
 
+- **The desktop Sequence Editor updates itself** — the Windows installer and
+  the AppImage, not the `.deb`. On start it looks at the latest published
+  Release, downloads a newer editor in the background and asks whether to
+  restart; *Later* installs it when the editor is closed. It never asks while
+  a run is in flight, and warns when restarting would discard unsaved changes.
+  This updates the editor only: the engine is still a separate download
+  ([#67](https://github.com/anlaco/anvil/issues/67)). The first version with
+  this has to be installed by hand once. Releases now carry `latest.yml` and
+  `latest-linux.yml`, and the installer and AppImage are named that way by
+  electron-builder rather than renamed afterwards.
+
 ### Changed
 
 - **The desktop Sequence Editor has a single menu bar**, the native one. Its

@@ -496,7 +496,15 @@ function setView(view) {
   if (!steps) renderText();
 }
 
+// The shell holds a downloaded update back while either is true
+// (`offerRestart` in electron/main.mjs): restarting under a run leaves the
+// bench wherever it was, and restarting over unsaved changes loses them.
+function reportWork() {
+  window.anvil?.setWorkState({ running: state.runInFlight, dirty: state.dirty });
+}
+
 function renderAll({ skipText = false } = {}) {
+  reportWork();
   ui.panes.dataset.stale = String(state.doc?.stale ?? false);
   ui.filename.textContent = state.filename ?? (state.doc ? NEW_SEQUENCE_NAME : "no file");
   ui.filename.dataset.dirty = String(state.dirty);
@@ -595,6 +603,7 @@ async function run() {
   const name = state.filename ?? NEW_SEQUENCE_NAME;
   status("busy", `running ${name}…`);
   state.runInFlight = true;
+  reportWork();
   state.run = newRunState();
   ui.run.disabled = true;
   renderSequence();
