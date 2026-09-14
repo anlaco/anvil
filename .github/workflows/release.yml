@@ -105,6 +105,16 @@ jobs:
           npm run app:build -- --linux AppImage deb --publish never -c.extraMetadata.version="$VERSION"
           ls ../dist-app
 
+      # ADR-0031 on what actually ships: the engine modules packed into the
+      # editor must be, byte for byte, inside the anvil in the tarball. The
+      # AppImage and the .deb are both packed from linux-unpacked/.
+      - name: "Check: the editor and anvil carry the same engine"
+        working-directory: editor
+        run: |
+          node scripts/same-engine.mjs \
+            ../dist-app/linux-unpacked/resources/app.asar \
+            "../dist/anvil-v$VERSION-x86_64-linux-musl/anvil"
+
       # The AppImage already carries its download name (`appImage.artifactName`
       # in editor/package.json), and it has to: `latest-linux.yml` is what an
       # installed editor reads to update itself, and it names the file it was
@@ -189,6 +199,15 @@ jobs:
           npm run transpile
           npm run app:build -- --win nsis --publish never -c.extraMetadata.version="$VERSION"
           ls ../dist-app
+
+      # ADR-0031 on what actually ships; the installer is packed from
+      # win-unpacked/.
+      - name: "Check: the editor and anvil.exe carry the same engine"
+        working-directory: editor
+        run: |
+          node scripts/same-engine.mjs \
+            ../dist-app/win-unpacked/resources/app.asar \
+            "../dist/anvil-v$VERSION-x86_64-windows/anvil.exe"
 
       # Named at build time (`nsis.artifactName` in editor/package.json), not
       # here, for the same reason as the AppImage: `latest.yml` names the
