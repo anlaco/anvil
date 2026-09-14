@@ -76,6 +76,11 @@ body {
   gap: 2px;
 }
 
+/* Inside the shell the native menu bar replaces this one; see `.pane[hidden]`. */
+.menus[hidden] {
+  display: none;
+}
+
 .menu {
   position: relative;
 }

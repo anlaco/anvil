@@ -12,7 +12,7 @@ import { readFile } from "node:fs/promises";
 import { createInterface } from "node:readline";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { app, BrowserWindow, dialog, ipcMain, protocol, shell } from "electron";
+import { app, BrowserWindow, dialog, ipcMain, Menu, protocol, shell } from "electron";
 import { writeFile } from "node:fs/promises";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -154,7 +154,7 @@ async function startBridge(sequencePath) {
 // ---------------------------------------------------------------- the IPC
 
 // Everything the page can reach, and nothing else (ADR-0037 §c). The
-// renderer has no Node: these five handlers are the whole surface, which is
+// renderer has no Node: these handlers are the whole surface, which is
 // what `editor/src-tauri/capabilities/default.json` used to enumerate.
 function wireIpc() {
   ipcMain.handle("anvil:open-dialog", async (event) => {
@@ -186,6 +186,61 @@ function wireIpc() {
   );
   ipcMain.handle("anvil:write-text", (_event, file, text) => writeFile(file, text, "utf8"));
   ipcMain.handle("anvil:start-bridge", (_event, sequencePath) => startBridge(sequencePath));
+  ipcMain.handle("anvil:stop-bridge", () => killBridge());
+}
+
+// --------------------------------------------------------------- the menu
+
+// The native menu bar, and the only one inside the shell: the page's own
+// File/View menus exist for a plain browser, which has no menu of its own to
+// put them in, and `app.mjs` hides them when `window.anvil` is there. Two bars
+// saying the same thing was how it looked on Windows before this.
+//
+// Each item only names an action; what the action does stays in `app.mjs`,
+// next to the page's own menus, so the two cannot come to mean different
+// things.
+function buildMenu() {
+  const send = (action) => (_item, window) => window?.webContents.send("anvil:menu", action);
+  const item = (label, action, accelerator) => ({ label, accelerator, click: send(action) });
+
+  Menu.setApplicationMenu(
+    Menu.buildFromTemplate([
+      ...(process.platform === "darwin" ? [{ role: "appMenu" }] : []),
+      {
+        label: "&File",
+        submenu: [
+          item("&New", "new", "CmdOrCtrl+N"),
+          item("&Open…", "open", "CmdOrCtrl+O"),
+          { type: "separator" },
+          item("&Save", "save", "CmdOrCtrl+S"),
+          item("Save &As…", "save-as", "CmdOrCtrl+Shift+S"),
+          { type: "separator" },
+          process.platform === "darwin" ? { role: "close" } : { role: "quit" },
+        ],
+      },
+      // Undo, cut, copy and paste in the text view and in every field of the
+      // step settings: without the role, those shortcuts stop working on
+      // Windows and Linux the moment a custom menu replaces the default one.
+      { role: "editMenu" },
+      {
+        label: "&View",
+        submenu: [
+          item("S&teps", "view-steps"),
+          item("Te&xt", "view-text"),
+          { type: "separator" },
+          { role: "reload" },
+          { role: "toggleDevTools" },
+          { type: "separator" },
+          { role: "resetZoom" },
+          { role: "zoomIn" },
+          { role: "zoomOut" },
+          { type: "separator" },
+          { role: "togglefullscreen" },
+        ],
+      },
+      { role: "windowMenu" },
+    ]),
+  );
 }
 
 // -------------------------------------------------------------- the window
@@ -257,6 +312,7 @@ if (process.env.ANVIL_EDITOR_DEBUG_PORT) {
 app.whenReady().then(() => {
   if (!isDev) serveDist();
   wireIpc();
+  buildMenu();
   createWindow();
   app.on("activate", () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();

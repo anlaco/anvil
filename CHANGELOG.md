@@ -24,6 +24,20 @@ minors, with the change written down here.
   publishes it to the `gh-pages` branch, served at
   <https://anlaco.github.io/anvil/>.
 
+- **File ▸ New in the Sequence Editor**: starts an unsaved
+  `sequence.yseq` with an empty `main`, which the status bar reports as invalid
+  until the first step is inserted. In the desktop app it also stops the bridge
+  of the file that was open, so Run cannot reach that file's executors; saving
+  the new sequence starts one of its own.
+
+### Changed
+
+- **The desktop Sequence Editor has a single menu bar**, the native one. Its
+  File and View menus used to be drawn a second time inside the window; they
+  now appear only when the editor runs in a plain browser, which has no menu
+  bar to put them in. The native bar gains Save As, the Steps/Text views and
+  keyboard shortcuts for New, Open, Save and Save As.
+
 ## [0.5.0] — 2026-09-13
 
 ### Added
