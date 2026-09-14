@@ -6,7 +6,7 @@ resolver = "2"
 members = ["anvil-step", "anvil-step-macros"]
 
 [workspace.package]
-version = "0.5.0"
+version = "0.6.0"
 edition = "2021"
 # Apache-2.0, like everything under `executors/`: what you *use* is AGPL, what
 # you *link* is Apache (ADR-0004). Your step links this crate and stays yours.

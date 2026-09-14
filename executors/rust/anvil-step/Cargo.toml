@@ -6,7 +6,7 @@ edition.workspace = true
 license.workspace = true
 
 [dependencies]
-anvil-step-macros = { path = "../anvil-step-macros", version = "0.5.0" }
+anvil-step-macros = { path = "../anvil-step-macros", version = "0.6.0" }
 # The registry `#[step]` writes to. Its constructors run when the component is
 # instantiated (a WASM *reactor* calls `_initialize`), which is what lets steps
 # declared in different modules be found without the author listing them.

@@ -10,6 +10,8 @@ minors, with the change written down here.
 
 ## [Unreleased]
 
+## [0.6.0] — 2026-09-14
+
 ### Added
 
 - **The Anvil Book** ([`docs/book/`](docs/book/README.md)): a guide to using
@@ -999,6 +1001,7 @@ primera campaña de betatesting externa.
 - *Private vulnerability reporting* no puede activarse mientras el
   repositorio sea privado; hasta entonces vale el correo de `SECURITY.md`.
 
+[0.6.0]: https://github.com/anlaco/anvil/releases/tag/v0.6.0
 [0.5.0]: https://github.com/anlaco/anvil/releases/tag/v0.5.0
 [0.4.0]: https://github.com/anlaco/anvil/releases/tag/v0.4.0
 [0.3.0]: https://github.com/anlaco/anvil/releases/tag/v0.3.0
