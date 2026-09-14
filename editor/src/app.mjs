@@ -498,9 +498,14 @@ function setView(view) {
 
 // The shell holds a downloaded update back while either is true
 // (`offerRestart` in electron/main.mjs): restarting under a run leaves the
-// bench wherever it was, and restarting over unsaved changes loses them.
+// bench wherever it was. The name is what the shell's unsaved-changes question
+// at close calls the document (`guardUnsaved`).
 function reportWork() {
-  window.anvil?.setWorkState({ running: state.runInFlight, dirty: state.dirty });
+  window.anvil?.setWorkState({
+    running: state.runInFlight,
+    dirty: state.dirty,
+    name: state.filename ?? NEW_SEQUENCE_NAME,
+  });
 }
 
 function renderAll({ skipText = false } = {}) {
@@ -770,6 +775,7 @@ async function fetchText(url) {
 }
 
 async function openFile() {
+  if (!(await confirmDiscard())) return;
   if (inShell()) {
     const path = await window.anvil.openDialog();
     if (!path) return;
@@ -805,6 +811,7 @@ async function newFile() {
     status("error", "a run is in flight — wait for it to finish before starting a new sequence");
     return;
   }
+  if (!(await confirmDiscard())) return;
   // The bridge was started for the file that was open: its executors and its
   // network allowance are that file's (packaging/anvil-host/src/main.rs). A
   // Run of a different sequence through it would reach the wrong equipment,
@@ -833,7 +840,7 @@ function loadText(text, filename, handle) {
   validate();
 }
 
-async function saveFile({ forceDialog = false } = {}) {
+async function saveFile({ forceDialog = false, connect = true } = {}) {
   if (!state.doc) return;
 
   let handle = state.handle;
@@ -865,7 +872,61 @@ async function saveFile({ forceDialog = false } = {}) {
   status("pass", `saved ${state.filename}`);
   // A document that had no file had no bridge either (`newFile`); now that it
   // is somewhere on disk, it gets one the same way an opened file does.
-  if (savedAs && !state.bridge) await connectLocalBridge(savedAs);
+  // Not when saving on the way out (`saveThenLeave`): an engine started only
+  // to be stopped as the window closes is a second of waiting for nothing.
+  if (connect && savedAs && !state.bridge) await connectLocalBridge(savedAs);
+}
+
+// ------------------------------------------------------ unsaved changes
+
+/**
+ * Whether the open document may be thrown away, asking first if it has unsaved
+ * changes (#84). New and Open call it before they replace the document.
+ *
+ * In the shell the question is Save / Don't Save / Cancel. "Save" saves — through
+ * Save As if the document has never had a file — and the answer is yes only if
+ * the save went through: dismissing its dialog, or a write that fails, keeps
+ * the document. A plain browser has no native dialog to put three buttons on,
+ * so there it is only whether to discard.
+ */
+async function confirmDiscard() {
+  if (!state.doc || !state.dirty) return true;
+  const name = state.filename ?? NEW_SEQUENCE_NAME;
+  if (!inShell()) return window.confirm(`Discard the unsaved changes to ${name}?`);
+
+  const answer = await window.anvil.askUnsaved(name);
+  if (answer === "discard") return true;
+  if (answer === "save") return saveKeepingTheAnswer({ connect: false });
+  return false;
+}
+
+/** Saves, and says whether the document is saved afterwards. */
+async function saveKeepingTheAnswer(options) {
+  try {
+    await saveFile(options);
+  } catch (e) {
+    // The browser's picker rejects when it is dismissed; anything else is a
+    // write that failed. Either way the changes are still only in here.
+    if (e?.name !== "AbortError") status("error", `could not save: ${e?.message ?? e}`);
+  }
+  return !state.dirty;
+}
+
+// Closing, quitting and reloading unload the page. While there are unsaved
+// changes it refuses: a plain browser shows its own "leave site?" prompt, and
+// the shell asks Save / Don't Save / Cancel in its place (`guardUnsaved` in
+// electron/main.mjs). A browser only honours this after the person has
+// interacted with the page — which anyone with unsaved edits has.
+window.addEventListener("beforeunload", (e) => {
+  if (!state.doc || !state.dirty) return;
+  e.preventDefault();
+  e.returnValue = "";
+});
+
+// "Save" answered at close or reload: the shell held the leaving back so this
+// can save first, and does it once the save went through.
+async function saveThenLeave(kind) {
+  if (await saveKeepingTheAnswer({ connect: false })) window.anvil.leave(kind);
 }
 
 function downloadFallback() {
@@ -926,6 +987,7 @@ function wireMenus() {
   if (inShell()) {
     ui.menus.hidden = true;
     window.anvil.onMenu((action) => actions[action]?.());
+    window.anvil.onSaveThenLeave(saveThenLeave);
   }
 
   for (const b of document.querySelectorAll(".views button")) {

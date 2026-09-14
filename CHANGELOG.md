@@ -26,6 +26,18 @@ applies from 0.6.0 on; by it, 0.6.0 itself would have been 0.5.1.
 
 ## [Unreleased]
 
+### Fixed
+
+- **The Sequence Editor no longer throws away unsaved changes without asking**
+  ([#84](https://github.com/anlaco/anvil/issues/84)). File ▸ New, File ▸ Open,
+  closing the window, quitting and reloading all used to discard them. In the
+  desktop app each now asks *Save*, *Don't Save* or *Cancel*; *Save* on a
+  sequence that has never been saved goes through Save As, and dismissing that
+  dialog keeps the sequence open. In a plain browser, New and Open ask whether
+  to discard, and closing or reloading shows the browser's own prompt. Closing
+  the window no longer stops the bridge until it has really closed, so a
+  cancelled close leaves Run available.
+
 ## [0.6.0] — 2026-09-14
 
 ### Added
