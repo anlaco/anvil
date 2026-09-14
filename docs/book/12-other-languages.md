@@ -82,7 +82,7 @@ $ anvil sequences/python.yseq 2>/dev/null
   [pass] board/measure_rail: 
 ```
 
-The Python executor's own README, [`executors/python/README.md`](../../executors/python/README.md),
+The Python executor's own README, [`executors/python/README.md`](https://github.com/anlaco/anvil/blob/main/executors/python/README.md),
 covers the rest: named outputs, references and options. It is still in Spanish.
 
 ## Rust
@@ -166,4 +166,4 @@ serves it.
 
 The step-by-step [Rust quick start](https://anlaco.github.io/quickstart.html)
 goes further, with two modules and optional inputs, and
-[`executors/rust/README.md`](../../executors/rust/README.md) covers the SDK.
+[`executors/rust/README.md`](https://github.com/anlaco/anvil/blob/main/executors/rust/README.md) covers the SDK.

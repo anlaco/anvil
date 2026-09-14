@@ -41,7 +41,7 @@ Python or Rust instead.
 
 It does not cover talking to real instruments — every step here pretends to
 measure — nor how Anvil is built inside. For that, see the
-[documentation index](../README.md).
+[documentation index](https://github.com/anlaco/anvil/blob/main/docs/README.md).
 
 ## What you need
 
