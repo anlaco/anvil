@@ -188,16 +188,33 @@ function wireIpc() {
   ipcMain.handle("anvil:write-text", (_event, file, text) => writeFile(file, text, "utf8"));
   ipcMain.handle("anvil:start-bridge", (_event, sequencePath) => startBridge(sequencePath));
   ipcMain.handle("anvil:stop-bridge", () => killBridge());
+  ipcMain.handle("anvil:ask-unsaved", (event, name) =>
+    askUnsaved(BrowserWindow.fromWebContents(event.sender), name),
+  );
+  // What the page asks for once a "Save" answered at close or reload has
+  // actually saved: the leaving it had to hold back, done now.
+  ipcMain.on("anvil:leave", (event, kind) => {
+    const window = BrowserWindow.fromWebContents(event.sender);
+    if (kind === "close") window?.close();
+    else window?.webContents.reload();
+  });
   ipcMain.on("anvil:work-state", (_event, state) => {
-    work = { running: Boolean(state?.running), dirty: Boolean(state?.dirty) };
+    work = {
+      running: Boolean(state?.running),
+      dirty: Boolean(state?.dirty),
+      name: typeof state?.name === "string" ? state.name : null,
+    };
     offerRestart();
   });
 }
 
 // ------------------------------------------------------------ the updates
 
-/** What the page says it is in the middle of; `offerRestart` reads it. */
-let work = { running: false, dirty: false };
+/**
+ * What the page says it is in the middle of. `offerRestart` reads it, and the
+ * unsaved-changes question takes the file's name from it.
+ */
+let work = { running: false, dirty: false, name: null };
 /** The version downloaded and waiting for a restart, if any. */
 let downloaded = null;
 /** Whether the restart question is on screen or was already answered. */
@@ -255,17 +272,86 @@ async function offerRestart() {
     title: "Update ready",
     message: `Anvil Sequence Editor ${downloaded} is ready to install.`,
     detail: work.dirty
-      ? "Restarting now discards the changes you have not saved. Later installs it when you close the editor."
+      ? "There are unsaved changes: restarting asks whether to save them first. Later installs it when you close the editor."
       : "Restart now to use it, or Later to install it when you close the editor.",
     buttons: ["Restart now", "Later"],
     defaultId: work.dirty ? 1 : 0,
     cancelId: 1,
   });
   // A run may have started while the question was on screen.
+  // No `killBridge` here: the unsaved-changes question can still cancel the
+  // quit, and `will-quit` stops the bridge once it is really happening.
   if (response === 0 && !work.running) {
-    killBridge();
     updater.autoUpdater.quitAndInstall();
   }
+}
+
+// ------------------------------------------------------ unsaved changes
+
+const UNSAVED_ANSWERS = ["save", "discard", "cancel"];
+
+/// The Save / Don't Save / Cancel question, asked before anything throws the
+/// open document away (#84). Resolves to "save", "discard" or "cancel".
+///
+/// `ANVIL_EDITOR_UNSAVED_ANSWER` answers it without showing it, for the same
+/// reason `ANVIL_EDITOR_OPEN` exists: a native dialog cannot be clicked by
+/// anything but a hand, so without it no path through here can be exercised
+/// unattended.
+async function askUnsaved(window, name) {
+  const { response } = forced(name) ?? (await dialog.showMessageBox(window, unsavedQuestion(name)));
+  return UNSAVED_ANSWERS[response] ?? "cancel";
+}
+
+function forced(name) {
+  const answer = process.env.ANVIL_EDITOR_UNSAVED_ANSWER;
+  if (!UNSAVED_ANSWERS.includes(answer)) return null;
+  console.log(`[unsaved] ${name}: answered "${answer}" (ANVIL_EDITOR_UNSAVED_ANSWER)`);
+  return { response: UNSAVED_ANSWERS.indexOf(answer) };
+}
+
+function unsavedQuestion(name) {
+  return {
+    type: "warning",
+    title: "Unsaved changes",
+    message: `Save the changes to ${name}?`,
+    detail: "If you don't save them, they are lost.",
+    buttons: ["Save", "Don't Save", "Cancel"],
+    defaultId: 0,
+    cancelId: 2,
+    noLink: true,
+  };
+}
+
+// Closing the window, quitting and reloading all unload the page, and the page
+// refuses to unload while it has unsaved changes (`beforeunload` in app.mjs).
+// Electron then asks here instead of showing Chromium's own prompt, which has
+// no Save.
+//
+// It has to answer synchronously — letting the unload go on is
+// `preventDefault()` on this very event — so "Save" cannot save first and then
+// continue. It keeps the unload cancelled, has the page save, and the page
+// asks for the close or the reload again once the save went through
+// (`anvil:leave`). A save that is itself cancelled leaves the window as it was.
+function guardUnsaved(window) {
+  // `close` is emitted before `beforeunload`, so by the time the question is
+  // asked this says whether it was a close. Anything else that unloads the
+  // page is a reload.
+  let leaving = "reload";
+  window.on("close", () => {
+    leaving = "close";
+  });
+
+  window.webContents.on("will-prevent-unload", (event) => {
+    const kind = leaving;
+    leaving = "reload";
+    const name = work.name ?? "this sequence";
+    const { response } = forced(name) ?? {
+      response: dialog.showMessageBoxSync(window, unsavedQuestion(name)),
+    };
+    const answer = UNSAVED_ANSWERS[response] ?? "cancel";
+    if (answer === "discard") event.preventDefault();
+    else if (answer === "save") window.webContents.send("anvil:save-then-leave", kind);
+  });
 }
 
 // --------------------------------------------------------------- the menu
@@ -367,9 +453,13 @@ function createWindow() {
   const query = open ? `?open=${encodeURIComponent(open)}` : "";
   window.loadURL(isDev ? `${DEV_URL}/${query}` : `anvil://bundle/${query}`);
 
+  guardUnsaved(window);
+
   // The bridge is this window's child, not a background service: it must not
-  // outlive the window a person can see it from.
-  window.on("close", killBridge);
+  // outlive the window a person can see it from. `closed`, not `close`: a
+  // close can still be cancelled by the unsaved-changes question, and a
+  // window left open without its bridge has lost Run for nothing.
+  window.on("closed", killBridge);
   return window;
 }
 
@@ -404,4 +494,6 @@ app.on("window-all-closed", () => {
   if (process.platform !== "darwin") app.quit();
 });
 
-app.on("before-quit", killBridge);
+// `will-quit`, not `before-quit`, for the same reason as `closed` above: it is
+// emitted only once every window has actually closed.
+app.on("will-quit", killBridge);

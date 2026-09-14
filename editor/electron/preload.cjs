@@ -30,6 +30,17 @@ contextBridge.exposeInMainWorld("anvil", {
    */
   onMenu: (listener) => ipcRenderer.on("anvil:menu", (_event, action) => listener(action)),
   /**
+   * Asks Save / Don't Save / Cancel about unsaved changes to `name`. Resolves
+   * to "save", "discard" or "cancel".
+   */
+  askUnsaved: (name) => ipcRenderer.invoke("anvil:ask-unsaved", name),
+  /**
+   * Calls `listener(kind)` when a close or reload ("close" | "reload") was
+   * held back so the page can save first. Once it has, `leave(kind)` does it.
+   */
+  onSaveThenLeave: (listener) => ipcRenderer.on("anvil:save-then-leave", (_event, kind) => listener(kind)),
+  leave: (kind) => ipcRenderer.send("anvil:leave", kind),
+  /**
    * Tells the shell whether a run is in flight and whether there are unsaved
    * changes, so an update never offers to restart on top of either.
    */
