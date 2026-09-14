@@ -45,9 +45,9 @@ measure — nor how Anvil is built inside. For that, see the
 
 ## What you need
 
-- **Linux on x86-64.** Everything in the book was run there. Anvil also ships
-  for Windows; the commands are the same with `.exe`, but this book has **not
-  verified** them on Windows.
+- **Linux or Windows, on x86-64.** Everything in the book was run on Linux.
+  Chapter 2 also covers installing on Windows, and says what of the rest was
+  run there.
 - **The .NET 10 SDK** (`dotnet --version` should print `10.` something).
 - **git**, to get the step SDK.
 - For chapter 12 only: Python 3.10 or newer, and a Rust toolchain.

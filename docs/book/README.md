@@ -4,7 +4,7 @@ Learn to use Anvil from nothing: install it, write test steps, put them in
 sequences, run them, and read what Anvil says back.
 
 > **Alpha.** This edition is written and checked against **Anvil 0.5.0 on
-> Linux x86-64**. Anvil is young, and some of what you will do here — cloning
+> Linux x86-64**; installing on Windows is covered and checked too. Anvil is young, and some of what you will do here — cloning
 > the repository to get the step SDK, above all — will get shorter. Where 0.5.0
 > has a rough edge or a known defect, the book says so where you meet it,
 > rather than pretending it is not there.
