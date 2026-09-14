@@ -8,6 +8,22 @@ Anvil is in 0.x: the public surface — the YAML sequence format, the
 `paso.proto` contract and the textual report (RNF-08) — may change between
 minors, with the change written down here.
 
+Anvil has one version number for everything it ships: the engine, the
+Sequence Editor and the step SDKs. So the number moves with the public
+surface, which here also includes the API of each step SDK:
+
+- **A minor (0.x.0)** when the public surface gains or changes something: a
+  new field in the YAML, a change to `paso.proto`, new columns in the report,
+  new API in an SDK.
+- **A patch (0.x.y)** for everything else: fixes, and additions that leave the
+  public surface as it was — a new button or menu in the editor, a clearer
+  message.
+
+A new editor button is a patch because a minor tells every SDK user that
+something may have broken: Cargo treats `0.6` and `0.7` as incompatible, and
+`anvil-step = "0.6"` would have to be edited by hand for nothing. The rule
+applies from 0.6.0 on; by it, 0.6.0 itself would have been 0.5.1.
+
 ## [Unreleased]
 
 ## [0.6.0] — 2026-09-14
