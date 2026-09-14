@@ -1,0 +1,3 @@
+$ .venv/bin/python anvil/executors/python/anvil-exec-python --steps python_steps
+module 'board' (/home/you/anvil-book/python_steps/board.py) sha256:831270a42ae7bb6a050f189a2dcf434cf8cc44ca68122871a74e84f3808009e6
+python executor listening on 127.0.0.1:9101 — 1 step(s) from 1 module(s): board/measure_rail

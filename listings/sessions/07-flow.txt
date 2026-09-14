@@ -1,0 +1,7 @@
+$ anvil sequences/flow.yseq 2>/dev/null
+=== flow: pass ===
+  [pass] pick_channel: statement ok
+  [pass] dmm/measure_voltage: range auto
+  [skipped] board/measure_leakage: precondición falsa
+  [skipped] board/read_temperature: disable
+  (2 de 4 pasos saltados)

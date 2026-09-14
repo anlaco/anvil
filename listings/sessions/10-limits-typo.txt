@@ -1,0 +1,15 @@
+$ anvil sequences/judging.yseq --limits sequences/judging.typo.limits.yaml
+ejecutor de pasos escuchando en 40627
+secuencia 'judging' cargada (3 pasos en main, 0 subsecuencia(s) externa(s), 1 ejecutor(es))
+sidecar de límites 'sequences/judging.typo.limits.yaml' aplicado (0 paso(s) afectado(s))
+aviso: 1 límite(s) del sidecar 'sequences/judging.typo.limits.yaml' no afectan a ningún paso: board/measure_rial
+aviso: el sidecar no afectó a ningún paso. Comprueba que los nombres coincidan con los de los pasos de la secuencia
+motor conectado
+conectado a los ejecutores de pasos (embebido en 127.0.0.1:40627)
+catálogo pedido
+3 paso(s) comprobados contra el catálogo de su ejecutor
+=== judging: pass ===
+  [pass] board/measure_rail: 
+  [pass] board/measure_leakage: 
+  [pass] board/check_led: 
+conexión cerrada; esperando otra

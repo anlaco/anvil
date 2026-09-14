@@ -1,0 +1,16 @@
+name: judging
+
+executors:
+  - { name: bench, type: grpc, host: 127.0.0.1, port: 9201 }
+
+main:
+  - name: board/measure_rail
+    executor: bench
+    limit: { type: range, min: 4.75, max: 5.25 }
+
+  - name: board/measure_leakage
+    executor: bench
+    limit: { type: comparison, op: le, expected: 0.001 }
+
+  - name: board/check_led
+    executor: bench

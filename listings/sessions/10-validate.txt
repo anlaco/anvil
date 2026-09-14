@@ -1,0 +1,5 @@
+$ anvil sequences/board.yseq --validate
+secuencia 'board' cargada (4 pasos en main, 1 subsecuencia(s) externa(s), 1 ejecutor(es))
+'board' válida (4 paso(s) en main, 1 subsecuencia(s) externa(s))
+$ echo $?
+0

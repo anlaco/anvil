@@ -1,0 +1,31 @@
+name: data
+
+executors:
+  - { name: bench, type: grpc, host: 127.0.0.1, port: 9201 }
+
+locals:
+  channel: 2
+  rail: 0.0
+  led_ok: false
+
+main:
+  - name: unit/read_serial
+    executor: bench
+
+  - name: dmm/measure_voltage
+    executor: bench
+    inputs:
+      channel: '${locals.channel}'
+      range: "10V"
+    limit: { type: range, min: 1.7, max: 1.9 }
+    assign:
+      rail: result.measured_value
+
+  - name: board/check_led
+    executor: bench
+    assign:
+      led_ok: 'result.status == "pass"'
+
+  - name: rail_in_spec
+    type: pass_fail
+    condition: 'locals.rail > 1.75 && locals.led_ok'

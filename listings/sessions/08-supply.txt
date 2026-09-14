@@ -1,0 +1,14 @@
+$ anvil sequences/supply.yseq --json supply.json 2>/dev/null
+=== supply: pass ===
+  [pass] psu/open: 
+  [pass] psu/set_voltage: 
+  [pass] psu/measure_current: 
+  [pass] psu/output_off: 
+$ grep -A 6 "\"outputs\": {$" supply.json | head -n 8
+      "outputs": {
+        "psu": {
+          "type": "reference",
+          "executor": "bench",
+          "lifetime": "ad96dffbdcf9425fb91af7bf196e34d8",
+          "payload": "s1"
+        }

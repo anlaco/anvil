@@ -1,0 +1,5 @@
+$ anvil sequences/error.yseq 2>/dev/null
+=== error: error ===
+  [error] board/read_temperature: the temperature sensor did not answer
+$ echo $?
+1
