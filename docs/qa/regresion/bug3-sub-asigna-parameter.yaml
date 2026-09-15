@@ -1,20 +1,21 @@
-# BUG-3 (subsecuencia) — `asigna` sobre un nombre declarado como `parameter`
-# crea en silencio un Local que lo ensombrece.
+# BUG-3 (subsequence) — `assign` onto a name declared as a `parameter` silently
+# creates a Local that shadows it.
 #
-# `asigna` escribe siempre en Locals (ADR-0009). Si el destino coincide con el
-# nombre de un `parameter` declarado, el motor NO avisa: crea un local nuevo, el
-# parameter se queda con su valor inicial, y el retorno by-reference devuelve ese
-# valor inicial al padre. Todo el test sale verde con datos que no son los medidos.
+# `assign` always writes to Locals (ADR-0009). If the target matches the name of
+# a declared `parameter`, the engine did NOT warn: it created a new local, the
+# parameter kept its initial value, and the by-reference return handed that
+# initial value back to the parent. The whole test came out green with data
+# that was not what was measured.
 #
-# Se invoca desde bug3-padre-asigna-parameter.yaml.
+# Called from bug3-padre-asigna-parameter.yaml.
 #
-# Comportamiento observado:
-#   [paso]    medir_voltaje                     -> mide 4.2
-#   [saltado] verificar_led: precondicion falsa -> parameters.p sigue siendo 0.0
-#   [paso]    abrir_rele                        -> locals.p SI vale 4.2 (el shadow)
+# Observed behaviour (at the time):
+#   [paso]    medir_voltaje                     -> measures 4.2
+#   [saltado] verificar_led: precondition false -> parameters.p is still 0.0
+#   [paso]    abrir_rele                        -> locals.p DOES hold 4.2 (the shadow)
 #
-# Criterio de aceptacion: el cargador deberia rechazar (o al menos avisar de)
-# un `asigna` cuyo destino es un nombre declarado en `parameters:`.
+# Acceptance criterion: the loader should refuse (or at least warn about) an
+# `assign` whose target is a name declared in `parameters:`.
 
 name: sub_asigna_parameter
 parameters:
@@ -24,7 +25,7 @@ main:
     retries: 1
     assign:
       p: '${result.measured_value}'
-  # lee el PARAMETER: sigue a 0.0 -> se salta
+  # reads the PARAMETER: still 0.0 -> skipped
   - name: verificar_led
     retries: 1
     precondition: 'parameters.p > 4.0'

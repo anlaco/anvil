@@ -1,15 +1,15 @@
 #!/bin/bash
-# Regresión de los defectos de la beta de agosto 2026.
-# Ver docs/qa/informe-beta-2026-08.md
+# Regression suite for the defects of the August 2026 beta.
+# See docs/qa/informe-beta-2026-08.md
 #
-# Cada caso AFIRMA EL COMPORTAMIENTO CORRECTO, así que mientras el defecto siga
-# presente sale FALLA. Cuando se arregle, sale OK.
+# Each case ASSERTS THE CORRECT BEHAVIOUR, so while the defect is still present
+# it prints FALLA. Once fixed, it prints OK.
 #
-# Uso (desde la raíz del repo):
+# Usage (from the repo root):
 #   ./docs/qa/regresion/run.sh
 #
-# Requiere el binario host construido:
-#   make release      (o `make build`, pero arranca mucho más lento)
+# Needs the host binary built:
+#   make release      (or `make build`, but it starts much more slowly)
 
 cd "$(dirname "$0")/../../.." || exit 1
 
@@ -19,19 +19,19 @@ for cand in packaging/anvil-host/target/release/anvil \
   [ -x "$cand" ] && { A="$cand"; break; }
 done
 if [ -z "$A" ]; then
-  echo "no encuentro el binario host. Constrúyelo con:" >&2
+  echo "host binary not found. Build it with:" >&2
   echo "  make release" >&2
   exit 2
 fi
-echo "binario: $A"
+echo "binary: $A"
 
 R=docs/qa/regresion
 ok=0; falla=0
-# El binario solo preabre el CWD: la salida de --csv/--json debe caer dentro
-# del árbol, no en /tmp.
+# The binary only preopens the CWD: --csv/--json output must land inside the
+# tree, not in /tmp.
 TMP=$R/.tmp; mkdir -p "$TMP"; trap 'rm -rf "$TMP"' EXIT
 
-check() {  # check <id> <descripcion> <0=ok|1=falla>
+check() {  # check <id> <description> <0=ok|1=fail>
   if [ "$3" -eq 0 ]; then
     printf '  \033[32mOK   \033[0m %-8s %s\n' "$1" "$2"; ok=$((ok+1))
   else
@@ -39,52 +39,52 @@ check() {  # check <id> <descripcion> <0=ok|1=falla>
   fi
 }
 
-echo "== Regresión beta 2026-08 =========================================="
+echo "== Beta 2026-08 regression ========================================"
 
-# ---- DEF-1: --limits debe llegar a la secuencia del operador bajo un PM ----
+# ---- DEF-1: --limits must reach the operator's sequence under a PM ----
 $A --process-model process_models/sequential.yaml \
    ejemplos/limites.yaml --limits ejemplos/limites.limits.yaml \
    >"$TMP/d1.out" 2>"$TMP/d1.err"
 afectados=$(grep -oE 'aplicado \([0-9]+ paso' "$TMP/d1.err" | grep -oE '[0-9]+' | head -1)
 grep -q ': pass ===' "$TMP/d1.out"; agregado=$?
 [ "${afectados:-0}" -ge 1 ] && [ "$agregado" -eq 0 ]
-check DEF-1 "sidecar aplicado bajo --process-model (afectados=${afectados:-0}, esperado>=1)" $?
+check DEF-1 "sidecar applied under --process-model (affected=${afectados:-0}, expected>=1)" $?
 
-# ---- DEF-2: la columna nombre_secuencia del CSV debe traer el nombre ----
+# ---- DEF-2: the CSV's sequence-name column must carry the name ----
 $A "$R/bug2-csv-nombre.yaml" --csv "$TMP/d2.csv" >/dev/null 2>&1
 col1=$(sed -n '2p' "$TMP/d2.csv" 2>/dev/null | cut -d, -f1)
 [ "$col1" = "regresion_csv_nombre" ]
-check DEF-2 "CSV columna 1 = nombre de secuencia (obtenido: '${col1}')" $?
+check DEF-2 "CSV column 1 = sequence name (got: '${col1}')" $?
 
-# ---- DEF-3a / DEF-3b: asigna no debe ensombrecer un parameter en silencio ----
-# El defecto se cerró por la vía dura —el cargador rechaza la secuencia— así que
-# los dos casos aceptan el rechazo como arreglo. Lo que **no** aceptan es la
-# nada: sin la guardia de abajo, un binario que no imprimiera una sola línea
-# salía verde, porque el `grep` de la marca de fallo no casaba con un fichero
-# vacío. DEF-3b pasaba exactamente así.
+# ---- DEF-3a / DEF-3b: assign must not silently shadow a parameter ----
+# The defect was closed the hard way —the loader refuses the sequence— so both
+# cases accept the refusal as the fix. What they do **not** accept is nothing
+# at all: without the guard below, a binary that printed not a single line
+# came out green, because the `grep` for the failure mark did not match an
+# empty file. DEF-3b passed exactly that way.
 asigna_no_ensombrece() {  # <stdout> <stderr>
   if grep -qiE 'inválida|invalida' "$2"; then
-    return 0            # el cargador lo rechaza: arreglo aceptable
+    return 0            # the loader refuses it: an acceptable fix
   fi
   if ! grep -q '===' "$1"; then
-    return 1            # ni rechazo ni corrida: aquí no se ha comprobado nada
+    return 1            # neither refusal nor run: nothing was checked here
   fi
   grep -qE '\[skipped\] verificar_led' "$1" && return 1 || return 0
 }
 
 $A "$R/bug3-sub-asigna-parameter.yaml" >"$TMP/d3a.out" 2>"$TMP/d3a.err"
 asigna_no_ensombrece "$TMP/d3a.out" "$TMP/d3a.err"
-check DEF-3a "asigna no ensombrece un parameter declarado" $?
+check DEF-3a "assign does not shadow a declared parameter" $?
 
-# El mismo shadow visto desde el padre: el retorno by-reference no puede traerse
-# el valor inicial en vez del medido.
+# The same shadow seen from the parent: the by-reference return must not bring
+# back the initial value instead of the measured one.
 $A "$R/bug3-padre-asigna-parameter.yaml" >"$TMP/d3b.out" 2>"$TMP/d3b.err"
 asigna_no_ensombrece "$TMP/d3b.out" "$TMP/d3b.err"
-check DEF-3b "retorno by-reference no trae el valor sin medir" $?
+check DEF-3b "by-reference return does not bring the unmeasured value" $?
 
-# ---- DIAG-1: avisar cuando el sidecar no afecta a ningún paso ----
-# Antes este caso reusaba el comando de DEF-1, que daba 0 afectados **por el
-# defecto**. Arreglado DEF-1, hace falta un sidecar huérfano de verdad.
+# ---- DIAG-1: warn when the sidecar affects no step ----
+# This case used to reuse DEF-1's command, which gave 0 affected **because of
+# the defect**. With DEF-1 fixed, a genuinely orphan sidecar is needed.
 cat >"$TMP/huerfano.limits.yaml" <<'YAML'
 paso_que_no_existe:
   type: comparison
@@ -93,34 +93,34 @@ paso_que_no_existe:
 YAML
 $A ejemplos/limites.yaml --limits "$TMP/huerfano.limits.yaml" 2>&1 |
   grep -qiE 'aviso.*sidecar|sidecar.*no afect|ningún paso'
-check DIAG-1 "aviso cuando el sidecar afecta a 0 pasos" $?
+check DIAG-1 "warning when the sidecar affects 0 steps" $?
 
-# ---- DIAG-3: el reporte debe decir en qué fase corrió cada paso ----
-# Sin esto, al post-procesar no se distingue un fallo de Setup (el DUT no se
-# pudo ni conectar) de uno de Main o de Cleanup.
+# ---- DIAG-3: the report must say which phase each step ran in ----
+# Without it, post-processing cannot tell a Setup failure (the DUT could not
+# even be connected) from a Main or Cleanup one.
 $A ejemplos/basica.yaml --json "$TMP/d3.json" --csv "$TMP/d3.csv" >/dev/null 2>&1
 res=0
 for f in setup main cleanup; do
   grep -q "\"phase\": \"$f\"" "$TMP/d3.json" || res=1
 done
-# El CSV va en CRLF (RFC-4180): hay que quitar el \r antes de mirar.
-# La columna no se ancla al final: lo que este caso afirma es que la fase esté,
-# no en qué posición — `inputs` y `outputs` se añadieron después (ADR-0020) y
-# la dejaron en medio.
+# The CSV is CRLF (RFC-4180): the \r has to go before looking.
+# The column is not anchored at the end: what this case asserts is that the
+# phase is there, not where — `inputs` and `outputs` were added later
+# (ADR-0020) and left it in the middle.
 head -1 "$TMP/d3.csv" 2>/dev/null | tr -d '\r' | grep -qE '(^|,)phase(,|$)' || res=1
-check DIAG-3 "fase (setup/main/cleanup) en el JSON y en el CSV" $res
+check DIAG-3 "phase (setup/main/cleanup) in the JSON and the CSV" $res
 
-# ---- DIAG-4: bajo un PM, qué secuencia de operador se corrió ----
-# `secuencia` es el nombre del PM, así que el test debe viajar como campo
-# propio: sin él, el resultado archivado no registra qué se corrió.
+# ---- DIAG-4: under a PM, which operator sequence was run ----
+# `sequence` is the PM's name, so the test has to travel as a field of its
+# own: without it, the archived result does not record what was run.
 $A --process-model process_models/sequential.yaml \
    ejemplos/limites.yaml --json "$TMP/d4.json" >/dev/null 2>&1
 grep -q '"user_sequence": "ejemplos/limites.yaml"' "$TMP/d4.json"
-check DIAG-4 "la secuencia del operador es un campo del JSON" $?
+check DIAG-4 "the operator's sequence is a JSON field" $?
 
-# ---- DIAG-5a: un sidecar envuelto debe señalar el envoltorio ----
-# El error genérico acusaba al nombre del paso, que está bien; de ahí salió el
-# bug fantasma «el sidecar no funciona con process model».
+# ---- DIAG-5a: a wrapped sidecar must point at the wrapper ----
+# The generic error blamed the step's name, which is fine; that is where the
+# phantom bug "the sidecar does not work with a process model" came from.
 cat >"$TMP/envoltorio.limits.yaml" <<'YAML'
 limits:
   medir_voltaje:
@@ -130,9 +130,9 @@ limits:
 YAML
 $A ejemplos/limites.yaml --limits "$TMP/envoltorio.limits.yaml" 2>&1 |
   grep -qiE 'mapa plano|envoltorio'
-check DIAG-5a "un sidecar envuelto señala el envoltorio, no el paso" $?
+check DIAG-5a "a wrapped sidecar points at the wrapper, not the step" $?
 
-# ---- DIAG-5b: un campo desconocido debe ubicarse y sugerir el correcto ----
+# ---- DIAG-5b: an unknown field must be located and the right one suggested ----
 cat >"$TMP/steps.yaml" <<'YAML'
 name: regresion_steps
 subsequences:
@@ -144,36 +144,36 @@ main:
 YAML
 $A "$TMP/steps.yaml" --validate 2>&1 |
   grep -qE "subsequences.interna.*querías 'main'"
-check DIAG-5b "campo desconocido: ubicación + sugerencia" $?
+check DIAG-5b "unknown field: location + suggestion" $?
 
-# ---- DIAG-5c: mensaje de flag desconocido ----
-# El patrón original exigía el adjetivo DESPUÉS del nombre del flag y nunca
-# casó con el mensaje real ("flag desconocido: '--x'"), así que este caso salía
-# rojo mucho después de estar arreglado. Ahora acepta ambos órdenes.
+# ---- DIAG-5c: unknown flag message ----
+# The original pattern required the adjective AFTER the flag's name and never
+# matched the real message ("flag desconocido: '--x'"), so this case stayed red
+# long after it was fixed. It now accepts both orders.
 $A "$R/bug2-csv-nombre.yaml" --inventado 2>&1 |
   grep -qiE "flag (desconocido|no reconocido).*--inventado|flag .*--inventado.* (desconocido|no reconocido)"
-check DIAG-5c "flag desconocido se reporta como desconocido" $?
+check DIAG-5c "an unknown flag is reported as unknown" $?
 
-# ---- DIAG-5e: -h y -V existen (la beta no los usó ni una vez) ----
+# ---- DIAG-5e: -h and -V exist (the beta did not use them once) ----
 $A -h 2>&1 | grep -qE '^uso: anvil' && $A -V 2>&1 | grep -qE '^anvil [0-9]'
-check DIAG-5e "-h y -V responden como --help y --version" $?
+check DIAG-5e "-h and -V answer like --help and --version" $?
 
-# ---- DIAG-5f: nada de ejecutor si el motor no va a correr un paso ----
-# Anunciar 'escuchando en 9100' por delante de la ayuda o del error ensucia la
-# salida, y con el puerto fijo del MVP bloquea a otro anvil que sí fuera a
-# correr (dos `--validate` en paralelo chocaban).
+# ---- DIAG-5f: no executor if the engine is not going to run a step ----
+# Announcing 'escuchando en 9100' ahead of the help or the error pollutes the
+# output, and with the MVP's fixed port it blocked another anvil that was going
+# to run (two `--validate` in parallel clashed).
 ! $A -h 2>&1 | grep -qi 'escuchando' &&
   ! $A ejemplos/limites.yaml --validate 2>&1 | grep -qi 'escuchando'
-check DIAG-5f "sin ejecutor embebido para -h/--validate" $?
+check DIAG-5f "no embedded executor for -h/--validate" $?
 
-# ---- DIAG-5d: un .wasm que es módulo core, no componente ----
-# Los 8 bytes de cabecera son un módulo core válido y vacío: basta para que el
-# ejecutor lo rechace, y el mensaje debe decir POR QUÉ (antes decía sólo
-# "failed to parse WebAssembly module", que hizo culpar al toolchain).
+# ---- DIAG-5d: a .wasm that is a core module, not a component ----
+# The 8 header bytes are a valid, empty core module: enough for the executor to
+# refuse it, and the message must say WHY (it used to say only "failed to parse
+# WebAssembly module", which got the toolchain blamed).
 #
-# Desde ADR-0027 el `path` del YAML es el binario del ejecutor, así que el
-# módulo malo se pone DENTRO del departamento: se monta uno de mentira con una
-# copia del ejecutor y el core.wasm al lado.
+# Since ADR-0027 the YAML's `path` is the executor's binary, so the bad module
+# goes INSIDE the department: a fake one is assembled with a copy of the
+# executor and the core.wasm beside it.
 PUENTE=""
 for cand in packaging/anvil-host/target/release/anvil-exec-wasm \
             packaging/anvil-host/target/debug/anvil-exec-wasm \
@@ -182,7 +182,7 @@ for cand in packaging/anvil-host/target/release/anvil-exec-wasm \
   [ -x "$cand" ] && { PUENTE="$cand"; break; }
 done
 if [ -z "$PUENTE" ]; then
-  check DIAG-5d "un .wasm módulo core se diagnostica como tal (sin ejecutor: omitido)" 1
+  check DIAG-5d "a core-module .wasm is diagnosed as such (no executor: skipped)" 1
 else
   mkdir -p "$TMP/depto"
   cp "$PUENTE" "$TMP/depto/anvil-exec-wasm"
@@ -198,13 +198,13 @@ main:
     executor: dmm
 YAML
   $A "$TMP/coremod.yaml" 2>&1 | grep -qiE 'módulo core|modulo core|core module'
-  check DIAG-5d "un .wasm módulo core se diagnostica como tal" $?
+  check DIAG-5d "a core-module .wasm is diagnosed as such" $?
 fi
 
-# ---- DIAG-5g: apuntar el `path` de un ejecutor wasm a un `.wasm` ----
-# El tropiezo nº1 viniendo de antes de ADR-0027. Es un fichero, así que pasa
-# cualquier comprobación de existencia, y `exec` fallaría con «Exec format
-# error» — que manda a mirar el toolchain en vez de la línea del YAML.
+# ---- DIAG-5g: pointing a wasm executor's `path` at a `.wasm` ----
+# The number one stumble coming from before ADR-0027. It is a file, so it passes
+# any existence check, and `exec` would fail with "Exec format error" — which
+# sends you to look at the toolchain instead of the YAML line.
 printf '\x00asm\x0d\x00\x01\x00' >"$TMP/suelto.wasm"
 cat >"$TMP/pathwasm.yaml" <<'YAML'
 name: regresion_path_es_wasm
@@ -217,12 +217,12 @@ main:
     executor: dmm
 YAML
 $A "$TMP/pathwasm.yaml" 2>&1 | grep -qiE 'binario del ejecutor|executor.s binary'
-check DIAG-5g "path a un .wasm dice que se espera el binario del ejecutor" $?
+check DIAG-5g "a path to a .wasm says the executor's binary is expected" $?
 
-# ---- LEC-1: `resultado.*` fuera de `asigna` debe ser error de carga ----
-# La lección de producto (§5): este YAML cargaba, la precondición era un `false`
-# constante, el paso se saltaba y la secuencia salía VERDE. La campaña propagó
-# el patrón a 19 secuencias y 51 precondiciones.
+# ---- LEC-1: `result.*` outside `assign` must be a load error ----
+# The product lesson (§5): this YAML loaded, the precondition was a constant
+# `false`, the step was skipped and the sequence came out GREEN. The campaign
+# spread the pattern to 19 sequences and 51 preconditions.
 cat >"$TMP/lec1.yaml" <<'YAML'
 name: regresion_result_outside_assign
 locals:
@@ -233,11 +233,11 @@ main:
 YAML
 $A "$TMP/lec1.yaml" --validate 2>&1 |
   grep -qE "medir_voltaje.*result.measured_value|result.measured_value.*precondicion"
-check LEC-1 "resultado.* en una precondición es error de carga" $?
+check LEC-1 "result.* in a precondition is a load error" $?
 
-# ---- LEC-2: un verde que se saltó pasos tiene que decirlo ----
-# `saltado` es neutral en el agregado y debe seguir siéndolo, pero 9 secuencias
-# de la campaña daban verde saltándose ≥30% de sus pasos sin que se notara.
+# ---- LEC-2: a green that skipped steps has to say so ----
+# `skipped` is neutral in the aggregate and must stay so, but 9 sequences of the
+# campaign came out green skipping ≥30% of their steps without it showing.
 cat >"$TMP/lec2.yaml" <<'YAML'
 name: regresion_visible_skips
 locals:
@@ -256,15 +256,15 @@ res=0
 grep -qE '\(2 de 3 pasos saltados\)' "$TMP/lec2.out" || res=1
 grep -q '"skipped_steps": 2' "$TMP/lec2.json" || res=1
 grep -q '"total_steps": 3' "$TMP/lec2.json" || res=1
-# Y el agregado sigue siendo verde: la neutralidad no cambia (RF-33/34).
+# And the aggregate stays green: neutrality does not change (RF-33/34).
 grep -q ': pass ===' "$TMP/lec2.out" || res=1
-check LEC-2 "un verde con pasos saltados lo declara (consola y JSON)" $res
+check LEC-2 "a green with skipped steps declares it (console and JSON)" $res
 
-# ---- NOTA-1: dos `anvil` simultáneos no deben chocar de puerto ----
-# El ejecutor embebido bindeaba 9100 fijo: el segundo proceso moría con
-# `address in use`, lo que impedía paralelizar una campaña lanzando N procesos.
-# El `--port` que la guía recomendaba como remedio sólo movía la punta del
-# motor, así que daba `connection refused`.
+# ---- NOTA-1: two simultaneous `anvil` must not clash on a port ----
+# The embedded executor bound a fixed 9100: the second process died with
+# `address in use`, which prevented parallelising a campaign by launching N
+# processes. The `--port` the guide recommended as a remedy only moved the
+# engine's end, so it gave `connection refused`.
 $A ejemplos/basica.yaml >"$TMP/n1a.out" 2>&1 &
 p1=$!
 $A ejemplos/basica.yaml >"$TMP/n1b.out" 2>&1 &
@@ -275,26 +275,26 @@ for f in "$TMP/n1a.out" "$TMP/n1b.out"; do
   grep -qi 'address in use\|refused' "$f" && res=1
   grep -q '=== basica:' "$f" || res=1
 done
-check NOTA-1 "dos anvil simultáneos corren sin chocar de puerto" $res
+check NOTA-1 "two simultaneous anvil run without a port clash" $res
 
-# ---- NOTA-1b: --port explícito fija ejecutor y motor, no sólo el motor ----
+# ---- NOTA-1b: an explicit --port pins executor and engine, not just the engine ----
 $A ejemplos/basica.yaml --port 9300 2>&1 | grep -qE 'escuchando en 9300'
-check NOTA-1b "--port fija también el puerto del ejecutor embebido" $?
+check NOTA-1b "--port also pins the embedded executor's port" $?
 
-# ---- EXIT-1: el exit code debe reflejar el veredicto agregado (#16) ----
-# `main` descartaba el `Ok` de `ejecuta_programa` y sólo miraba el `Err` (que
-# es «se rompió la comunicación», no «el veredicto es negativo»), así que una
-# secuencia en rojo salía 0 y `anvil secuencia.yaml && desplegar` desplegaba
-# con el DUT suspendido. Contrato: 0 sólo si el agregado es `paso`, 1 en todo
-# lo demás. El fixture de `error` es el de los tests del host: ningún ejemplo
-# produce un error de ejecución determinista y sin red.
+# ---- EXIT-1: the exit code must reflect the aggregate verdict (#16) ----
+# `main` discarded `ejecuta_programa`'s `Ok` and only looked at the `Err` (which
+# is "the communication broke", not "the verdict is negative"), so a red
+# sequence exited 0 and `anvil sequence.yaml && deploy` deployed with the DUT
+# failed. Contract: 0 only if the aggregate is `pass`, 1 for everything else.
+# The `error` fixture is the host tests' one: no example produces a
+# deterministic execution error without a network.
 F=packaging/anvil-host/tests/fixtures
 res=0
 $A "$F/paso.yaml"          --quiet >/dev/null 2>&1; [ $? -eq 0 ] || res=1
 $A ejemplos/veredicto.yaml --quiet >/dev/null 2>&1; [ $? -eq 1 ] || res=1
 $A "$F/error_runtime.yaml" --quiet >/dev/null 2>&1; [ $? -eq 1 ] || res=1
 $A no-existe-de-verdad.yaml        >/dev/null 2>&1; [ $? -eq 1 ] || res=1
-check EXIT-1 "exit 0 sólo con veredicto paso; fallo/error/carga salen 1" $res
+check EXIT-1 "exit 0 only on a pass verdict; fail/error/load exit 1" $res
 
 echo "===================================================================="
 echo "  OK: $ok    FALLA: $falla"
