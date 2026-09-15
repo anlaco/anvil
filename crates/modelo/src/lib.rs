@@ -492,8 +492,16 @@ pub enum TipoPaso {
     /// contra su entorno y produce `paso`/`fallo` — el criterio de aceptación
     /// **compuesto** sobre medidas ya volcadas a variables. Local, sin gRPC.
     /// Es el análogo del step type `Pass/Fail Test` de TestStand, cuyo data
-    /// source es una expresión booleana.
+    /// source es una expresión booleana. With a `module` it also calls an
+    /// executor, and is judged on the executor's answer or on `condicion`
+    /// reading it (ADR-0040 §4, ADR-0042).
     PassFail,
+    /// Calls a module to do something, and judges nothing (ADR-0040 §3): the
+    /// executor's `pass` becomes `done`.
+    Action,
+    /// Judges one number against `limite` (ADR-0040 §5): the module's
+    /// measurement, or `valor`. Without a measurement it is `error`.
+    NumericLimit,
 }
 
 /// How a step executor is reached (M5-ext.1, RF-36.3). The engine dispatches by
@@ -705,6 +713,9 @@ pub struct DefinicionPaso {
     /// then only the step's own name, for the report, the editor and the
     /// events. `None` means the step's name is also what it calls.
     pub module: Option<String>,
+    /// The number a `numeric_limit` judges, TestStand's numeric data source
+    /// (ADR-0040 §5). `None` means the module's `measured_value`.
+    pub valor: Option<expr::Expresion>,
 }
 
 impl DefinicionPaso {
@@ -725,7 +736,27 @@ impl DefinicionPaso {
             entradas: None,
             ejecutor: None,
             module: None,
+            valor: None,
         }
+    }
+
+    /// Whether running this step calls an executor: a `grpc` or `action` step
+    /// always does, and any other with a `module` (ADR-0040 §1).
+    pub fn llama_a_un_ejecutor(&self) -> bool {
+        matches!(self.tipo, TipoPaso::Grpc | TipoPaso::Action) || self.module.is_some()
+    }
+
+    /// The expressions that may read this step's own `result`: its `assign`,
+    /// and — when it calls an executor — its `condicion` and `valor`
+    /// (ADR-0042 §1).
+    pub fn lecturas_de_resultado(&self) -> Vec<&expr::Expresion> {
+        let mut fuera: Vec<&expr::Expresion> =
+            self.asigna.iter().flatten().map(|a| &a.expr).collect();
+        if self.llama_a_un_ejecutor() {
+            fuera.extend(self.condicion.iter());
+            fuera.extend(self.valor.iter());
+        }
+        fuera
     }
 
     /// What the step calls on its executor: its `module`, or — until ADR-0040

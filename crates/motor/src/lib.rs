@@ -371,11 +371,11 @@ impl Motor {
             intento += 1;
             resultado = self.ejecuta_paso(def, programa, intento as i32, parametros)?;
         }
-        // El límite (si la secuencia lo declara) se evalúa tras la invocación:
-        // el paso devuelve la medida, el motor produce el estado final
-        // (ADR-0008). El contrato `paso.proto` no cambia — el límite vive en
-        // la definición, no en el cable.
-        Ok(aplicar_limite(def, resultado))
+        // The limit is not applied here but in `corre_un_paso`, where every
+        // step type is judged (ADR-0040): here it would only reach the network
+        // path, and each type judges a limit at a different moment. A limit
+        // failure still does not consume a retry (#76).
+        Ok(resultado)
     }
 
     /// Ejecuta un **programa** (M4b, RF-27): la secuencia raíz, con sus
@@ -623,9 +623,7 @@ fn necesita_contrato_2(def: &DefinicionPaso) -> bool {
     if def.entradas.is_some() {
         return true;
     }
-    def.asigna
-        .as_deref()
-        .is_some_and(|asigs| asigs.iter().any(|a| lee_salidas(&a.expr)))
+    def.lecturas_de_resultado().into_iter().any(lee_salidas)
 }
 
 /// `true` si el AST lee en algún sitio una `result.outputs.<nombre>`.
@@ -887,12 +885,23 @@ fn corre_un_paso<I: InvocaPasos>(
     // ejecutor.
     let mut r = match p.tipo {
         TipoPaso::Statement => ejecuta_statement_puro(p.statement.as_deref(), &p.nombre, ent),
-        TipoPaso::PassFail => evalua_pass_fail(p.condicion.as_ref(), &p.nombre, ent),
+        TipoPaso::SequenceCall => {
+            ejecuta_sequence_call(inv, p, ent, sink, ctx, &step_run_id, &ruta)?
+        }
+        // Judged by the engine alone, on the variables: ADR-0018's `pass_fail`
+        // and a `numeric_limit` on a value already acquired (ADR-0040 §5).
+        _ if !p.llama_a_un_ejecutor() => match p.tipo {
+            TipoPaso::NumericLimit => {
+                ent.limpia_resultado();
+                juzga_limite_numerico(p, ResultadoStep::nuevo(&p.nombre, "pass", ""), ent)
+            }
+            _ => evalua_pass_fail(p.condicion.as_ref(), &p.nombre, ent),
+        },
         // ADR-0020: los parámetros se evalúan **aquí**, donde está el entorno,
         // y antes de invocar. Una expresión que falla convierte el paso en
         // `error` y **no se llama al ejecutor**: medir con un parámetro
         // inventado da un número que parece bueno y no lo es.
-        TipoPaso::Grpc => match evalua_entradas(p, ent) {
+        _ => match evalua_entradas(p, ent) {
             Ok(parametros) => {
                 let mut r = inv.ejecuta_paso_grpc(p, ctx.programa, &parametros)?;
                 // The report names the step as the sequence does. What the
@@ -900,13 +909,10 @@ fn corre_un_paso<I: InvocaPasos>(
                 // calling one module would otherwise read as the same step.
                 r.nombre = p.nombre.clone();
                 r.module = Some(p.modulo().to_string());
-                normaliza_estado_de_ejecutor(r)
+                juzga_respuesta_del_modulo(p, normaliza_estado_de_ejecutor(r), ent)
             }
             Err(r) => *r,
         },
-        TipoPaso::SequenceCall => {
-            ejecuta_sequence_call(inv, p, ent, sink, ctx, &step_run_id, &ruta)?
-        }
     };
 
     // (d) asigna (RF-31): tras un paso Grpc o SequenceCall, vuelca campos
@@ -932,6 +938,114 @@ fn corre_un_paso<I: InvocaPasos>(
     sink.on_resultado(&r, &id);
     sink.on_fin_paso(p, &id);
     Ok(r)
+}
+
+/// Judges what a module answered, by the step's type (ADR-0040 §3–5).
+///
+/// For the types ADR-0040 adds, `assign` runs **before** the judgement, so a
+/// `condition` or `value` reading a local sees what the module just returned
+/// (ADR-0042 §2); and a module that returned `error` is neither copied out nor
+/// judged — a broken bench is not judged (ADR-0019, Rule 2). A `grpc` step
+/// keeps its order, limit first and `assign` after, until ADR-0040 is complete.
+fn juzga_respuesta_del_modulo(
+    p: &DefinicionPaso,
+    r: ResultadoStep,
+    ent: &mut EntornoMotor,
+) -> ResultadoStep {
+    if p.tipo == TipoPaso::Grpc {
+        return aplicar_limite(p, r);
+    }
+    if r.estado == "error" {
+        return r;
+    }
+    let mut r = match &p.asigna {
+        Some(asignaciones) => aplica_asigna(asignaciones, r, ent),
+        None => r,
+    };
+    if r.estado == "error" {
+        return r;
+    }
+    match p.tipo {
+        // §3: an action judges nothing. Its `pass` is `done`; a `fail` or a
+        // `skipped` the module set stands, as TestStand's does.
+        TipoPaso::Action => {
+            if r.paso() {
+                r.estado = "done".into();
+            }
+            r
+        }
+        // §4: the module's status is the verdict, unless a condition decides.
+        TipoPaso::PassFail => match &p.condicion {
+            None => r,
+            Some(cond) => {
+                ent.set_resultado(r.clone());
+                let juicio = evalua_condicion(cond, &p.nombre, ent);
+                ent.limpia_resultado();
+                r.estado = juicio.estado;
+                r.mensaje = juicio.mensaje;
+                r
+            }
+        },
+        TipoPaso::NumericLimit => juzga_limite_numerico(p, r, ent),
+        _ => r,
+    }
+}
+
+/// A `numeric_limit` (ADR-0040 §5): the number is `valor`, or the module's
+/// measurement, and a step with no number to judge is `error`, not a limit that
+/// silently does not apply. A `fail` or `error` already on `r` stands: a limit
+/// only ever turns a `pass` into a `fail` (ADR-0008).
+///
+/// With a module, `ent` must not hold a stale result: it is given `r` here.
+fn juzga_limite_numerico(
+    p: &DefinicionPaso,
+    mut r: ResultadoStep,
+    ent: &mut EntornoMotor,
+) -> ResultadoStep {
+    if !r.paso() {
+        return r;
+    }
+    let numero = match &p.valor {
+        Some(expr) => {
+            if p.llama_a_un_ejecutor() {
+                ent.set_resultado(r.clone());
+            }
+            let evaluado = eval(expr, ent);
+            ent.limpia_resultado();
+            // On error the step keeps what the module returned — its inputs,
+            // outputs and measurement stay in the report.
+            let motivo = match evaluado {
+                Ok(Value::Numero(x)) => Ok(x),
+                Ok(Value::Nulo) => {
+                    Err("'value' evaluated to nothing: there is no number to judge".to_string())
+                }
+                Ok(otro) => Err(format!("'value' is {}, not a number", otro.tipo())),
+                Err(e) => Err(format!("'value': {e}")),
+            };
+            match motivo {
+                Ok(x) => x,
+                Err(m) => {
+                    r.estado = "error".into();
+                    r.mensaje = m;
+                    return r;
+                }
+            }
+        }
+        None => match r.valor_medido {
+            Some(x) => x,
+            None => {
+                r.estado = "error".into();
+                r.mensaje = format!(
+                    "no measurement: a numeric_limit judges the module's measured value, and \
+                     it returned none (it said: '{}')",
+                    r.mensaje
+                );
+                return r;
+            }
+        },
+    };
+    r.valor_medido = Some(numero);
+    aplicar_limite(p, r)
 }
 
 /// Ejecuta un paso `sequence_call` (M4b, RF-27): invoca otra secuencia
@@ -1158,6 +1272,12 @@ fn evalua_pass_fail(
     };
     // Un `pass_fail` no tiene `resultado.*` propio: lee variables de scopes.
     ent.limpia_resultado();
+    evalua_condicion(cond, nombre, ent)
+}
+
+/// Evaluates a verdict condition against `ent` as it is: `true` passes, `false`
+/// fails, anything else is `error`.
+fn evalua_condicion(cond: &Expresion, nombre: &str, ent: &mut EntornoMotor) -> ResultadoStep {
     match eval(cond, ent) {
         Ok(Value::Bool(true)) => ResultadoStep::nuevo(nombre, "pass", "condición cumplida"),
         Ok(Value::Bool(false)) => ResultadoStep::nuevo(nombre, "fail", "condición no cumplida"),
@@ -2579,6 +2699,175 @@ mod tests {
         p.tipo = TipoPaso::Statement;
         p.statement = Some(expr::parse_sentencias("locals.v = 1.0").unwrap());
         p
+    }
+
+    // --- ADR-0040 E3: the step types, judged -----------------------------
+
+    /// An executor that answers every call with a copy of one result.
+    struct Responde(ResultadoStep);
+    impl InvocaPasos for Responde {
+        fn ejecuta_paso_grpc(
+            &mut self,
+            _: &DefinicionPaso,
+            _: &Programa,
+            _: &[(String, Value)],
+        ) -> Result<ResultadoStep, Error> {
+            Ok(self.0.clone())
+        }
+    }
+
+    fn con_modulo(nombre: &str, tipo: TipoPaso) -> DefinicionPaso {
+        let mut p = DefinicionPaso::nuevo(nombre, 1);
+        p.tipo = tipo;
+        p.module = Some("bench/step".into());
+        p.ejecutor = Some("bench".into());
+        p
+    }
+
+    fn medida(valor: f64) -> ResultadoStep {
+        ResultadoStep::medido_valor("bench/step", "pass", "measured", valor)
+    }
+
+    /// Runs one step in `main` against `respuesta`, with `locals` declared.
+    fn corre_uno(
+        p: DefinicionPaso,
+        respuesta: ResultadoStep,
+        locals: &[(&str, ValorDefinicion)],
+    ) -> (ResultadoStep, EntornoMotor) {
+        let mut def = DefinicionSecuencia {
+            nombre: "s".into(),
+            pasos_main: vec![p],
+            ..Default::default()
+        };
+        for (k, v) in locals {
+            def.locals.insert((*k).to_string(), v.clone());
+        }
+        let (sec, ent) = corre_con(&mut Responde(respuesta), &def);
+        (sec.pasos[0].clone(), ent)
+    }
+
+    #[test]
+    fn an_action_that_passes_is_done_and_its_fail_stands() {
+        let (r, _) = corre_uno(
+            con_modulo("power on", TipoPaso::Action),
+            ResultadoStep::nuevo("bench/step", "pass", "on"),
+            &[],
+        );
+        assert_eq!(r.estado, "done");
+        let (r, _) = corre_uno(
+            con_modulo("power on", TipoPaso::Action),
+            ResultadoStep::nuevo("bench/step", "fail", "no"),
+            &[],
+        );
+        assert_eq!(r.estado, "fail");
+    }
+
+    #[test]
+    fn a_pass_fail_with_a_module_is_judged_on_its_answer() {
+        let (r, _) = corre_uno(
+            con_modulo("led", TipoPaso::PassFail),
+            ResultadoStep::nuevo("bench/step", "fail", "off"),
+            &[],
+        );
+        assert_eq!(r.estado, "fail");
+    }
+
+    /// ADR-0042 §1–2: the condition reads the module's `result`, and a local
+    /// `assign` just wrote.
+    #[test]
+    fn a_pass_fail_condition_reads_result_and_what_assign_just_wrote() {
+        let mut p = con_modulo("rail", TipoPaso::PassFail);
+        p.asigna = Some(vec![modelo::Asignacion {
+            var: "v".into(),
+            expr: expr::parse_expresion("result.measured_value").unwrap(),
+        }]);
+        p.condicion =
+            Some(expr::parse_expresion("locals.v > 4.0 && result.measured_value < 5.0").unwrap());
+        let (r, ent) = corre_uno(
+            p.clone(),
+            medida(4.5),
+            &[("v", ValorDefinicion::Numero(0.0))],
+        );
+        assert_eq!(r.estado, "pass", "{}", r.mensaje);
+        assert_eq!(ent.locals().get("v"), Some(&Value::Numero(4.5)));
+        assert_eq!(
+            r.valor_medido,
+            Some(4.5),
+            "the measurement stays in the report"
+        );
+
+        let (r, _) = corre_uno(p, medida(5.5), &[("v", ValorDefinicion::Numero(0.0))]);
+        assert_eq!(r.estado, "fail");
+    }
+
+    /// A broken bench is not judged, and nothing it returned is copied out.
+    #[test]
+    fn a_module_error_skips_assign_and_the_condition() {
+        let mut p = con_modulo("rail", TipoPaso::PassFail);
+        p.asigna = Some(vec![modelo::Asignacion {
+            var: "v".into(),
+            expr: expr::parse_expresion("1.0").unwrap(),
+        }]);
+        p.condicion = Some(expr::parse_expresion("true").unwrap());
+        let (r, ent) = corre_uno(
+            p,
+            ResultadoStep::nuevo("bench/step", "error", "no answer"),
+            &[("v", ValorDefinicion::Numero(9.0))],
+        );
+        assert_eq!(r.estado, "error");
+        assert_eq!(ent.locals().get("v"), Some(&Value::Numero(9.0)));
+    }
+
+    #[test]
+    fn a_numeric_limit_judges_the_measurement_and_errors_without_one() {
+        let mut p = con_modulo("rail", TipoPaso::NumericLimit);
+        p.limite = Some(Limite::Rango { min: 4.5, max: 5.5 });
+        let (r, _) = corre_uno(p.clone(), medida(5.0), &[]);
+        assert_eq!(r.estado, "pass");
+        let (r, _) = corre_uno(p.clone(), medida(4.2), &[]);
+        assert_eq!(r.estado, "fail");
+        let (r, _) = corre_uno(p, ResultadoStep::nuevo("bench/step", "pass", "ok"), &[]);
+        assert_eq!(
+            r.estado, "error",
+            "a declared limit that was never checked is not a pass (ADR-0040 §5)"
+        );
+    }
+
+    #[test]
+    fn a_numeric_limit_value_reads_the_result_or_locals() {
+        let mut p = con_modulo("temp", TipoPaso::NumericLimit);
+        p.limite = Some(Limite::Rango {
+            min: 15.0,
+            max: 30.0,
+        });
+        p.valor = Some(expr::parse_expresion("result.outputs.temperature").unwrap());
+        let mut respuesta = ResultadoStep::nuevo("bench/step", "pass", "ok");
+        respuesta.salidas = vec![("temperature".into(), Value::Numero(21.5))];
+        let (r, _) = corre_uno(p, respuesta, &[]);
+        assert_eq!(r.estado, "pass", "{}", r.mensaje);
+        assert_eq!(r.valor_medido, Some(21.5), "the judged number is reported");
+
+        let mut local = DefinicionPaso::nuevo("already acquired", 1);
+        local.tipo = TipoPaso::NumericLimit;
+        local.limite = Some(Limite::Rango { min: 0.0, max: 1.0 });
+        local.valor = Some(expr::parse_expresion("locals.x").unwrap());
+        let (r, _) = corre_uno(
+            local.clone(),
+            medida(0.0),
+            &[("x", ValorDefinicion::Numero(3.0))],
+        );
+        assert_eq!(
+            r.estado, "fail",
+            "no module: nothing is called, locals.x is judged"
+        );
+
+        local.valor = Some(expr::parse_expresion("locals.nada").unwrap());
+        let (r, _) = corre_uno(
+            local,
+            medida(0.0),
+            &[("nada", ValorDefinicion::Texto("t".into()))],
+        );
+        assert_eq!(r.estado, "error", "a value that is not a number is error");
     }
 
     /// ADR-0040 §1: what travels is the module, and a step without one still

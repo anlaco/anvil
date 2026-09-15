@@ -20,9 +20,7 @@
 //!   which is the false green of ADR-0019.
 
 use modelo::proto::{Catalog, ParameterSpec, StepSpec, ValueType};
-use modelo::{
-    DefinicionPaso, DefinicionSecuencia, EntradaPaso, Programa, TipoPaso, ValorDefinicion,
-};
+use modelo::{DefinicionPaso, DefinicionSecuencia, EntradaPaso, Programa, ValorDefinicion};
 use std::collections::{BTreeMap, BTreeSet};
 
 use crate::Motor;
@@ -370,7 +368,7 @@ fn comprueba_paso(
     // Only steps that cross the wire. A `statement`, a `pass_fail` or a
     // `sequence_call` is the engine's own business and no executor describes
     // it (ADR-0009, ADR-0010, ADR-0018).
-    if def.tipo != TipoPaso::Grpc {
+    if !def.llama_a_un_ejecutor() {
         return;
     }
     // A disabled step is registered as `skipped` **without asking anyone**
@@ -499,8 +497,8 @@ fn comprueba_tipo(
 
 fn comprueba_salidas(def: &DefinicionPaso, spec: &StepSpec, ejecutor: &str, informe: &mut Informe) {
     let mut leidas = Vec::new();
-    for a in def.asigna.as_deref().unwrap_or(&[]) {
-        salidas_leidas(&a.expr, &mut leidas);
+    for e in def.lecturas_de_resultado() {
+        salidas_leidas(e, &mut leidas);
     }
     for salida in leidas {
         if !spec.outputs.iter().any(|o| o.name == salida) {
@@ -544,7 +542,7 @@ fn salidas_leidas(e: &expr::Expresion, fuera: &mut Vec<String>) {
 mod tests {
     use super::*;
     use modelo::proto::{OutputSpec, ParameterSpec};
-    use modelo::{Asignacion, DefinicionPaso, DefinicionSecuencia};
+    use modelo::{Asignacion, DefinicionPaso, DefinicionSecuencia, TipoPaso};
     use std::collections::HashMap;
 
     /// The catalog of an executor that serves `medir_voltaje(canal?, offset?)`

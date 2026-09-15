@@ -315,6 +315,9 @@ struct PasoYaml {
     /// `name` is also what it calls.
     #[serde(default)]
     module: Option<String>,
+    /// The number a `numeric_limit` judges (ADR-0040 §5).
+    #[serde(default)]
+    value: Option<String>,
 }
 
 fn reintentos_por_defecto() -> u32 {
@@ -604,7 +607,7 @@ impl From<noyalib::Error> for ErrorCarga {
 /// errata. Es una ayuda de diagnóstico, no una fuente de verdad: el schema lo
 /// imponen los `struct` con `deny_unknown_fields`, y si esta lista se queda
 /// corta lo único que se pierde es una sugerencia.
-const CAMPOS_DEL_SCHEMA: [&str; 29] = [
+const CAMPOS_DEL_SCHEMA: [&str; 30] = [
     // SecuenciaYaml
     "name",
     "setup",
@@ -630,6 +633,7 @@ const CAMPOS_DEL_SCHEMA: [&str; 29] = [
     "args",
     "executor",
     "module",
+    "value",
     // EjecutorYaml
     "path",
     "host",
@@ -907,8 +911,16 @@ fn validar_alcance_resultado(def: &DefinicionSecuencia) -> Result<(), ErrorCarga
         if let Some(pre) = &p.precondicion {
             donde.push(("precondition", pre));
         }
-        if let Some(cond) = &p.condicion {
-            donde.push(("condition", cond));
+        // With a module, `condition` and `value` are evaluated after the module
+        // answers and read that answer (ADR-0042 §1); without one there is no
+        // answer to read.
+        if !p.llama_a_un_ejecutor() {
+            if let Some(cond) = &p.condicion {
+                donde.push(("condition", cond));
+            }
+            if let Some(v) = &p.valor {
+                donde.push(("value", v));
+            }
         }
         for (campo_yaml, e) in donde {
             if let Some(campo) = primer_uso_de_resultado(e) {
@@ -1006,10 +1018,12 @@ fn validar_campos_de_resultado(def: &DefinicionSecuencia) -> Result<(), ErrorCar
         .chain(&def.pasos_main)
         .chain(&def.pasos_cleanup)
     {
-        let Some(asignaciones) = &p.asigna else {
-            continue;
+        let campos = || {
+            modelo::CAMPOS_RESULTADO
+                .map(|c| format!("'{c}'"))
+                .join(", ")
         };
-        for a in asignaciones {
+        for a in p.asigna.iter().flatten() {
             if let Some(campo) = primer_uso_de_resultado_si(&a.expr, &desconocido) {
                 return Err(ErrorCarga::Validacion(format!(
                     "el paso '{}' asigna a '{}' desde 'result.{campo}', que no existe: \
@@ -1017,10 +1031,23 @@ fn validar_campos_de_resultado(def: &DefinicionSecuencia) -> Result<(), ErrorCar
                      lo que devuelva el paso",
                     p.nombre,
                     a.var,
-                    modelo::CAMPOS_RESULTADO
-                        .map(|c| format!("'{c}'"))
-                        .join(", ")
+                    campos()
                 )));
+            }
+        }
+        // The same check where ADR-0042 §1 lets `result` be read too.
+        if p.llama_a_un_ejecutor() {
+            for (campo_yaml, e) in [("condition", &p.condicion), ("value", &p.valor)] {
+                let Some(e) = e else { continue };
+                if let Some(campo) = primer_uso_de_resultado_si(e, &desconocido) {
+                    return Err(ErrorCarga::Validacion(format!(
+                        "step '{}' reads 'result.{campo}' in '{campo_yaml}', and it does not \
+                         exist: the fields of 'result' are {}, and 'outputs.<name>' for what \
+                         the step returns",
+                        p.nombre,
+                        campos()
+                    )));
+                }
             }
         }
     }
@@ -1172,6 +1199,9 @@ fn validar_variables_leidas(def: &DefinicionSecuencia) -> Result<(), ErrorCarga>
         }
         if let Some(cond) = &p.condicion {
             donde.push(("condition", cond));
+        }
+        if let Some(v) = &p.valor {
+            donde.push(("value", v));
         }
         // Sólo el lado derecho: los destinos los valida `validar_lvalues`.
         if let Some(stmts) = &p.statement {
@@ -1582,7 +1612,7 @@ fn validar_referencias_de(
         // (3b) and (4): the `assign` that fills a reference variable.
         for a in p.asigna.iter().flatten() {
             let Some(duenio) = refs(&a.var) else { continue };
-            if p.tipo != TipoPaso::Grpc {
+            if !p.llama_a_un_ejecutor() {
                 return Err(ErrorCarga::Validacion(format!(
                     "el paso '{}' de la secuencia '{}' asigna a 'locals.{}', que se declara \
                      como referencia, y no es un paso de ejecutor. Sólo un paso servido por \
@@ -1873,7 +1903,7 @@ fn visitar(
         // A step that calls an executor names it (ADR-0041). Checked here, per
         // program, because this is where the executor table is known: a
         // subsequence file declares none and uses its root's.
-        if paso.tipo == TipoPaso::Grpc && paso.ejecutor.is_none() {
+        if paso.llama_a_un_ejecutor() && paso.ejecutor.is_none() {
             return Err(ErrorCarga::Validacion(error_paso_sin_ejecutor(
                 paso, def, programa,
             )));
@@ -2243,13 +2273,25 @@ impl PasoYaml {
             "statement" => TipoPaso::Statement,
             "sequence_call" => TipoPaso::SequenceCall,
             "pass_fail" => TipoPaso::PassFail,
+            "action" => TipoPaso::Action,
+            "numeric_limit" => TipoPaso::NumericLimit,
             otro => {
                 return Err(ErrorCarga::Validacion(format!(
                     "el paso '{}' tiene tipo '{otro}' inválido \
-                     (grpc|statement|sequence_call|pass_fail)",
+                     (action|pass_fail|numeric_limit|statement|sequence_call|grpc)",
                     self.name
                 )))
             }
+        };
+        // Whether this step calls an executor (ADR-0040 §1): the fields that
+        // only mean something on such a step are checked against it.
+        let llama = matches!(tipo, TipoPaso::Grpc | TipoPaso::Action) || self.module.is_some();
+
+        let valor = match self.value.as_deref() {
+            Some(texto) => Some(expr::parse_expresion(extraer_expr(texto)).map_err(|e| {
+                ErrorCarga::Validacion(format!("step '{}' has an invalid 'value': {e}", self.name))
+            })?),
+            None => None,
         };
 
         // RF-27: el statement se parsea a una lista de sentencias.
@@ -2280,10 +2322,10 @@ impl PasoYaml {
         // `sequence_call` (by-reference, ADR-0010). Cada uno en el sitio que
         // no le toca es un error de definición, no algo que ignorar: un paso
         // que declara valores que nadie va a leer está mal escrito.
-        if !matches!(tipo, TipoPaso::Grpc) && self.inputs.is_some() {
+        if !llama && self.inputs.is_some() {
             return Err(ErrorCarga::Validacion(format!(
                 "el paso '{}' es '{}' pero trae 'inputs' (son los parámetros by-value de un \
-                 paso 'grpc'; para pasar variables a una subsecuencia es 'args')",
+                 paso que llama a un ejecutor; para pasar variables a una subsecuencia es 'args')",
                 self.name, self.kind
             )));
         }
@@ -2356,12 +2398,42 @@ impl PasoYaml {
                 self.name, self.kind
             )));
         }
-        // RF-25 (ADR-0018): un `pass_fail` es su condición; sin ella no hay
-        // veredicto que dar.
-        if matches!(tipo, TipoPaso::PassFail) && condicion.is_none() {
+        // RF-25 (ADR-0018, ADR-0040 §4): a `pass_fail` is judged on its module's
+        // answer or on its condition; with neither there is nothing to judge.
+        if matches!(tipo, TipoPaso::PassFail) && condicion.is_none() && self.module.is_none() {
             return Err(ErrorCarga::Validacion(format!(
-                "el paso '{}' es 'pass_fail' pero no trae 'condition'",
+                "step '{}' is 'pass_fail' and has neither 'module' nor 'condition': \
+                 it needs one of them to judge anything",
                 self.name
+            )));
+        }
+        // ADR-0040 §3: an action does something on an executor, so it names what.
+        if matches!(tipo, TipoPaso::Action) && self.module.is_none() {
+            return Err(ErrorCarga::Validacion(format!(
+                "step '{}' is 'action' and has no 'module': an action calls something",
+                self.name
+            )));
+        }
+        // ADR-0040 §5: a numeric limit judges a number against a limit.
+        if matches!(tipo, TipoPaso::NumericLimit) {
+            if limite.is_none() {
+                return Err(ErrorCarga::Validacion(format!(
+                    "step '{}' is 'numeric_limit' and has no 'limit'",
+                    self.name
+                )));
+            }
+            if valor.is_none() && self.module.is_none() {
+                return Err(ErrorCarga::Validacion(format!(
+                    "step '{}' is 'numeric_limit' and has neither 'module' nor 'value': \
+                     there is no number to judge",
+                    self.name
+                )));
+            }
+        }
+        if !matches!(tipo, TipoPaso::NumericLimit) && valor.is_some() {
+            return Err(ErrorCarga::Validacion(format!(
+                "step '{}' is '{}' and has 'value': only a 'numeric_limit' judges a value",
+                self.name, self.kind
             )));
         }
         if !matches!(tipo, TipoPaso::PassFail) && condicion.is_some() {
@@ -2376,9 +2448,15 @@ impl PasoYaml {
                 self.name
             )));
         }
-        // Ni un sequence call ni un pass_fail miden: el primero agrega los
-        // resultados de sus pasos, el segundo evalúa variables ya pobladas.
-        if matches!(tipo, TipoPaso::SequenceCall | TipoPaso::PassFail) && limite.is_some() {
+        // A limit belongs to a step that judges a number (ADR-0040 §5): a
+        // sequence call aggregates, a pass_fail judges a boolean, an action and
+        // a statement judge nothing. `grpc` keeps accepting one until ADR-0040
+        // is complete.
+        if matches!(
+            tipo,
+            TipoPaso::SequenceCall | TipoPaso::PassFail | TipoPaso::Action | TipoPaso::Statement
+        ) && limite.is_some()
+        {
             return Err(ErrorCarga::Validacion(format!(
                 "el paso '{}' es '{}' y trae 'limit': no mide",
                 self.name, self.kind
@@ -2394,21 +2472,30 @@ impl PasoYaml {
         // Un `pass_fail` es puro y determinista (el motor evalúa una
         // expresión, sin red): reintentarlo daría el mismo veredicto. Se
         // rechaza en vez de aceptarlo e ignorarlo en silencio.
-        if matches!(tipo, TipoPaso::PassFail) && self.retries > 1 {
+        // Without a module a `pass_fail` or `numeric_limit` is pure: retrying it
+        // would give the same verdict. With one it retries on the executor's
+        // answer, like any step that calls one (ADR-0042 §3).
+        if matches!(tipo, TipoPaso::PassFail | TipoPaso::NumericLimit)
+            && self.module.is_none()
+            && self.retries > 1
+        {
             return Err(ErrorCarga::Validacion(format!(
-                "el paso '{}' es 'pass_fail' con reintentos={}: no admite reintentos \
+                "el paso '{}' es '{}' con reintentos={}: no admite reintentos \
                  (evalúa una expresión, el resultado no cambia entre intentos)",
-                self.name, self.retries
+                self.name, self.kind, self.retries
             )));
         }
-        // Un `pass_fail` no produce `resultado.*`, así que su `asigna` no
-        // volcaría nada. Rechazarlo en vez de ignorarlo: un `asigna` que no se
-        // aplica es la clase de fallo silencioso de DEF-3.
-        if matches!(tipo, TipoPaso::PassFail) && asigna.is_some() {
+        // Without a module there is no `result.*` to dump, so an `assign` would
+        // dump nothing. Refused rather than ignored: an `assign` that does not
+        // apply is DEF-3's kind of silent failure.
+        if matches!(tipo, TipoPaso::PassFail | TipoPaso::NumericLimit)
+            && self.module.is_none()
+            && asigna.is_some()
+        {
             return Err(ErrorCarga::Validacion(format!(
-                "el paso '{}' es 'pass_fail' y trae 'assign': un pass_fail no produce \
+                "el paso '{}' es '{}' sin 'module' y trae 'assign': no produce \
                  'result.*' que volcar (usa un paso 'statement' aparte)",
-                self.name
+                self.name, self.kind
             )));
         }
         // Lo mismo para un `statement`, por el mismo motivo (ADR-0019, regla de
@@ -2462,15 +2549,16 @@ impl PasoYaml {
         }
         // M5-ext.1 (RF-36.3): `ejecutor` sólo aplica a un paso `Grpc` (los
         // `statement`/`sequence_call` son motor-side y no van por gRPC).
-        if !matches!(tipo, TipoPaso::Grpc) && self.executor.is_some() {
+        if !llama && self.executor.is_some() {
             return Err(ErrorCarga::Validacion(format!(
-                "el paso '{}' es '{}' pero trae 'executor' (reservado para 'grpc')",
+                "el paso '{}' es '{}' pero trae 'executor' (sólo lo lleva un paso que llama \
+                 a un ejecutor)",
                 self.name, self.kind
             )));
         }
-        // `module` is what an executor is asked for, so only a step that asks
-        // an executor can have one.
-        if self.module.is_some() && !matches!(tipo, TipoPaso::Grpc) {
+        // `module` is what an executor is asked for, so only a step type that
+        // can ask one can have it.
+        if self.module.is_some() && matches!(tipo, TipoPaso::Statement | TipoPaso::SequenceCall) {
             return Err(ErrorCarga::Validacion(format!(
                 "step '{}' is '{}' and has 'module': only a step that calls an executor \
                  has a module",
@@ -2500,6 +2588,7 @@ impl PasoYaml {
             entradas,
             ejecutor: self.executor,
             module: self.module,
+            valor,
         })
     }
 }
@@ -2881,7 +2970,7 @@ main:
         let casos = [
             (
                 "name: s\nmain:\n  - name: v\n    type: pass_fail\n",
-                "no trae 'condition'",
+                "neither 'module' nor 'condition'",
             ),
             (
                 "name: s\nmain:\n  - name: v\n    condition: 'true'\n",
@@ -4344,6 +4433,85 @@ main:
         );
     }
 
+    /// ADR-0040 §3–5 and ADR-0042: what each new type requires and refuses.
+    #[test]
+    fn the_step_types_require_and_refuse_their_fields() {
+        let refused = [
+            (
+                "name: s\nmain:\n  - name: a\n    type: action\n",
+                "an action calls something",
+            ),
+            (
+                "name: s\nmain:\n  - name: a\n    type: action\n    module: m\n    limit: { type: range, min: 1, max: 2 }\n",
+                "no mide",
+            ),
+            (
+                "name: s\nmain:\n  - name: a\n    type: action\n    module: m\n    condition: 'true'\n",
+                "reservado para 'pass_fail'",
+            ),
+            (
+                "name: s\nmain:\n  - name: n\n    type: numeric_limit\n    module: m\n",
+                "has no 'limit'",
+            ),
+            (
+                "name: s\nmain:\n  - name: n\n    type: numeric_limit\n    limit: { type: range, min: 1, max: 2 }\n",
+                "neither 'module' nor 'value'",
+            ),
+            (
+                "name: s\nmain:\n  - name: v\n    type: pass_fail\n    module: m\n    value: '1.0'\n",
+                "only a 'numeric_limit' judges a value",
+            ),
+            (
+                "name: s\nlocals: { x: 0.0 }\nmain:\n  - name: n\n    type: numeric_limit\n    value: 'result.measured_value'\n    limit: { type: range, min: 1, max: 2 }\n",
+                "result.measured_value",
+            ),
+            (
+                "name: s\nmain:\n  - name: v\n    type: pass_fail\n    module: m\n    condition: 'result.measured_valu > 1'\n",
+                "'result.measured_valu' in 'condition'",
+            ),
+        ];
+        for (yaml, frag) in refused {
+            let err = cargar_de_texto(yaml).unwrap_err();
+            assert!(
+                matches!(&err, ErrorCarga::Validacion(m) if m.contains(frag)),
+                "expected '{frag}' in: {err}\n{yaml}"
+            );
+        }
+
+        let accepted = [
+            "name: s\nmain:\n  - name: a\n    type: action\n    module: m\n    retries: 3\n",
+            "name: s\nlocals: { v: 0.0 }\nmain:\n  - name: v\n    type: pass_fail\n    module: m\n    retries: 2\n    assign: { v: result.measured_value }\n    condition: 'result.measured_value > locals.v'\n",
+            "name: s\nmain:\n  - name: n\n    type: numeric_limit\n    module: m\n    value: 'result.outputs.t'\n    limit: { type: range, min: 1, max: 2 }\n",
+            "name: s\nlocals: { x: 1.5 }\nmain:\n  - name: n\n    type: numeric_limit\n    value: 'locals.x'\n    limit: { type: range, min: 1, max: 2 }\n",
+        ];
+        for yaml in accepted {
+            if let Err(e) = cargar_de_texto(yaml) {
+                panic!("should load: {e}\n{yaml}");
+            }
+        }
+    }
+
+    /// A step with a module calls an executor, whatever its type, so it names
+    /// one (ADR-0041 §2).
+    #[test]
+    fn a_step_with_a_module_names_its_executor() {
+        let dir = std::env::temp_dir().join(format!("anvil_adr40_exec_{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let y = dir.join("s.yaml");
+        std::fs::write(
+            &y,
+            "name: s\nexecutors:\n  - { name: e, type: grpc, host: 127.0.0.1, port: 9101 }\n\
+             main:\n  - name: led\n    type: pass_fail\n    module: m\n",
+        )
+        .unwrap();
+        let err = cargar_programa_de_archivo(y.to_str().unwrap()).unwrap_err();
+        std::fs::remove_dir_all(&dir).ok();
+        assert!(
+            matches!(&err, ErrorCarga::Validacion(m) if m.contains("step 'led'") && m.contains("names none")),
+            "{err}"
+        );
+    }
+
     /// `module` is read on a step that calls an executor, and refused where
     /// nothing is called or where it names nothing (ADR-0040 §1).
     #[test]
@@ -4494,7 +4662,7 @@ main:
         std::fs::write(&y, "name: s\nexecutors:\n  - { name: e, type: grpc, host: 127.0.0.1, port: 9101 }\nmain:\n  - name: a\n    type: statement\n    statement: 'locals.x = 1'\n    executor: e\n").unwrap();
         let err = cargar_programa_de_archivo(y.to_str().unwrap()).unwrap_err();
         assert!(
-            matches!(&err, ErrorCarga::Validacion(m) if m.contains("reservado para 'grpc'")),
+            matches!(&err, ErrorCarga::Validacion(m) if m.contains("sólo lo lleva un paso que llama")),
             "{err}"
         );
     }
