@@ -59,6 +59,11 @@ esos ejecutores.
    la apuesta filosófica (ADR-0001). La asimetría de layout es deliberada:
    WASM es core y de serie; los ejecutores de lenguaje son opt-in.
 
+   > **Overruled by [ADR-0041](0041-there-is-no-embedded-executor.md)
+   > (2026-09-15):** there is no embedded executor and no executor "de serie".
+   > WASM stays the zero-install way to write steps, through `anvil-exec-wasm`,
+   > which ships next to `anvil`.
+
 3. **Cargador de `.wasm` por path (modelo `.vi`), MVP extendido.** El
    ejecutor embebido evoluciona de "despacha `pasos_demo` fijos" a
    "despacha built-in + módulos `.wasm` **cargados por path en runtime**".

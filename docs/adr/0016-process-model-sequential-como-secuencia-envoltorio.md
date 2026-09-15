@@ -30,6 +30,12 @@ secuencia del usuario, con pasos plug-in `grpc` en `setup` (identificar
 UUT) y `cleanup` (notificar/reportar). El PM canónico vive en
 `process_models/sequential.yaml`.
 
+> **Overruled in part by [ADR-0041](0041-there-is-no-embedded-executor.md)
+> (2026-09-15):** `process_models/sequential.yaml` is removed — its plug-ins
+> were served by the embedded executor and stood in for an operator prompt that
+> does not exist. The mechanism this ADR decides stays: `--process-model` wraps
+> the user's sequence in any process model file.
+
 El PM es genérico y no sabe qué secuencia va a correr — la ruta la da el
 CLI dinámicamente. Convención: el PM autora el `sequence_call` con
 `secuencia: secuencia_usuario` (un **nombre reservado**, no un path:

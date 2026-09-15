@@ -50,6 +50,12 @@ El bin WASM `anvil` (en `crates/motor`) **se conserva** para el path de
 desarrollo/depuración con wasmtime CLI. El host nativo se llama también
 `anvil` (artefacto `target/release/anvil`); conviven en targets distintos.
 
+> **Overruled in part by [ADR-0041](0041-there-is-no-embedded-executor.md)
+> (2026-09-15):** the binary embeds **one** guest, the engine. The step executor
+> (`ejecutor_pasos`) is removed, and steps are served by executors the sequence
+> declares. What does not change: one binary hosts wasmtime, and the user
+> installs nothing else to run the engine.
+
 ## Por qué esta forma
 
 - **Mantiene el sandbox y el JIT** de WASM (ADR-0001): los guests siguen

@@ -73,6 +73,12 @@ módulo y los expone como endpoints gRPC en loopback. El ejecutor embebido
   endpoint: embebido, `.wasm` cargado por el host (futuro), o Python en otra
   máquina.
 
+> **Overruled in part by [ADR-0041](0041-there-is-no-embedded-executor.md)
+> (2026-09-15):** `Embebido` is not a variant any more and there is no default
+> endpoint. A step that calls an executor names it, and every entry under
+> `executors:` names its `type`. What does not change: routing by the step's
+> `executor:` and the `--executor` override.
+
 ### 3. Relajación acotada del loopback (ADR-0011, implementada)
 
 IPs no-loopback sólo si se **declaran** en `ejecutores:` (un `Grpc` con
