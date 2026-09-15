@@ -20,6 +20,7 @@
   documentation (links at the end), not exercised in TestStand.
 - **Relates to:** ADR-0003, ADR-0005, ADR-0008, ADR-0009, ADR-0010, ADR-0018,
   ADR-0019, ADR-0020, ADR-0021, ADR-0033,
+  [#76](https://github.com/anlaco/anvil/issues/76),
   [motor-de-ejecucion.md](../diseno/motor-de-ejecucion.md),
   [modelo-de-pasos.md](../diseno/modelo-de-pasos.md)
 - **Scope:** decides **what a step's `type` means** — how the step is judged —
@@ -106,10 +107,12 @@ it".
 **A limit failure is not retried.** With `retries: 3` and a limit the
 measurement misses, the executor is called once (`paso pedido: medir_voltaje
 intento=1`) and the step fails. The retry loop looks at the executor's status
-and the limit is applied after it (`crates/motor/src/lib.rs:369-384`), while
+and the limit is applied after it (`crates/motor/src/lib.rs:369-384`).
 [motor-de-ejecucion.md](../diseno/motor-de-ejecucion.md) says the engine
-retries "*mientras el paso no pase*". Noted here because numeric limits are in
-scope; **not decided here** (§Consequences i).
+retries "*mientras el paso no pase*" and its pseudocode loops exactly as the
+code does, so this may be intended — which is the question
+[#76](https://github.com/anlaco/anvil/issues/76) asks. Noted here because
+numeric limits are in scope; **not decided here** (§Consequences i).
 
 ### 4. What TestStand does — second-hand, from NI's documentation
 
@@ -339,10 +342,10 @@ String Value Test are further values of `type`, each with its own judgement,
 and no longer need to be squeezed into `limit`. Each is its own decision.
 
 **i. Retries and limits are left as they are, and that is written down.** A
-limit failure is not retried today (§Context 3), contrary to
-`motor-de-ejecucion.md`. Whether a numeric limit test should retry on a limit
-failure is a question about execution semantics of its own; it is filed as an
-issue, not decided here.
+limit failure is not retried today (§Context 3). Whether a numeric limit test
+should retry on a limit failure is a question about execution semantics of its
+own, open as [#76](https://github.com/anlaco/anvil/issues/76) since 0.5.0; it
+is not decided here, and whatever #76 decides applies to `numeric_limit`.
 
 ## Sources (second-hand, not exercised)
 
