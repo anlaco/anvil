@@ -197,3 +197,18 @@ test("a refused Run says which of the two things is missing", () => {
   const ambos = runButton({ hasDoc: true, bridged: false, inFlight: true });
   assert.match(ambos.title, /in flight/);
 });
+
+test("a Run the desktop app could not arm says why, not how to start a bridge", () => {
+  // #80: the packaged editor starts the bridge itself. When it cannot find the
+  // engine, telling the person to run `anvil --bridge` by hand sends them the
+  // wrong way; the shell's own reason is the instruction.
+  const reason = "anvil was not found on PATH — use File ▸ Locate Anvil Engine…";
+  const noEngine = runButton({ hasDoc: true, bridged: false, inFlight: false, unavailable: reason });
+  assert.equal(noEngine.disabled, true);
+  assert.match(noEngine.title, /Locate Anvil Engine/);
+  assert.doesNotMatch(noEngine.title, /--bridge/);
+
+  // A run in flight still wins, as above.
+  const running = runButton({ hasDoc: true, bridged: false, inFlight: true, unavailable: reason });
+  assert.match(running.title, /in flight/);
+});

@@ -71,6 +71,10 @@ const state = {
   text: null, // CodeMirror view
   validateTimer: null,
   bridge: null, // the URL, once connected
+  // Why the shell could not start a bridge for this file (no engine found, not
+  // the engine…). Kept so the next status line does not bury it: validation
+  // finishes after the failed start more often than not.
+  runUnavailable: null,
   /**
    * What the engine is doing right now, fed by the NDJSON of `--events`.
    * The state machine that reads it lives in ./run-state.mjs, out of the DOM so
@@ -514,6 +518,7 @@ function renderAll({ skipText = false } = {}) {
   ui.filename.textContent = state.filename ?? (state.doc ? NEW_SEQUENCE_NAME : "no file");
   ui.filename.dataset.dirty = String(state.dirty);
   const boton = runButton({
+    unavailable: state.runUnavailable,
     hasDoc: !!state.doc,
     bridged: engine.bridged,
     inFlight: state.runInFlight,
@@ -578,7 +583,9 @@ async function validate() {
     // field name, the location and the suggestion
     // (crates/cargador/src/lib.rs:686-763).
     const last = stderr.trim().split("\n").filter(Boolean).pop() ?? "";
-    status(exitCode === 0 ? "pass" : "fail", last || (exitCode === 0 ? "valid" : "rejected"));
+    const verdict = last || (exitCode === 0 ? "valid" : "rejected");
+    const run = state.runUnavailable ? ` — Run is unavailable: ${state.runUnavailable}` : "";
+    status(exitCode === 0 ? "pass" : "fail", verdict + run);
   } catch (e) {
     // A host failure is not a verdict about the sequence, and must not read as
     // one (ADR-0019, Rule 2). It gets its own colour, not "fail".
@@ -737,6 +744,7 @@ const inShell = () => Boolean(window.anvil);
 // and `saveFile` do not need to know which world they are in.
 function shellHandle(path) {
   return {
+    path,
     name: path.split(/[\\/]/).pop(),
     async getFile() {
       const text = await window.anvil.readTextFile(path);
@@ -753,18 +761,52 @@ function shellHandle(path) {
   };
 }
 
-// Same machine, no second terminal: asks the Rust side to start
+// Same machine, no second terminal: asks the shell to start
 // `anvil <sequence_path> --bridge` itself and connects to the URL it
 // prints, through the same `openBridge` a `?bridge=` link already uses.
-// Stopgap in `startBridge` (electron/main.mjs) — it finds `anvil` by a
-// dev-tree-only path, not something that survives packaging (issue #67).
+// Which `anvil` is the shell's call (`findEngine` in electron/main.mjs): the
+// one installed on the machine, not one inside the editor (#80).
 async function connectLocalBridge(sequencePath) {
+  state.runUnavailable = null;
   try {
     status("busy", "starting the engine…");
-    const url = await window.anvil.startBridge(sequencePath);
+    const { url, engine } = await window.anvil.startBridge(sequencePath);
     await openBridge(url);
+    if (state.bridge) {
+      status("pass", `bridge connected — Run is available (${engineNote(engine)})`);
+    }
   } catch (e) {
-    status("error", e?.message ?? "could not start the local engine");
+    state.runUnavailable = ipcMessage(e) || "could not start the local engine";
+    status("error", state.runUnavailable);
+    renderAll();
+  }
+}
+
+// Which engine Run uses, for the status bar. The editor validates with the
+// engine it carries and runs with the one installed, and when their versions
+// differ that is worth seeing before a run rather than after (ADR-0031).
+function engineNote({ path, version, editor }) {
+  const differs = editor && version !== editor;
+  return `anvil ${version} at ${path}` + (differs ? ` — the editor is ${editor}` : "");
+}
+
+// Electron wraps an error thrown in the shell as "Error invoking remote method
+// 'anvil:…': Error: <message>". The message is the part meant for a person.
+function ipcMessage(e) {
+  return String(e?.message ?? "").replace(/^Error invoking remote method '[^']*': (Error: )?/, "");
+}
+
+// File ▸ Locate Anvil Engine…: once there is an engine, the open sequence gets
+// the bridge it could not get before.
+async function locateEngine() {
+  try {
+    const engine = await window.anvil.locateEngine();
+    if (!engine) return;
+    const path = state.handle?.path;
+    if (path && !state.runInFlight) await connectLocalBridge(path);
+    else status("pass", `engine located: ${engineNote(engine)}`);
+  } catch (e) {
+    status("error", ipcMessage(e));
   }
 }
 
@@ -820,6 +862,8 @@ async function newFile() {
     state.bridge = null;
     await window.anvil.stopBridge();
   }
+  // Nor does the reason the previous file had no Run carry over to it.
+  state.runUnavailable = null;
   loadText(NEW_SEQUENCE_TEXT, null, null);
 }
 
@@ -971,6 +1015,7 @@ function wireMenus() {
   const actions = {
     new: newFile,
     open: openFile,
+    "locate-engine": locateEngine,
     save: () => saveFile(),
     "save-as": () => saveFile({ forceDialog: true }),
     "view-steps": () => setView("steps"),

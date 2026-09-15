@@ -11,6 +11,14 @@
 // `window.__TAURI_INTERNALS__`.
 const { contextBridge, ipcRenderer } = require("electron");
 
+// The shell answers the engine calls with `{ value }` or `{ error }` so that an
+// engine not being installed is not logged as a crash (`anvil:start-bridge` in
+// main.mjs). To the page they are still a promise that resolves or rejects.
+const unwrap = ({ value, error }) => {
+  if (error !== undefined) throw new Error(error);
+  return value;
+};
+
 contextBridge.exposeInMainWorld("anvil", {
   /** Native open dialog. Resolves to a path, or null if it was dismissed. */
   openDialog: () => ipcRenderer.invoke("anvil:open-dialog"),
@@ -20,8 +28,16 @@ contextBridge.exposeInMainWorld("anvil", {
   /** The text, or null if there is no such file. Other failures still throw. */
   readTextFileIfAny: (path) => ipcRenderer.invoke("anvil:read-text-if-any", path),
   writeTextFile: (path, text) => ipcRenderer.invoke("anvil:write-text", path, text),
-  /** Starts `anvil <path> --bridge`; resolves to the `ws://` URL it prints. */
-  startBridge: (path) => ipcRenderer.invoke("anvil:start-bridge", path),
+  /**
+   * Starts `anvil <path> --bridge`; resolves to `{ url, engine }` — the
+   * `ws://` URL it prints and `{ path, version, source, editor }` of the engine used.
+   */
+  startBridge: (path) => ipcRenderer.invoke("anvil:start-bridge", path).then(unwrap),
+  /**
+   * Asks for the engine's executable, checks it and remembers it. Resolves to
+   * `{ path, version, source, editor }`, or null if the dialog was dismissed.
+   */
+  locateEngine: () => ipcRenderer.invoke("anvil:locate-engine").then(unwrap),
   /** Stops the bridge `startBridge` started, if there is one. */
   stopBridge: () => ipcRenderer.invoke("anvil:stop-bridge"),
   /**

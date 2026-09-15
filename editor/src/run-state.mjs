@@ -123,12 +123,18 @@ export function applyEvent(state, line) {
  * The title is part of the answer, not decoration: a control that is refused
  * without saying why reads as broken.
  */
-export function runButton({ hasDoc, bridged, inFlight }) {
+export function runButton({ hasDoc, bridged, inFlight, unavailable = null }) {
   if (inFlight) {
     return {
       disabled: true,
       title: "A run is in flight; the engine takes one sequence at a time",
     };
+  }
+  // The desktop app starts the bridge itself, so "start `anvil --bridge`" is
+  // the wrong advice there; when it tried and could not, the reason it gives
+  // (no engine found, not the engine) is what the person can act on.
+  if (!bridged && unavailable) {
+    return { disabled: true, title: `Run is unavailable: ${unavailable}` };
   }
   if (!bridged) {
     return {
