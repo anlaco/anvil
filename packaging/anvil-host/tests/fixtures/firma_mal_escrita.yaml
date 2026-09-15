@@ -1,9 +1,9 @@
 # Fixture for `tests/exit_codes.rs`: ADR-0021 / issues #45 and #54 — a typo in
 # a parameter's name and another in an output's.
 #
-# Both are the embedded executor's, which does describe its catalog:
-#   - `medir_voltaje` takes `canal` and `offset`; here it says `canall`.
-#   - it returns `canal_usado` and `temperatura`; here it reads `temperaturaa`.
+# Both are on the demo bench, which does describe its catalog:
+#   - `demo/measure_voltage` takes `channel` and `offset`; here it says `channell`.
+#   - it returns `channel_used` and `temperature`; here it reads `temperaturee`.
 #
 # Until ADR-0021 this loaded without a complaint (ADR-0020 §3 wrote it down as
 # the exception to ADR-0019's detection rule) and was only noticed with the
@@ -11,12 +11,16 @@
 
 name: firma_mal_escrita
 
+executors:
+  - { name: demo, type: wasm, path: ../../../../ejemplos/departamento/dist/anvil-exec-wasm }
+
 locals:
   t: 0.0
 
 main:
-  - name: medir_voltaje
+  - name: demo/measure_voltage
+    executor: demo
     inputs:
-      canall: 3
+      channell: 3
     assign:
-      t: result.outputs.temperaturaa
+      t: result.outputs.temperaturee

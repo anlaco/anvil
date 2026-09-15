@@ -1,7 +1,10 @@
 # Issue #19: `--validate` approved this and the run died halfway.
 name: validate_var_no_declarada
+executors:
+  - { name: demo, type: wasm, path: ../../../../ejemplos/departamento/dist/anvil-exec-wasm }
 locals:
   v: 0.0
 main:
-  - name: medir_voltaje
+  - name: demo/measure_voltage
+    executor: demo
     precondition: 'locals.no_existe > 0.0'

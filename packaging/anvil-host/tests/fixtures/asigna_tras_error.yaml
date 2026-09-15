@@ -1,14 +1,14 @@
 # Fixture for `tests/exit_codes.rs`: issue #27, case 2 — `assign` does not write
 # when the step gave `error` (ADR-0019, Rule 2).
 #
-# `medir_voltaje_scpi` does exist in the executor, but no instrument is
-# listening on the SCPI port, so it returns `error`. Before, the `assign` ran
+# `demo/instrument_offline` is the demo bench's instrument that is not there:
+# it always returns `error`. Before, the `assign` ran
 # anyway: `result.*` was `nothing` and that `nothing` clobbered `locals.valor`,
 # which `cleanup` reads right after to decide. On a real bench that variable is
 # the one that says whether a supply has to be switched off.
 #
 #   === exit_asigna_tras_error: error ===
-#     [error] medir_voltaje_scpi: SCPI connect … falló
+#     [error] demo/instrument_offline: the instrument did not answer
 #     [pass] check_valor: condición cumplida
 #
 # The verdict is `error` (exit 1) because of the step that could not measure;
@@ -22,11 +22,15 @@
 
 name: exit_asigna_tras_error
 
+executors:
+  - { name: demo, type: wasm, path: ../../../../ejemplos/departamento/dist/anvil-exec-wasm }
+
 locals:
   valor: 99.0
 
 main:
-  - name: medir_voltaje_scpi
+  - name: demo/instrument_offline
+    executor: demo
     assign:
       valor: '${result.measured_value}'
 

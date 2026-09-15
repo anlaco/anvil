@@ -249,7 +249,9 @@ fn validate_rechaza_valor_medido_en_un_sequence_call() {
     let s = valida("packaging/anvil-host/tests/fixtures/validate_valor_medido_en_call.yaml");
     let err = String::from_utf8_lossy(&s.stderr);
     assert_eq!(codigo(&s), 1, "stderr:\n{err}");
-    assert!(err.contains("valor_medido"), "stderr:\n{err}");
+    // Not "valor_medido": that is in the fixture's own path, which every load
+    // error prints, so it matched whatever the refusal was about.
+    assert!(err.contains("una subsecuencia no mide"), "stderr:\n{err}");
 }
 
 #[test]
@@ -380,15 +382,15 @@ fn validate_con_ejecutores_caza_los_nombres_mal_escritos() {
         "una firma que no casa no puede salir 0. stderr:\n{stderr}"
     );
     assert!(
-        stderr.contains("canall"),
+        stderr.contains("channell"),
         "nombra el parámetro mal escrito. stderr:\n{stderr}"
     );
     assert!(
-        stderr.contains("canal, offset"),
+        stderr.contains("channel, offset"),
         "y los que el paso sí toma, que es la respuesta. stderr:\n{stderr}"
     );
     assert!(
-        stderr.contains("temperaturaa"),
+        stderr.contains("temperaturee"),
         "y la salida mal escrita, que es la excepción que ADR-0020 §3 dejó \
          abierta. stderr:\n{stderr}"
     );

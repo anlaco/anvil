@@ -1,13 +1,16 @@
 # Issue #20: a sequence_call measures nothing; `result.measured_value` is always
 # `nothing` and silently wiped the target.
 name: validate_valor_medido_en_call
+executors:
+  - { name: demo, type: wasm, path: ../../../../ejemplos/departamento/dist/anvil-exec-wasm }
 locals:
   my_num: 42.0
 subsequences:
   hija:
     main:
-      - name: medir_voltaje
+      - name: demo/measure_voltage
         type: grpc
+        executor: demo
 main:
   - name: call_sub
     type: sequence_call
