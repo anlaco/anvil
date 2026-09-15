@@ -4597,11 +4597,12 @@ main:
         let init = &s.pasos_main[0];
         assert_eq!(init.tipo, modelo::TipoPaso::Statement);
         assert!(init.statement.is_some());
-        // medir_voltaje: precondición + límite + asigna (2).
+        // measure_voltage: precondition + limit + one assign (the measurement;
+        // the status is not copied before the limit judges it, ADR-0042 §2).
         let medir = &s.pasos_main[1];
         assert!(medir.precondicion.is_some());
         assert!(medir.limite.is_some());
-        assert_eq!(medir.asigna.as_ref().unwrap().len(), 2);
+        assert_eq!(medir.asigna.as_ref().unwrap().len(), 1);
         // paso_obsoleto: disable.
         assert!(s.pasos_main[2].disable);
         // verificar_frecuencia: pause_on_fail.
