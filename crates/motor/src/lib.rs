@@ -18,8 +18,8 @@ mod entorno;
 
 use modelo::proto::{StepRequest, StepResult, Value as ProtoValue, CONTRACT, ROUTE_INVOKE};
 use modelo::{
-    Asignacion, DefinicionPaso, DefinicionSecuencia, EntradaPaso, Fase, IdentidadPaso, Limite,
-    Programa, ResultSink, ResultadoSecuencia, ResultadoStep, TipoEjecutor, TipoPaso,
+    Asignacion, DefinicionPaso, DefinicionSecuencia, EntradaPaso, Fase, IdentidadPaso, Programa,
+    ResultSink, ResultadoSecuencia, ResultadoStep, TipoEjecutor, TipoPaso,
 };
 use prost::Message;
 use wasi_grpc::grpc::Cliente;
@@ -1375,28 +1375,30 @@ pub(crate) fn aplicar_limite(def: &DefinicionPaso, mut r: ResultadoStep) -> Resu
         return r;
     };
 
-    // Rellenar los campos de límite para el reporte, según el tipo.
-    match lim {
-        Limite::Rango { min, max } => {
-            r.limite_min = Some(*min);
-            r.limite_max = Some(*max);
-        }
-        Limite::Comparacion { op, esperado } => {
-            r.operador = Some(*op);
-            r.valor_esperado = Some(*esperado);
-        }
+    // The limit's fields in the report, whatever the verdict: a reader must be
+    // able to see what the value was compared with (ADR-0019, Rule 3).
+    let (min, max) = lim.cotas();
+    r.limite_min = min;
+    r.limite_max = max;
+    if let modelo::Criterio::Uno { op, low } = &lim.criterio {
+        r.operador = Some(*op);
+        r.valor_esperado = Some(*low);
     }
+    r.comparacion = Some(lim.codigo());
+    r.unidades = lim.unidades.clone();
 
     // El límite solo puede empeorar un `paso` a `fallo`: nunca toca un
     // `fallo`/`error` que el paso haya emitido por sí mismo.
-    if r.estado == "pass" && lim.evalua(valor) == "fail" {
-        r.estado = "fail".into();
-        r.mensaje = match lim {
-            Limite::Rango { min, max } => format!("{valor} fuera de rango [{min}, {max}]"),
-            Limite::Comparacion { op, esperado } => {
-                format!("{valor} {} {esperado} no cumplido", op.simbolo())
+    if r.estado == "pass" {
+        match lim.evalua(valor) {
+            modelo::Veredicto::Pasa => {}
+            modelo::Veredicto::Falla => {
+                r.estado = "fail".into();
+                r.mensaje = lim.mensaje_de_fallo(valor);
             }
-        };
+            // `none` compares nothing, and says so (ADR-0040 §8).
+            modelo::Veredicto::SinComparar => r.estado = "done".into(),
+        }
     }
     r
 }
@@ -1418,7 +1420,7 @@ mod tests {
 
     #[test]
     fn rango_dentro_deja_paso_y_rellena_campos() {
-        let def = DefinicionPaso::con_limite("m", 1, Limite::Rango { min: 4.5, max: 5.5 });
+        let def = DefinicionPaso::con_limite("m", 1, Limite::rango(4.5, 5.5));
         let r = aplicar_limite(&def, paso_medido(5.0, "pass"));
         assert_eq!(r.estado, "pass");
         assert_eq!(r.limite_min, Some(4.5));
@@ -1431,7 +1433,7 @@ mod tests {
 
     #[test]
     fn rango_fuera_convierte_paso_a_fallo_y_reescribe_mensaje() {
-        let def = DefinicionPaso::con_limite("m", 1, Limite::Rango { min: 4.5, max: 5.5 });
+        let def = DefinicionPaso::con_limite("m", 1, Limite::rango(4.5, 5.5));
         let r = aplicar_limite(&def, paso_medido(4.2, "pass"));
         assert_eq!(r.estado, "fail");
         assert_eq!(r.limite_min, Some(4.5));
@@ -1441,14 +1443,7 @@ mod tests {
 
     #[test]
     fn comparacion_no_cumplida_convierte_a_fallo() {
-        let def = DefinicionPaso::con_limite(
-            "m",
-            1,
-            Limite::Comparacion {
-                op: Operador::Ge,
-                esperado: 1000.0,
-            },
-        );
+        let def = DefinicionPaso::con_limite("m", 1, Limite::comparacion(Operador::Ge, 1000.0));
         let r = aplicar_limite(&def, paso_medido(999.0, "pass"));
         assert_eq!(r.estado, "fail");
         assert_eq!(r.operador, Some(Operador::Ge));
@@ -1459,7 +1454,7 @@ mod tests {
     #[test]
     fn el_paso_que_ya_fallo_no_se_mejora_solo_se_rellena_el_limite() {
         // El paso sabe algo que el límite no: su fallo se respeta.
-        let def = DefinicionPaso::con_limite("m", 1, Limite::Rango { min: 4.5, max: 5.5 });
+        let def = DefinicionPaso::con_limite("m", 1, Limite::rango(4.5, 5.5));
         let r = aplicar_limite(&def, paso_medido(5.0, "fail"));
         assert_eq!(r.estado, "fail", "el paso ya falló: el límite no lo mejora");
         assert_eq!(
@@ -1471,7 +1466,7 @@ mod tests {
 
     #[test]
     fn el_paso_con_error_no_se_toca() {
-        let def = DefinicionPaso::con_limite("m", 1, Limite::Rango { min: 4.5, max: 5.5 });
+        let def = DefinicionPaso::con_limite("m", 1, Limite::rango(4.5, 5.5));
         let r = aplicar_limite(&def, paso_medido(5.0, "error"));
         assert_eq!(r.estado, "error");
         assert_eq!(r.limite_min, Some(4.5));
@@ -1489,7 +1484,7 @@ mod tests {
     fn paso_con_limite_pero_sin_medida_no_se_evalua() {
         // Un pass/fail con un límite declarado (mal uso) no debe pánico: sin
         // valor_medido el límite no aplica, todo se queda igual.
-        let def = DefinicionPaso::con_limite("m", 1, Limite::Rango { min: 4.5, max: 5.5 });
+        let def = DefinicionPaso::con_limite("m", 1, Limite::rango(4.5, 5.5));
         let r = aplicar_limite(&def, ResultadoStep::nuevo("m", "pass", "sin medida"));
         assert_eq!(r.estado, "pass");
         assert_eq!(r.limite_min, None, "sin medida no se rellena el límite");
@@ -2701,6 +2696,25 @@ mod tests {
         p
     }
 
+    /// ADR-0040 §7–8: the report carries the comparison code and units, and a
+    /// `none` comparison is `done`, never `pass`.
+    #[test]
+    fn a_limit_stamps_its_code_and_units_and_none_is_done() {
+        let mut lim = Limite::rango(4.5, 5.5);
+        lim.unidades = Some("V".into());
+        let def = DefinicionPaso::con_limite("m", 1, lim);
+        let r = aplicar_limite(&def, ResultadoStep::medido_valor("m", "pass", "ok", 4.2));
+        assert_eq!(r.estado, "fail");
+        assert_eq!(r.comparacion.as_deref(), Some("GELE"));
+        assert_eq!(r.unidades.as_deref(), Some("V"));
+        assert_eq!(r.mensaje, "4.2 V fuera de rango [4.5, 5.5]");
+
+        let none = DefinicionPaso::con_limite("m", 1, Limite::con(modelo::Criterio::Ninguno));
+        let r = aplicar_limite(&none, ResultadoStep::medido_valor("m", "pass", "ok", 4.2));
+        assert_eq!(r.estado, "done");
+        assert_eq!(r.valor_medido, Some(4.2), "the value is still recorded");
+    }
+
     // --- ADR-0040 E3: the step types, judged -----------------------------
 
     /// An executor that answers every call with a copy of one result.
@@ -2821,7 +2835,7 @@ mod tests {
     #[test]
     fn a_numeric_limit_judges_the_measurement_and_errors_without_one() {
         let mut p = con_modulo("rail", TipoPaso::NumericLimit);
-        p.limite = Some(Limite::Rango { min: 4.5, max: 5.5 });
+        p.limite = Some(Limite::rango(4.5, 5.5));
         let (r, _) = corre_uno(p.clone(), medida(5.0), &[]);
         assert_eq!(r.estado, "pass");
         let (r, _) = corre_uno(p.clone(), medida(4.2), &[]);
@@ -2836,10 +2850,7 @@ mod tests {
     #[test]
     fn a_numeric_limit_value_reads_the_result_or_locals() {
         let mut p = con_modulo("temp", TipoPaso::NumericLimit);
-        p.limite = Some(Limite::Rango {
-            min: 15.0,
-            max: 30.0,
-        });
+        p.limite = Some(Limite::rango(15.0, 30.0));
         p.valor = Some(expr::parse_expresion("result.outputs.temperature").unwrap());
         let mut respuesta = ResultadoStep::nuevo("bench/step", "pass", "ok");
         respuesta.salidas = vec![("temperature".into(), Value::Numero(21.5))];
@@ -2849,7 +2860,7 @@ mod tests {
 
         let mut local = DefinicionPaso::nuevo("already acquired", 1);
         local.tipo = TipoPaso::NumericLimit;
-        local.limite = Some(Limite::Rango { min: 0.0, max: 1.0 });
+        local.limite = Some(Limite::rango(0.0, 1.0));
         local.valor = Some(expr::parse_expresion("locals.x").unwrap());
         let (r, _) = corre_uno(
             local.clone(),

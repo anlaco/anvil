@@ -40,6 +40,9 @@ const CABECERA: &[&str] = &[
     // ADR-0040 §1: what the step called on its executor. Last, like every
     // column added after the first ten.
     "module",
+    // ADR-0040 §7, last like every added column.
+    "comparison",
+    "units",
 ];
 
 /// Verte el resultado a un `Write` como CSV (una fila por paso).
@@ -122,6 +125,8 @@ fn fila_paso(
         nombrados_a_csv(&p.parametros),
         nombrados_a_csv(&p.salidas),
         p.module.clone().unwrap_or_default(),
+        p.comparacion.clone().unwrap_or_default(),
+        p.unidades.clone().unwrap_or_default(),
     ]
 }
 
@@ -265,17 +270,17 @@ mod tests {
 
         let out = String::from_utf8(sink.salida).unwrap();
         let lineas: Vec<&str> = out.split("\r\n").collect();
-        assert_eq!(lineas[0], "sequence_name,status,step_name,step_status,message,measured_value,limit_min,limit_max,expected_value,operator,phase,inputs,outputs,module");
+        assert_eq!(lineas[0], "sequence_name,status,step_name,step_status,message,measured_value,limit_min,limit_max,expected_value,operator,phase,inputs,outputs,module,comparison,units");
         // rango: valor_esperado/operador vacíos (no aplican a un rango).
         // primer campo = nombre de la secuencia (DEF-2), segundo = su estado agregado.
         assert_eq!(
             lineas[1],
-            "basica,fail,medir_voltaje,fail,fuera de rango,4.2,4.5,5.5,,,main,,,"
+            "basica,fail,medir_voltaje,fail,fuera de rango,4.2,4.5,5.5,,,main,,,,,"
         );
         // sin medida ni límite: valor_medido..operador vacíos, y la fase al final.
         assert_eq!(
             lineas[2],
-            "basica,fail,verificar_led,pass,led encendido,,,,,,main,,,"
+            "basica,fail,verificar_led,pass,led encendido,,,,,,main,,,,,"
         );
         assert!(lineas[3].is_empty(), "termina en CRLF");
     }
@@ -298,7 +303,7 @@ mod tests {
         let out = String::from_utf8(sink.salida).unwrap();
         assert_eq!(
             out.split("\r\n").nth(1).unwrap(),
-            "b31,inconclusive,verdict,skipped,precondición falsa,,,,,,main,,,"
+            "b31,inconclusive,verdict,skipped,precondición falsa,,,,,,main,,,,,"
         );
     }
 
@@ -374,7 +379,7 @@ mod tests {
         let lineas: Vec<&str> = out.split("\r\n").collect();
         assert_eq!(
             lineas[0],
-            "sequence_name,status,step_name,step_status,message,measured_value,limit_min,limit_max,expected_value,operator,phase,inputs,outputs,module"
+            "sequence_name,status,step_name,step_status,message,measured_value,limit_min,limit_max,expected_value,operator,phase,inputs,outputs,module,comparison,units"
         );
         // Call. Primer campo = nombre de secuencia, segundo = estado agregado
         // (fallo, el mismo en las tres filas).
@@ -415,9 +420,13 @@ mod tests {
         sink.on_fin_secuencia(&s);
         let out = String::from_utf8(sink.salida).unwrap();
         let lineas: Vec<&str> = out.split("\r\n").collect();
-        assert!(lineas[1].ends_with(",setup,,,"), "setup: {}", lineas[1]);
-        assert!(lineas[2].ends_with(",main,,,"), "main: {}", lineas[2]);
-        assert!(lineas[3].ends_with(",cleanup,,,"), "cleanup: {}", lineas[3]);
+        assert!(lineas[1].ends_with(",setup,,,,,"), "setup: {}", lineas[1]);
+        assert!(lineas[2].ends_with(",main,,,,,"), "main: {}", lineas[2]);
+        assert!(
+            lineas[3].ends_with(",cleanup,,,,,"),
+            "cleanup: {}",
+            lineas[3]
+        );
     }
     /// ADR-0020 + Regla 3 de ADR-0019: **la condición en la que se midió
     /// queda escrita**. Antes de esto, dos corridas de la misma secuencia con

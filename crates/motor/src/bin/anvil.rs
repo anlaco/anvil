@@ -25,7 +25,8 @@
 
 use cargador::{
     aplicar_limites_programa, aplicar_override_ejecutores, cargar_limites_de_archivo,
-    cargar_programa_con_pm, cargar_programa_de_archivo, limites_sin_aplicar_programa,
+    cargar_programa_con_pm, cargar_programa_de_archivo, limites_mal_colocados_programa,
+    limites_sin_aplicar_programa,
 };
 use modelo::{Programa, ResultSink};
 use motor::Motor;
@@ -247,6 +248,14 @@ fn main() {
     if let Some(r) = cli.limits.as_deref() {
         match cargar_limites_de_archivo(r) {
             Ok(l) => {
+                let mal = limites_mal_colocados_programa(&programa, &l);
+                if !mal.is_empty() {
+                    eprintln!("no se pudo aplicar el sidecar de límites '{r}':");
+                    for m in &mal {
+                        eprintln!("  - {m}");
+                    }
+                    std::process::exit(1);
+                }
                 let sobran = limites_sin_aplicar_programa(&programa, &l);
                 let n = aplicar_limites_programa(&mut programa, &l);
                 if !cli.quiet {

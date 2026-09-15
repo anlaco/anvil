@@ -524,6 +524,9 @@ impl From<StepResult> for crate::ResultadoStep {
             // What was called is the engine's to stamp: it knows the module it
             // asked for, and the echoed name is not trusted for it.
             module: None,
+            // The limit is the sequence's, not the wire's (ADR-0008).
+            comparacion: None,
+            unidades: None,
         }
     }
 }

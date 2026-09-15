@@ -7,7 +7,7 @@ pub mod proto;
 pub mod result_sink;
 pub use result_sink::{IdentidadPaso, ResultSink, SinkCompuesto};
 
-/// Un operador de comparación para un `Limite::Comparacion`.
+/// A comparison operator, for a limit against one value (`Criterio::Uno`).
 ///
 /// Vive en el modelo (datos), no en `paso.proto`: el límite no viaja por el
 /// cable ([contrato-grpc.md](../../docs/contrato-grpc.md)). Lo declara la
@@ -33,6 +33,18 @@ impl Operador {
             Operador::Le => "<=",
             Operador::Gt => ">",
             Operador::Ge => ">=",
+        }
+    }
+
+    /// TestStand's code for the operator (`EQ`, `NE`, `LT`, `LE`, `GT`, `GE`).
+    pub fn codigo(&self) -> &'static str {
+        match self {
+            Operador::Eq => "EQ",
+            Operador::Ne => "NE",
+            Operador::Lt => "LT",
+            Operador::Le => "LE",
+            Operador::Gt => "GT",
+            Operador::Ge => "GE",
         }
     }
 
@@ -65,42 +77,273 @@ impl Operador {
     }
 }
 
-/// Un límite como **dato first-class** (RF-29): una regla de aceptación que la
-/// secuencia declara en YAML y el motor evalúa contra la medida que devuelve
-/// el paso. El paso **no conoce el umbral**; solo mide.
+/// A limit as **first-class data** (RF-29): an acceptance rule the sequence
+/// declares and the engine evaluates against a number. The step **does not know
+/// the threshold**; it only measures (ADR-0008).
 ///
-/// Esto es lo que separa el *qué es aceptable* (datos, cambia en producción)
-/// del *cómo se mide* (código del paso). Ver
-/// [limites-y-estados.md](../../docs/diseno/limites-y-estados.md) y
-/// ADR-0008.
+/// Its shape is TestStand's Numeric Limit Test (ADR-0040 §7): a comparison code
+/// and the fields that code uses, plus `units`, which is text for the report and
+/// never scales or affects the comparison. See
+/// [limites-y-estados.md](../../docs/diseno/limites-y-estados.md).
 #[derive(Debug, Clone, PartialEq)]
-pub enum Limite {
-    /// Rango inclusivo high/low: `min <= valor <= max` → `paso`; si no, `fallo`.
-    Rango { min: f64, max: f64 },
-    /// Comparación contra un valor esperado: `valor {op} esperado` →
-    /// `paso`; si no, `fallo`.
-    Comparacion { op: Operador, esperado: f64 },
+pub struct Limite {
+    pub criterio: Criterio,
+    pub unidades: Option<String>,
+}
+
+/// What a limit compares. The variants carry exactly the fields their codes use,
+/// so a limit with a field its comparison ignores cannot be built.
+#[derive(Debug, Clone, PartialEq)]
+pub enum Criterio {
+    /// `EQ`, `NE`, `GT`, `LT`, `GE`, `LE`: the value against one limit.
+    Uno { op: Operador, low: f64 },
+    /// `GTLT`, `GELE`, `GELT`, `GTLE`: inside two limits, each end inclusive or
+    /// not — `GE`/`LE` are, `GT`/`LT` are not.
+    Dentro {
+        low: f64,
+        high: f64,
+        low_incluido: bool,
+        high_incluido: bool,
+    },
+    /// `LTGT`, `LEGE`, `LEGT`, `LTGE`: outside two limits. `LE`/`GE` count the
+    /// limit itself as outside.
+    Fuera {
+        low: f64,
+        high: f64,
+        low_incluido: bool,
+        high_incluido: bool,
+    },
+    /// `EQT`: a nominal value, within `lower` below and `upper` above it, each
+    /// read as `umbral` says, both ends inclusive.
+    ///
+    /// **Not contrasted with NI's documentation**, which could not be read when
+    /// this was written: percent and ppm are taken of the nominal's magnitude,
+    /// delta as an absolute amount.
+    Eqt {
+        nominal: f64,
+        lower: f64,
+        upper: f64,
+        umbral: Umbral,
+    },
+    /// `none`: TestStand's No Comparison. The value is recorded and nothing is
+    /// judged — which Anvil reports as `done`, not `pass` (ADR-0040 §8).
+    Ninguno,
+}
+
+/// How an `EQT` threshold is read.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Umbral {
+    Porcentaje,
+    Ppm,
+    Delta,
+}
+
+impl Umbral {
+    pub fn como_texto(&self) -> &'static str {
+        match self {
+            Umbral::Porcentaje => "percent",
+            Umbral::Ppm => "ppm",
+            Umbral::Delta => "delta",
+        }
+    }
+}
+
+/// The outcome of evaluating a limit.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Veredicto {
+    Pasa,
+    Falla,
+    /// Nothing was compared (`none`).
+    SinComparar,
 }
 
 impl Limite {
-    /// Evalúa un valor contra el límite → `"pass"` o `"fail"`. Lógica pura,
-    /// sin gRPC ni IO: el motor la reutiliza, los tests la prueban directa.
-    pub fn evalua(&self, valor: f64) -> &'static str {
-        match self {
-            Limite::Rango { min, max } => {
-                if valor >= *min && valor <= *max {
-                    "pass"
-                } else {
-                    "fail"
-                }
+    /// A limit with no units.
+    pub fn con(criterio: Criterio) -> Self {
+        Limite {
+            criterio,
+            unidades: None,
+        }
+    }
+
+    /// `GELE`: `min <= value <= max`, the shape of the old `range`.
+    pub fn rango(min: f64, max: f64) -> Self {
+        Limite::con(Criterio::Dentro {
+            low: min,
+            high: max,
+            low_incluido: true,
+            high_incluido: true,
+        })
+    }
+
+    /// One comparison against one limit, the shape of the old `comparison`.
+    pub fn comparacion(op: Operador, low: f64) -> Self {
+        Limite::con(Criterio::Uno { op, low })
+    }
+
+    /// TestStand's code for the comparison: `GELE`, `LT`, `EQT`, `none`…
+    pub fn codigo(&self) -> String {
+        let par = |alto: bool, low_inc: bool, high_inc: bool| {
+            let bajo = match (alto, low_inc) {
+                (false, true) => "GE",
+                (false, false) => "GT",
+                (true, true) => "LE",
+                (true, false) => "LT",
+            };
+            let arriba = match (alto, high_inc) {
+                (false, true) => "LE",
+                (false, false) => "LT",
+                (true, true) => "GE",
+                (true, false) => "GT",
+            };
+            format!("{bajo}{arriba}")
+        };
+        match &self.criterio {
+            Criterio::Uno { op, .. } => op.codigo().to_string(),
+            Criterio::Dentro {
+                low_incluido,
+                high_incluido,
+                ..
+            } => par(false, *low_incluido, *high_incluido),
+            Criterio::Fuera {
+                low_incluido,
+                high_incluido,
+                ..
+            } => par(true, *low_incluido, *high_incluido),
+            Criterio::Eqt { .. } => "EQT".into(),
+            Criterio::Ninguno => "none".into(),
+        }
+    }
+
+    /// The lower and upper bounds, where the comparison has them: what the
+    /// report writes as `limit_min` and `limit_max`. For `EQT` they are the
+    /// bounds computed from the nominal.
+    pub fn cotas(&self) -> (Option<f64>, Option<f64>) {
+        match &self.criterio {
+            Criterio::Dentro { low, high, .. } | Criterio::Fuera { low, high, .. } => {
+                (Some(*low), Some(*high))
             }
-            Limite::Comparacion { op, esperado } => {
-                if op.aplica(valor, *esperado) {
-                    "pass"
-                } else {
-                    "fail"
-                }
+            Criterio::Eqt { .. } => {
+                let (a, b) = self.cotas_eqt().expect("EQT");
+                (Some(a), Some(b))
             }
+            Criterio::Uno { .. } | Criterio::Ninguno => (None, None),
+        }
+    }
+
+    fn cotas_eqt(&self) -> Option<(f64, f64)> {
+        let Criterio::Eqt {
+            nominal,
+            lower,
+            upper,
+            umbral,
+        } = &self.criterio
+        else {
+            return None;
+        };
+        let escala = |t: f64| match umbral {
+            Umbral::Delta => t,
+            Umbral::Porcentaje => nominal.abs() * t / 100.0,
+            Umbral::Ppm => nominal.abs() * t / 1_000_000.0,
+        };
+        Some((nominal - escala(*lower), nominal + escala(*upper)))
+    }
+
+    /// Evaluates a value against the limit. Pure logic, no IO.
+    pub fn evalua(&self, valor: f64) -> Veredicto {
+        let cumple = match &self.criterio {
+            Criterio::Uno { op, low } => op.aplica(valor, *low),
+            Criterio::Dentro {
+                low,
+                high,
+                low_incluido,
+                high_incluido,
+            } => {
+                let sobre = if *low_incluido {
+                    valor >= *low
+                } else {
+                    valor > *low
+                };
+                let bajo = if *high_incluido {
+                    valor <= *high
+                } else {
+                    valor < *high
+                };
+                sobre && bajo
+            }
+            Criterio::Fuera {
+                low,
+                high,
+                low_incluido,
+                high_incluido,
+            } => {
+                let debajo = if *low_incluido {
+                    valor <= *low
+                } else {
+                    valor < *low
+                };
+                let encima = if *high_incluido {
+                    valor >= *high
+                } else {
+                    valor > *high
+                };
+                debajo || encima
+            }
+            Criterio::Eqt { .. } => {
+                let (a, b) = self.cotas_eqt().expect("EQT");
+                valor >= a && valor <= b
+            }
+            Criterio::Ninguno => return Veredicto::SinComparar,
+        };
+        if cumple {
+            Veredicto::Pasa
+        } else {
+            Veredicto::Falla
+        }
+    }
+
+    /// Why `valor` failed the limit, for the report.
+    pub fn mensaje_de_fallo(&self, valor: f64) -> String {
+        let u = self
+            .unidades
+            .as_deref()
+            .map(|u| format!(" {u}"))
+            .unwrap_or_default();
+        match &self.criterio {
+            Criterio::Uno { op, low } => format!("{valor}{u} {} {low} no cumplido", op.simbolo()),
+            Criterio::Dentro {
+                low,
+                high,
+                low_incluido,
+                high_incluido,
+            } => format!(
+                "{valor}{u} fuera de rango {}{low}, {high}{}",
+                if *low_incluido { "[" } else { "(" },
+                if *high_incluido { "]" } else { ")" }
+            ),
+            Criterio::Fuera {
+                low,
+                high,
+                low_incluido,
+                high_incluido,
+            } => format!(
+                "{valor}{u} dentro de {}{low}, {high}{}, y tenía que quedar fuera",
+                if *low_incluido { "(" } else { "[" },
+                if *high_incluido { ")" } else { "]" }
+            ),
+            Criterio::Eqt {
+                nominal,
+                lower,
+                upper,
+                umbral,
+            } => {
+                let (a, b) = self.cotas_eqt().expect("EQT");
+                format!(
+                    "{valor}{u} fuera de {nominal} -{lower}/+{upper} {} [{a}, {b}]",
+                    umbral.como_texto()
+                )
+            }
+            Criterio::Ninguno => String::new(),
         }
     }
 }
@@ -269,6 +512,11 @@ pub struct ResultadoStep {
     /// engine. `None` for a step that calls nothing. It is not the step's
     /// `nombre`: two steps can call one module and be told apart by name.
     pub module: Option<String>,
+    /// The comparison code of the limit the engine applied (`GELE`, `EQT`,
+    /// `none`…, ADR-0040 §7). `None` if no limit was applied.
+    pub comparacion: Option<String>,
+    /// The limit's `units`: text for the report, never part of the comparison.
+    pub unidades: Option<String>,
 }
 
 impl ResultadoStep {
@@ -288,6 +536,8 @@ impl ResultadoStep {
             parametros: Vec::new(),
             salidas: Vec::new(),
             module: None,
+            comparacion: None,
+            unidades: None,
         }
     }
 
@@ -1055,85 +1305,131 @@ mod tests {
         assert_eq!(String::from_utf8(out).unwrap(), esperado);
     }
 
+    /// ADR-0040 §7: every TestStand code, at and around its limits.
+    #[test]
+    fn every_comparison_code_at_its_limits() {
+        let dentro = |li, hi| {
+            Limite::con(Criterio::Dentro {
+                low: 1.0,
+                high: 2.0,
+                low_incluido: li,
+                high_incluido: hi,
+            })
+        };
+        let fuera = |li, hi| {
+            Limite::con(Criterio::Fuera {
+                low: 1.0,
+                high: 2.0,
+                low_incluido: li,
+                high_incluido: hi,
+            })
+        };
+        use Veredicto::{Falla as F, Pasa as P};
+        // (limit, code, verdicts at 0.5, 1.0, 1.5, 2.0, 2.5)
+        let casos = [
+            (dentro(false, false), "GTLT", [F, F, P, F, F]),
+            (dentro(true, true), "GELE", [F, P, P, P, F]),
+            (dentro(true, false), "GELT", [F, P, P, F, F]),
+            (dentro(false, true), "GTLE", [F, F, P, P, F]),
+            (fuera(false, false), "LTGT", [P, F, F, F, P]),
+            (fuera(true, true), "LEGE", [P, P, F, P, P]),
+            (fuera(true, false), "LEGT", [P, P, F, F, P]),
+            (fuera(false, true), "LTGE", [P, F, F, P, P]),
+        ];
+        for (lim, codigo, esperados) in casos {
+            assert_eq!(lim.codigo(), codigo);
+            for (x, esperado) in [0.5, 1.0, 1.5, 2.0, 2.5].into_iter().zip(esperados) {
+                assert_eq!(lim.evalua(x), esperado, "{codigo} at {x}");
+            }
+        }
+        for (op, codigo) in [
+            (Operador::Eq, "EQ"),
+            (Operador::Ne, "NE"),
+            (Operador::Gt, "GT"),
+            (Operador::Lt, "LT"),
+            (Operador::Ge, "GE"),
+            (Operador::Le, "LE"),
+        ] {
+            assert_eq!(Limite::comparacion(op, 1.0).codigo(), codigo);
+        }
+    }
+
+    /// `EQT` bounds from the nominal, by threshold kind — not contrasted with
+    /// NI's documentation (see `Criterio::Eqt`).
+    #[test]
+    fn eqt_bounds_by_threshold_and_none_compares_nothing() {
+        let eqt = |umbral| {
+            Limite::con(Criterio::Eqt {
+                nominal: -5.0,
+                lower: 2.0,
+                upper: 10.0,
+                umbral,
+            })
+        };
+        assert_eq!(eqt(Umbral::Delta).cotas(), (Some(-7.0), Some(5.0)));
+        assert_eq!(eqt(Umbral::Porcentaje).cotas(), (Some(-5.1), Some(-4.5)));
+        let (a, b) = eqt(Umbral::Ppm).cotas();
+        assert!((a.unwrap() + 5.00001).abs() < 1e-12 && (b.unwrap() + 4.99995).abs() < 1e-12);
+        assert_eq!(
+            eqt(Umbral::Porcentaje).evalua(-5.1),
+            Veredicto::Pasa,
+            "inclusive"
+        );
+        assert_eq!(eqt(Umbral::Porcentaje).evalua(-4.4), Veredicto::Falla);
+        assert_eq!(eqt(Umbral::Delta).codigo(), "EQT");
+
+        let none = Limite::con(Criterio::Ninguno);
+        assert_eq!(none.evalua(123.0), Veredicto::SinComparar);
+        assert_eq!(none.codigo(), "none");
+    }
+
     #[test]
     fn limite_rango_dentro_fuera_y_fronteras() {
-        let r = Limite::Rango { min: 4.5, max: 5.5 };
-        assert_eq!(r.evalua(5.0), "pass", "dentro del rango");
-        assert_eq!(r.evalua(4.2), "fail", "por debajo");
-        assert_eq!(r.evalua(6.0), "fail", "por encima");
+        let r = Limite::rango(4.5, 5.5);
+        assert_eq!(r.evalua(5.0), Veredicto::Pasa, "dentro del rango");
+        assert_eq!(r.evalua(4.2), Veredicto::Falla, "por debajo");
+        assert_eq!(r.evalua(6.0), Veredicto::Falla, "por encima");
         // Fronteras inclusivas.
-        assert_eq!(r.evalua(4.5), "pass", "min incluido");
-        assert_eq!(r.evalua(5.5), "pass", "max incluido");
+        assert_eq!(r.evalua(4.5), Veredicto::Pasa, "min incluido");
+        assert_eq!(r.evalua(5.5), Veredicto::Pasa, "max incluido");
     }
 
     #[test]
     fn limite_comparacion_cubre_seis_operadores() {
         use Operador::*;
         assert_eq!(
-            Limite::Comparacion {
-                op: Eq,
-                esperado: 1000.0
-            }
-            .evalua(1000.0),
-            "pass"
+            Limite::comparacion(Eq, 1000.0).evalua(1000.0),
+            Veredicto::Pasa
         );
         assert_eq!(
-            Limite::Comparacion {
-                op: Eq,
-                esperado: 1000.0
-            }
-            .evalua(999.0),
-            "fail"
+            Limite::comparacion(Eq, 1000.0).evalua(999.0),
+            Veredicto::Falla
         );
         assert_eq!(
-            Limite::Comparacion {
-                op: Ne,
-                esperado: 1000.0
-            }
-            .evalua(999.0),
-            "pass"
+            Limite::comparacion(Ne, 1000.0).evalua(999.0),
+            Veredicto::Pasa
         );
         assert_eq!(
-            Limite::Comparacion {
-                op: Lt,
-                esperado: 1000.0
-            }
-            .evalua(999.0),
-            "pass"
+            Limite::comparacion(Lt, 1000.0).evalua(999.0),
+            Veredicto::Pasa
         );
         assert_eq!(
-            Limite::Comparacion {
-                op: Lt,
-                esperado: 1000.0
-            }
-            .evalua(1000.0),
-            "fail",
+            Limite::comparacion(Lt, 1000.0).evalua(1000.0),
+            Veredicto::Falla,
             "lt excluye el igual"
         );
         assert_eq!(
-            Limite::Comparacion {
-                op: Le,
-                esperado: 1000.0
-            }
-            .evalua(1000.0),
-            "pass",
+            Limite::comparacion(Le, 1000.0).evalua(1000.0),
+            Veredicto::Pasa,
             "le incluye el igual"
         );
         assert_eq!(
-            Limite::Comparacion {
-                op: Gt,
-                esperado: 1000.0
-            }
-            .evalua(1001.0),
-            "pass"
+            Limite::comparacion(Gt, 1000.0).evalua(1001.0),
+            Veredicto::Pasa
         );
         assert_eq!(
-            Limite::Comparacion {
-                op: Ge,
-                esperado: 1000.0
-            }
-            .evalua(1000.0),
-            "pass"
+            Limite::comparacion(Ge, 1000.0).evalua(1000.0),
+            Veredicto::Pasa
         );
     }
 
@@ -1170,9 +1466,8 @@ mod tests {
 
     #[test]
     fn definicion_paso_con_limite_lo_guarda() {
-        let p =
-            DefinicionPaso::con_limite("medir_voltaje", 1, Limite::Rango { min: 4.5, max: 5.5 });
-        assert_eq!(p.limite, Some(Limite::Rango { min: 4.5, max: 5.5 }));
+        let p = DefinicionPaso::con_limite("medir_voltaje", 1, Limite::rango(4.5, 5.5));
+        assert_eq!(p.limite, Some(Limite::rango(4.5, 5.5)));
         // Sin límite por defecto: el paso decide (pass/fail, action).
         assert_eq!(DefinicionPaso::nuevo("verificar_led", 1).limite, None);
     }
@@ -1353,7 +1648,7 @@ mod tests {
         let p = DefinicionPaso::nuevo("verificar_led", 1);
         assert_eq!(p.ejecutor, None);
         assert_eq!(
-            DefinicionPaso::con_limite("m", 1, Limite::Rango { min: 1.0, max: 2.0 }).ejecutor,
+            DefinicionPaso::con_limite("m", 1, Limite::rango(1.0, 2.0)).ejecutor,
             None
         );
     }

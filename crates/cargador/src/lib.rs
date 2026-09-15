@@ -26,8 +26,8 @@
 //! [`aplicar_limites`](aplicar_limites) y ADR-0008.
 
 use modelo::{
-    Argumento, Asignacion, DefinicionEjecutor, DefinicionPaso, DefinicionSecuencia, EntradaPaso,
-    Limite, Operador, Programa, TipoEjecutor, TipoPaso, ValorDefinicion,
+    Argumento, Asignacion, Criterio, DefinicionEjecutor, DefinicionPaso, DefinicionSecuencia,
+    EntradaPaso, Limite, Operador, Programa, TipoEjecutor, TipoPaso, Umbral, ValorDefinicion,
 };
 use serde::Deserialize;
 use std::collections::{HashMap, HashSet};
@@ -337,10 +337,11 @@ fn tipo_por_defecto() -> String {
 #[derive(Debug, PartialEq, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct LimiteYaml {
-    /// `"range"` o `"comparison"`. `kind` por la palabra reservada de Rust;
-    /// en el YAML la clave es `type`.
-    #[serde(rename = "type")]
-    kind: String,
+    /// The old shape's `"range"` or `"comparison"`, accepted until ADR-0040 is
+    /// complete. `kind` por la palabra reservada de Rust; en el YAML la clave
+    /// es `type`.
+    #[serde(default, rename = "type")]
+    kind: Option<String>,
     #[serde(default)]
     min: Option<f64>,
     #[serde(default)]
@@ -349,13 +350,203 @@ struct LimiteYaml {
     op: Option<String>,
     #[serde(default)]
     expected: Option<f64>,
+    /// TestStand's comparison code (ADR-0040 §7).
+    #[serde(default)]
+    comparison: Option<String>,
+    #[serde(default)]
+    low: Option<f64>,
+    #[serde(default)]
+    high: Option<f64>,
+    #[serde(default)]
+    nominal: Option<f64>,
+    #[serde(default)]
+    lower: Option<f64>,
+    #[serde(default)]
+    upper: Option<f64>,
+    #[serde(default)]
+    threshold: Option<String>,
+    #[serde(default)]
+    units: Option<String>,
 }
 
 impl LimiteYaml {
-    /// Traduce a `modelo::Limite`, validando que los campos cuadren con el
-    /// `tipo` declarado. `nombre_paso` solo para mensajes de error.
+    /// Traduce a `modelo::Limite`, validando que los campos cuadren con la
+    /// comparación declarada. `nombre_paso` solo para mensajes de error.
     fn a_limite(&self, nombre_paso: &str) -> Result<Limite, ErrorCarga> {
-        match self.kind.as_str() {
+        match (&self.kind, &self.comparison) {
+            (Some(_), Some(_)) => Err(ErrorCarga::Validacion(format!(
+                "step '{nombre_paso}' has a limit with both 'type' and 'comparison': \
+                 write only 'comparison'"
+            ))),
+            (None, None) => Err(ErrorCarga::Validacion(format!(
+                "step '{nombre_paso}' has a limit with no 'comparison' (GELE, LT, EQT, none…)"
+            ))),
+            (Some(kind), None) => self.a_limite_viejo(kind, nombre_paso),
+            (None, Some(codigo)) => self.a_limite_teststand(codigo, nombre_paso),
+        }
+    }
+
+    /// ADR-0040 §7: TestStand's codes, each with exactly the fields it uses.
+    fn a_limite_teststand(&self, codigo: &str, nombre_paso: &str) -> Result<Limite, ErrorCarga> {
+        if self.min.is_some() || self.max.is_some() || self.op.is_some() || self.expected.is_some()
+        {
+            return Err(ErrorCarga::Validacion(format!(
+                "step '{nombre_paso}' has a '{codigo}' limit with 'min'/'max'/'op'/'expected', \
+                 which belong to the old shape: use 'low'/'high'"
+            )));
+        }
+        // Every field present, by name, so each code can refuse the ones it
+        // does not use (a field a comparison ignores is a load error, §7).
+        let presentes: Vec<&str> = [
+            ("low", self.low.is_some()),
+            ("high", self.high.is_some()),
+            ("nominal", self.nominal.is_some()),
+            ("lower", self.lower.is_some()),
+            ("upper", self.upper.is_some()),
+            ("threshold", self.threshold.is_some()),
+        ]
+        .into_iter()
+        .filter_map(|(n, esta)| esta.then_some(n))
+        .collect();
+        let usa = |permitidos: &[&str]| -> Result<(), ErrorCarga> {
+            for campo in &presentes {
+                if !permitidos.contains(campo) {
+                    return Err(ErrorCarga::Validacion(format!(
+                        "step '{nombre_paso}' has a '{codigo}' limit with '{campo}', which \
+                         '{codigo}' does not use (it uses: {})",
+                        if permitidos.is_empty() {
+                            "nothing".to_string()
+                        } else {
+                            permitidos.join(", ")
+                        }
+                    )));
+                }
+            }
+            Ok(())
+        };
+        let requiere = |campo: &str, v: Option<f64>| -> Result<f64, ErrorCarga> {
+            v.ok_or_else(|| {
+                ErrorCarga::Validacion(format!(
+                    "step '{nombre_paso}' has a '{codigo}' limit with no '{campo}'"
+                ))
+            })
+        };
+        let dos = |low_incluido: bool,
+                   high_incluido: bool,
+                   dentro: bool|
+         -> Result<Criterio, ErrorCarga> {
+            usa(&["low", "high"])?;
+            let low = requiere("low", self.low)?;
+            let high = requiere("high", self.high)?;
+            if low > high {
+                return Err(ErrorCarga::Validacion(format!(
+                    "step '{nombre_paso}' has a '{codigo}' limit with low ({low}) > high ({high})"
+                )));
+            }
+            Ok(if dentro {
+                Criterio::Dentro {
+                    low,
+                    high,
+                    low_incluido,
+                    high_incluido,
+                }
+            } else {
+                Criterio::Fuera {
+                    low,
+                    high,
+                    low_incluido,
+                    high_incluido,
+                }
+            })
+        };
+        let uno = |op: Operador| -> Result<Criterio, ErrorCarga> {
+            usa(&["low"])?;
+            Ok(Criterio::Uno {
+                op,
+                low: requiere("low", self.low)?,
+            })
+        };
+        let criterio = match codigo {
+            "EQ" => uno(Operador::Eq)?,
+            "NE" => uno(Operador::Ne)?,
+            "GT" => uno(Operador::Gt)?,
+            "LT" => uno(Operador::Lt)?,
+            "GE" => uno(Operador::Ge)?,
+            "LE" => uno(Operador::Le)?,
+            "GTLT" => dos(false, false, true)?,
+            "GELE" => dos(true, true, true)?,
+            "GELT" => dos(true, false, true)?,
+            "GTLE" => dos(false, true, true)?,
+            "LTGT" => dos(false, false, false)?,
+            "LEGE" => dos(true, true, false)?,
+            "LEGT" => dos(true, false, false)?,
+            "LTGE" => dos(false, true, false)?,
+            "EQT" => {
+                usa(&["nominal", "lower", "upper", "threshold"])?;
+                let umbral = match self.threshold.as_deref() {
+                    Some("percent") => Umbral::Porcentaje,
+                    Some("ppm") => Umbral::Ppm,
+                    Some("delta") => Umbral::Delta,
+                    Some(otro) => {
+                        return Err(ErrorCarga::Validacion(format!(
+                            "step '{nombre_paso}' has an 'EQT' limit with threshold '{otro}' \
+                             (percent|ppm|delta)"
+                        )))
+                    }
+                    None => {
+                        return Err(ErrorCarga::Validacion(format!(
+                            "step '{nombre_paso}' has an 'EQT' limit with no 'threshold' \
+                             (percent|ppm|delta)"
+                        )))
+                    }
+                };
+                Criterio::Eqt {
+                    nominal: requiere("nominal", self.nominal)?,
+                    lower: requiere("lower", self.lower)?,
+                    upper: requiere("upper", self.upper)?,
+                    umbral,
+                }
+            }
+            "none" => {
+                usa(&[])?;
+                Criterio::Ninguno
+            }
+            otro => {
+                let pista = if otro != otro.to_uppercase() && otro != "none" {
+                    format!(" — codes are upper case: '{}'", otro.to_uppercase())
+                } else {
+                    String::new()
+                };
+                return Err(ErrorCarga::Validacion(format!(
+                    "step '{nombre_paso}' has a limit with comparison '{otro}', which is not one \
+                     of EQ, NE, GT, LT, GE, LE, GTLT, GELE, GELT, GTLE, LTGT, LEGE, LEGT, LTGE, \
+                     EQT, none{pista}"
+                )));
+            }
+        };
+        Ok(Limite {
+            criterio,
+            unidades: self.units.clone(),
+        })
+    }
+
+    /// The shape before ADR-0040: `range` (`min`, `max`) and `comparison`
+    /// (`op`, `expected`), translated to `GELE` and a one-limit code.
+    fn a_limite_viejo(&self, kind: &str, nombre_paso: &str) -> Result<Limite, ErrorCarga> {
+        let nuevos = self.low.is_some()
+            || self.high.is_some()
+            || self.nominal.is_some()
+            || self.lower.is_some()
+            || self.upper.is_some()
+            || self.threshold.is_some()
+            || self.units.is_some();
+        if nuevos {
+            return Err(ErrorCarga::Validacion(format!(
+                "step '{nombre_paso}' has a 'type: {kind}' limit with fields of the \
+                 TestStand shape: write 'comparison' instead of 'type'"
+            )));
+        }
+        match kind {
             "range" => {
                 let Some(min) = self.min else {
                     return Err(ErrorCarga::Validacion(format!(
@@ -377,7 +568,7 @@ impl LimiteYaml {
                         "el paso '{nombre_paso}' tiene un límite 'range' con campos 'op'/'expected' (no aplican a un rango)"
                     )));
                 }
-                Ok(Limite::Rango { min, max })
+                Ok(Limite::rango(min, max))
             }
             "comparison" => {
                 let Some(op_texto) = &self.op else {
@@ -400,7 +591,7 @@ impl LimiteYaml {
                         "el paso '{nombre_paso}' tiene un límite 'comparison' con campos 'min'/'max' (no aplican a una comparación)"
                     )));
                 }
-                Ok(Limite::Comparacion { op, esperado })
+                Ok(Limite::comparacion(op, esperado))
             }
             otro => Err(ErrorCarga::Validacion(format!(
                 "el paso '{nombre_paso}' tiene un límite con 'type' '{otro}' desconocido (range|comparison)"
@@ -607,7 +798,7 @@ impl From<noyalib::Error> for ErrorCarga {
 /// errata. Es una ayuda de diagnóstico, no una fuente de verdad: el schema lo
 /// imponen los `struct` con `deny_unknown_fields`, y si esta lista se queda
 /// corta lo único que se pierde es una sugerencia.
-const CAMPOS_DEL_SCHEMA: [&str; 30] = [
+const CAMPOS_DEL_SCHEMA: [&str; 38] = [
     // SecuenciaYaml
     "name",
     "setup",
@@ -642,6 +833,14 @@ const CAMPOS_DEL_SCHEMA: [&str; 30] = [
     "min",
     "max",
     "op",
+    "comparison",
+    "low",
+    "high",
+    "nominal",
+    "lower",
+    "upper",
+    "threshold",
+    "units",
 ];
 
 /// Lo que la gente escribe de verdad cuando se equivoca, y a qué campo se le
@@ -2151,6 +2350,47 @@ pub fn aplicar_limites_programa(
     aplicados
 }
 
+/// The sidecar limits that would land on a step that cannot take one: an
+/// `action`, `pass_fail`, `statement` or `sequence_call` (ADR-0042 §4). The
+/// sidecar is applied after the sequence's own checks, so without this it
+/// could build a step the loader refuses when the sequence writes it. One
+/// message per step, naming step and sequence.
+pub fn limites_mal_colocados_programa(
+    programa: &Programa,
+    limites: &HashMap<String, Limite>,
+) -> Vec<String> {
+    fn recorre(
+        sec: &DefinicionSecuencia,
+        limites: &HashMap<String, Limite>,
+        fuera: &mut Vec<String>,
+    ) {
+        for p in sec
+            .pasos_setup
+            .iter()
+            .chain(&sec.pasos_main)
+            .chain(&sec.pasos_cleanup)
+        {
+            let admite = matches!(p.tipo, TipoPaso::NumericLimit | TipoPaso::Grpc);
+            if limites.contains_key(&p.nombre) && !admite {
+                fuera.push(format!(
+                    "step '{}' of sequence '{}' is not a 'numeric_limit', and the sidecar gives \
+                     it a limit: only a numeric_limit is judged against one",
+                    p.nombre, sec.nombre
+                ));
+            }
+        }
+        for sub in sec.subsecuencias.values() {
+            recorre(sub, limites, fuera);
+        }
+    }
+    let mut fuera = Vec::new();
+    recorre(&programa.raiz, limites, &mut fuera);
+    for sec in programa.archivos.values() {
+        recorre(sec, limites, &mut fuera);
+    }
+    fuera
+}
+
 /// [`aplicar_limites`] sobre una secuencia y sus subsecuencias **inline**
 /// (las externas las recorre [`aplicar_limites_programa`] por `archivos`).
 fn aplicar_limites_recursivo(
@@ -2755,7 +2995,7 @@ cleanup:
                 en_bench(DefinicionPaso::con_limite(
                     "medir_voltaje",
                     1,
-                    Limite::Rango { min: 4.5, max: 5.5 },
+                    Limite::rango(4.5, 5.5),
                 )),
                 en_bench(DefinicionPaso::nuevo("verificar_led", 1)),
             ],
@@ -3242,10 +3482,7 @@ main:
       max: 5.5
 ";
         let s = cargar_de_texto(yaml).unwrap();
-        assert_eq!(
-            s.pasos_main[0].limite,
-            Some(Limite::Rango { min: 4.5, max: 5.5 })
-        );
+        assert_eq!(s.pasos_main[0].limite, Some(Limite::rango(4.5, 5.5)));
     }
 
     #[test]
@@ -3262,10 +3499,7 @@ main:
         let s = cargar_de_texto(yaml).unwrap();
         assert_eq!(
             s.pasos_main[0].limite,
-            Some(Limite::Comparacion {
-                op: Operador::Ge,
-                esperado: 1000.0
-            })
+            Some(Limite::comparacion(Operador::Ge, 1000.0))
         );
     }
 
@@ -3384,16 +3618,10 @@ main:
     fn property_loader_aplica_limites_por_nombre() {
         let mut s = cargar_de_texto(basica_yaml()).unwrap();
         let mut lim = HashMap::new();
-        lim.insert(
-            "medir_voltaje".to_string(),
-            Limite::Rango { min: 4.5, max: 5.5 },
-        );
+        lim.insert("medir_voltaje".to_string(), Limite::rango(4.5, 5.5));
         let n = aplicar_limites(&mut s, &lim);
         assert_eq!(n, 1, "solo medir_voltaje recibió límite");
-        assert_eq!(
-            s.pasos_main[0].limite,
-            Some(Limite::Rango { min: 4.5, max: 5.5 })
-        );
+        assert_eq!(s.pasos_main[0].limite, Some(Limite::rango(4.5, 5.5)));
         // Los demás pasos siguen sin límite.
         assert_eq!(
             s.pasos_main[1].limite, None,
@@ -3415,14 +3643,11 @@ main:
 ";
         let mut s = cargar_de_texto(yaml).unwrap();
         let mut lim = HashMap::new();
-        lim.insert(
-            "medir_voltaje".to_string(),
-            Limite::Rango { min: 4.0, max: 6.0 },
-        );
+        lim.insert("medir_voltaje".to_string(), Limite::rango(4.0, 6.0));
         aplicar_limites(&mut s, &lim);
         assert_eq!(
             s.pasos_main[0].limite,
-            Some(Limite::Rango { min: 4.0, max: 6.0 }),
+            Some(Limite::rango(4.0, 6.0)),
             "el sidecar overridea el embebido"
         );
     }
@@ -3431,10 +3656,7 @@ main:
     fn property_loader_ignora_nombres_que_no_estan_en_la_secuencia() {
         let mut s = cargar_de_texto(basica_yaml()).unwrap();
         let mut lim = HashMap::new();
-        lim.insert(
-            "paso_que_no_existe".to_string(),
-            Limite::Rango { min: 0.0, max: 1.0 },
-        );
+        lim.insert("paso_que_no_existe".to_string(), Limite::rango(0.0, 1.0));
         assert_eq!(aplicar_limites(&mut s, &lim), 0, "ningún paso coincide");
         assert_eq!(
             limites_sin_aplicar(&s, &lim),
@@ -3446,7 +3668,7 @@ main:
     #[test]
     fn limites_sin_aplicar_lista_solo_los_huerfanos_y_ordenados() {
         let s = cargar_de_texto(basica_yaml()).unwrap();
-        let rango = Limite::Rango { min: 0.0, max: 1.0 };
+        let rango = Limite::rango(0.0, 1.0);
         let lim = HashMap::from([
             ("medir_voltaje".to_string(), rango.clone()), // sí existe en basica
             ("zeta_inventado".to_string(), rango.clone()),
@@ -3462,10 +3684,7 @@ main:
     #[test]
     fn limites_sin_aplicar_vacio_cuando_todo_casa() {
         let s = cargar_de_texto(basica_yaml()).unwrap();
-        let lim = HashMap::from([(
-            "medir_voltaje".to_string(),
-            Limite::Rango { min: 0.0, max: 1.0 },
-        )]);
+        let lim = HashMap::from([("medir_voltaje".to_string(), Limite::rango(0.0, 1.0))]);
         assert!(limites_sin_aplicar(&s, &lim).is_empty());
     }
 
@@ -3492,10 +3711,7 @@ main:
 
         let mut prog =
             cargar_programa_con_pm(pm.to_str().unwrap(), usuario.to_str().unwrap()).unwrap();
-        let lim = HashMap::from([(
-            "medir_voltaje".to_string(),
-            Limite::Rango { min: 4.0, max: 6.0 },
-        )]);
+        let lim = HashMap::from([("medir_voltaje".to_string(), Limite::rango(4.0, 6.0))]);
 
         // La primitiva por secuencia sólo ve el PM: ahí no hay nada que casar.
         assert_eq!(
@@ -3516,7 +3732,7 @@ main:
         let clave = prog.raiz.pasos_main[0].secuencia.as_deref().unwrap();
         assert_eq!(
             prog.archivos[clave].pasos_main[0].limite,
-            Some(Limite::Rango { min: 4.0, max: 6.0 })
+            Some(Limite::rango(4.0, 6.0))
         );
     }
 
@@ -3539,10 +3755,7 @@ main:
         .unwrap();
 
         let mut prog = cargar_programa_de_archivo(padre.to_str().unwrap()).unwrap();
-        let lim = HashMap::from([(
-            "medir_voltaje".to_string(),
-            Limite::Rango { min: 4.0, max: 6.0 },
-        )]);
+        let lim = HashMap::from([("medir_voltaje".to_string(), Limite::rango(4.0, 6.0))]);
         assert_eq!(
             aplicar_limites_programa(&mut prog, &lim),
             3,
@@ -3561,7 +3774,7 @@ main:
             cargar_de_texto("name: hija\nmain:\n  - name: solo_en_la_hija\n    type: grpc\n")
                 .unwrap(),
         );
-        let rango = Limite::Rango { min: 0.0, max: 1.0 };
+        let rango = Limite::rango(0.0, 1.0);
         let lim = HashMap::from([
             ("medir_voltaje".to_string(), rango.clone()), // en la raíz
             ("solo_en_la_hija".to_string(), rango.clone()), // en la externa
@@ -3723,16 +3936,10 @@ verificar_frecuencia:
             .map(|(n, l)| Ok((n.clone(), l.a_limite(&n)?)))
             .collect::<Result<_, ErrorCarga>>()
             .unwrap();
-        assert_eq!(
-            lim.get("medir_voltaje"),
-            Some(&Limite::Rango { min: 4.5, max: 5.5 })
-        );
+        assert_eq!(lim.get("medir_voltaje"), Some(&Limite::rango(4.5, 5.5)));
         assert_eq!(
             lim.get("verificar_frecuencia"),
-            Some(&Limite::Comparacion {
-                op: Operador::Ge,
-                esperado: 1000.0
-            })
+            Some(&Limite::comparacion(Operador::Ge, 1000.0))
         );
     }
 
@@ -4431,6 +4638,102 @@ main:
             matches!(&err, ErrorCarga::Validacion(m) if m.contains("no existe")),
             "{err}"
         );
+    }
+
+    fn limite_de(texto: &str) -> Result<Limite, ErrorCarga> {
+        let y = format!(
+            "name: s\nmain:\n  - name: n\n    type: numeric_limit\n    module: m\n    limit: {texto}\n"
+        );
+        cargar_de_texto(&y).map(|s| s.pasos_main[0].limite.clone().unwrap())
+    }
+
+    /// ADR-0040 §7: the TestStand shape, each code with exactly its fields.
+    #[test]
+    fn limits_in_teststand_shape_load_with_exactly_their_fields() {
+        let l = limite_de("{ comparison: GELE, low: 4.75, high: 5.25, units: V }").unwrap();
+        assert_eq!(l.codigo(), "GELE");
+        assert_eq!(l.cotas(), (Some(4.75), Some(5.25)));
+        assert_eq!(l.unidades.as_deref(), Some("V"));
+        assert_eq!(
+            limite_de("{ comparison: LT, low: 1 }").unwrap().codigo(),
+            "LT"
+        );
+        assert_eq!(
+            limite_de("{ comparison: LEGT, low: 1, high: 2 }")
+                .unwrap()
+                .codigo(),
+            "LEGT"
+        );
+        let eqt =
+            limite_de("{ comparison: EQT, nominal: 5, lower: 1, upper: 2, threshold: percent }")
+                .unwrap();
+        assert_eq!(eqt.cotas(), (Some(4.95), Some(5.1)));
+        assert_eq!(
+            limite_de("{ comparison: none, units: V }")
+                .unwrap()
+                .codigo(),
+            "none"
+        );
+        assert_eq!(
+            limite_de("{ type: range, min: 1, max: 2 }").unwrap(),
+            Limite::rango(1.0, 2.0),
+            "the old shape still loads until ADR-0040 is complete"
+        );
+
+        let refused = [
+            ("{ comparison: LT, low: 1, high: 2 }", "'LT' does not use"),
+            ("{ comparison: GELE, low: 1 }", "no 'high'"),
+            (
+                "{ comparison: GELE, low: 3, high: 2 }",
+                "low (3) > high (2)",
+            ),
+            (
+                "{ comparison: gele, low: 1, high: 2 }",
+                "upper case: 'GELE'",
+            ),
+            (
+                "{ comparison: EQT, nominal: 5, lower: 1, upper: 2 }",
+                "no 'threshold'",
+            ),
+            (
+                "{ comparison: EQT, nominal: 5, lower: 1, upper: 2, threshold: pct }",
+                "percent|ppm|delta",
+            ),
+            ("{ comparison: none, low: 1 }", "'none' does not use"),
+            ("{ comparison: GE, min: 1 }", "old shape"),
+            (
+                "{ type: range, comparison: GELE, min: 1, max: 2 }",
+                "both 'type' and 'comparison'",
+            ),
+            ("{ units: V }", "no 'comparison'"),
+        ];
+        for (texto, frag) in refused {
+            let err = limite_de(texto).unwrap_err();
+            assert!(
+                matches!(&err, ErrorCarga::Validacion(m) if m.contains(frag)),
+                "expected '{frag}' for {texto}: {err}"
+            );
+        }
+    }
+
+    /// ADR-0042 §4: a sidecar limit landing on a step that cannot take one.
+    #[test]
+    fn a_sidecar_limit_on_a_step_that_is_not_a_numeric_limit_is_named() {
+        let raiz = cargar_de_texto(
+            "name: s\nmain:\n  - name: led\n    type: pass_fail\n    module: m\n  - name: rail\n    type: numeric_limit\n    module: m\n    limit: { comparison: GE, low: 1 }\n",
+        )
+        .unwrap();
+        let programa = Programa {
+            raiz,
+            ..Default::default()
+        };
+        let lim = HashMap::from([
+            ("led".to_string(), Limite::rango(0.0, 1.0)),
+            ("rail".to_string(), Limite::rango(0.0, 1.0)),
+        ]);
+        let mal = limites_mal_colocados_programa(&programa, &lim);
+        assert_eq!(mal.len(), 1, "{mal:?}");
+        assert!(mal[0].contains("step 'led'"), "{mal:?}");
     }
 
     /// ADR-0040 §3–5 and ADR-0042: what each new type requires and refuses.

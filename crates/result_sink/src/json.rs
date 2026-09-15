@@ -97,6 +97,10 @@ pub(crate) fn paso_a_json_con(p: &ResultadoStep, anidar: bool) -> Value {
         "limit_max": opt_num(p.limite_max),
         "expected_value": opt_num(p.valor_esperado),
         "operator": p.operador.map(|op| json!(op.simbolo())).unwrap_or(Value::Null),
+        // ADR-0040 §7: the limit's TestStand code and its units, null when no
+        // limit was applied.
+        "comparison": p.comparacion,
+        "units": p.unidades,
         // ADR-0020 + Regla 3 de ADR-0019: **la condición en la que se midió
         // queda escrita**. Hasta ahora dos corridas de la misma secuencia con
         // distinto canal producían informes idénticos, porque el canal iba
@@ -211,6 +215,19 @@ mod tests {
 
         let statement = ResultadoStep::nuevo("set_x", "done", "statement ok");
         assert!(paso_a_json_con(&statement, true)["module"].is_null());
+    }
+
+    #[test]
+    fn the_comparison_and_units_are_written() {
+        let mut r = ResultadoStep::medido_valor("rail", "pass", "ok", 5.0);
+        r.comparacion = Some("GELE".into());
+        r.unidades = Some("V".into());
+        let v = paso_a_json_con(&r, true);
+        assert_eq!(v["comparison"], "GELE");
+        assert_eq!(v["units"], "V");
+        assert!(
+            paso_a_json_con(&ResultadoStep::nuevo("x", "done", ""), true)["comparison"].is_null()
+        );
     }
 
     #[test]
