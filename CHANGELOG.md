@@ -26,6 +26,8 @@ applies from 0.6.0 on; by it, 0.6.0 itself would have been 0.5.1.
 
 ## [Unreleased]
 
+## [0.6.2] — 2026-09-15
+
 ### Fixed
 
 - **The installed Sequence Editor can run a sequence**
@@ -1046,6 +1048,7 @@ primera campaña de betatesting externa.
 - *Private vulnerability reporting* no puede activarse mientras el
   repositorio sea privado; hasta entonces vale el correo de `SECURITY.md`.
 
+[0.6.2]: https://github.com/anlaco/anvil/releases/tag/v0.6.2
 [0.6.1]: https://github.com/anlaco/anvil/releases/tag/v0.6.1
 [0.6.0]: https://github.com/anlaco/anvil/releases/tag/v0.6.0
 [0.5.0]: https://github.com/anlaco/anvil/releases/tag/v0.5.0
