@@ -94,23 +94,12 @@ function killBridge() {
 
 /// Starts `anvil <sequencePath> --bridge` and resolves to the `ws://` URL it
 /// prints (`packaging/anvil-host/src/main.rs:617-649`) once it appears on
-/// stdout.
-///
-/// **Stopgap, not the real answer**, carried over from the Tauri shell
-/// unchanged (ADR-0037 §d): it finds `anvil` by a path relative to this file
-/// that only exists in the dev tree — it breaks the moment this ships
-/// packaged, because there is no bundling story for the engine yet (#67).
-/// Good enough to develop against today; revisit before this goes further
-/// than a developer's own checkout.
+/// stdout, together with which engine it started (`findEngine`).
 async function startBridge(sequencePath) {
   killBridge();
 
-  const anvil = path.join(
-    REPO,
-    process.platform === "win32"
-      ? "packaging/anvil-host/target/release/anvil.exe"
-      : "packaging/anvil-host/target/release/anvil",
-  );
+  const engine = await findEngine();
+  const anvil = engine.path;
 
   // A sequence opened through the dialog arrives as a real filesystem path;
   // one opened with `?open=` arrives as the dev server's own `/ejemplos/…`,
@@ -144,13 +133,126 @@ async function startBridge(sequencePath) {
       const at = line.indexOf("ws://");
       if (at === -1) return;
       bridge = child;
-      done(resolve, line.slice(at).trim());
+      done(resolve, { url: line.slice(at).trim(), engine });
     });
     child.on("exit", () => {
       done(reject, new Error("the engine exited before printing a bridge URL"));
     });
   });
 }
+
+// ------------------------------------------------------------- the engine
+
+// The editor does not carry the engine: it uses the `anvil` installed on the
+// machine, the way a code editor uses the compiler that is installed rather
+// than one of its own (#80). ADR-0035 keeps the IDE and the engine separate
+// artefacts, and the engine is what a bench gets on its own.
+
+const ENGINE_EXE = process.platform === "win32" ? "anvil.exe" : "anvil";
+
+/** Where a located engine is remembered, per user. */
+const enginePrefs = () => path.join(app.getPath("userData"), "engine.json");
+
+/// The engine to run, and where it was found, in this order:
+///
+/// 1. `ANVIL_EDITOR_ENGINE`, a path — for scripts and tests. If it is set and
+///    wrong, that is an error, not a reason to quietly try something else.
+/// 2. The one located through File ▸ Locate Anvil Engine…, remembered.
+/// 3. The dev tree's release build, only when running unpackaged, so that
+///    `npm run app` uses the engine built from this checkout rather than an
+///    older one that happens to be on PATH.
+/// 4. `anvil` on PATH. On Windows, a PATH set in one terminal is not the PATH
+///    of an editor started from the Start menu, which is why 2 exists.
+///
+/// Each candidate is checked by asking it for `--version`: a file with the
+/// right name that is not the engine fails here, with its path in the
+/// message, rather than as a bridge that never prints its URL.
+async function findEngine() {
+  const forced = process.env.ANVIL_EDITOR_ENGINE;
+  if (forced) return checkEngine(forced, "ANVIL_EDITOR_ENGINE");
+
+  const remembered = await rememberedEngine();
+  if (remembered && existsSync(remembered)) return checkEngine(remembered, "located");
+
+  if (!app.isPackaged) {
+    const dev = path.join(REPO, "packaging/anvil-host/target/release", ENGINE_EXE);
+    if (existsSync(dev)) return checkEngine(dev, "dev tree");
+  }
+
+  for (const dir of (process.env.PATH ?? "").split(path.delimiter)) {
+    if (!dir) continue;
+    const candidate = path.join(dir, ENGINE_EXE);
+    if (existsSync(candidate)) return checkEngine(candidate, "PATH");
+  }
+
+  throw new Error(
+    `the Anvil engine (${ENGINE_EXE}) was not found on PATH` +
+      (remembered ? ` nor at ${remembered}, where it was located before` : "") +
+      ` — install it from the release page, then File ▸ Locate Anvil Engine…`,
+  );
+}
+
+async function rememberedEngine() {
+  try {
+    return JSON.parse(await readFile(enginePrefs(), "utf8")).path ?? null;
+  } catch {
+    return null;
+  }
+}
+
+/// Resolves to `{ path, version, source, editor }` if `file` answers `--version` as
+/// the engine does. `anvil --version` writes to stderr (#75), so both
+/// streams are read.
+function checkEngine(file, source) {
+  return new Promise((resolve, reject) => {
+    let out = "";
+    let child;
+    try {
+      child = spawn(file, ["--version"], { stdio: ["ignore", "pipe", "pipe"] });
+    } catch (e) {
+      reject(new Error(`${file} (${source}) could not be started: ${e.message}`));
+      return;
+    }
+    const timer = setTimeout(() => child.kill(), 5000);
+    child.stdout.on("data", (d) => (out += d));
+    child.stderr.on("data", (d) => (out += d));
+    child.on("error", (e) => {
+      clearTimeout(timer);
+      reject(new Error(`${file} (${source}) could not be started: ${e.message}`));
+    });
+    child.on("close", () => {
+      clearTimeout(timer);
+      const version = /^anvil (\S+)/m.exec(out)?.[1];
+      // `editor` is this app's own version when it is a release, so the page
+      // can say when the two differ; a dev run has none worth comparing.
+      const editor = app.isPackaged ? app.getVersion() : null;
+      if (version) resolve({ path: file, version, source, editor });
+      else
+        reject(
+          new Error(
+            `${file} (${source}) is not the Anvil engine: \`--version\` did not answer "anvil <version>"`,
+          ),
+        );
+    });
+  });
+}
+
+/// File ▸ Locate Anvil Engine…: picks the executable, checks it, and
+/// remembers it. Resolves to the engine, or null if the dialog was dismissed.
+async function locateEngine(window) {
+  const { canceled, filePaths } = await dialog.showOpenDialog(window, {
+    title: "Locate the Anvil engine",
+    properties: ["openFile"],
+    filters: process.platform === "win32" ? [{ name: "anvil.exe", extensions: ["exe"] }] : [],
+  });
+  if (canceled) return null;
+  const engine = await checkEngine(filePaths[0], "located");
+  await writeFile(enginePrefs(), JSON.stringify({ path: engine.path }, null, 2), "utf8");
+  return engine;
+}
+
+/** Resolves to `{ value }` or `{ error }`; see `anvil:start-bridge`. */
+const answer = (promise) => promise.then((value) => ({ value }), (e) => ({ error: e.message }));
 
 // ---------------------------------------------------------------- the IPC
 
@@ -186,8 +288,15 @@ function wireIpc() {
     existsSync(file) ? readFile(file, "utf8") : null,
   );
   ipcMain.handle("anvil:write-text", (_event, file, text) => writeFile(file, text, "utf8"));
-  ipcMain.handle("anvil:start-bridge", (_event, sequencePath) => startBridge(sequencePath));
+  // An engine that is not installed, or not where it was, is an expected
+  // answer here, not a fault: it comes back as `{ error }` for the page to
+  // show, rather than as a rejection Electron logs with a stack trace on every
+  // file opened — the same reasoning as `anvil:read-text-if-any` below.
+  ipcMain.handle("anvil:start-bridge", (_event, sequencePath) => answer(startBridge(sequencePath)));
   ipcMain.handle("anvil:stop-bridge", () => killBridge());
+  ipcMain.handle("anvil:locate-engine", (event) =>
+    answer(locateEngine(BrowserWindow.fromWebContents(event.sender))),
+  );
   ipcMain.handle("anvil:ask-unsaved", (event, name) =>
     askUnsaved(BrowserWindow.fromWebContents(event.sender), name),
   );
@@ -379,6 +488,8 @@ function buildMenu() {
           { type: "separator" },
           item("&Save", "save", "CmdOrCtrl+S"),
           item("Save &As…", "save-as", "CmdOrCtrl+Shift+S"),
+          { type: "separator" },
+          item("Locate Anvil &Engine…", "locate-engine"),
           { type: "separator" },
           process.platform === "darwin" ? { role: "close" } : { role: "quit" },
         ],

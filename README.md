@@ -59,8 +59,13 @@ system's webview is that on Linux that would mean depending on whichever
 `libwebkit2gtk` the machine happens to have. The [release page][rel]
 publishes it as `anvil-editor-vX.Y.Z-x86_64-linux.AppImage`,
 `anvil-editor-vX.Y.Z-amd64.deb` and
-`anvil-editor-vX.Y.Z-x86_64-windows-setup.exe`. To run it from source: `cd
-editor && npm install && npm run app`.
+`anvil-editor-vX.Y.Z-x86_64-windows-setup.exe`. It does not carry the engine:
+to run a sequence it uses the `anvil` installed on the machine — the one on
+`PATH`, or the one you point it at with **File ▸ Locate Anvil Engine…**, which
+it remembers. On Windows, a `PATH` set in one terminal is not seen by an editor
+started from the Start menu, so locate `anvil.exe` once. To run it from source:
+`cd editor && npm install && npm run app`, which uses the engine built in this
+checkout.
 
 [rel]: https://github.com/anlaco/anvil/releases/latest
 

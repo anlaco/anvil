@@ -26,6 +26,21 @@ applies from 0.6.0 on; by it, 0.6.0 itself would have been 0.5.1.
 
 ## [Unreleased]
 
+### Fixed
+
+- **The installed Sequence Editor can run a sequence**
+  ([#80](https://github.com/anlaco/anvil/issues/80)). It looked for `anvil` in
+  a path that only exists in a source checkout, so Run never became available
+  outside one. It now uses the engine installed on the machine: the one on
+  `PATH`, or the one chosen with the new **File ▸ Locate Anvil Engine…**, which
+  it remembers — needed on Windows, where a `PATH` set in a terminal does not
+  reach an editor started from the Start menu. `ANVIL_EDITOR_ENGINE` overrides
+  both. Whatever it picks is checked with `--version` first, and the status
+  bar names it (`anvil 0.6.0 at …`), adding a note when its version differs
+  from the editor's. When no engine is found the reason stays in the status
+  bar and on the Run button instead of being overwritten by the validation
+  result. The editor still does not carry the engine.
+
 ## [0.6.1] — 2026-09-15
 
 ### Fixed
