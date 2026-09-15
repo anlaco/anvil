@@ -315,6 +315,17 @@ struct EjecutorWasm {
 ///
 /// The bridge is the one loading the components into its own Store (empty
 /// WASI sandbox: no files, no network — a component is a pure function).
+/// The executor binary a `path:` names, as it is on this platform: a sequence
+/// says `dist/anvil-exec-wasm` and on Windows the file is
+/// `dist/anvil-exec-wasm.exe` (ADR-0041 §5). A path that already names a file
+/// is taken as written.
+fn binario_de_plataforma(path: &Path, exe_suffix: &str) -> PathBuf {
+    if exe_suffix.is_empty() || path.is_file() {
+        return path.to_path_buf();
+    }
+    cargador::con_sufijo(path, exe_suffix)
+}
+
 fn instanciar_wasm(nombre: &str, path: &Path) -> Result<EjecutorWasm, String> {
     // El tropiezo nº1 viniendo de antes de ADR-0027: apuntar `path` al `.wasm`.
     // Es un fichero, así que pasaría cualquier comprobación de existencia, y
@@ -330,6 +341,7 @@ fn instanciar_wasm(nombre: &str, path: &Path) -> Result<EjecutorWasm, String> {
             path.display()
         ));
     }
+    let path = &binario_de_plataforma(path, std::env::consts::EXE_SUFFIX);
     if !path.is_file() {
         return Err(format!(
             "el ejecutor '{nombre}' declara 'path: {}', que no es un fichero: se \
@@ -720,7 +732,33 @@ fn main() {
 
 #[cfg(test)]
 mod tests {
-    use super::{ruta_de_secuencia, rutas_de_argumentos};
+    use super::{binario_de_plataforma, ruta_de_secuencia, rutas_de_argumentos};
+    use std::path::{Path, PathBuf};
+
+    #[test]
+    fn a_path_without_exe_resolves_to_the_windows_binary() {
+        let dir = std::env::temp_dir().join(format!("anvil_host_exe_{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("anvil-exec-wasm.exe"), b"MZ").unwrap();
+        let named = dir.join("anvil-exec-wasm");
+
+        let on_windows = binario_de_plataforma(&named, ".exe");
+        let on_linux = binario_de_plataforma(&named, "");
+        std::fs::remove_dir_all(&dir).ok();
+
+        assert_eq!(on_windows, dir.join("anvil-exec-wasm.exe"));
+        assert_eq!(on_linux, named);
+    }
+
+    #[test]
+    fn a_path_that_names_a_file_is_taken_as_written() {
+        let exe = std::env::current_exe().unwrap();
+        assert_eq!(binario_de_plataforma(&exe, ".exe"), exe);
+        assert_eq!(
+            binario_de_plataforma(Path::new("no/such/file"), ""),
+            PathBuf::from("no/such/file")
+        );
+    }
 
     fn args(v: &[&str]) -> Vec<String> {
         v.iter().map(|s| s.to_string()).collect()

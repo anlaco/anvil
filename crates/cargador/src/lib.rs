@@ -404,6 +404,15 @@ impl LimiteYaml {
     }
 }
 
+/// `path` with `suffix` appended to its last component (`a/b` → `a/b.exe`).
+/// Not `Path::with_extension`, which would replace whatever follows a dot in
+/// the name instead of adding to it.
+pub fn con_sufijo(path: &Path, suffix: &str) -> PathBuf {
+    let mut s = path.as_os_str().to_owned();
+    s.push(suffix);
+    PathBuf::from(s)
+}
+
 /// Nombre de ejecutor reservado del motor (clave interna de la conexión al
 /// ejecutor embebido). No declarable en el YAML: el cargador lo rechaza.
 pub const NOMBRE_EMBEDIDO_RESERVADO: &str = modelo::EJECUTOR_EMBEBIDO;
@@ -457,7 +466,11 @@ impl EjecutorYaml {
                 // El path debe existir (relativo al directorio del YAML),
                 // como las subsecuencias externas (fail-fast al cargar).
                 let ruta = normalizar_path(dir_yaml, Path::new(&path));
-                if !ruta.exists() {
+                // The loader runs inside the engine's WASM sandbox and cannot
+                // tell which OS it is on, so one sequence naming
+                // `anvil-exec-wasm` must also find `anvil-exec-wasm.exe`
+                // (ADR-0041 §5); the host picks the right one when it spawns.
+                if !ruta.exists() && !con_sufijo(&ruta, ".exe").exists() {
                     return Err(ErrorCarga::Validacion(format!(
                         "el ejecutor '{}' es 'wasm' y su 'path' '{}' no existe",
                         self.name, path
@@ -4230,6 +4243,32 @@ main:
         assert!(
             matches!(&err, ErrorCarga::Validacion(m) if m.contains("no existe")),
             "{err}"
+        );
+    }
+
+    /// A sequence written as `path: ./anvil-exec-wasm` loads where the file on
+    /// disk is `anvil-exec-wasm.exe`, so one sequence serves Linux and Windows.
+    #[test]
+    fn wasm_path_without_exe_finds_the_windows_binary() {
+        let dir = std::env::temp_dir().join(format!("anvil_adr41_exe_{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("anvil-exec-wasm.exe"), b"MZ").unwrap();
+        let y = dir.join("s.yaml");
+        std::fs::write(
+            &y,
+            "name: s\nexecutors:\n  - { name: p, type: wasm, path: ./anvil-exec-wasm }\nmain:\n  - name: a\n    executor: p\n",
+        )
+        .unwrap();
+        let loaded = cargar_programa_de_archivo(y.to_str().unwrap());
+        std::fs::remove_dir_all(&dir).ok();
+        assert!(loaded.is_ok(), "{:?}", loaded.err());
+    }
+
+    #[test]
+    fn con_sufijo_appends_instead_of_replacing_an_extension() {
+        assert_eq!(
+            con_sufijo(Path::new("dist/exec.v2"), ".exe"),
+            PathBuf::from("dist/exec.v2.exe")
         );
     }
 
