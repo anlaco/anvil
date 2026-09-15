@@ -1,5 +1,5 @@
-# Issue #20: un sequence_call no mide; `result.measured_value` vale siempre
-# `nothing` y borraba el destino en silencio.
+# Issue #20: a sequence_call measures nothing; `result.measured_value` is always
+# `nothing` and silently wiped the target.
 name: validate_valor_medido_en_call
 locals:
   my_num: 42.0

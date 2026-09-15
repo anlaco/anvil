@@ -1,4 +1,4 @@
-# Issue #19: `--validate` aprobaba esto y la corrida moría a mitad.
+# Issue #19: `--validate` approved this and the run died halfway.
 name: validate_var_no_declarada
 locals:
   v: 0.0
