@@ -71,6 +71,7 @@ const state = {
   text: null, // CodeMirror view
   validateTimer: null,
   bridge: null, // the URL, once connected
+  bridgeError: null, // why the shell could not start one, if it could not
   /**
    * What the engine is doing right now, fed by the NDJSON of `--events`.
    * The state machine that reads it lives in ./run-state.mjs, out of the DOM so
@@ -517,6 +518,11 @@ function renderAll({ skipText = false } = {}) {
     hasDoc: !!state.doc,
     bridged: engine.bridged,
     inFlight: state.runInFlight,
+    shell: inShell(),
+    // Why the shell's own engine did not start, so the refused button says it
+    // too: the status bar shows one line at a time and the next edit replaces
+    // it, leaving a disabled Run with no explanation anywhere on screen.
+    reason: state.bridgeError,
   });
   ui.run.disabled = boton.disabled;
   ui.run.title = boton.title;
@@ -674,6 +680,9 @@ async function run() {
 function bridgeLost(reason) {
   const expected = state.bridge === null;
   state.bridge = null;
+  // Kept for the Run button's tooltip, the same way a failed start is — except
+  // when the editor stopped the bridge itself, which is not a fault to report.
+  state.bridgeError = expected ? null : reason;
   // Not while a run is on screen: that run's own outcome is the more useful
   // thing to be looking at, and `run()` reports the failure itself. Nor when
   // the editor stopped the bridge itself (`newFile`): that is not news, and
@@ -694,6 +703,7 @@ async function openBridge(url) {
   try {
     await engine.attachBridge(url, connectBridge, bridgeLost);
     state.bridge = url;
+    state.bridgeError = null;
     status("pass", "bridge connected — Run is available");
   } catch (e) {
     // Not being connected is a normal state, not a broken editor, so this says
@@ -761,11 +771,28 @@ function shellHandle(path) {
 async function connectLocalBridge(sequencePath) {
   try {
     status("busy", "starting the engine…");
+    state.bridgeError = null;
     const url = await window.anvil.startBridge(sequencePath);
     await openBridge(url);
   } catch (e) {
-    status("error", e?.message ?? "could not start the local engine");
+    // The shell's message names the engine it tried, or every place it looked
+    // for one. It is kept — not just shown once — because the Run button has
+    // to be able to say why it is refusing (`runButton`).
+    const what = e?.message ?? "could not start the local engine";
+    state.bridgeError = firstLine(what);
+    status("error", what);
+    renderAll();
   }
+}
+
+/**
+ * The first line of a multi-line failure.
+ *
+ * The engine-not-found message is a paragraph and a list of paths: right for
+ * the status bar and for the log, far too long for a tooltip.
+ */
+function firstLine(text) {
+  return String(text).split("\n")[0].trim();
 }
 
 async function fetchText(url) {

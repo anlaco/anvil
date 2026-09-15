@@ -197,3 +197,32 @@ test("a refused Run says which of the two things is missing", () => {
   const ambos = runButton({ hasDoc: true, bridged: false, inFlight: true });
   assert.match(ambos.title, /in flight/);
 });
+
+test("inside the shell, no bridge never sends anyone to a terminal", () => {
+  // The desktop window has no address bar: a URL printed by `anvil --bridge`
+  // in a terminal has nowhere to be pasted, so that advice was a dead end on
+  // Windows, where the shell could not find the engine to start it itself.
+  const enElShell = runButton({ hasDoc: true, bridged: false, inFlight: false, shell: true });
+  assert.doesNotMatch(enElShell.title, /--bridge/);
+
+  // What went wrong is the whole answer when there is one, because the status
+  // bar that showed it has since been overwritten by the next edit.
+  const conMotivo = runButton({
+    hasDoc: true,
+    bridged: false,
+    inFlight: false,
+    shell: true,
+    reason: "could not find the engine (anvil.exe).",
+  });
+  assert.match(conMotivo.title, /could not find the engine/);
+
+  // And a run is still refused for the more recent reason first.
+  const enVuelo = runButton({
+    hasDoc: true,
+    bridged: false,
+    inFlight: true,
+    shell: true,
+    reason: "could not find the engine (anvil.exe).",
+  });
+  assert.match(enVuelo.title, /in flight/);
+});

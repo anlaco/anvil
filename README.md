@@ -62,6 +62,19 @@ publishes it as `anvil-editor-vX.Y.Z-x86_64-linux.AppImage`,
 `anvil-editor-vX.Y.Z-x86_64-windows-setup.exe`. To run it from source: `cd
 editor && npm install && npm run app`.
 
+**Run needs the engine as well.** The editor writes, opens and validates a
+sequence entirely on its own — it carries the same engine compiled to
+JavaScript — but *running* one invokes real steps on your bench, and for that
+it starts `anvil <sequence> --bridge` on this machine. That is the binary
+download above, and it is not inside the editor's installer yet
+([#67](https://github.com/anlaco/anvil/issues/67)). Take it from the same
+release and then either put it on your `PATH`, set `ANVIL_BIN` to its full
+path, or let the editor ask: the first time Run needs an engine and finds
+none, it offers *Locate anvil.exe…* and remembers what you pick. There is no
+second terminal to keep open — the editor starts and stops the engine itself,
+and the `--bridge` URL printed in a terminal is for the browser editor, not
+for the installed one.
+
 [rel]: https://github.com/anlaco/anvil/releases/latest
 
 ## Building from source

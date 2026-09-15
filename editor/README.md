@@ -168,6 +168,25 @@ anvil ejemplos/basica.yaml --bridge      # prints a URL with a token
 Open the URL it prints, adding `&open=/ejemplos/basica.yaml`. Run is disabled
 until a bridge is attached, and says so on hover.
 
+That is the **browser** editor. The desktop shell starts the engine itself
+when a sequence is opened or saved (`startBridge`, `electron/main.mjs`), and
+its window has no address bar, so a URL printed in a terminal cannot reach it
+— telling anyone in the shell to run `--bridge` by hand is a dead end, and the
+tooltip on a disabled Run does not.
+
+Which engine it starts, in order: `ANVIL_BIN`, the one chosen through
+*Locate…* last time (remembered in `engine.json` under the app's user-data
+directory), `packaging/anvil-host/target/release/anvil` in this checkout, the
+app's own `resources/anvil/`, the directory the editor is installed in, then
+`PATH`. The dev tree comes before the installed places on purpose: `npm run
+app` exists to exercise the engine you just built, not whatever release is on
+`PATH`. When none of them holds one, the shell says where it looked and offers
+to be pointed at it — the engine is still a separate download from the editor
+(#67), so having none is the normal first run of an installed editor.
+`editor/electron/find-anvil.mjs` is that lookup, kept free of `electron` and
+of the filesystem so `test/find-anvil.test.mjs` can assert the order on a
+machine that has none of those paths.
+
 The bridge sends the engine's arguments — the embedded executor's ephemeral
 port, an `--executor` per declared one — in its first frame, because there is
 no argv to inject them into when the engine runs in a browser. Without them the

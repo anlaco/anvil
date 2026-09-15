@@ -625,12 +625,20 @@ fn main() {
         let puerto = listener.local_addr().map(|a| a.port()).unwrap_or(0);
         let token = bridge::mint_token();
 
-        // Printed for a person to copy, because that is how the editor gets it:
-        // from the terminal that started this. Loopback only, and the URL never
-        // leaves the machine.
+        // Printed for a person to copy, because that is how the *browser*
+        // editor gets it: from the terminal that started this. Loopback only,
+        // and the URL never leaves the machine.
+        //
+        // Said to be the browser's, because the address is the dev server's
+        // (`npm run dev`) and the installed desktop editor cannot use it: its
+        // window has no address bar to paste a URL into. It starts a bridge of
+        // its own instead, and someone told to run this by hand — the tooltip
+        // on a disabled Run used to say exactly that — ended up with a URL and
+        // nowhere to put it (#67).
         println!("bridge listening on 127.0.0.1:{puerto}");
-        println!("open the editor with:");
+        println!("open the browser editor with:");
         println!("  http://localhost:5180/?bridge=ws://127.0.0.1:{puerto}/?token={token}");
+        println!("(the desktop editor starts its own bridge: just open the sequence in it)");
 
         // The engine gets its arguments over the wire instead of through argv:
         // there is no argv to inject into when it runs in a browser. These are

@@ -123,7 +123,7 @@ export function applyEvent(state, line) {
  * The title is part of the answer, not decoration: a control that is refused
  * without saying why reads as broken.
  */
-export function runButton({ hasDoc, bridged, inFlight }) {
+export function runButton({ hasDoc, bridged, inFlight, shell = false, reason = null }) {
   if (inFlight) {
     return {
       disabled: true,
@@ -133,11 +133,29 @@ export function runButton({ hasDoc, bridged, inFlight }) {
   if (!bridged) {
     return {
       disabled: true,
-      title:
-        "Run needs a bridge: start `anvil <sequence.yaml> --bridge` and open the URL it prints",
+      title: noBridge({ hasDoc, shell, reason }),
     };
   }
   return { disabled: !hasDoc, title: "Run this sequence" };
+}
+
+/**
+ * Why Run is refused without a bridge — which is not one sentence.
+ *
+ * In a plain browser the person starts the engine themselves and opens the
+ * link it prints. Inside the desktop shell they cannot: the window has no
+ * address bar to paste `?bridge=` into, so the shell starts the engine itself
+ * and the only useful thing to say is **why that failed**, verbatim. Telling
+ * someone in the shell to run `anvil --bridge` sent them to a terminal to
+ * produce a URL with nowhere to put it.
+ */
+function noBridge({ hasDoc, shell, reason }) {
+  if (!shell) {
+    return "Run needs a bridge: start `anvil <sequence.yaml> --bridge` and open the URL it prints";
+  }
+  if (reason) return `Run needs the engine — ${reason}`;
+  if (!hasDoc) return "Run needs a sequence: File ▸ Open starts the engine for it";
+  return "Run needs the engine: save this sequence to a file and the editor starts one for it";
 }
 
 /**

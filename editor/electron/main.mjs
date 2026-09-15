@@ -15,6 +15,7 @@ import { fileURLToPath } from "node:url";
 import { app, BrowserWindow, dialog, ipcMain, Menu, protocol, shell } from "electron";
 import { writeFile } from "node:fs/promises";
 import updater from "electron-updater";
+import { anvilCandidates, anvilName, findAnvil, notFoundMessage } from "./find-anvil.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const REPO = path.resolve(HERE, "../..");
@@ -92,25 +93,102 @@ function killBridge() {
   child.kill();
 }
 
+// How long the engine gets to print its bridge URL. It was 5s, a number taken
+// on a dev tree that had just built it: on a cold Windows machine the host
+// compiles both `.wasm` components and the virus scanner reads a freshly
+// downloaded `anvil.exe` first, and a person whose bench was simply slow was
+// told the engine had failed. The env var is for a machine slower still.
+const BRIDGE_TIMEOUT_MS = Number(process.env.ANVIL_EDITOR_BRIDGE_TIMEOUT_MS) || 30_000;
+
+/** Where an engine chosen through "Locate…" is remembered between starts. */
+function engineFile() {
+  return path.join(app.getPath("userData"), "engine.json");
+}
+
+async function rememberedAnvil() {
+  try {
+    const { path: chosen } = JSON.parse(await readFile(engineFile(), "utf8"));
+    // A remembered path that has since been uninstalled is not an answer, and
+    // must not shadow the engine that is now on PATH.
+    return typeof chosen === "string" && existsSync(chosen) ? chosen : null;
+  } catch {
+    return null;
+  }
+}
+
+async function rememberAnvil(chosen) {
+  try {
+    await writeFile(engineFile(), `${JSON.stringify({ path: chosen }, null, 2)}\n`, "utf8");
+  } catch (e) {
+    console.log(`[engine] could not remember ${chosen}: ${e.message}`);
+  }
+}
+
+/// Finds the engine, and asks for it when it is nowhere.
+///
+/// The asking is the part that matters on an installed editor: the engine is
+/// still a separate download (#67), so "not found" is the normal first run on
+/// Windows, and an error in the status bar leaves a person with a Run button
+/// that refuses and no way to fix it from inside the window.
+async function locateAnvil(window) {
+  const where = {
+    platform: process.platform,
+    env: process.env,
+    execPath: process.execPath,
+    resourcesPath: process.resourcesPath,
+    repo: REPO,
+    remembered: await rememberedAnvil(),
+  };
+  const found = findAnvil({ ...where, exists: existsSync });
+  if (found) {
+    console.log(`[engine] ${found.path} (${found.where})`);
+    return found.path;
+  }
+
+  const message = notFoundMessage(anvilCandidates(where), process.platform);
+  console.log(`[engine] ${message}`);
+  const chosen = await askForAnvil(window, message);
+  // Cancelled: the message is what the page shows in the status bar, so the
+  // reason survives the dialog being dismissed.
+  if (!chosen) throw new Error(message);
+  await rememberAnvil(chosen);
+  return chosen;
+}
+
+async function askForAnvil(window, detail) {
+  const name = anvilName(process.platform);
+  const { response } = await dialog.showMessageBox(window ?? null, {
+    type: "warning",
+    title: "The engine is missing",
+    message: `Anvil's engine (${name}) is not where the editor looks for it.`,
+    detail,
+    buttons: [`Locate ${name}…`, "Cancel"],
+    defaultId: 0,
+    cancelId: 1,
+    noLink: true,
+  });
+  if (response !== 0) return null;
+
+  const { canceled, filePaths } = await dialog.showOpenDialog(window ?? null, {
+    title: `Where is ${name}?`,
+    properties: ["openFile"],
+    filters: process.platform === "win32" ? [{ name: "Anvil engine", extensions: ["exe"] }] : [],
+  });
+  return canceled ? null : filePaths[0];
+}
+
 /// Starts `anvil <sequencePath> --bridge` and resolves to the `ws://` URL it
 /// prints (`packaging/anvil-host/src/main.rs:617-649`) once it appears on
 /// stdout.
 ///
-/// **Stopgap, not the real answer**, carried over from the Tauri shell
-/// unchanged (ADR-0037 §d): it finds `anvil` by a path relative to this file
-/// that only exists in the dev tree — it breaks the moment this ships
-/// packaged, because there is no bundling story for the engine yet (#67).
-/// Good enough to develop against today; revisit before this goes further
-/// than a developer's own checkout.
-async function startBridge(sequencePath) {
+/// The engine is found by `locateAnvil` above, not by a path into the dev
+/// tree: an installed editor has no checkout under it. What is still a
+/// stopgap is that the engine has to be *there at all* — it is a separate
+/// download, and bundling it with the editor is #67.
+async function startBridge(window, sequencePath) {
   killBridge();
 
-  const anvil = path.join(
-    REPO,
-    process.platform === "win32"
-      ? "packaging/anvil-host/target/release/anvil.exe"
-      : "packaging/anvil-host/target/release/anvil",
-  );
+  const anvil = await locateAnvil(window);
 
   // A sequence opened through the dialog arrives as a real filesystem path;
   // one opened with `?open=` arrives as the dev server's own `/ejemplos/…`,
@@ -119,21 +197,44 @@ async function startBridge(sequencePath) {
     ? sequencePath
     : path.join(REPO, sequencePath.replace(/^[/\\]+/, ""));
 
-  const child = spawn(anvil, [sequence, "--bridge"], { stdio: ["ignore", "pipe", "ignore"] });
+  // stderr is read, not discarded. It used to be `ignore`, so an engine that
+  // refused the sequence, could not bind, or could not start its executor
+  // said so into nothing and the shell reported only that no URL had arrived.
+  const child = spawn(anvil, [sequence, "--bridge"], { stdio: ["ignore", "pipe", "pipe"] });
 
   return new Promise((resolve, reject) => {
+    const tail = [];
+    const why = () => (tail.length ? `\n${tail.join("\n")}` : "");
     const done = (fn, value) => {
       clearTimeout(timer);
       lines.close();
+      errors.close();
       fn(value);
     };
     const timer = setTimeout(() => {
       child.kill();
-      done(reject, new Error("the engine did not print a bridge URL within 5s"));
-    }, 5000);
+      done(
+        reject,
+        new Error(
+          `the engine did not print a bridge URL within ${Math.round(BRIDGE_TIMEOUT_MS / 1000)}s` +
+            ` — ${anvil}${why()}`,
+        ),
+      );
+    }, BRIDGE_TIMEOUT_MS);
 
     child.on("error", (e) => {
       done(reject, new Error(`could not start ${anvil}: ${e.message}`));
+    });
+
+    const errors = createInterface({ input: child.stderr });
+    errors.on("line", (line) => {
+      if (!line.trim()) return;
+      // On this process's stdout like everything else the shell keeps
+      // readable (ADR-0037 §e), and the last few lines go into the error the
+      // page shows, because that is the only place a packaged user looks.
+      console.log(`[engine] ${line}`);
+      tail.push(line);
+      if (tail.length > 10) tail.shift();
     });
 
     const lines = createInterface({ input: child.stdout });
@@ -146,8 +247,8 @@ async function startBridge(sequencePath) {
       bridge = child;
       done(resolve, line.slice(at).trim());
     });
-    child.on("exit", () => {
-      done(reject, new Error("the engine exited before printing a bridge URL"));
+    child.on("exit", (code) => {
+      done(reject, new Error(`the engine exited (${code}) before printing a bridge URL${why()}`));
     });
   });
 }
@@ -186,7 +287,9 @@ function wireIpc() {
     existsSync(file) ? readFile(file, "utf8") : null,
   );
   ipcMain.handle("anvil:write-text", (_event, file, text) => writeFile(file, text, "utf8"));
-  ipcMain.handle("anvil:start-bridge", (_event, sequencePath) => startBridge(sequencePath));
+  ipcMain.handle("anvil:start-bridge", (event, sequencePath) =>
+    startBridge(BrowserWindow.fromWebContents(event.sender), sequencePath),
+  );
   ipcMain.handle("anvil:stop-bridge", () => killBridge());
   ipcMain.handle("anvil:ask-unsaved", (event, name) =>
     askUnsaved(BrowserWindow.fromWebContents(event.sender), name),

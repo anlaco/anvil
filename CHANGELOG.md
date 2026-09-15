@@ -28,6 +28,33 @@ applies from 0.6.0 on; by it, 0.6.0 itself would have been 0.5.1.
 
 ### Fixed
 
+- **Run in the installed Sequence Editor finds the engine** — on Windows above
+  all, where it never could
+  ([#67](https://github.com/anlaco/anvil/issues/67)). The desktop editor starts
+  `anvil <sequence> --bridge` itself, and it looked for that binary in exactly
+  one place: `packaging/anvil-host/target/release/` inside the checkout it was
+  launched from. An installed editor has no checkout, so Run stayed disabled
+  with `spawn … ENOENT` in the status bar and a tooltip telling the person to
+  start `anvil --bridge` by hand — which does not help, because the URL that
+  prints is the dev server's and the installed window has no address bar to
+  paste it into. It now looks, in order, at `ANVIL_BIN`, the engine chosen
+  through *Locate…* before, the dev tree, the app's own resources, the
+  directory the editor is installed in, and every directory on `PATH`; when it
+  is nowhere it says where it looked and offers *Locate anvil.exe…*, and
+  remembers the answer. The engine is still a separate download — bundling it
+  with the editor is #67 itself.
+
+- **The editor says why the engine did not start.** Its stderr used to be
+  discarded, so a sequence the engine refused, a port it could not bind or an
+  executor that died all read as "the engine did not print a bridge URL". The
+  engine's own output now reaches the shell's log and the last lines of it
+  reach the message on screen, and the refused Run button keeps that reason in
+  its tooltip instead of losing it to the next status-bar message. The wait for
+  the bridge URL goes from 5s to 30s (`ANVIL_EDITOR_BRIDGE_TIMEOUT_MS` to
+  change it): 5s was measured on a dev tree that had just built the engine, and
+  a cold Windows machine compiling both `.wasm` components was being told it
+  had failed when it was only slow.
+
 - **The Sequence Editor no longer throws away unsaved changes without asking**
   ([#84](https://github.com/anlaco/anvil/issues/84)). File ▸ New, File ▸ Open,
   closing the window, quitting and reloading all used to discard them. In the
