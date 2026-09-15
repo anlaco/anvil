@@ -26,17 +26,23 @@ parameters:
   p: 0.0
 main:
   - name: demo/measure_voltage
+    type: pass_fail
+    module: demo/measure_voltage
     executor: demo
     retries: 1
     assign:
       p: '${result.measured_value}'
   # reads the PARAMETER: still 0.0 -> skipped
   - name: demo/check_led
+    type: pass_fail
+    module: demo/check_led
     executor: demo
     retries: 1
     precondition: 'parameters.p > 4.0'
   # reads the same-named LOCAL that assign created: holds 4.2 -> runs
   - name: demo/open_relay
+    type: pass_fail
+    module: demo/open_relay
     executor: demo
     retries: 1
     precondition: 'locals.p > 4.0'

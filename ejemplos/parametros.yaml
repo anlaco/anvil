@@ -22,12 +22,14 @@ main:
   # A literal (`offset`) and an expression (`channel`). Both reach the step
   # already evaluated: the step does not see `locals`, it is handed values.
   - name: demo/measure_voltage
+    type: numeric_limit
+    module: demo/measure_voltage
     executor: demo
     retries: 1
     inputs:
       channel: '${locals.canal_activo}'
       offset: 0.05
-    limit: { type: range, min: 4.2, max: 4.5 }
+    limit: { comparison: GELE, low: 4.2, high: 4.5 }
     # Outputs are the named values the step returns besides the measurement.
     # They take no part in the verdict: the limit above is evaluated against
     # the measured value and nothing else (ADR-0008).

@@ -17,6 +17,8 @@ locals:
 
 setup:
   - name: psu/open
+    type: pass_fail
+    module: psu/open
     executor: csharp
     inputs: { resource: "TCPIP::10.0.0.5" }
     assign:
@@ -24,24 +26,34 @@ setup:
 
 main:
   - name: rail/measure_voltage
+    type: numeric_limit
+    module: rail/measure_voltage
     executor: csharp
     inputs: { nominal: 5.0 }
-    limit: { type: range, min: 4.5, max: 5.5 }
+    limit: { comparison: GELE, low: 4.5, high: 5.5 }
 
   - name: rail/check_led
+    type: pass_fail
+    module: rail/check_led
     executor: csharp
 
   - name: psu/set_voltage
+    type: pass_fail
+    module: psu/set_voltage
     executor: csharp
     inputs: { psu: '${locals.psu}', volts: 12.0 }
 
   # The limit lives here and the engine applies it, not the step (ADR-0008).
   - name: psu/measure_current
+    type: numeric_limit
+    module: psu/measure_current
     executor: csharp
     inputs: { psu: '${locals.psu}' }
-    limit: { type: range, min: 0.0, max: 0.80 }
+    limit: { comparison: GELE, low: 0.0, high: 0.80 }
 
 cleanup:
   - name: psu/output_off
+    type: pass_fail
+    module: psu/output_off
     executor: csharp
     inputs: { psu: '${locals.psu}' }

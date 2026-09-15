@@ -21,12 +21,18 @@ executors:
   - { name: demo, type: wasm, path: ../../../ejemplos/departamento/dist/anvil-exec-wasm }
 main:
   - name: demo/check_led
+    type: pass_fail
+    module: demo/check_led
     executor: demo
     retries: 1
   - name: demo/open_relay
+    type: pass_fail
+    module: demo/open_relay
     executor: demo
     retries: 1
   - name: demo/measure_voltage
+    type: numeric_limit
+    module: demo/measure_voltage
     executor: demo
     retries: 1
-    limit: { type: comparison, op: ge, expected: 4.0 }
+    limit: { comparison: GE, low: 4.0 }

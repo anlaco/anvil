@@ -272,10 +272,11 @@ struct PasoYaml {
     /// `resultado`/scopes) a la Local. Texto → AST en `a_definicion`.
     #[serde(default)]
     assign: Option<HashMap<String, String>>,
-    /// RF-27: `"grpc"` (default), `"statement"`, `"sequence_call"` o
-    /// `"pass_fail"`. `kind` por la palabra reservada de Rust; en el YAML la
-    /// clave es `type`.
-    #[serde(default = "tipo_por_defecto", rename = "type")]
+    /// How the step is judged (ADR-0040): `action`, `pass_fail`,
+    /// `numeric_limit`, `statement` or `sequence_call`. Required; empty when
+    /// the YAML leaves it out, so the error can say which to write. `kind` por
+    /// la palabra reservada de Rust; en el YAML la clave es `type`.
+    #[serde(default, rename = "type")]
     kind: String,
     /// RF-27: sentencia(s) a ejecutar si `tipo == "statement"`. Texto → AST.
     #[serde(default)]
@@ -322,10 +323,6 @@ struct PasoYaml {
 
 fn reintentos_por_defecto() -> u32 {
     1
-}
-
-fn tipo_por_defecto() -> String {
-    "grpc".into()
 }
 
 /// Un límite como se lee del YAML, antes de traducirse a `modelo::Limite`.
@@ -530,73 +527,35 @@ impl LimiteYaml {
         })
     }
 
-    /// The shape before ADR-0040: `range` (`min`, `max`) and `comparison`
-    /// (`op`, `expected`), translated to `GELE` and a one-limit code.
+    /// The shape before ADR-0040, `type: range|comparison`, refused with its
+    /// TestStand spelling (§10).
     fn a_limite_viejo(&self, kind: &str, nombre_paso: &str) -> Result<Limite, ErrorCarga> {
-        let nuevos = self.low.is_some()
-            || self.high.is_some()
-            || self.nominal.is_some()
-            || self.lower.is_some()
-            || self.upper.is_some()
-            || self.threshold.is_some()
-            || self.units.is_some();
-        if nuevos {
-            return Err(ErrorCarga::Validacion(format!(
-                "step '{nombre_paso}' has a 'type: {kind}' limit with fields of the \
-                 TestStand shape: write 'comparison' instead of 'type'"
-            )));
-        }
-        match kind {
-            "range" => {
-                let Some(min) = self.min else {
-                    return Err(ErrorCarga::Validacion(format!(
-                        "el paso '{nombre_paso}' tiene un límite 'range' sin 'min'"
-                    )));
-                };
-                let Some(max) = self.max else {
-                    return Err(ErrorCarga::Validacion(format!(
-                        "el paso '{nombre_paso}' tiene un límite 'range' sin 'max'"
-                    )));
-                };
-                if min > max {
-                    return Err(ErrorCarga::Validacion(format!(
-                        "el paso '{nombre_paso}' tiene un límite 'range' con min ({min}) > max ({max})"
-                    )));
-                }
-                if self.op.is_some() || self.expected.is_some() {
-                    return Err(ErrorCarga::Validacion(format!(
-                        "el paso '{nombre_paso}' tiene un límite 'range' con campos 'op'/'expected' (no aplican a un rango)"
-                    )));
-                }
-                Ok(Limite::rango(min, max))
-            }
+        let n = |v: Option<f64>, falta: &str| v.map(|x| x.to_string()).unwrap_or(falta.into());
+        let escribe = match kind {
+            "range" => format!(
+                "comparison: GELE, low: {}, high: {}",
+                n(self.min, "<min>"),
+                n(self.max, "<max>")
+            ),
             "comparison" => {
-                let Some(op_texto) = &self.op else {
-                    return Err(ErrorCarga::Validacion(format!(
-                        "el paso '{nombre_paso}' tiene un límite 'comparison' sin 'op'"
-                    )));
-                };
-                let Some(op) = Operador::de_texto(op_texto) else {
-                    return Err(ErrorCarga::Validacion(format!(
-                        "el paso '{nombre_paso}' tiene un límite 'comparison' con 'op' inválido '{op_texto}' (eq/ne/lt/le/gt/ge)"
-                    )));
-                };
-                let Some(esperado) = self.expected else {
-                    return Err(ErrorCarga::Validacion(format!(
-                        "el paso '{nombre_paso}' tiene un límite 'comparison' sin 'expected'"
-                    )));
-                };
-                if self.min.is_some() || self.max.is_some() {
-                    return Err(ErrorCarga::Validacion(format!(
-                        "el paso '{nombre_paso}' tiene un límite 'comparison' con campos 'min'/'max' (no aplican a una comparación)"
-                    )));
-                }
-                Ok(Limite::comparacion(op, esperado))
+                let codigo = self
+                    .op
+                    .as_deref()
+                    .and_then(Operador::de_texto)
+                    .map(|op| op.codigo().to_string())
+                    .unwrap_or_else(|| "<EQ|NE|GT|LT|GE|LE>".into());
+                format!(
+                    "comparison: {codigo}, low: {}",
+                    n(self.expected, "<expected>")
+                )
             }
-            otro => Err(ErrorCarga::Validacion(format!(
-                "el paso '{nombre_paso}' tiene un límite con 'type' '{otro}' desconocido (range|comparison)"
-            ))),
-        }
+            otro => format!("comparison: <code>  (the old 'type: {otro}' is not a limit shape)"),
+        };
+        Err(ErrorCarga::Diagnostico(format!(
+            "step '{nombre_paso}' has a limit in the shape before 0.7.0 ('type: {kind}'). \
+             Limits are written in TestStand's terms now (ADR-0040): \
+             limit: {{ {escribe} }}"
+        )))
     }
 }
 
@@ -2370,7 +2329,7 @@ pub fn limites_mal_colocados_programa(
             .chain(&sec.pasos_main)
             .chain(&sec.pasos_cleanup)
         {
-            let admite = matches!(p.tipo, TipoPaso::NumericLimit | TipoPaso::Grpc);
+            let admite = p.tipo == TipoPaso::NumericLimit;
             if limites.contains_key(&p.nombre) && !admite {
                 fuera.push(format!(
                     "step '{}' of sequence '{}' is not a 'numeric_limit', and the sidecar gives \
@@ -2466,10 +2425,52 @@ fn validar(y: &SecuenciaYaml) -> Result<(), ErrorCarga> {
 }
 
 impl PasoYaml {
+    /// A step with no `type`, or the removed `type: grpc` (ADR-0040 §2, §10). The
+    /// type cannot be inferred — whether a step without a limit only does
+    /// something or passes and fails is decided by its executor at run time —
+    /// so the message says what to write and why.
+    fn error_de_tipo(&self) -> String {
+        let cual = if self.kind.is_empty() {
+            "has no 'type'".to_string()
+        } else {
+            "is 'type: grpc', which no longer exists".to_string()
+        };
+        let sugerencia = if self.limit.is_some() {
+            "it has a limit, so it is 'type: numeric_limit'".to_string()
+        } else if self.statement.is_some() {
+            "it has a statement, so it is 'type: statement'".to_string()
+        } else if self.sequence.is_some() {
+            "it calls a sequence, so it is 'type: sequence_call'".to_string()
+        } else if self.condition.is_some() && self.executor.is_none() {
+            "it has a condition, so it is 'type: pass_fail'".to_string()
+        } else {
+            "write 'type: action' if its executor only does something, or \
+             'type: pass_fail' if its executor passes or fails it"
+                .to_string()
+        };
+        let modulo = if self.module.is_none()
+            && self.statement.is_none()
+            && self.sequence.is_none()
+            && (self.executor.is_some() || self.condition.is_none())
+        {
+            format!(", and name what it calls with 'module: {}'", self.name)
+        } else {
+            String::new()
+        };
+        format!(
+            "step '{}' {cual}: a step's type says how it is judged (ADR-0040) — \
+             {sugerencia}{modulo}",
+            self.name
+        )
+    }
+
     // `mut self` porque `parametros` se consume por una vía o por la otra
     // según el `tipo` (ADR-0020): by-value en un `grpc`, by-reference en un
     // `sequence_call`. El `take()` deja claro cuál se ha llevado el mapa.
     fn a_definicion(mut self) -> Result<DefinicionPaso, ErrorCarga> {
+        if self.kind.is_empty() || self.kind == "grpc" {
+            return Err(ErrorCarga::Diagnostico(self.error_de_tipo()));
+        }
         let limite = match self.limit {
             Some(l) => Some(l.a_limite(&self.name)?),
             None => None,
@@ -2509,7 +2510,6 @@ impl PasoYaml {
         // RF-27: tipo de paso. `grpc` (default), `statement`, `sequence_call`
         // (M4b) o `pass_fail` (RF-25, ADR-0018).
         let tipo = match self.kind.as_str() {
-            "grpc" => TipoPaso::Grpc,
             "statement" => TipoPaso::Statement,
             "sequence_call" => TipoPaso::SequenceCall,
             "pass_fail" => TipoPaso::PassFail,
@@ -2518,14 +2518,18 @@ impl PasoYaml {
             otro => {
                 return Err(ErrorCarga::Validacion(format!(
                     "el paso '{}' tiene tipo '{otro}' inválido \
-                     (action|pass_fail|numeric_limit|statement|sequence_call|grpc)",
+                     (action|pass_fail|numeric_limit|statement|sequence_call)",
                     self.name
                 )))
             }
         };
         // Whether this step calls an executor (ADR-0040 §1): the fields that
         // only mean something on such a step are checked against it.
-        let llama = matches!(tipo, TipoPaso::Grpc | TipoPaso::Action) || self.module.is_some();
+        let llama = match tipo {
+            TipoPaso::Action => true,
+            TipoPaso::PassFail | TipoPaso::NumericLimit => self.module.is_some(),
+            TipoPaso::Statement | TipoPaso::SequenceCall => false,
+        };
 
         let valor = match self.value.as_deref() {
             Some(texto) => Some(expr::parse_expresion(extraer_expr(texto)).map_err(|e| {
@@ -2690,8 +2694,7 @@ impl PasoYaml {
         }
         // A limit belongs to a step that judges a number (ADR-0040 §5): a
         // sequence call aggregates, a pass_fail judges a boolean, an action and
-        // a statement judge nothing. `grpc` keeps accepting one until ADR-0040
-        // is complete.
+        // a statement judge nothing.
         if matches!(
             tipo,
             TipoPaso::SequenceCall | TipoPaso::PassFail | TipoPaso::Action | TipoPaso::Statement
@@ -2950,21 +2953,29 @@ executors:
   - { name: bench, type: grpc, host: 127.0.0.1, port: 9101 }
 setup:
   - name: conectar_equipo
+    type: pass_fail
+    module: conectar_equipo
     executor: bench
     retries: 3
 main:
   - name: medir_voltaje
+    type: numeric_limit
+    module: medir_voltaje
     executor: bench
     retries: 1
     limit:
-      type: range
-      min: 4.5
-      max: 5.5
+      comparison: GELE
+      low: 4.5
+      high: 5.5
   - name: verificar_led
+    type: pass_fail
+    module: verificar_led
     executor: bench
     retries: 1
 cleanup:
   - name: desconectar_equipo
+    type: pass_fail
+    module: desconectar_equipo
     executor: bench
     retries: 1
 "
@@ -3011,6 +3022,8 @@ cleanup:
 name: s
 main:
   - name: un_paso
+    type: pass_fail
+    module: un_paso
 ";
         let s = cargar_de_texto(yaml).unwrap();
         assert_eq!(s.pasos_main[0].reintentos, 1);
@@ -3022,6 +3035,8 @@ main:
 name: s
 main:
   - name: un_paso
+    type: pass_fail
+    module: un_paso
 ";
         let s = cargar_de_texto(yaml).unwrap();
         assert!(s.pasos_setup.is_empty());
@@ -3051,6 +3066,8 @@ main:
 name: ''
 main:
   - name: un_paso
+    type: pass_fail
+    module: un_paso
 ";
         let err = cargar_de_texto(yaml).unwrap_err();
         assert!(matches!(&err, ErrorCarga::Validacion(ref m) if m.contains("name")));
@@ -3062,6 +3079,8 @@ main:
 name: s
 main:
   - name: un_paso
+    type: pass_fail
+    module: un_paso
     retries: 0
 ";
         let err = cargar_de_texto(yaml).unwrap_err();
@@ -3079,6 +3098,8 @@ main:
 name: s
 main:
   - name: un_paso
+    type: pass_fail
+    module: un_paso
     foo: bar
 ";
         let err = cargar_de_texto(yaml).unwrap_err();
@@ -3156,7 +3177,7 @@ main:
     fn sequence_call_mal_usado_es_error() {
         let casos = [
             ("name: s\nmain:\n  - name: c\n    type: sequence_call\n", "no trae 'sequence'"),
-            ("name: s\nmain:\n  - name: c\n    type: sequence_call\n    sequence: x\n    limit: { type: range, min: 1, max: 2 }\n", "no mide"),
+            ("name: s\nmain:\n  - name: c\n    type: sequence_call\n    sequence: x\n    limit: { comparison: GELE, low: 1, high: 2 }\n", "no mide"),
             ("name: s\nmain:\n  - name: c\n    type: sequence_call\n    sequence: x\n    retries: 2\n", "no admite reintentos"),
             ("name: s\nmain:\n  - name: c\n    type: sequence_call\n    sequence: x\n    statement: 'locals.y = 1'\n", "reservado para 'statement'"),
         ];
@@ -3213,7 +3234,7 @@ main:
                 "neither 'module' nor 'condition'",
             ),
             (
-                "name: s\nmain:\n  - name: v\n    condition: 'true'\n",
+                "name: s\nmain:\n  - name: v\n    type: action\n    module: v\n    condition: 'true'\n",
                 "reservado para 'pass_fail'",
             ),
             (
@@ -3221,7 +3242,7 @@ main:
                 "reservado para 'pass_fail'",
             ),
             (
-                "name: s\nmain:\n  - name: v\n    type: pass_fail\n    condition: 'true'\n    limit: { type: range, min: 1, max: 2 }\n",
+                "name: s\nmain:\n  - name: v\n    type: pass_fail\n    condition: 'true'\n    limit: { comparison: GELE, low: 1, high: 2 }\n",
                 "no mide",
             ),
             (
@@ -3253,6 +3274,8 @@ main:
 name: s
 main:
   - name: c
+    type: pass_fail
+    module: c
     sequence: ./h.yaml
 ";
         let err = cargar_de_texto(yaml).unwrap_err();
@@ -3272,6 +3295,8 @@ subsequences:
     name: init
 main:
   - name: p
+    type: pass_fail
+    module: p
 ";
         let err = cargar_de_texto(yaml).unwrap_err();
         assert!(
@@ -3289,8 +3314,12 @@ subsequences:
   init:
     main:
       - name: p
+        type: pass_fail
+        module: p
 main:
   - name: m
+    type: pass_fail
+    module: m
 ";
         let s = cargar_de_texto(yaml).unwrap();
         assert_eq!(s.subsecuencias.get("init").unwrap().nombre, "init");
@@ -3307,9 +3336,13 @@ subsequences:
     name: init
     main:
       - name: p
+        type: pass_fail
+        module: p
     foo: bar
 main:
   - name: p
+    type: pass_fail
+    module: p
 ";
         let err = cargar_de_texto(yaml).unwrap_err();
         // DIAG-5: en un fichero con varias inline, saber en cuál está es la
@@ -3339,7 +3372,7 @@ main:
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(
             dir.join("child.yseq"),
-            "name: child\nmain:\n  - name: m\n    type: grpc\n    executor: e\n",
+            "name: child\nmain:\n  - name: m\n    module: m\n    type: pass_fail\n    executor: e\n",
         )
         .unwrap();
         let parent = dir.join("parent.yseq");
@@ -3364,7 +3397,7 @@ main:
         let hija = dir.join("hija.yaml");
         std::fs::write(
             &hija,
-            "name: hija\nparameters: { canal: 0.0 }\nmain:\n  - name: m\n    type: grpc\n    executor: e\n",
+            "name: hija\nparameters: { canal: 0.0 }\nmain:\n  - name: m\n    module: m\n    type: pass_fail\n    executor: e\n",
         )
         .unwrap();
         let padre = dir.join("padre.yaml");
@@ -3414,7 +3447,7 @@ main:
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(
             dir.join("h.yaml"),
-            "name: h\nparameters: { canal: 0.0, extra: 0.0 }\nmain:\n  - name: m\n",
+            "name: h\nparameters: { canal: 0.0, extra: 0.0 }\nmain:\n  - name: m\n    type: pass_fail\n    module: m\n",
         )
         .unwrap();
         std::fs::write(dir.join("p.yaml"), "name: p\nlocals: { canal: 1.0 }\nmain:\n  - name: c\n    type: sequence_call\n    sequence: ./h.yaml\n    args: { canal: locals.canal }\n").unwrap();
@@ -3429,7 +3462,7 @@ main:
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(
             dir.join("h.yaml"),
-            "name: h\nparameters: { canal: 0.0 }\nmain:\n  - name: m\n",
+            "name: h\nparameters: { canal: 0.0 }\nmain:\n  - name: m\n    type: pass_fail\n    module: m\n",
         )
         .unwrap();
         std::fs::write(dir.join("p.yaml"), "name: p\nmain:\n  - name: c\n    type: sequence_call\n    sequence: ./h.yaml\n    args: { canal: locals.inventado }\n").unwrap();
@@ -3476,10 +3509,12 @@ main:
 name: s
 main:
   - name: medir_voltaje
+    type: numeric_limit
+    module: medir_voltaje
     limit:
-      type: range
-      min: 4.5
-      max: 5.5
+      comparison: GELE
+      low: 4.5
+      high: 5.5
 ";
         let s = cargar_de_texto(yaml).unwrap();
         assert_eq!(s.pasos_main[0].limite, Some(Limite::rango(4.5, 5.5)));
@@ -3491,10 +3526,11 @@ main:
 name: s
 main:
   - name: verificar_frecuencia
+    type: numeric_limit
+    module: verificar_frecuencia
     limit:
-      type: comparison
-      op: ge
-      expected: 1000.0
+      comparison: GE
+      low: 1000.0
 ";
         let s = cargar_de_texto(yaml).unwrap();
         assert_eq!(
@@ -3509,13 +3545,15 @@ main:
 name: s
 main:
   - name: m
+    type: numeric_limit
+    module: m
     limit:
-      type: range
-      max: 5.5
+      comparison: GELE
+      high: 5.5
 ";
         let err = cargar_de_texto(yaml).unwrap_err();
         assert!(
-            matches!(&err, ErrorCarga::Validacion(ref m) if m.contains("min")),
+            matches!(&err, ErrorCarga::Validacion(ref m) if m.contains("no 'low'")),
             "{err}"
         );
     }
@@ -3526,10 +3564,12 @@ main:
 name: s
 main:
   - name: m
+    type: numeric_limit
+    module: m
     limit:
-      type: range
-      min: 6.0
-      max: 5.5
+      comparison: GELE
+      low: 6.0
+      high: 5.5
 ";
         let err = cargar_de_texto(yaml).unwrap_err();
         assert!(
@@ -3544,14 +3584,15 @@ main:
 name: s
 main:
   - name: m
+    type: numeric_limit
+    module: m
     limit:
-      type: comparison
-      op: mayor_que
-      expected: 1000.0
+      comparison: MAYOR_QUE
+      low: 1000.0
 ";
         let err = cargar_de_texto(yaml).unwrap_err();
         assert!(
-            matches!(&err, ErrorCarga::Validacion(ref m) if m.contains("op")),
+            matches!(&err, ErrorCarga::Validacion(ref m) if m.contains("'MAYOR_QUE', which is not one of")),
             "{err}"
         );
     }
@@ -3563,10 +3604,12 @@ main:
 name: s
 main:
   - name: m
+    type: numeric_limit
+    module: m
     limit:
-      type: range
-      min: 4.5
-      max: 5.5
+      comparison: GELE
+      low: 4.5
+      high: 5.5
       op: ge
 ";
         let err = cargar_de_texto(yaml).unwrap_err();
@@ -3582,6 +3625,8 @@ main:
 name: s
 main:
   - name: m
+    type: numeric_limit
+    module: m
     limit:
       type: ventana
       min: 4.5
@@ -3589,7 +3634,7 @@ main:
 ";
         let err = cargar_de_texto(yaml).unwrap_err();
         assert!(
-            matches!(&err, ErrorCarga::Validacion(ref m) if m.contains("type")),
+            matches!(&err, ErrorCarga::Diagnostico(ref m) if m.contains("'type: ventana'")),
             "{err}"
         );
     }
@@ -3601,10 +3646,12 @@ main:
 name: s
 main:
   - name: m
+    type: numeric_limit
+    module: m
     limit:
-      type: range
-      min: 4.5
-      max: 5.5
+      comparison: GELE
+      low: 4.5
+      high: 5.5
       tolerancia: 0.1
 ";
         let err = cargar_de_texto(yaml).unwrap_err();
@@ -3636,10 +3683,12 @@ main:
 name: s
 main:
   - name: medir_voltaje
+    type: numeric_limit
+    module: medir_voltaje
     limit:
-      type: range
-      min: 4.5
-      max: 5.5
+      comparison: GELE
+      low: 4.5
+      high: 5.5
 ";
         let mut s = cargar_de_texto(yaml).unwrap();
         let mut lim = HashMap::new();
@@ -3705,7 +3754,7 @@ main:
         let usuario = dir.join("usuario.yaml");
         std::fs::write(
             &usuario,
-            "name: usuario\nexecutors:\n  - { name: e, type: grpc, host: 127.0.0.1, port: 9101 }\nmain:\n  - name: medir_voltaje\n    type: grpc\n    executor: e\n",
+            "name: usuario\nexecutors:\n  - { name: e, type: grpc, host: 127.0.0.1, port: 9101 }\nmain:\n  - name: medir_voltaje\n    module: medir_voltaje\n    type: pass_fail\n    executor: e\n",
         )
         .unwrap();
 
@@ -3744,13 +3793,13 @@ main:
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(
             dir.join("hija.yaml"),
-            "name: hija\nmain:\n  - name: medir_voltaje\n    type: grpc\n    executor: e\n",
+            "name: hija\nmain:\n  - name: medir_voltaje\n    module: medir_voltaje\n    type: pass_fail\n    executor: e\n",
         )
         .unwrap();
         let padre = dir.join("padre.yaml");
         std::fs::write(
             &padre,
-            "name: padre\nexecutors:\n  - { name: e, type: grpc, host: 127.0.0.1, port: 9101 }\nsubsequences:\n  inline:\n    name: inline\n    main:\n      - name: medir_voltaje\n        type: grpc\n        executor: e\nmain:\n  - name: medir_voltaje\n    type: grpc\n    executor: e\n  - name: c1\n    type: sequence_call\n    sequence: ./hija.yaml\n  - name: c2\n    type: sequence_call\n    sequence: inline\n",
+            "name: padre\nexecutors:\n  - { name: e, type: grpc, host: 127.0.0.1, port: 9101 }\nsubsequences:\n  inline:\n    name: inline\n    main:\n      - name: medir_voltaje\n        module: medir_voltaje\n        type: pass_fail\n        executor: e\nmain:\n  - name: medir_voltaje\n    module: medir_voltaje\n    type: pass_fail\n    executor: e\n  - name: c1\n    type: sequence_call\n    sequence: ./hija.yaml\n  - name: c2\n    type: sequence_call\n    sequence: inline\n",
         )
         .unwrap();
 
@@ -3771,7 +3820,7 @@ main:
         };
         prog.archivos.insert(
             "hija.yaml".to_string(),
-            cargar_de_texto("name: hija\nmain:\n  - name: solo_en_la_hija\n    type: grpc\n")
+            cargar_de_texto("name: hija\nmain:\n  - name: solo_en_la_hija\n    module: solo_en_la_hija\n    type: pass_fail\n")
                 .unwrap(),
         );
         let rango = Limite::rango(0.0, 1.0);
@@ -3792,7 +3841,9 @@ main:
     /// herramienta, y el campo correcto está a una palabra de distancia.
     #[test]
     fn steps_sugiere_main() {
-        let err = cargar_de_texto("name: s\nsteps:\n  - name: p\n").unwrap_err();
+        let err =
+            cargar_de_texto("name: s\nsteps:\n  - name: p\n    type: pass_fail\n    module: p\n")
+                .unwrap_err();
         let msg = err.to_string();
         assert!(msg.contains("campo desconocido 'steps'"), "{msg}");
         assert!(msg.contains("la raíz"), "{msg}");
@@ -3807,8 +3858,12 @@ subsequences:
   interna:
     steps:
       - name: p
+        type: pass_fail
+        module: p
 main:
   - name: p
+    type: pass_fail
+    module: p
 ";
         let msg = cargar_de_texto(yaml).unwrap_err().to_string();
         assert!(msg.contains("subsequences.interna"), "{msg}");
@@ -3818,9 +3873,11 @@ main:
     /// Una errata sin alias se resuelve por parecido.
     #[test]
     fn errata_sugiere_el_campo_parecido() {
-        let msg = cargar_de_texto("name: s\nmain:\n  - name: p\n    retrie: 2\n")
-            .unwrap_err()
-            .to_string();
+        let msg = cargar_de_texto(
+            "name: s\nmain:\n  - name: p\n    type: pass_fail\n    module: p\n    retrie: 2\n",
+        )
+        .unwrap_err()
+        .to_string();
         assert!(msg.contains("¿querías 'retries'?"), "{msg}");
     }
 
@@ -3828,9 +3885,11 @@ main:
     /// desorienta más que callarse.
     #[test]
     fn campo_sin_parecido_no_sugiere_nada() {
-        let msg = cargar_de_texto("name: s\nmain:\n  - name: p\n    zumbido: 2\n")
-            .unwrap_err()
-            .to_string();
+        let msg = cargar_de_texto(
+            "name: s\nmain:\n  - name: p\n    type: pass_fail\n    module: p\n    zumbido: 2\n",
+        )
+        .unwrap_err()
+        .to_string();
         assert!(msg.contains("campo desconocido 'zumbido'"), "{msg}");
         assert!(!msg.contains("¿querías"), "{msg}");
     }
@@ -3847,6 +3906,8 @@ subsequences:
     steps: []
 main:
   - name: p
+    type: pass_fail
+    module: p
 ";
         let msg = cargar_de_texto(yaml).unwrap_err().to_string();
         assert!(msg.contains("subsequences.a"), "{msg}");
@@ -3922,13 +3983,12 @@ main:
         // Versión sin disco de cargar_limites_de_archivo para testear directo.
         let texto = "\
 medir_voltaje:
-  type: range
-  min: 4.5
-  max: 5.5
+  comparison: GELE
+  low: 4.5
+  high: 5.5
 verificar_frecuencia:
-  type: comparison
-  op: ge
-  expected: 1000.0
+  comparison: GE
+  low: 1000.0
 ";
         let mapa: HashMap<String, LimiteYaml> = noyalib::from_str(texto).unwrap();
         let lim: HashMap<String, Limite> = mapa
@@ -3964,6 +4024,8 @@ locals:
 parameters: {}
 main:
   - name: un_paso
+    type: pass_fail
+    module: un_paso
 ";
         let s = cargar_de_texto(yaml).unwrap();
         assert_eq!(
@@ -3985,6 +4047,8 @@ main:
 name: s
 main:
   - name: un_paso
+    type: pass_fail
+    module: un_paso
     disable: true
     pause_on_fail: true
 ";
@@ -3992,7 +4056,10 @@ main:
         assert!(s.pasos_main[0].disable);
         assert!(s.pasos_main[0].pause_on_fail);
         // Sin los campos: defaults false (compat con M3).
-        let s2 = cargar_de_texto("name: s\nmain:\n  - name: otro\n").unwrap();
+        let s2 = cargar_de_texto(
+            "name: s\nmain:\n  - name: otro\n    type: pass_fail\n    module: otro\n",
+        )
+        .unwrap();
         assert!(!s2.pasos_main[0].disable);
         assert!(!s2.pasos_main[0].pause_on_fail);
     }
@@ -4009,6 +4076,8 @@ locals:
   listo: false
 main:
   - name: medir
+    type: pass_fail
+    module: medir
     precondition: 'locals.contador > 0 && locals.listo'
 ";
         let s = cargar_de_texto(yaml).unwrap();
@@ -4040,6 +4109,8 @@ locals:
   v_real: 0.0
 main:
   - name: medir
+    type: pass_fail
+    module: medir
     precondition: 'locals.v_real > 4.9 && result.measured_value != nothing'
 ",
         );
@@ -4106,6 +4177,8 @@ locals:
   val: 0.0
 main:
   - name: medir_voltaje
+    type: pass_fail
+    module: medir_voltaje
     assign:
       val: '${result.measured_valu}'
 ",
@@ -4128,6 +4201,8 @@ locals:
   ok: false
 main:
   - name: medir
+    type: pass_fail
+    module: medir
     assign:
       ok: '${result.measured_value > 1.0 && result.stauts == \"pass\"}'
 ",
@@ -4147,6 +4222,8 @@ locals:
   msg: ''
 main:
   - name: medir
+    type: pass_fail
+    module: medir
     assign:
       v: '${result.measured_value}'
       e: '${result.status}'
@@ -4189,6 +4266,8 @@ locals:
   v: 0.0
 main:
   - name: medir
+    type: pass_fail
+    module: medir
     assign:
       v: 'result.measured_value'
 ";
@@ -4207,6 +4286,8 @@ locals:
   v: 0.0
 main:
   - name: medir
+    type: pass_fail
+    module: medir
     precondition: '!(locals.v > 1.0 && (result.measured_value < 2.0 || false))'
 ",
         );
@@ -4219,6 +4300,8 @@ main:
 name: s
 main:
   - name: medir
+    type: pass_fail
+    module: medir
     precondition: 'locals.contador >'
 ";
         let err = cargar_de_texto(yaml).unwrap_err();
@@ -4237,6 +4320,8 @@ locals:
   ok: false
 main:
   - name: medir
+    type: pass_fail
+    module: medir
     assign:
       voltaje: result.measured_value
       ok: '${result.status == \"paso\"}'
@@ -4255,6 +4340,8 @@ main:
 name: s
 main:
   - name: medir
+    type: pass_fail
+    module: medir
     assign:
       x: 'result.measured_value +'
 ";
@@ -4286,7 +4373,8 @@ main:
 name: s
 main:
   - name: init
-    type: grpc
+    module: init
+    type: pass_fail
     statement: 'locals.x = 1'
 ";
         let err = cargar_de_texto(yaml).unwrap_err();
@@ -4326,6 +4414,8 @@ parameters:
   p: 0.0
 main:
   - name: medir_voltaje
+    type: pass_fail
+    module: medir_voltaje
     assign: { p: '${result.measured_value}' }
 ";
         let err = cargar_de_texto(yaml).unwrap_err();
@@ -4347,6 +4437,8 @@ locals:
   voltaje: 0.0
 main:
   - name: medir_voltaje
+    type: pass_fail
+    module: medir_voltaje
     assign: { voltage: '${result.measured_value}' }
 ";
         let err = cargar_de_texto(yaml).unwrap_err();
@@ -4418,6 +4510,8 @@ subsequences:
       p: 0.0
     main:
       - name: medir
+        type: pass_fail
+        module: medir
         assign: { p: '${result.measured_value}' }
 main:
   - name: c
@@ -4448,10 +4542,42 @@ main:
         );
     }
 
+    /// ADR-0040 §2, §10: no `type`, `type: grpc` and the old limit shape do not
+    /// load, and each says what to write — the translation is not knowable when
+    /// loading, so it is not done silently.
     #[test]
-    fn tipo_omitido_es_grpc_por_defecto() {
-        let s = cargar_de_texto("name: s\nmain:\n  - name: un_paso\n").unwrap();
-        assert_eq!(s.pasos_main[0].tipo, modelo::TipoPaso::Grpc);
+    fn sequences_before_0_7_are_refused_with_the_way_out() {
+        let diag = |yaml: &str| match cargar_de_texto(yaml).unwrap_err() {
+            ErrorCarga::Diagnostico(m) => m,
+            otro => panic!("expected a diagnostic, got {otro}"),
+        };
+
+        let m = diag("name: s\nmain:\n  - name: led\n");
+        assert!(m.contains("step 'led' has no 'type'"), "{m}");
+        assert!(
+            m.contains("'type: action'") && m.contains("'type: pass_fail'"),
+            "{m}"
+        );
+        assert!(m.contains("'module: led'"), "{m}");
+
+        let m = diag(
+            "name: s\nmain:\n  - name: rail\n    type: grpc\n    executor: bench\n    limit: { comparison: GE, low: 1 }\n",
+        );
+        assert!(m.contains("'type: grpc', which no longer exists"), "{m}");
+        assert!(
+            m.contains("'type: numeric_limit'") && m.contains("'module: rail'"),
+            "{m}"
+        );
+
+        let m = diag(
+            "name: s\nmain:\n  - name: rail\n    type: numeric_limit\n    module: m\n    limit: { type: range, min: 4.5, max: 5.5 }\n",
+        );
+        assert!(m.contains("comparison: GELE, low: 4.5, high: 5.5"), "{m}");
+
+        let m = diag(
+            "name: s\nmain:\n  - name: rail\n    type: numeric_limit\n    module: m\n    limit: { type: comparison, op: le, expected: 1 }\n",
+        );
+        assert!(m.contains("comparison: LE, low: 1"), "{m}");
     }
 
     /// End-to-end: el ejemplo `ejemplos/variables.yaml` carga con todos los
@@ -4500,8 +4626,12 @@ executors:
   - { name: python, type: grpc, host: 127.0.0.1, port: 9101 }
 main:
   - name: a
+    type: pass_fail
+    module: a
     executor: bench
   - name: b
+    type: pass_fail
+    module: b
     executor: python
 ",
         )
@@ -4542,21 +4672,25 @@ main:
         assert!(prog.ejecutores.is_empty());
     }
 
-    /// A `grpc` step that names no executor does not load, and the error says
+    /// A step that calls an executor and names none does not load, and the error says
     /// what to add and which executors there are (ADR-0041). The executor
     /// built into anvil it used to fall back on is gone.
     #[test]
-    fn a_grpc_step_without_executor_is_refused_and_says_what_to_add() {
+    fn a_step_without_executor_is_refused_and_says_what_to_add() {
         let dir = std::env::temp_dir().join(format!("anvil_adr41_sin_{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let y = dir.join("s.yaml");
-        std::fs::write(&y, "name: s\nmain:\n  - name: a\n").unwrap();
+        std::fs::write(
+            &y,
+            "name: s\nmain:\n  - name: a\n    type: pass_fail\n    module: a\n",
+        )
+        .unwrap();
         let none = cargar_programa_de_archivo(y.to_str().unwrap()).unwrap_err();
 
         std::fs::write(
             &y,
             "name: s\nexecutors:\n  - { name: bench, type: grpc, host: 127.0.0.1, port: 9101 }\n\
-             subsequences:\n  inner:\n    main:\n      - name: deep\nmain:\n  - name: c\n    \
+             subsequences:\n  inner:\n    main:\n      - name: deep\n        type: pass_fail\n        module: deep\nmain:\n  - name: c\n    \
              type: sequence_call\n    sequence: inner\n",
         )
         .unwrap();
@@ -4582,7 +4716,7 @@ main:
         let dir = std::env::temp_dir().join(format!("anvil_m5ext_{}", "indef"));
         std::fs::create_dir_all(&dir).unwrap();
         let y = dir.join("s.yaml");
-        std::fs::write(&y, "name: s\nmain:\n  - name: a\n    executor: inventado\n").unwrap();
+        std::fs::write(&y, "name: s\nmain:\n  - name: a\n    type: pass_fail\n    module: a\n    executor: inventado\n").unwrap();
         let err = cargar_programa_de_archivo(y.to_str().unwrap()).unwrap_err();
         assert!(
             matches!(&err, ErrorCarga::Validacion(m) if m.contains("inventado")),
@@ -4603,7 +4737,7 @@ main:
         std::fs::write(
             &y,
             format!(
-                "name: s\nexecutors:\n  - {{ name: p, type: wasm, path: {} }}\nmain:\n  - name: a\n",
+                "name: s\nexecutors:\n  - {{ name: p, type: wasm, path: {} }}\nmain:\n  - name: a\n    type: pass_fail\n    module: a\n",
                 wasm.display()
             ),
         )
@@ -4623,7 +4757,7 @@ main:
         let y = dir.join("s.yaml");
         std::fs::write(
             &y,
-            "name: s\nexecutors:\n  - { name: p, type: wasm }\nmain:\n  - name: a\n",
+            "name: s\nexecutors:\n  - { name: p, type: wasm }\nmain:\n  - name: a\n    type: pass_fail\n    module: a\n",
         )
         .unwrap();
         let err = cargar_programa_de_archivo(y.to_str().unwrap()).unwrap_err();
@@ -4632,7 +4766,7 @@ main:
             "{err}"
         );
 
-        std::fs::write(&y, "name: s\nexecutors:\n  - { name: p, type: wasm, path: ./no_existe.wasm }\nmain:\n  - name: a\n").unwrap();
+        std::fs::write(&y, "name: s\nexecutors:\n  - { name: p, type: wasm, path: ./no_existe.wasm }\nmain:\n  - name: a\n    type: pass_fail\n    module: a\n").unwrap();
         let err = cargar_programa_de_archivo(y.to_str().unwrap()).unwrap_err();
         assert!(
             matches!(&err, ErrorCarga::Validacion(m) if m.contains("no existe")),
@@ -4675,9 +4809,9 @@ main:
             "none"
         );
         assert_eq!(
-            limite_de("{ type: range, min: 1, max: 2 }").unwrap(),
+            limite_de("{ comparison: GELE, low: 1, high: 2 }").unwrap(),
             Limite::rango(1.0, 2.0),
-            "the old shape still loads until ADR-0040 is complete"
+            "GELE is the range with both ends included"
         );
 
         let refused = [
@@ -4702,7 +4836,7 @@ main:
             ("{ comparison: none, low: 1 }", "'none' does not use"),
             ("{ comparison: GE, min: 1 }", "old shape"),
             (
-                "{ type: range, comparison: GELE, min: 1, max: 2 }",
+                "{ type: range, comparison: GELE, low: 1, high: 2 }",
                 "both 'type' and 'comparison'",
             ),
             ("{ units: V }", "no 'comparison'"),
@@ -4745,7 +4879,7 @@ main:
                 "an action calls something",
             ),
             (
-                "name: s\nmain:\n  - name: a\n    type: action\n    module: m\n    limit: { type: range, min: 1, max: 2 }\n",
+                "name: s\nmain:\n  - name: a\n    type: action\n    module: m\n    limit: { comparison: GELE, low: 1, high: 2 }\n",
                 "no mide",
             ),
             (
@@ -4757,7 +4891,7 @@ main:
                 "has no 'limit'",
             ),
             (
-                "name: s\nmain:\n  - name: n\n    type: numeric_limit\n    limit: { type: range, min: 1, max: 2 }\n",
+                "name: s\nmain:\n  - name: n\n    type: numeric_limit\n    limit: { comparison: GELE, low: 1, high: 2 }\n",
                 "neither 'module' nor 'value'",
             ),
             (
@@ -4765,7 +4899,7 @@ main:
                 "only a 'numeric_limit' judges a value",
             ),
             (
-                "name: s\nlocals: { x: 0.0 }\nmain:\n  - name: n\n    type: numeric_limit\n    value: 'result.measured_value'\n    limit: { type: range, min: 1, max: 2 }\n",
+                "name: s\nlocals: { x: 0.0 }\nmain:\n  - name: n\n    type: numeric_limit\n    value: 'result.measured_value'\n    limit: { comparison: GELE, low: 1, high: 2 }\n",
                 "result.measured_value",
             ),
             (
@@ -4784,8 +4918,8 @@ main:
         let accepted = [
             "name: s\nmain:\n  - name: a\n    type: action\n    module: m\n    retries: 3\n",
             "name: s\nlocals: { v: 0.0 }\nmain:\n  - name: v\n    type: pass_fail\n    module: m\n    retries: 2\n    assign: { v: result.measured_value }\n    condition: 'result.measured_value > locals.v'\n",
-            "name: s\nmain:\n  - name: n\n    type: numeric_limit\n    module: m\n    value: 'result.outputs.t'\n    limit: { type: range, min: 1, max: 2 }\n",
-            "name: s\nlocals: { x: 1.5 }\nmain:\n  - name: n\n    type: numeric_limit\n    value: 'locals.x'\n    limit: { type: range, min: 1, max: 2 }\n",
+            "name: s\nmain:\n  - name: n\n    type: numeric_limit\n    module: m\n    value: 'result.outputs.t'\n    limit: { comparison: GELE, low: 1, high: 2 }\n",
+            "name: s\nlocals: { x: 1.5 }\nmain:\n  - name: n\n    type: numeric_limit\n    value: 'locals.x'\n    limit: { comparison: GELE, low: 1, high: 2 }\n",
         ];
         for yaml in accepted {
             if let Err(e) = cargar_de_texto(yaml) {
@@ -4820,7 +4954,7 @@ main:
     #[test]
     fn module_is_read_on_a_grpc_step_and_refused_elsewhere() {
         let s = cargar_de_texto(
-            "name: s\nmain:\n  - name: Measure 5V rail\n    module: dmm/measure_voltage\n",
+            "name: s\nmain:\n  - name: Measure 5V rail\n    type: pass_fail\n    module: dmm/measure_voltage\n",
         )
         .unwrap();
         assert_eq!(s.pasos_main[0].nombre, "Measure 5V rail");
@@ -4836,7 +4970,9 @@ main:
             "{err}"
         );
 
-        let err = cargar_de_texto("name: s\nmain:\n  - name: a\n    module: ' '\n").unwrap_err();
+        let err =
+            cargar_de_texto("name: s\nmain:\n  - name: a\n    type: pass_fail\n    module: ' '\n")
+                .unwrap_err();
         assert!(
             matches!(&err, ErrorCarga::Validacion(m) if m.contains("empty 'module'")),
             "{err}"
@@ -4853,7 +4989,7 @@ main:
         let y = dir.join("s.yaml");
         std::fs::write(
             &y,
-            "name: s\nexecutors:\n  - { name: p, type: wasm, path: ./anvil-exec-wasm }\nmain:\n  - name: a\n    executor: p\n",
+            "name: s\nexecutors:\n  - { name: p, type: wasm, path: ./anvil-exec-wasm }\nmain:\n  - name: a\n    type: pass_fail\n    module: a\n    executor: p\n",
         )
         .unwrap();
         let loaded = cargar_programa_de_archivo(y.to_str().unwrap());
@@ -4876,7 +5012,7 @@ main:
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(dir.join("p.wasm"), b"\0asm").unwrap();
         let y = dir.join("s.yaml");
-        std::fs::write(&y, "name: s\nexecutors:\n  - { name: p, type: wasm, path: ./p.wasm }\nmain:\n  - name: a\n    executor: p\n").unwrap();
+        std::fs::write(&y, "name: s\nexecutors:\n  - { name: p, type: wasm, path: ./p.wasm }\nmain:\n  - name: a\n    type: pass_fail\n    module: a\n    executor: p\n").unwrap();
         let prog = cargar_programa_de_archivo(y.to_str().unwrap()).unwrap();
         assert_eq!(
             prog.ejecutores["p"].tipo,
@@ -4892,14 +5028,14 @@ main:
         let dir = std::env::temp_dir().join(format!("anvil_m5ext_{}", "grpc"));
         std::fs::create_dir_all(&dir).unwrap();
         let y = dir.join("s.yaml");
-        std::fs::write(&y, "name: s\nexecutors:\n  - { name: p, type: grpc, host: 127.0.0.1 }\nmain:\n  - name: a\n").unwrap();
+        std::fs::write(&y, "name: s\nexecutors:\n  - { name: p, type: grpc, host: 127.0.0.1 }\nmain:\n  - name: a\n    type: pass_fail\n    module: a\n").unwrap();
         let err = cargar_programa_de_archivo(y.to_str().unwrap()).unwrap_err();
         assert!(
             matches!(&err, ErrorCarga::Validacion(m) if m.contains("'host' y 'port'")),
             "{err}"
         );
 
-        std::fs::write(&y, "name: s\nexecutors:\n  - { name: p, type: grpc, host: 127.0.0.1, port: 9101, path: ./p.wasm }\nmain:\n  - name: a\n").unwrap();
+        std::fs::write(&y, "name: s\nexecutors:\n  - { name: p, type: grpc, host: 127.0.0.1, port: 9101, path: ./p.wasm }\nmain:\n  - name: a\n    type: pass_fail\n    module: a\n").unwrap();
         let err = cargar_programa_de_archivo(y.to_str().unwrap()).unwrap_err();
         assert!(
             matches!(&err, ErrorCarga::Validacion(m) if m.contains("'path'")),
@@ -4914,7 +5050,7 @@ main:
         let dir = std::env::temp_dir().join(format!("anvil_m5ext_{}", "emb"));
         std::fs::create_dir_all(&dir).unwrap();
         let y = dir.join("s.yaml");
-        std::fs::write(&y, "name: s\nexecutors:\n  - { name: e, type: embedded }\nmain:\n  - name: a\n    executor: e\n").unwrap();
+        std::fs::write(&y, "name: s\nexecutors:\n  - { name: e, type: embedded }\nmain:\n  - name: a\n    type: pass_fail\n    module: a\n    executor: e\n").unwrap();
         let err = cargar_programa_de_archivo(y.to_str().unwrap()).unwrap_err();
         assert!(
             matches!(&err, ErrorCarga::Validacion(m)
@@ -4922,7 +5058,7 @@ main:
             "{err}"
         );
 
-        std::fs::write(&y, "name: s\nexecutors:\n  - { name: e, host: 127.0.0.1, port: 9101 }\nmain:\n  - name: a\n    executor: e\n").unwrap();
+        std::fs::write(&y, "name: s\nexecutors:\n  - { name: e, host: 127.0.0.1, port: 9101 }\nmain:\n  - name: a\n    type: pass_fail\n    module: a\n    executor: e\n").unwrap();
         let err = cargar_programa_de_archivo(y.to_str().unwrap()).unwrap_err();
         assert!(
             matches!(&err, ErrorCarga::Validacion(m)
@@ -4932,7 +5068,7 @@ main:
 
         std::fs::write(
             &y,
-            "name: s\nexecutors:\n  - { name: e, type: raro }\nmain:\n  - name: a\n",
+            "name: s\nexecutors:\n  - { name: e, type: raro }\nmain:\n  - name: a\n    type: pass_fail\n    module: a\n",
         )
         .unwrap();
         let err = cargar_programa_de_archivo(y.to_str().unwrap()).unwrap_err();
@@ -4948,7 +5084,7 @@ main:
         let dir = std::env::temp_dir().join(format!("anvil_m5ext_{}", "dups"));
         std::fs::create_dir_all(&dir).unwrap();
         let y = dir.join("s.yaml");
-        std::fs::write(&y, "name: s\nexecutors:\n  - { name: a, type: grpc, host: 127.0.0.1, port: 9101 }\n  - { name: a, type: grpc, host: 127.0.0.1, port: 9102 }\nmain:\n  - name: p\n    executor: a\n").unwrap();
+        std::fs::write(&y, "name: s\nexecutors:\n  - { name: a, type: grpc, host: 127.0.0.1, port: 9101 }\n  - { name: a, type: grpc, host: 127.0.0.1, port: 9102 }\nmain:\n  - name: p\n    type: pass_fail\n    module: p\n    executor: a\n").unwrap();
         let err = cargar_programa_de_archivo(y.to_str().unwrap()).unwrap_err();
         assert!(
             matches!(&err, ErrorCarga::Validacion(m) if m.contains("más de una vez")),
@@ -4978,7 +5114,7 @@ main:
         let y = dir.join("s.yaml");
         std::fs::write(
             &y,
-            "name: s\nexecutors:\n  - { name: e, type: grpc, host: 127.0.0.1, port: 9101, foo: bar }\nmain:\n  - name: a\n    executor: e\n",
+            "name: s\nexecutors:\n  - { name: e, type: grpc, host: 127.0.0.1, port: 9101, foo: bar }\nmain:\n  - name: a\n    type: pass_fail\n    module: a\n    executor: e\n",
         )
         .unwrap();
         let err = cargar_programa_de_archivo(y.to_str().unwrap()).unwrap_err();
@@ -5033,7 +5169,7 @@ main:
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(dir.join("anvil-exec-wasm"), b"").unwrap();
         let y = dir.join("s.yaml");
-        std::fs::write(&y, "name: s\nexecutors:\n  - { name: e, type: wasm, path: ./anvil-exec-wasm }\n  - { name: py, type: grpc, host: 127.0.0.1, port: 9101 }\nmain:\n  - name: a\n    executor: py\n").unwrap();
+        std::fs::write(&y, "name: s\nexecutors:\n  - { name: e, type: wasm, path: ./anvil-exec-wasm }\n  - { name: py, type: grpc, host: 127.0.0.1, port: 9101 }\nmain:\n  - name: a\n    type: pass_fail\n    module: a\n    executor: py\n").unwrap();
         let mut prog = cargar_programa_de_archivo(y.to_str().unwrap()).unwrap();
 
         // Re-apuntar un grpc a remoto.
@@ -5124,7 +5260,11 @@ main:
     #[test]
     fn pm_sin_call_a_secuencia_usuario_es_error() {
         let dir = dir_pm("sin_call");
-        std::fs::write(dir.join("pm.yaml"), "name: pm\nmain:\n  - name: x\n").unwrap();
+        std::fs::write(
+            dir.join("pm.yaml"),
+            "name: pm\nmain:\n  - name: x\n    type: pass_fail\n    module: x\n",
+        )
+        .unwrap();
         std::fs::write(dir.join("usuario.yaml"), basica_yaml()).unwrap();
         let err = cargar_programa_con_pm(
             dir.join("pm.yaml").to_str().unwrap(),
@@ -5156,7 +5296,7 @@ main:
         let dir = dir_pm("reservado");
         std::fs::write(
             dir.join("pm.yaml"),
-            "name: pm\nsubsequences:\n  secuencia_usuario:\n    name: secuencia_usuario\n    main:\n      - name: x\nmain:\n  - name: a\n    type: sequence_call\n    sequence: secuencia_usuario\n",
+            "name: pm\nsubsequences:\n  secuencia_usuario:\n    name: secuencia_usuario\n    main:\n      - name: x\n        type: pass_fail\n        module: x\nmain:\n  - name: a\n    type: sequence_call\n    sequence: secuencia_usuario\n",
         )
         .unwrap();
         std::fs::write(dir.join("usuario.yaml"), basica_yaml()).unwrap();
@@ -5217,7 +5357,7 @@ main:
         std::fs::write(dir.join("pm.yaml"), pm_yaml()).unwrap();
         std::fs::write(
             dir.join("usuario.yaml"),
-            "name: u\nparameters: { p: 0.0 }\nmain:\n  - name: m\n",
+            "name: u\nparameters: { p: 0.0 }\nmain:\n  - name: m\n    type: pass_fail\n    module: m\n",
         )
         .unwrap();
         let err = cargar_programa_con_pm(
@@ -5295,6 +5435,8 @@ locals:
   v: 0.0
 main:
   - name: medir
+    type: pass_fail
+    module: medir
     precondition: 'locals.no_existe > 0.0'
 ",
         );
@@ -5348,6 +5490,8 @@ locals:
   x: 0.0
 main:
   - name: medir
+    type: pass_fail
+    module: medir
     assign:
       x: '${result.measured_value + locals.offset}'
 ",
@@ -5367,6 +5511,8 @@ locals:
   a: true
 main:
   - name: medir
+    type: pass_fail
+    module: medir
     precondition: '!(locals.a && (parameters.p || true))'
 ",
         );
@@ -5389,6 +5535,8 @@ locals:
   ok: false
 main:
   - name: medir
+    type: pass_fail
+    module: medir
     precondition: 'parameters.canal >= 0.0'
     assign:
       v: '${result.measured_value}'
@@ -5511,7 +5659,8 @@ subsequences:
   hija:
     main:
       - name: p
-        type: grpc
+        module: p
+        type: pass_fail
 main:
   - name: call_sub
     type: sequence_call
@@ -5535,7 +5684,8 @@ subsequences:
   hija:
     main:
       - name: p
-        type: grpc
+        module: p
+        type: pass_fail
 main:
   - name: call_sub
     type: sequence_call
@@ -5560,7 +5710,8 @@ subsequences:
   hija:
     main:
       - name: p
-        type: grpc
+        module: p
+        type: pass_fail
 main:
   - name: call_sub
     type: sequence_call
@@ -5582,7 +5733,7 @@ main:
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(
             dir.join("hija.yaml"),
-            "name: hija\nexecutors:\n  - name: wasm_temp\n    type: grpc\n    host: 127.0.0.1\n    port: 9300\nmain:\n  - name: m\n    type: grpc\n",
+            "name: hija\nexecutors:\n  - name: wasm_temp\n    type: grpc\n    host: 127.0.0.1\n    port: 9300\nmain:\n  - name: m\n    module: m\n    type: pass_fail\n",
         )
         .unwrap();
         let padre = dir.join("padre.yaml");
@@ -5613,7 +5764,8 @@ subsequences:
         port: 9300
     main:
       - name: m
-        type: grpc
+        module: m
+        type: pass_fail
 main:
   - name: c
     type: sequence_call
@@ -5633,7 +5785,7 @@ main:
         let raiz = dir.join("raiz.yaml");
         std::fs::write(
             &raiz,
-            "name: raiz\nmain:\n  - name: m\n    type: grpc\n    executor: wasm_temp\n",
+            "name: raiz\nmain:\n  - name: m\n    module: m\n    type: pass_fail\n    executor: wasm_temp\n",
         )
         .unwrap();
         let m = match cargar_programa_de_archivo(raiz.to_str().unwrap()) {
@@ -5660,7 +5812,7 @@ main:
         let usuario = dir.join("usuario.yaml");
         std::fs::write(
             &usuario,
-            "name: usuario\nexecutors:\n  - name: del_usuario\n    type: grpc\n    host: 127.0.0.1\n    port: 9400\nmain:\n  - name: m\n    type: grpc\n    executor: del_usuario\n",
+            "name: usuario\nexecutors:\n  - name: del_usuario\n    type: grpc\n    host: 127.0.0.1\n    port: 9400\nmain:\n  - name: m\n    module: m\n    type: pass_fail\n    executor: del_usuario\n",
         )
         .unwrap();
         let prog = cargar_programa_con_pm(pm.to_str().unwrap(), usuario.to_str().unwrap()).unwrap();
@@ -5687,6 +5839,8 @@ name: s
 locals: { canal: 2.0 }
 main:
   - name: medir
+    type: pass_fail
+    module: medir
     inputs: { canal: locals.canal }
 ";
         let err = cargar_de_texto(yaml).unwrap_err();
@@ -5706,6 +5860,8 @@ name: s
 locals: { canal: 2.0 }
 main:
   - name: medir
+    type: pass_fail
+    module: medir
     inputs: { canal: '${locals.canal}' }
 ";
         let s = cargar_de_texto(yaml).unwrap();
@@ -5722,6 +5878,8 @@ main:
 name: s
 main:
   - name: medir
+    type: pass_fail
+    module: medir
     inputs:
       canal: 2
       etiqueta: '2'
@@ -5757,6 +5915,8 @@ main:
 name: s
 main:
   - name: medir
+    type: pass_fail
+    module: medir
     inputs:
       canal: [1, 2]
 ";
@@ -5776,6 +5936,8 @@ subsequences:
     parameters: { canal: 0.0 }
     main:
       - name: p
+        type: pass_fail
+        module: p
 main:
   - name: c
     type: sequence_call
@@ -5832,7 +5994,7 @@ executors:
             "decl",
             &format!(
                 "name: s\n{EJECUTORES_DOS}locals:\n  rack: {{ type: reference, executor: banco }}\n\
-                 main:\n  - name: abrir\n    executor: banco\n    assign: {{ rack: result.outputs.rack }}\n"
+                 main:\n  - name: abrir\n    type: pass_fail\n    module: abrir\n    executor: banco\n    assign: {{ rack: result.outputs.rack }}\n"
             ),
         )
         .unwrap();
@@ -5857,8 +6019,8 @@ executors:
     fn una_referencia_a_un_paso_de_otro_ejecutor_se_rechaza_al_cargar() {
         let yaml = format!(
             "name: s\n{EJECUTORES_DOS}locals:\n  rack: {{ type: reference, executor: banco }}\n\
-             setup:\n  - name: abrir\n    executor: banco\n    assign: {{ rack: result.outputs.rack }}\n\
-             main:\n  - name: medir\n    executor: otro\n    inputs: {{ rack: '${{locals.rack}}' }}\n"
+             setup:\n  - name: abrir\n    type: pass_fail\n    module: abrir\n    executor: banco\n    assign: {{ rack: result.outputs.rack }}\n\
+             main:\n  - name: medir\n    type: pass_fail\n    module: medir\n    executor: otro\n    inputs: {{ rack: '${{locals.rack}}' }}\n"
         );
         let err = programa_de("cruzado", &yaml).unwrap_err();
         assert!(
@@ -5880,7 +6042,7 @@ executors:
             "assign_cruzado",
             &format!(
                 "name: s\n{EJECUTORES_DOS}locals:\n  rack: {{ type: reference, executor: banco }}\n\
-                 main:\n  - name: abrir\n    executor: otro\n    assign: {{ rack: result.outputs.rack }}\n"
+                 main:\n  - name: abrir\n    type: pass_fail\n    module: abrir\n    executor: otro\n    assign: {{ rack: result.outputs.rack }}\n"
             ),
         )
         .unwrap_err();
@@ -5916,7 +6078,7 @@ executors:
             "medida",
             &format!(
                 "name: s\n{EJECUTORES_DOS}locals:\n  rack: {{ type: reference, executor: banco }}\n\
-                 main:\n  - name: medir\n    executor: banco\n    assign: {{ rack: result.measured_value }}\n"
+                 main:\n  - name: medir\n    type: pass_fail\n    module: medir\n    executor: banco\n    assign: {{ rack: result.measured_value }}\n"
             ),
         )
         .unwrap_err();
@@ -5932,7 +6094,7 @@ executors:
         let err = programa_de(
             "literal",
             &format!(
-                "name: s\n{EJECUTORES_DOS}main:\n  - name: medir\n    executor: banco\n    inputs: {{ rack: {{ type: reference, executor: banco }} }}\n"
+                "name: s\n{EJECUTORES_DOS}main:\n  - name: medir\n    type: pass_fail\n    module: medir\n    executor: banco\n    inputs: {{ rack: {{ type: reference, executor: banco }} }}\n"
             ),
         )
         .unwrap_err();
@@ -5955,7 +6117,7 @@ executors:
             &y,
             "name: s\nexecutors:\n  - { name: comp, type: wasm, path: ./p.wasm }\n\
              locals:\n  rack: { type: reference, executor: comp }\n\
-             main:\n  - name: abrir\n    executor: comp\n    assign: { rack: result.outputs.rack }\n",
+             main:\n  - name: abrir\n    type: pass_fail\n    module: abrir\n    executor: comp\n    assign: { rack: result.outputs.rack }\n",
         )
         .unwrap();
         let err = cargar_programa_de_archivo(y.to_str().unwrap()).unwrap_err();
@@ -5972,7 +6134,7 @@ executors:
     fn una_referencia_fuera_de_locals_se_rechaza() {
         for scope in ["file_globals", "parameters"] {
             let err = cargar_de_texto(&format!(
-                "name: s\n{scope}:\n  rack: {{ type: reference, executor: banco }}\nmain:\n  - name: a\n"
+                "name: s\n{scope}:\n  rack: {{ type: reference, executor: banco }}\nmain:\n  - name: a\n    type: pass_fail\n    module: a\n"
             ))
             .unwrap_err();
             assert!(
@@ -5989,7 +6151,7 @@ executors:
         let err = programa_de(
             "sin_ejecutor",
             &format!(
-                "name: s\n{EJECUTORES_DOS}locals:\n  rack: {{ type: reference, executor: bancoo }}\nmain:\n  - name: a\n    executor: banco\n"
+                "name: s\n{EJECUTORES_DOS}locals:\n  rack: {{ type: reference, executor: bancoo }}\nmain:\n  - name: a\n    type: pass_fail\n    module: a\n    executor: banco\n"
             ),
         )
         .unwrap_err();
@@ -6004,7 +6166,7 @@ executors:
     #[test]
     fn una_declaracion_mal_escrita_se_nombra() {
         let err = cargar_de_texto(
-            "name: s\nlocals:\n  rack: { type: referencia, executor: banco }\nmain:\n  - name: a\n",
+            "name: s\nlocals:\n  rack: { type: referencia, executor: banco }\nmain:\n  - name: a\n    type: pass_fail\n    module: a\n",
         )
         .unwrap_err();
         assert!(
@@ -6013,7 +6175,7 @@ executors:
         );
 
         let sin_ejecutor =
-            cargar_de_texto("name: s\nlocals:\n  rack: { type: reference }\nmain:\n  - name: a\n")
+            cargar_de_texto("name: s\nlocals:\n  rack: { type: reference }\nmain:\n  - name: a\n    type: pass_fail\n    module: a\n")
                 .unwrap_err();
         assert!(
             matches!(&sin_ejecutor, ErrorCarga::Validacion(m) if m.contains("ejecutor")),

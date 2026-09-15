@@ -14,23 +14,33 @@ executors:
   - { name: demo, type: wasm, path: departamento/dist/anvil-exec-wasm }
 setup:
   - name: demo/open_relay        # action (RF-27): technical success, no measurement
+    type: action
+    module: demo/open_relay
     executor: demo
     retries: 1
   - name: demo/connect
+    type: action
+    module: demo/connect
     executor: demo
     retries: 3
 main:
   - name: demo/measure_voltage   # limit test (RF-26): the engine evaluates the range
+    type: numeric_limit
+    module: demo/measure_voltage
     executor: demo
     retries: 1
     limit:
-      type: range
-      min: 4.5
-      max: 5.5
+      comparison: GELE
+      low: 4.5
+      high: 5.5
   - name: demo/check_led         # pass/fail (RF-25)
+    type: pass_fail
+    module: demo/check_led
     executor: demo
     retries: 1
 cleanup:
   - name: demo/disconnect
+    type: action
+    module: demo/disconnect
     executor: demo
     retries: 1

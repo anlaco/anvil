@@ -7,5 +7,6 @@ executors:
     port: 9300
 main:
   - name: medir_temperatura_bobina
-    type: grpc
+    module: medir_temperatura_bobina
+    type: pass_fail
     executor: wasm_temp

@@ -6,5 +6,7 @@ locals:
   v: 0.0
 main:
   - name: demo/measure_voltage
+    type: pass_fail
+    module: demo/measure_voltage
     executor: demo
     precondition: 'locals.no_existe > 0.0'

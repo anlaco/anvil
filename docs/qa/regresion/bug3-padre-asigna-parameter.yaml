@@ -24,6 +24,8 @@ main:
     sequence: ./bug3-sub-asigna-parameter.yaml
     args: { p: locals.t }
   - name: demo/check_led
+    type: pass_fail
+    module: demo/check_led
     executor: demo
     retries: 1
     precondition: 'locals.t > 4.0'

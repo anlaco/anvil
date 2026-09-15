@@ -32,6 +32,8 @@ main:
   # A step of another module in the same department: one executor serves every
   # module next to its binary (ADR-0025), so `demo` and `hola_paso` share it.
   - name: demo/check_led
+    type: pass_fail
+    module: demo/check_led
     executor: mi_paso_wasm
     retries: 1
 
@@ -39,16 +41,20 @@ main:
   # the component's `run`. The component returns measured value 4.2; the
   # engine evaluates the limit from the YAML (ADR-0008).
   - name: hola_paso/medir_voltaje
+    type: numeric_limit
+    module: hola_paso/medir_voltaje
     executor: mi_paso_wasm
     retries: 1
     limit:
-      type: range
-      min: 4.0
-      max: 5.0
+      comparison: GELE
+      low: 4.0
+      high: 5.0
 
   # Another step in the same `.wasm` (same path → the host shares a single
   # bridge: 1 Store, N calls, TestStand's RTE pattern).
   - name: hola_paso/conectar_equipo
+    type: action
+    module: hola_paso/conectar_equipo
     executor: mi_paso_wasm
     retries: 3
 
@@ -56,6 +62,8 @@ main:
   # **describes its catalog**, so `--validate --with-executors` checks that
   # `a_quien` exists and is text without running anything (ADR-0021, ADR-0024).
   - name: hola_paso/hola
+    type: pass_fail
+    module: hola_paso/hola
     executor: mi_paso_wasm
     retries: 1
     inputs:

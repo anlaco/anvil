@@ -8,10 +8,10 @@
 # Expected result (demo/measure_voltage reads 4.2 against the 4.5–5.5 range →
 # fail by limit, ADR-0008; Main stops there):
 #   === variables_demo: fail ===
-#     [pass] demo/connect: instrument connected (attempt 2)
+#     [done] demo/connect: instrument connected (attempt 2)
 #     [done] init_log: statement ok
 #     [fail] demo/measure_voltage: 4.2 fuera de rango [4.5, 5.5]
-#     [pass] demo/disconnect: instrument disconnected
+#     [done] demo/disconnect: instrument disconnected
 # `paso_obsoleto` and `demo/check_led` are never reached: Main stops at the
 # first fail (pause_on_fail reinforces it).
 
@@ -36,6 +36,8 @@ locals:
 
 setup:
   - name: demo/connect
+    type: action
+    module: demo/connect
     executor: demo
     retries: 3
 
@@ -49,22 +51,27 @@ main:
   # If the precondition were false, the step would be skipped without spending
   # an attempt.
   - name: demo/measure_voltage
+    type: numeric_limit
+    module: demo/measure_voltage
     executor: demo
     retries: 1
     precondition: 'file_globals.lote != ""'
     limit:
-      type: range
-      min: 4.5
-      max: 5.5
-    # Assign (RF-31): dumps `result` fields into Locals after the step.
+      comparison: GELE
+      low: 4.5
+      high: 5.5
+    # Assign (RF-31): dumps `result` fields into Locals. It runs before the
+    # limit judges the step (ADR-0042 §2), so it copies what was measured, not
+    # the verdict.
     assign:
       voltaje_leido: '${result.measured_value}'
-      ok: '${result.status == "pass"}'
 
   # Disabled step (RF-34): recorded as "skipped", not invoked. It still names
   # its executor: turning a step off does not make it stop being a step that
   # calls one.
   - name: paso_obsoleto
+    type: pass_fail
+    module: paso_obsoleto
     executor: demo
     disable: true
 
@@ -72,11 +79,15 @@ main:
   # reached here: demo/measure_voltage fails first and Main stops at the first
   # fail.
   - name: demo/check_led
+    type: pass_fail
+    module: demo/check_led
     executor: demo
     retries: 1
     pause_on_fail: true
 
 cleanup:
   - name: demo/disconnect
+    type: action
+    module: demo/disconnect
     executor: demo
     retries: 1

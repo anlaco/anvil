@@ -9,29 +9,37 @@
 # this sequence fails on purpose.
 #
 #   === basica: fail ===
-#     [pass] demo/connect: instrument connected (attempt 2)
+#     [done] demo/connect: instrument connected (attempt 2)
 #     [fail] demo/measure_voltage: 4.2 fuera de rango [4.5, 5.5]
-#     [pass] demo/disconnect: instrument disconnected
+#     [done] demo/disconnect: instrument disconnected
 
 name: basica
 executors:
   - { name: demo, type: wasm, path: departamento/dist/anvil-exec-wasm }
 setup:
   - name: demo/connect
+    type: action
+    module: demo/connect
     executor: demo
     retries: 3
 main:
   - name: demo/measure_voltage
+    type: numeric_limit
+    module: demo/measure_voltage
     executor: demo
     retries: 1
     limit:
-      type: range
-      min: 4.5
-      max: 5.5
+      comparison: GELE
+      low: 4.5
+      high: 5.5
   - name: demo/check_led
+    type: pass_fail
+    module: demo/check_led
     executor: demo
     retries: 1
 cleanup:
   - name: demo/disconnect
+    type: action
+    module: demo/disconnect
     executor: demo
     retries: 1

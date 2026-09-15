@@ -720,38 +720,28 @@ impl ResultadoSecuencia {
     }
 }
 
-/// El tipo de un paso. Por defecto es gRPC (el flujo de M3); `Statement`
-/// es un paso **local** (RF-27) que el motor ejecuta evaluando una sentencia
-/// del lenguaje de expresiones, **sin** ir por el cable. `SequenceCall`
-/// (M4b, RF-27) invoca otra secuencia como un paso — también motor-side, sin
-/// gRPC — anidando su `ResultadoSecuencia` en el resultado del paso.
-/// `PassFail` (ADR-0018) evalúa una expresión booleana y produce el veredicto.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+/// What kind of step it is: **how it is judged** (ADR-0040). What it calls on an
+/// executor is a separate part of the step, its `module`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TipoPaso {
-    /// El motor invoca el paso por gRPC contra el ejecutor, por nombre (M3).
-    #[default]
-    Grpc,
+    /// Calls a module to do something, and judges nothing (ADR-0040 §3): the
+    /// executor's `pass` becomes `done`.
+    Action,
+    /// Passes or fails (RF-25): on its module's answer, on `condicion`, or on
+    /// `condicion` reading the module's answer (ADR-0018, ADR-0040 §4,
+    /// ADR-0042). TestStand's Pass/Fail Test.
+    PassFail,
+    /// Judges one number against `limite` (ADR-0040 §5): the module's
+    /// measurement, or `valor`. Without a number to judge it is `error`.
+    /// TestStand's Numeric Limit Test.
+    NumericLimit,
     /// Paso local (RF-27): el motor evalúa `statement` contra su entorno, sin
-    /// gRPC. Útil para inicializar variables o cablear datos entre pasos.
+    /// gRPC. `done` on success (ADR-0040 §9).
     Statement,
     /// Invoca otra secuencia como un paso (M4b, RF-27). El motor orquesta la
     /// subsecuencia contra su propio entorno, sin gRPC; `paso.proto` no
     /// cambia (ADR-0010). El resultado se anida en `ResultadoStep.sub_pasos`.
     SequenceCall,
-    /// Veredicto por expresión (RF-25, ADR-0018): el motor evalúa `condicion`
-    /// contra su entorno y produce `paso`/`fallo` — el criterio de aceptación
-    /// **compuesto** sobre medidas ya volcadas a variables. Local, sin gRPC.
-    /// Es el análogo del step type `Pass/Fail Test` de TestStand, cuyo data
-    /// source es una expresión booleana. With a `module` it also calls an
-    /// executor, and is judged on the executor's answer or on `condicion`
-    /// reading it (ADR-0040 §4, ADR-0042).
-    PassFail,
-    /// Calls a module to do something, and judges nothing (ADR-0040 §3): the
-    /// executor's `pass` becomes `done`.
-    Action,
-    /// Judges one number against `limite` (ADR-0040 §5): the module's
-    /// measurement, or `valor`. Without a measurement it is `error`.
-    NumericLimit,
 }
 
 /// How a step executor is reached (M5-ext.1, RF-36.3). The engine dispatches by
@@ -969,6 +959,8 @@ pub struct DefinicionPaso {
 }
 
 impl DefinicionPaso {
+    /// A `pass_fail` step that calls the module of its own name: judged on what
+    /// its executor answers.
     pub fn nuevo(nombre: &str, reintentos: u32) -> Self {
         DefinicionPaso {
             nombre: nombre.to_string(),
@@ -978,22 +970,27 @@ impl DefinicionPaso {
             pause_on_fail: false,
             precondicion: None,
             asigna: None,
-            tipo: TipoPaso::Grpc,
+            tipo: TipoPaso::PassFail,
             statement: None,
             condicion: None,
             secuencia: None,
             parametros: None,
             entradas: None,
             ejecutor: None,
-            module: None,
+            module: Some(nombre.to_string()),
             valor: None,
         }
     }
 
-    /// Whether running this step calls an executor: a `grpc` or `action` step
-    /// always does, and any other with a `module` (ADR-0040 §1).
+    /// Whether running this step calls an executor: an `action` always does, a
+    /// `pass_fail` or `numeric_limit` when it has a `module` (ADR-0040 §1), and a
+    /// `statement` or `sequence_call` never.
     pub fn llama_a_un_ejecutor(&self) -> bool {
-        matches!(self.tipo, TipoPaso::Grpc | TipoPaso::Action) || self.module.is_some()
+        match self.tipo {
+            TipoPaso::Action => true,
+            TipoPaso::PassFail | TipoPaso::NumericLimit => self.module.is_some(),
+            TipoPaso::Statement | TipoPaso::SequenceCall => false,
+        }
     }
 
     /// The expressions that may read this step's own `result`: its `assign`,
@@ -1009,18 +1006,19 @@ impl DefinicionPaso {
         fuera
     }
 
-    /// What the step calls on its executor: its `module`, or — until ADR-0040
-    /// makes `module` the only way to say it — its name, which is what a step
-    /// without one has always called.
+    /// What the step calls on its executor. The loader requires a `module` on
+    /// every step that calls one, so the name is only a fallback for a step
+    /// built by hand.
     pub fn modulo(&self) -> &str {
         self.module.as_deref().unwrap_or(&self.nombre)
     }
 
-    /// Como `nuevo` pero fijando un límite. Lo usa el cargador al traducir el
-    /// YAML (límite embebido) y el property loader (sidecar).
+    /// A `numeric_limit` step with the given limit, calling the module of its
+    /// own name.
     pub fn con_limite(nombre: &str, reintentos: u32, limite: Limite) -> Self {
         DefinicionPaso {
             limite: Some(limite),
+            tipo: TipoPaso::NumericLimit,
             ..DefinicionPaso::nuevo(nombre, reintentos)
         }
     }
@@ -1554,8 +1552,8 @@ mod tests {
         assert_eq!(s.estado(), "pass");
     }
 
-    /// Los defaults de `DefinicionPaso::nuevo` preservan el comportamiento de
-    /// M3 (disable=false, pause_on_fail=false, sin precondición/asigna, Grpc).
+    /// `DefinicionPaso::nuevo` is a step judged on what its executor answers: a
+    /// `pass_fail` calling the module of its own name.
     #[test]
     fn definicion_paso_nuevo_tiene_defaults_de_m4() {
         let p = DefinicionPaso::nuevo("verificar_led", 1);
@@ -1563,7 +1561,8 @@ mod tests {
         assert!(!p.pause_on_fail);
         assert_eq!(p.precondicion, None);
         assert_eq!(p.asigna, None);
-        assert_eq!(p.tipo, TipoPaso::Grpc);
+        assert_eq!(p.tipo, TipoPaso::PassFail);
+        assert_eq!(p.module.as_deref(), Some("verificar_led"));
         assert_eq!(p.statement, None);
         // M4b: los campos de sequence call también parten de None.
         assert_eq!(p.secuencia, None);

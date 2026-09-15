@@ -17,15 +17,17 @@ main:
     type: statement
     statement: 'parameters.canal = parameters.canal + 1.0'
   - name: demo/measure_voltage
-    type: grpc
+    module: demo/measure_voltage
+    type: numeric_limit
     executor: demo
     retries: 1
     limit:
-      type: range
-      min: 4.0
-      max: 5.0
+      comparison: GELE
+      low: 4.0
+      high: 5.0
 cleanup:
   - name: demo/disconnect
-    type: grpc
+    module: demo/disconnect
+    type: action
     executor: demo
     retries: 1

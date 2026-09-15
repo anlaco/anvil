@@ -18,11 +18,11 @@
 # (4.0–6.0) → `pass`; but the product's real criterion is narrower (4.9–5.1),
 # so `verificar_dut` declares it `fail` and Main stops:
 #   === veredicto: fail ===
-#     [pass] demo/open_relay: relay open
+#     [done] demo/open_relay: relay open
 #     [pass] demo/measure_voltage: measured: 4.2 V (channel 1)
 #     [pass] demo/check_led: led on
 #     [fail] verificar_dut: condición no cumplida
-#     [pass] demo/disconnect: instrument disconnected
+#     [done] demo/disconnect: instrument disconnected
 # `demo/disconnect` does run: Cleanup always runs.
 #
 # Try relaxing the condition to `locals.voltaje > 4.0 && locals.led_ok` and you
@@ -41,6 +41,8 @@ locals:
 
 setup:
   - name: demo/open_relay
+    type: action
+    module: demo/open_relay
     executor: demo
     retries: 1
 
@@ -48,17 +50,21 @@ main:
   # (2) Loose limit: the engine evaluates it and it passes. It is the "is it
   # alive", not the product criterion.
   - name: demo/measure_voltage
+    type: numeric_limit
+    module: demo/measure_voltage
     executor: demo
     retries: 1
     limit:
-      type: range
-      min: 4.0
-      max: 6.0
+      comparison: GELE
+      low: 4.0
+      high: 6.0
     assign:
       voltaje: '${result.measured_value}'
 
   # (1) Classic pass/fail: the step decides, with no measurement.
   - name: demo/check_led
+    type: pass_fail
+    module: demo/check_led
     executor: demo
     retries: 1
     assign:
@@ -74,5 +80,7 @@ main:
 
 cleanup:
   - name: demo/disconnect
+    type: action
+    module: demo/disconnect
     executor: demo
     retries: 1

@@ -32,6 +32,8 @@ executors:
 main:
   # A step of the demo bench, a WASM component: the host spawns its executor.
   - name: demo/check_led
+    type: pass_fail
+    module: demo/check_led
     executor: demo
     retries: 1
 
@@ -39,15 +41,19 @@ main:
   # to 127.0.0.1:9101; the Python one talks TCP to the simulator and returns
   # the measurement. The engine evaluates the limit from the YAML (ADR-0008).
   - name: instrument/medir_simulador
+    type: numeric_limit
+    module: instrument/medir_simulador
     executor: python
     retries: 1
     limit:
-      type: range
-      min: 4.0
-      max: 5.0
+      comparison: GELE
+      low: 4.0
+      high: 5.0
 
   # Connection to the simulated equipment: transient fail on attempt 1, passes
   # from attempt 2 (RF-09: the attempt number reaches the step).
   - name: instrument/conectar_equipo
+    type: action
+    module: instrument/conectar_equipo
     executor: python
     retries: 3

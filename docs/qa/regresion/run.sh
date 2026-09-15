@@ -90,9 +90,8 @@ check DEF-3b "by-reference return does not bring the unmeasured value" $?
 # the defect**. With DEF-1 fixed, a genuinely orphan sidecar is needed.
 cat >"$TMP/huerfano.limits.yaml" <<'YAML'
 paso_que_no_existe:
-  type: comparison
-  op: ge
-  expected: 4.0
+  comparison: GE
+  low: 4.0
 YAML
 $A ejemplos/limites.yaml --limits "$TMP/huerfano.limits.yaml" 2>&1 |
   grep -qiE 'aviso.*sidecar|sidecar.*no afect|ningún paso'
@@ -127,9 +126,8 @@ check DIAG-4 "the operator's sequence is a JSON field" $?
 cat >"$TMP/envoltorio.limits.yaml" <<'YAML'
 limits:
   demo/measure_voltage:
-    type: comparison
-    op: ge
-    expected: 4.0
+    comparison: GE
+    low: 4.0
 YAML
 $A ejemplos/limites.yaml --limits "$TMP/envoltorio.limits.yaml" 2>&1 |
   grep -qiE 'mapa plano|envoltorio'
@@ -142,8 +140,12 @@ subsequences:
   interna:
     steps:
       - name: p
+        type: pass_fail
+        module: p
 main:
   - name: p
+    type: pass_fail
+    module: p
 YAML
 $A "$TMP/steps.yaml" --validate 2>&1 |
   grep -qE "subsequences.interna.*querías 'main'"
@@ -190,6 +192,8 @@ executors:
     path: ./depto/anvil-exec-wasm
 main:
   - name: core/medir
+    type: pass_fail
+    module: core/medir
     executor: dmm
 YAML
   $A "$TMP/coremod.yaml" 2>&1 | grep -qiE 'módulo core|modulo core|core module'
@@ -209,6 +213,8 @@ executors:
     path: ./suelto.wasm
 main:
   - name: x/medir
+    type: pass_fail
+    module: x/medir
     executor: dmm
 YAML
 $A "$TMP/pathwasm.yaml" 2>&1 | grep -qiE 'binario del ejecutor|executor.s binary'
@@ -226,6 +232,8 @@ locals:
   v_real: 5.0
 main:
   - name: demo/measure_voltage
+    type: pass_fail
+    module: demo/measure_voltage
     executor: demo
     precondition: 'locals.v_real > 4.9 && result.measured_value != nothing'
 YAML
@@ -247,12 +255,19 @@ main:
     type: statement
     statement: 'locals.activo = false'
   - name: demo/measure_voltage
+    type: action
+    module: demo/measure_voltage
     executor: demo
     precondition: 'locals.activo'
   - name: demo/check_led
+    type: action
+    module: demo/check_led
     executor: demo
     disable: true
 YAML
+# Actions, not pass_fail steps: a sequence whose declared verdicts were all
+# skipped is inconclusive (ADR-0019 Rule 1, #31), which is another case. This
+# one is about skips being neutral.
 $A "$TMP/lec2.yaml" --json "$TMP/lec2.json" >"$TMP/lec2.out" 2>/dev/null
 res=0
 grep -qE '\(2 de 3 pasos saltados\)' "$TMP/lec2.out" || res=1

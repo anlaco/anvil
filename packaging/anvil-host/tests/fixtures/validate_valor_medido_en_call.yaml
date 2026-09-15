@@ -9,7 +9,8 @@ subsequences:
   hija:
     main:
       - name: demo/measure_voltage
-        type: grpc
+        module: demo/measure_voltage
+        type: pass_fail
         executor: demo
 main:
   - name: call_sub

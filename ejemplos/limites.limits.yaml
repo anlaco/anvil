@@ -6,6 +6,5 @@
 # the sequence (ADR-0008).
 
 demo/measure_voltage:
-  type: comparison
-  op: ge
-  expected: 4.0
+  comparison: GE
+  low: 4.0

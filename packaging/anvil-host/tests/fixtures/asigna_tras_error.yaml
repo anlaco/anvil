@@ -30,6 +30,8 @@ locals:
 
 main:
   - name: demo/instrument_offline
+    type: pass_fail
+    module: demo/instrument_offline
     executor: demo
     assign:
       valor: '${result.measured_value}'

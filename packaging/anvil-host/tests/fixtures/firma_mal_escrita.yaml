@@ -19,6 +19,8 @@ locals:
 
 main:
   - name: demo/measure_voltage
+    type: pass_fail
+    module: demo/measure_voltage
     executor: demo
     inputs:
       channell: 3

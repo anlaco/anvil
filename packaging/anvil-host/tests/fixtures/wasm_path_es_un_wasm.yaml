@@ -8,4 +8,6 @@ executors:
     path: ./no_es_componente.wasm
 main:
   - name: multimetro/medir_voltaje
+    type: pass_fail
+    module: multimetro/medir_voltaje
     executor: dmm

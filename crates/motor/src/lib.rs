@@ -926,7 +926,7 @@ fn corre_un_paso<I: InvocaPasos>(
     // `nothing` de un `resultado.*` vacío encima de una variable con valor
     // bueno. Que la variable la lea después un `cleanup` para decidir si apaga
     // una fuente es todo el argumento: el destino no se toca.
-    if matches!(p.tipo, TipoPaso::Grpc | TipoPaso::SequenceCall) && r.estado != "error" {
+    if p.tipo == TipoPaso::SequenceCall && r.estado != "error" {
         if let Some(asignaciones) = &p.asigna {
             r = aplica_asigna(asignaciones, r, ent);
         }
@@ -945,16 +945,12 @@ fn corre_un_paso<I: InvocaPasos>(
 /// For the types ADR-0040 adds, `assign` runs **before** the judgement, so a
 /// `condition` or `value` reading a local sees what the module just returned
 /// (ADR-0042 §2); and a module that returned `error` is neither copied out nor
-/// judged — a broken bench is not judged (ADR-0019, Rule 2). A `grpc` step
-/// keeps its order, limit first and `assign` after, until ADR-0040 is complete.
+/// judged — a broken bench is not judged (ADR-0019, Rule 2).
 fn juzga_respuesta_del_modulo(
     p: &DefinicionPaso,
     r: ResultadoStep,
     ent: &mut EntornoMotor,
 ) -> ResultadoStep {
-    if p.tipo == TipoPaso::Grpc {
-        return aplicar_limite(p, r);
-    }
     if r.estado == "error" {
         return r;
     }
@@ -2412,6 +2408,7 @@ mod tests {
 
         let mut verificar = DefinicionPaso::nuevo("verificar_dut", 1);
         verificar.tipo = TipoPaso::PassFail;
+        verificar.module = None;
         verificar.condicion = Some(expr::parse_expresion("locals.v > 4.9").unwrap());
 
         let mut posterior = DefinicionPaso::nuevo("no_deberia_correr", 1);
@@ -2459,6 +2456,7 @@ mod tests {
 
         let mut verificar = DefinicionPaso::nuevo("verificar_dut", 1);
         verificar.tipo = TipoPaso::PassFail;
+        verificar.module = None;
         verificar.condicion = Some(expr::parse_expresion("locals.v > 4.9").unwrap());
 
         let mut posterior = DefinicionPaso::nuevo("siguiente", 1);
@@ -2511,6 +2509,7 @@ mod tests {
 
         let mut verdict = DefinicionPaso::nuevo("verdict", 1);
         verdict.tipo = TipoPaso::PassFail;
+        verdict.module = None;
         verdict.precondicion = Some(expr::parse_expresion("locals.flag").unwrap());
         verdict.condicion = Some(expr::parse_expresion("locals.flag == true").unwrap());
 
@@ -2557,6 +2556,7 @@ mod tests {
         };
         let mut verdict = DefinicionPaso::nuevo("verdict", 1);
         verdict.tipo = TipoPaso::PassFail;
+        verdict.module = None;
         verdict.disable = true;
         verdict.condicion = Some(expr::parse_expresion("true").unwrap());
         def.pasos_main = vec![verdict];
@@ -2640,11 +2640,13 @@ mod tests {
         };
         let mut setup = DefinicionPaso::nuevo("comprobar_banco", 1);
         setup.tipo = TipoPaso::PassFail;
+        setup.module = None;
         setup.condicion = Some(expr::parse_expresion("false").unwrap());
         def.pasos_setup = vec![setup];
 
         let mut verdict = DefinicionPaso::nuevo("verdict", 1);
         verdict.tipo = TipoPaso::PassFail;
+        verdict.module = None;
         verdict.condicion = Some(expr::parse_expresion("true").unwrap());
         def.pasos_main = vec![verdict];
 
