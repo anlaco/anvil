@@ -82,6 +82,9 @@
     <footer class="status" id="status">
       <span class="light" id="status-light" data-state="unknown"></span>
       <span id="status-text">no file open</span>
+      <!-- Which editor this is and which engine Run uses. Filled in only inside
+           the desktop shell, which is the only place both are known. -->
+      <span class="versions" id="versions" hidden></span>
     </footer>
 
     <script type="module" src="/src/app.mjs"></script>

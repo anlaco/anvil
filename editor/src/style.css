@@ -509,6 +509,26 @@ button:focus-visible {
   color: var(--stale);
 }
 
+/* The status message may be long — an engine that was not found says where
+ * it looked — so it takes the room and wraps; the versions keep their corner. */
+#status-text {
+  flex: 1;
+  min-width: 0;
+}
+
+.versions {
+  flex: none;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+/* The editor validates with the engine it carries and runs with the one
+ * installed; when their versions differ it should be seen, not read. */
+.versions[data-mismatch="true"] .engine {
+  color: var(--error);
+  font-weight: 600;
+}
+
 /* The staleness mark of AP-12: the step view is showing the last tree that
  * parsed, not what is in the text right now. It has to be visible without
  * being read — nobody reads a status bar while typing. */
