@@ -9,7 +9,7 @@
 # fail by limit, ADR-0008; Main stops there):
 #   === variables_demo: fail ===
 #     [pass] demo/connect: instrument connected (attempt 2)
-#     [pass] init_log: statement ok
+#     [done] init_log: statement ok
 #     [fail] demo/measure_voltage: 4.2 fuera de rango [4.5, 5.5]
 #     [pass] demo/disconnect: instrument disconnected
 # `paso_obsoleto` and `demo/check_led` are never reached: Main stops at the
@@ -61,8 +61,11 @@ main:
       voltaje_leido: '${result.measured_value}'
       ok: '${result.status == "pass"}'
 
-  # Disabled step (RF-34): recorded as "skipped", not invoked.
+  # Disabled step (RF-34): recorded as "skipped", not invoked. It still names
+  # its executor: turning a step off does not make it stop being a step that
+  # calls one.
   - name: paso_obsoleto
+    executor: demo
     disable: true
 
   # pause_on_fail (RF-34): if this step failed, Main would stop. It is not

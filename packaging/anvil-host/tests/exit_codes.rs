@@ -224,6 +224,32 @@ fn valida(secuencia: &str) -> Output {
         .expect("lanzar anvil")
 }
 
+/// Every example sequence loads. Examples are what a reader copies, and a
+/// loader change can break one nobody runs: removing the embedded executor
+/// left `variables.yaml` refusing to load for a disabled step with no
+/// `executor:`, and no test noticed.
+///
+/// Not sequences on their own, and so left out: a limits sidecar, and a file
+/// that is only ever called as a subsequence.
+#[test]
+fn every_example_sequence_validates() {
+    const NOT_A_ROOT: [&str; 2] = ["limites.limits.yaml", "medir_fuentes.yaml"];
+    let mut checked = 0;
+    for entry in std::fs::read_dir(raiz_repo().join("ejemplos")).expect("read ejemplos/") {
+        let path = entry.expect("dir entry").path();
+        let name = path.file_name().unwrap().to_string_lossy().into_owned();
+        let is_sequence = name.ends_with(".yaml") || name.ends_with(".yseq");
+        if !is_sequence || NOT_A_ROOT.contains(&name.as_str()) {
+            continue;
+        }
+        let s = valida(&format!("ejemplos/{name}"));
+        let err = String::from_utf8_lossy(&s.stderr);
+        assert_eq!(codigo(&s), 0, "ejemplos/{name} does not load:\n{err}");
+        checked += 1;
+    }
+    assert!(checked >= 10, "only {checked} examples were checked");
+}
+
 #[test]
 fn validate_de_una_secuencia_correcta_sale_con_cero() {
     // La línea base que faltaba: sin ella, cualquier test de abajo pasaría en
