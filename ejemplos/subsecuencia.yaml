@@ -10,7 +10,12 @@
 # subsequence's `parameters.P` (input when it starts, output on return). The
 # second call's `assign` dumps the call's aggregate status (`result.status`)
 # into `locals.estado_fuentes`.
+#
+# `executors:` is declared here, in the root: the external subsequence's steps
+# use `demo` too, and a subsequence file declares no executors of its own.
 name: basica
+executors:
+  - { name: demo, type: wasm, path: departamento/dist/anvil-exec-wasm }
 locals:
   canal_in: 0.5
   ok_init: false

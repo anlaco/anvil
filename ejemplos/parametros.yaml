@@ -1,4 +1,4 @@
-# A step's parameters and outputs (ADR-0020).
+# A step's inputs and outputs (ADR-0020).
 #
 # Until ADR-0020 a step only received its name and the attempt number, so the
 # channel to measure was hard-coded inside the step's code: changing it meant
@@ -7,8 +7,11 @@
 #
 # Run:
 #   ./anvil ejemplos/parametros.yaml --json /tmp/r.json
-#   # and look at "parametros" and "salidas" of each step in the JSON.
+#   # and look at "inputs" and "outputs" of each step in the JSON.
 name: parametros
+
+executors:
+  - { name: demo, type: wasm, path: departamento/dist/anvil-exec-wasm }
 
 locals:
   # The channel is declared once here and used below with `${...}`.
@@ -16,19 +19,20 @@ locals:
   temperatura_leida: 0.0
 
 main:
-  # A literal (`offset`) and an expression (`canal`). Both reach the step
+  # A literal (`offset`) and an expression (`channel`). Both reach the step
   # already evaluated: the step does not see `locals`, it is handed values.
-  - name: medir_voltaje
+  - name: demo/measure_voltage
+    executor: demo
     retries: 1
     inputs:
-      canal: '${locals.canal_activo}'
+      channel: '${locals.canal_activo}'
       offset: 0.05
     limit: { type: range, min: 4.2, max: 4.5 }
-    # `salidas` are the named values the step returns besides the measurement.
+    # Outputs are the named values the step returns besides the measurement.
     # They take no part in the verdict: the limit above is evaluated against
-    # `valor_medido` and nothing else (ADR-0008).
+    # the measured value and nothing else (ADR-0008).
     assign:
-      temperatura_leida: result.outputs.temperatura
+      temperatura_leida: result.outputs.temperature
 
   # And they can already be used like any other variable.
   - name: temperatura_en_rango

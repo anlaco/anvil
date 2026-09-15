@@ -6,6 +6,9 @@
 #   - It mutates it (`parameters.canal = parameters.canal + 1.0`) with a statement.
 #   - On return, the engine copies `parameters.canal` (final) to the parent's
 #     `locals.canal_in` (the same lvalue as the input).
+#
+# It declares no `executors:`: a subsequence file cannot, and `demo` is the
+# executor of the sequence that calls it.
 name: medir_fuentes
 parameters:
   canal: 0.0
@@ -13,14 +16,16 @@ main:
   - name: ajustar_canal
     type: statement
     statement: 'parameters.canal = parameters.canal + 1.0'
-  - name: medir_voltaje
+  - name: demo/measure_voltage
     type: grpc
+    executor: demo
     retries: 1
     limit:
       type: range
       min: 4.0
       max: 5.0
 cleanup:
-  - name: desconectar_equipo
+  - name: demo/disconnect
     type: grpc
+    executor: demo
     retries: 1

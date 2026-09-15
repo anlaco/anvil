@@ -1,32 +1,36 @@
-# Example sequence for M3: limit test (embedded range) + action, meant to run
-# with the limits sidecar `limites.limits.yaml` (property loader, RF-30).
+# Limit test + action, meant to run with the limits sidecar
+# `limites.limits.yaml` (property loader, RF-30).
 #
-# Without the sidecar: medir_voltaje measures 4.2 V against the embedded
-# 4.5–5.5 range and the engine declares it a fail (Main stops there). With the
-# sidecar, medir_voltaje's limit becomes a comparison (>= 4.0): 4.2 meets it
-# and the sequence passes. Changing the verdict without touching the sequence
-# is the value of the property loader.
+# Without the sidecar: demo/measure_voltage reads 4.2 V against the 4.5–5.5
+# range written here and the engine declares it a fail (Main stops there). With
+# the sidecar, the limit becomes a comparison (>= 4.0): 4.2 meets it and the
+# sequence passes. Changing the verdict without touching the sequence is the
+# value of the property loader.
 #
-# Run (with the step executor up in another terminal):
-#   wasmtime -S cli -S tcp=y -S inherit-network=y --dir=. \
-#     target/wasm32-wasip2/debug/anvil.wasm ejemplos/limites.yaml \
-#     --limits ejemplos/limites.limits.yaml --json /tmp/out.json
+#   ./anvil ejemplos/limites.yaml --limits ejemplos/limites.limits.yaml
 
 name: limites
+executors:
+  - { name: demo, type: wasm, path: departamento/dist/anvil-exec-wasm }
 setup:
-  - name: abrir_rele        # action (RF-27): technical success, no measurement
+  - name: demo/open_relay        # action (RF-27): technical success, no measurement
+    executor: demo
     retries: 1
-  - name: conectar_equipo
+  - name: demo/connect
+    executor: demo
     retries: 3
 main:
-  - name: medir_voltaje     # limit test (RF-26): the engine evaluates the range
+  - name: demo/measure_voltage   # limit test (RF-26): the engine evaluates the range
+    executor: demo
     retries: 1
     limit:
       type: range
       min: 4.5
       max: 5.5
-  - name: verificar_led      # pass/fail (RF-25)
+  - name: demo/check_led         # pass/fail (RF-25)
+    executor: demo
     retries: 1
 cleanup:
-  - name: desconectar_equipo
+  - name: demo/disconnect
+    executor: demo
     retries: 1

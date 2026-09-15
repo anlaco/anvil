@@ -1,10 +1,11 @@
 # Limits sidecar for ejemplos/limites.yaml (RF-30, property loader).
-# Overrides medir_voltaje's limit: the embedded 4.5–5.5 range becomes a
-# comparison (>= 4.0), which 4.2 does meet. So the sequence passes without
-# touching the flow — in production the threshold changes per lot/variant, not
-# in the sequence's YAML. The sidecar wins over the embedded limit (ADR-0008).
+# Overrides demo/measure_voltage's limit: the 4.5–5.5 range written in the
+# sequence becomes a comparison (>= 4.0), which 4.2 does meet. So the sequence
+# passes without touching the flow — in production the threshold changes per
+# lot/variant, not in the sequence's YAML. The sidecar wins over the limit in
+# the sequence (ADR-0008).
 
-medir_voltaje:
+demo/measure_voltage:
   type: comparison
   op: ge
   expected: 4.0

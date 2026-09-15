@@ -7,27 +7,31 @@
 # beta report: 131 of 180 sequences ended that way).
 #
 # Anvil's three ways of failing, together and in order:
-#   1. the STEP decides           → verificar_led (classic pass/fail, RF-25)
-#   2. the ENGINE evaluates the LIMIT → medir_voltaje (RF-29, ADR-0008)
+#   1. the STEP decides               → demo/check_led (classic pass/fail, RF-25)
+#   2. the ENGINE evaluates the LIMIT → demo/measure_voltage (RF-29, ADR-0008)
 #   3. the ENGINE evaluates the CONDITION over variables → verificar_dut (ADR-0018)
 #
 # Run:
 #   ./anvil ejemplos/veredicto.yaml
 #
-# Expected result: medir_voltaje measures 4.2, inside its loose limit
-# (4.0–6.0) → `paso`; but the product's real criterion is narrower (4.9–5.1),
-# so `verificar_dut` declares it `fallo` and Main stops:
-#   === veredicto: fallo ===
-#     [paso]  abrir_rele: relé abierto
-#     [paso]  medir_voltaje: medido: 4.2 V
-#     [paso]  verificar_led: led encendido
-#     [fallo] verificar_dut: condición no cumplida
-# `desconectar_equipo` does run: Cleanup always runs.
+# Expected result: demo/measure_voltage reads 4.2, inside its loose limit
+# (4.0–6.0) → `pass`; but the product's real criterion is narrower (4.9–5.1),
+# so `verificar_dut` declares it `fail` and Main stops:
+#   === veredicto: fail ===
+#     [pass] demo/open_relay: relay open
+#     [pass] demo/measure_voltage: measured: 4.2 V (channel 1)
+#     [pass] demo/check_led: led on
+#     [fail] verificar_dut: condición no cumplida
+#     [pass] demo/disconnect: instrument disconnected
+# `demo/disconnect` does run: Cleanup always runs.
 #
-# Try relaxing the condition to `locals.voltaje > 4.0` and you will see the
-# whole sequence pass.
+# Try relaxing the condition to `locals.voltaje > 4.0 && locals.led_ok` and you
+# will see the whole sequence pass.
 
 name: veredicto
+
+executors:
+  - { name: demo, type: wasm, path: departamento/dist/anvil-exec-wasm }
 
 # The verdict is evaluated over variables, so they have to be dumped first
 # with `assign`. They must be declared (the loader requires it).
@@ -36,13 +40,15 @@ locals:
   led_ok: false
 
 setup:
-  - name: abrir_rele
+  - name: demo/open_relay
+    executor: demo
     retries: 1
 
 main:
   # (2) Loose limit: the engine evaluates it and it passes. It is the "is it
   # alive", not the product criterion.
-  - name: medir_voltaje
+  - name: demo/measure_voltage
+    executor: demo
     retries: 1
     limit:
       type: range
@@ -52,10 +58,11 @@ main:
       voltaje: '${result.measured_value}'
 
   # (1) Classic pass/fail: the step decides, with no measurement.
-  - name: verificar_led
+  - name: demo/check_led
+    executor: demo
     retries: 1
     assign:
-      led_ok: '${result.status == "paso"}'
+      led_ok: '${result.status == "pass"}'
 
   # (3) The composite verdict: combines the two measurements above. The engine
   # evaluates it; the step takes no part. `false` → fail, and Main stops here.
@@ -66,5 +73,6 @@ main:
     condition: 'locals.voltaje > 4.9 && locals.voltaje < 5.1 && locals.led_ok'
 
 cleanup:
-  - name: desconectar_equipo
+  - name: demo/disconnect
+    executor: demo
     retries: 1

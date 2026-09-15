@@ -4400,7 +4400,7 @@ main:
         let prog = cargar_programa_de_archivo(&ruta)
             .unwrap_or_else(|e| panic!("no carga el programa {ruta}: {e}"));
         assert_eq!(prog.raiz.nombre, "demo_ejecutores");
-        assert_eq!(prog.ejecutores.len(), 2, "embebido + python");
+        assert_eq!(prog.ejecutores.len(), 2, "demo + python");
         assert_eq!(
             prog.ejecutores["python"].tipo,
             TipoEjecutor::Grpc {
@@ -4409,8 +4409,9 @@ main:
             }
         );
         assert_eq!(
-            prog.raiz.pasos_main[0].ejecutor, None,
-            "verificar_led → embebido"
+            prog.raiz.pasos_main[0].ejecutor.as_deref(),
+            Some("demo"),
+            "demo/check_led → demo"
         );
         assert_eq!(
             prog.raiz.pasos_main[1].ejecutor.as_deref(),
@@ -4593,6 +4594,10 @@ cleanup:
             dir.join("medir_fuentes.yaml"),
         )
         .unwrap();
+        // The copied sequence declares the demo bench's executor by path, and
+        // the loader checks that path exists.
+        std::fs::create_dir_all(dir.join("departamento/dist")).unwrap();
+        std::fs::write(dir.join("departamento/dist/anvil-exec-wasm"), b"").unwrap();
         let prog = cargar_programa_con_pm(
             dir.join("pm.yaml").to_str().unwrap(),
             dir.join("subsecuencia.yaml").to_str().unwrap(),
@@ -4675,28 +4680,6 @@ cleanup:
         )
         .unwrap();
         assert_eq!(prog.raiz.nombre, "sequential");
-    }
-
-    #[test]
-    fn ejemplo_sequential_carga_como_programa() {
-        // El PM canónico de `process_models/sequential.yaml` envuelve a
-        // `ejemplos/basica.yaml`. Smoke de integración de la convención.
-        let pm = format!(
-            "{}/../../process_models/sequential.yaml",
-            env!("CARGO_MANIFEST_DIR")
-        );
-        let usuario = format!("{}/../../ejemplos/basica.yaml", env!("CARGO_MANIFEST_DIR"));
-        let prog = cargar_programa_con_pm(&pm, &usuario)
-            .unwrap_or_else(|e| panic!("no carga el PM {pm} con {usuario}: {e}"));
-        assert_eq!(prog.raiz.nombre, "sequential");
-        let call = &prog.raiz.pasos_main[0];
-        assert_ne!(call.secuencia.as_deref().unwrap(), SECUENCIA_USUARIO);
-        assert_eq!(
-            prog.archivos
-                .get(call.secuencia.as_deref().unwrap())
-                .map(|d| d.nombre.as_str()),
-            Some("basica")
-        );
     }
 
     // --- Issue #19: leer una variable no declarada es error de carga ---
@@ -4968,7 +4951,7 @@ main:
     }
 
     /// `estado` y `mensaje` sí los produce un sequence call: siguen valiendo.
-    /// Protege a `process_models/sequential.yaml` y `ejemplos/subsecuencia.yaml`.
+    /// Protege a `ejemplos/subsecuencia.yaml` y a cualquier process model que lo use.
     #[test]
     fn asigna_de_estado_en_un_sequence_call_sigue_siendo_valido() {
         let s = cargar_de_texto(

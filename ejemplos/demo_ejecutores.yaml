@@ -1,6 +1,6 @@
 # Demo of multi-endpoint routing (M5-ext.1, RF-36.3).
 #
-# No Docker, no `.wasm`: the embedded executor (WASM, built-in) serves one step
+# A WASM component (the demo bench, served by `anvil-exec-wasm`) serves one step
 # and a Python executor on loopback serves two others. The engine dispatches
 # by name→endpoint (`executor:` on the step → `executors:` in the YAML); it
 # neither knows nor cares what is behind each endpoint (ADR-0013).
@@ -11,11 +11,8 @@
 #   # terminal 2: Python executor on loopback (127.0.0.1:9101). Its steps
 #   # live in executors/python/steps/, not inside server.py (ADR-0021).
 #   cd executors/python && python3 server.py
-#   # terminal 3: Anvil (embedded host, ADR-0011)
+#   # terminal 3: Anvil, which starts the demo bench itself
 #   ./anvil ejemplos/demo_ejecutores.yaml --json /tmp/out.json
-#
-# (Alternative without the host: wasmtime run anvil.wasm ... with the embedded
-#  executor already up on 9100 — see guia-inicio-rapido.md.)
 #
 # Variant with an executor override (R&D vs. factory, the --limits pattern):
 #   ./anvil ejemplos/demo_ejecutores.yaml --executor python=127.0.0.1:9200
@@ -27,16 +24,15 @@
 
 name: demo_ejecutores
 executors:
-  - name: embebido
-    type: embedded
+  - { name: demo, type: wasm, path: departamento/dist/anvil-exec-wasm }
   - name: python
     type: grpc
     host: 127.0.0.1
     port: 9101
 main:
-  # Built-in step: served by the embedded WASM executor (the default one). It
-  # declares no `executor` → embedded by default.
-  - name: verificar_led
+  # A step of the demo bench, a WASM component: the host spawns its executor.
+  - name: demo/check_led
+    executor: demo
     retries: 1
 
   # Step on the Python executor on loopback: the engine dispatches over gRPC

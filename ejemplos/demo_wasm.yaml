@@ -15,10 +15,8 @@
 #      ejemplos/departamento/dist/
 #
 # Start-up (from the repo root):
-#   cargo build --target wasm32-wasip2 -p motor -p ejecutor_pasos
-#   cargo build --manifest-path executors/wasm/Cargo.toml
-#   cargo build --manifest-path packaging/anvil-host/Cargo.toml
-#   ./packaging/anvil-host/target/debug/anvil ejemplos/demo_wasm.yaml --json out.json
+#   make release
+#   ./packaging/anvil-host/target/release/anvil ejemplos/demo_wasm.yaml --json out.json
 #
 # (The `path:` is relative to the YAML's directory (`ejemplos/`) and points
 # **at the executor's binary** (ADR-0027), not at the `.wasm`: the executor
@@ -27,15 +25,14 @@
 
 name: demo_wasm
 executors:
-  - name: embebido
-    type: embedded
   - name: mi_paso_wasm
     type: wasm
     path: departamento/dist/anvil-exec-wasm
 main:
-  # Built-in step: served by the embedded WASM executor (the default one). It
-  # declares no `executor` → embedded by default.
-  - name: verificar_led
+  # A step of another module in the same department: one executor serves every
+  # module next to its binary (ADR-0025), so `demo` and `hola_paso` share it.
+  - name: demo/check_led
+    executor: mi_paso_wasm
     retries: 1
 
   # Step in the `.wasm` loaded by path: the host spawns the bridge, which calls

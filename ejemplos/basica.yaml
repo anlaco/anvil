@@ -1,27 +1,37 @@
-# Example sequence "basica", expressed as data (ADR-0002).
-# It is the same content as crates/motor/src/bin/basica_datos.rs, but in
-# YAML: loading it with `anvil ejemplos/basica.yaml` produces the same
-# execution as the reference binary.
+# The basic example: setup, main and cleanup against the demo bench.
 #
-# M1/M3 schema: name, retries, the three sections and, since M3, the
-# per-step `limit` (RF-29). medir_voltaje's threshold lives here, not in the
-# step's code: the step measures 4.2 V and the engine evaluates the 4.5–5.5
-# range (ADR-0008). Fields from later milestones (disable, pause_on_fail,
-# etc.) are still rejected — they arrive in M4.
+# The steps are served by `demo`, a WASM component in the example department,
+# which `anvil-exec-wasm` serves from next to its own binary (ADR-0025,
+# ADR-0041). Nothing else needs to be installed or started.
+#
+# `demo/measure_voltage` reads 4.2 V and the threshold lives here, not in the
+# step: the engine judges the reading against the 4.5–5.5 range (ADR-0008), so
+# this sequence fails on purpose.
+#
+#   === basica: fail ===
+#     [pass] demo/connect: instrument connected (attempt 2)
+#     [fail] demo/measure_voltage: 4.2 fuera de rango [4.5, 5.5]
+#     [pass] demo/disconnect: instrument disconnected
 
 name: basica
+executors:
+  - { name: demo, type: wasm, path: departamento/dist/anvil-exec-wasm }
 setup:
-  - name: conectar_equipo
+  - name: demo/connect
+    executor: demo
     retries: 3
 main:
-  - name: medir_voltaje
+  - name: demo/measure_voltage
+    executor: demo
     retries: 1
     limit:
       type: range
       min: 4.5
       max: 5.5
-  - name: verificar_led
+  - name: demo/check_led
+    executor: demo
     retries: 1
 cleanup:
-  - name: desconectar_equipo
+  - name: demo/disconnect
+    executor: demo
     retries: 1
