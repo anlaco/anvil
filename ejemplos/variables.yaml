@@ -1,31 +1,33 @@
-# M4-núcleo: variables, precondición, asigna, statement y control de flujo.
+# M4-core: variables, precondition, assign, statement and flow control.
 #
-# Ejercita los scopes (RF-31), la precondición (RF-33), el control de flujo
-# (RF-34: disable / pause_on_fail), el paso `statement` local (RF-27) y el
-# vuelcado de `resultado` a `Locals` con `asigna`. El cableo al paso por el
-# wire es post-MVP: las variables viven en el motor; el paso gRPC no las recibe.
+# Exercises the scopes (RF-31), the precondition (RF-33), flow control
+# (RF-34: disable / pause_on_fail), the local `statement` step (RF-27) and
+# dumping `result` into `Locals` with `assign`. Wiring them to the step over
+# the wire is post-MVP: the variables live in the engine; the gRPC step does
+# not receive them.
 #
-# Resultado esperado (medir_voltaje mide 4.2 contra el rango 4.5–5.5 → fallo
-# por límite, ADR-0008; Main corta ahí):
+# Expected result (medir_voltaje measures 4.2 against the 4.5–5.5 range →
+# fail by limit, ADR-0008; Main stops there):
 #   === variables_demo: fallo ===
 #     [paso] init_log: statement ok
 #     [paso] medir_voltaje: 4.2 fuera de rango [4.5, 5.5]
 #     [saltado] paso_obsoleto: disable
-# Estado agregado: "fallo" (hay un fallo; saltado no cuenta). `verificar_led`
-# no se invoca: Main corta en el primer fallo (pause_on_fail refuerza).
+# Aggregate status: "fallo" (there is a fail; skipped does not count).
+# `verificar_led` is not invoked: Main stops at the first fail (pause_on_fail
+# reinforces it).
 
 name: variables_demo
 
-# Globales del archivo: visibles en toda la ejecución. El motor las carga al
-# iniciar la secuencia. Inmutables durante un paso.
+# File globals: visible to the whole execution. The engine loads them when the
+# sequence starts. Immutable during a step.
 file_globals:
-  lote: "A-2026-08"   # texto
-  umbral_min: 4.5      # número
+  lote: "A-2026-08"   # text
+  umbral_min: 4.5      # number
 
-# Parámetros vacíos: en M4-núcleo no hay sequence call (reservado para M4b).
+# Empty parameters: in M4-core there is no sequence call (reserved for M4b).
 parameters: {}
 
-# Locales de la secuencia: mutables por `asigna` durante la ejecución.
+# The sequence's locals: mutable by `assign` during the execution.
 locals:
   voltaje_leido: 0.0
   ok: false
@@ -35,13 +37,14 @@ setup:
     retries: 3
 
 main:
-  # Statement local (RF-27): ejecuta una asignación en el motor, sin gRPC.
+  # Local statement (RF-27): runs an assignment in the engine, with no gRPC.
   - name: init_log
     type: statement
     statement: 'locals.ok = false'
 
-  # Paso gRPC con precondición (RF-33): sólo mide si hay lote definido. Si la
-  # precondición fuera falsa, el paso se saltaría sin gastar intento.
+  # gRPC step with a precondition (RF-33): it only measures if a lot is
+  # defined. If the precondition were false, the step would be skipped without
+  # spending an attempt.
   - name: medir_voltaje
     retries: 1
     precondition: 'file_globals.lote != ""'
@@ -49,21 +52,22 @@ main:
       type: range
       min: 4.5
       max: 5.5
-    # Asigna (RF-31): vuelca campos de `resultado` a Locals tras el paso.
+    # Assign (RF-31): dumps `result` fields into Locals after the step.
     assign:
       voltaje_leido: '${result.measured_value}'
       ok: '${result.status == "paso"}'
 
-  # Paso deshabilitado (RF-34): se registra como "saltado", no se invoca.
+  # Disabled step (RF-34): recorded as "saltado", not invoked.
   - name: paso_obsoleto
     disable: true
 
-  # pause_on_fail (RF-34): si este paso fallara, Main se detendría. Aquí no se
-  # llega: medir_voltaje falla antes y Main corta en el primer fallo.
+  # pause_on_fail (RF-34): if this step failed, Main would stop. It is not
+  # reached here: medir_voltaje fails first and Main stops at the first fail.
   #
-  # Se llamaba `verificar_frecuencia`, que no lo sirve ningún ejecutor. Nunca
-  # dio guerra porque Main corta antes de llegar — hasta que alguien tocase el
-  # límite de arriba. Es justo el fallo latente que ADR-0021 caza al arrancar.
+  # It used to be called `verificar_frecuencia`, which no executor serves. It
+  # never caused trouble because Main stops before reaching it — until someone
+  # touched the limit above. It is exactly the latent failure ADR-0021 catches
+  # at start-up.
   - name: verificar_led
     retries: 1
     pause_on_fail: true

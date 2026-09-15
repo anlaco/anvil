@@ -1,13 +1,13 @@
-# Secuencia de ejemplo "basica", expresada como datos (ADR-0002).
-# Es el mismo contenido que crates/motor/src/bin/basica_datos.rs, pero en
-# YAML: cargarla con `anvil ejemplos/basica.yaml` produce la misma
-# ejecución que el binario de referencia.
+# Example sequence "basica", expressed as data (ADR-0002).
+# It is the same content as crates/motor/src/bin/basica_datos.rs, but in
+# YAML: loading it with `anvil ejemplos/basica.yaml` produces the same
+# execution as the reference binary.
 #
-# Schema de M1/M3: nombre, reintentos, las tres secciones y, desde M3, el
-# `limite` por paso (RF-29). El umbral de medir_voltaje vive aquí, no en el
-# código del paso: el paso mide 4.2 V y el motor evalúa el rango 4.5–5.5
-# (ADR-0008). Campos de hitos posteriores (disable, pause_on_fail, etc.)
-# aún se rechazan —llegan en M4.
+# M1/M3 schema: name, retries, the three sections and, since M3, the
+# per-step `limit` (RF-29). medir_voltaje's threshold lives here, not in the
+# step's code: the step measures 4.2 V and the engine evaluates the 4.5–5.5
+# range (ADR-0008). Fields from later milestones (disable, pause_on_fail,
+# etc.) are still rejected — they arrive in M4.
 
 name: basica
 setup:

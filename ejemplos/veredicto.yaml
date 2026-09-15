@@ -1,36 +1,36 @@
-# Veredicto compuesto con `tipo: pass_fail` (RF-25, ADR-0018).
+# Composite verdict with `type: pass_fail` (RF-25, ADR-0018).
 #
-# El criterio de aceptación que combina VARIAS medidas, que es lo que un
-# ingeniero de test escribe al final de una secuencia. Hasta ADR-0018 no había
-# forma de expresarlo: un `statement` sólo asigna, así que el veredicto acababa
-# en un local que nadie volvía a leer y la secuencia salía verde igualmente
-# (DIAG-2 del informe de beta: 131 de 180 secuencias terminaban así).
+# The acceptance criterion that combines SEVERAL measurements, which is what a
+# test engineer writes at the end of a sequence. Until ADR-0018 there was no
+# way to express it: a `statement` only assigns, so the verdict ended up in a
+# local nobody read again and the sequence came out green anyway (DIAG-2 of the
+# beta report: 131 of 180 sequences ended that way).
 #
-# Las tres formas de fallar de Anvil, juntas y en orden:
-#   1. el PASO lo decide          → verificar_led (pass/fail clásico, RF-25)
-#   2. el MOTOR evalúa el LÍMITE  → medir_voltaje (RF-29, ADR-0008)
-#   3. el MOTOR evalúa la CONDICIÓN sobre variables → verificar_dut (ADR-0018)
+# Anvil's three ways of failing, together and in order:
+#   1. the STEP decides           → verificar_led (classic pass/fail, RF-25)
+#   2. the ENGINE evaluates the LIMIT → medir_voltaje (RF-29, ADR-0008)
+#   3. the ENGINE evaluates the CONDITION over variables → verificar_dut (ADR-0018)
 #
-# Correr:
+# Run:
 #   ./anvil ejemplos/veredicto.yaml
 #
-# Resultado esperado: medir_voltaje mide 4.2, dentro de su límite laxo
-# (4.0–6.0) → `paso`; pero el criterio real del producto es más estrecho
-# (4.9–5.1), así que `verificar_dut` lo declara `fallo` y Main corta:
+# Expected result: medir_voltaje measures 4.2, inside its loose limit
+# (4.0–6.0) → `paso`; but the product's real criterion is narrower (4.9–5.1),
+# so `verificar_dut` declares it `fallo` and Main stops:
 #   === veredicto: fallo ===
 #     [paso]  abrir_rele: relé abierto
 #     [paso]  medir_voltaje: medido: 4.2 V
 #     [paso]  verificar_led: led encendido
 #     [fallo] verificar_dut: condición no cumplida
-# `desconectar_equipo` sí corre: el Cleanup corre siempre.
+# `desconectar_equipo` does run: Cleanup always runs.
 #
-# Prueba a relajar la condición a `locals.voltaje > 4.0` y verás que la
-# secuencia entera pasa.
+# Try relaxing the condition to `locals.voltaje > 4.0` and you will see the
+# whole sequence pass.
 
 name: veredicto
 
-# El veredicto se evalúa sobre variables, así que hay que volcarlas primero
-# con `asigna`. Deben estar declaradas (el cargador lo exige).
+# The verdict is evaluated over variables, so they have to be dumped first
+# with `assign`. They must be declared (the loader requires it).
 locals:
   voltaje: 0.0
   led_ok: false
@@ -40,8 +40,8 @@ setup:
     retries: 1
 
 main:
-  # (2) Límite laxo: el motor lo evalúa y pasa. Es el "está vivo", no el
-  # criterio de producto.
+  # (2) Loose limit: the engine evaluates it and it passes. It is the "is it
+  # alive", not the product criterion.
   - name: medir_voltaje
     retries: 1
     limit:
@@ -51,16 +51,16 @@ main:
     assign:
       voltaje: '${result.measured_value}'
 
-  # (1) Pass/fail clásico: lo decide el paso, sin medida.
+  # (1) Classic pass/fail: the step decides, with no measurement.
   - name: verificar_led
     retries: 1
     assign:
       led_ok: '${result.status == "paso"}'
 
-  # (3) El veredicto compuesto: combina las dos medidas anteriores. Lo evalúa
-  # el motor; el paso no interviene. `false` → fallo, y Main corta aquí.
-  # No admite `reintentos > 1`: evalúa una expresión pura, el resultado no
-  # cambiaría entre intentos.
+  # (3) The composite verdict: combines the two measurements above. The engine
+  # evaluates it; the step takes no part. `false` → fail, and Main stops here.
+  # It does not accept `retries > 1`: it evaluates a pure expression, the
+  # result would not change between attempts.
   - name: verificar_dut
     type: pass_fail
     condition: 'locals.voltaje > 4.9 && locals.voltaje < 5.1 && locals.led_ok'
