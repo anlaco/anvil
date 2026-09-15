@@ -23,6 +23,8 @@ locals:
 
 main:
   - name: dmm/measure_voltage
+    type: action
+    module: dmm/measure_voltage
     executor: bench
     inputs: { channel: '${parameters.channel}' }
     assign:
@@ -61,9 +63,13 @@ subsequences:
   power_up:
     setup:
       - name: fixture/power_on
+        type: action
+        module: fixture/power_on
         executor: bench
     main:
       - name: board/check_led
+        type: pass_fail
+        module: board/check_led
         executor: bench
 
 main:
@@ -87,6 +93,8 @@ main:
 
 cleanup:
   - name: fixture/power_off
+    type: action
+    module: fixture/power_off
     executor: bench
 ```
 
@@ -94,16 +102,16 @@ cleanup:
 $ anvil sequences/board.yseq 2>/dev/null
 === board: pass ===
   [pass] power_up: sequence call 'power_up' → pass
-    [pass] fixture/power_on: 
+    [done] fixture/power_on: 
     [pass] board/check_led: 
   [pass] measure_3v3: sequence call 'sequences/rail-check.yseq' → pass
-    [pass] dmm/measure_voltage: range auto
-    [pass] return_volts: statement ok
+    [done] dmm/measure_voltage: range auto
+    [done] return_volts: statement ok
   [pass] measure_1v1: sequence call 'sequences/rail-check.yseq' → pass
-    [pass] dmm/measure_voltage: range auto
-    [pass] return_volts: statement ok
+    [done] dmm/measure_voltage: range auto
+    [done] return_volts: statement ok
   [pass] rails_in_spec: condición cumplida
-  [pass] fixture/power_off: 
+  [done] fixture/power_off: 
 ```
 
 - **`subsequences`** holds `power_up`, a subsequence that lives in this file. It

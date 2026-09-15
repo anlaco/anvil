@@ -21,8 +21,10 @@ executors:
 
 main:
   - name: board/measure_rail
+    type: numeric_limit
+    module: board/measure_rail
     executor: bench
-    limit: { type: range, min: 4.75, max: 5.25 }
+    limit: { comparison: GELE, low: 4.75, high: 5.25 }
 ```
 
 It is YAML. Line by line:
@@ -32,10 +34,16 @@ It is YAML. Line by line:
   `name` you choose, a `type` — `grpc` for a process listening on a port, as
   your C# executor is — and where to find it.
 - **`main`** is the list of steps to run. Chapter 6 adds `setup` and `cleanup`.
-- Each step has the **`name`** the executor publishes and the **`executor`**
-  that serves it, by the name you gave it above.
-- **`limit`** is the acceptance criterion: a `range` passes when the
-  measurement is between `min` and `max`.
+- Each step has a **`name`**, which is how the report shows it, and a
+  **`type`**, which says how it is judged. `numeric_limit` judges a number
+  against a limit; chapter 5 shows the others. They are TestStand's step types.
+- **`module`** is what the step calls — the name the executor publishes — and
+  **`executor`** is who serves it, by the name you gave it above. Here the
+  step is named after its module; two steps calling one module with different
+  inputs would each get a name of their own.
+- **`limit`** is the acceptance criterion, in TestStand's terms: `GELE` passes
+  when the measurement is greater than or equal to `low` and less than or equal
+  to `high`.
 
 **Every step that calls an executor names it with `executor:`.** Anvil has no
 executor of its own to fall back on, so a step without one is refused when the
@@ -97,6 +105,8 @@ executors:
 
 main:
   - name: board/measure_rial
+    type: pass_fail
+    module: board/measure_rial
     executor: bench
 ```
 

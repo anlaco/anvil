@@ -64,6 +64,8 @@ locals:
 
 setup:
   - name: psu/open
+    type: action
+    module: psu/open
     executor: bench
     inputs: { resource: "TCPIP::192.168.0.50::5025::SOCKET" }
     assign:
@@ -71,16 +73,22 @@ setup:
 
 main:
   - name: psu/set_voltage
+    type: action
+    module: psu/set_voltage
     executor: bench
     inputs: { psu: '${locals.psu}', volts: 12.0 }
 
   - name: psu/measure_current
+    type: numeric_limit
+    module: psu/measure_current
     executor: bench
     inputs: { psu: '${locals.psu}' }
-    limit: { type: range, min: 0.5, max: 0.8 }
+    limit: { comparison: GELE, low: 0.5, high: 0.8 }
 
 cleanup:
   - name: psu/output_off
+    type: action
+    module: psu/output_off
     executor: bench
     inputs: { psu: '${locals.psu}' }
 ```
@@ -88,16 +96,16 @@ cleanup:
 ```console
 $ anvil sequences/supply.yseq --json supply.json 2>/dev/null
 === supply: pass ===
-  [pass] psu/open: 
-  [pass] psu/set_voltage: 
+  [done] psu/open: 
+  [done] psu/set_voltage: 
   [pass] psu/measure_current: 
-  [pass] psu/output_off: 
+  [done] psu/output_off: 
 $ grep -A 6 "\"outputs\": {$" supply.json | head -n 8
       "outputs": {
         "psu": {
           "type": "reference",
           "executor": "bench",
-          "lifetime": "ad96dffbdcf9425fb91af7bf196e34d8",
+          "lifetime": "3e4305842bd0441184334be2d7bc897c",
           "payload": "s1"
         }
 ```

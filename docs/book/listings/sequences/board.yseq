@@ -13,9 +13,13 @@ subsequences:
   power_up:
     setup:
       - name: fixture/power_on
+        type: action
+        module: fixture/power_on
         executor: bench
     main:
       - name: board/check_led
+        type: pass_fail
+        module: board/check_led
         executor: bench
 
 main:
@@ -39,4 +43,6 @@ main:
 
 cleanup:
   - name: fixture/power_off
+    type: action
+    module: fixture/power_off
     executor: bench

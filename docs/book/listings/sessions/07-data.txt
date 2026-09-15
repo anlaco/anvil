@@ -1,6 +1,6 @@
 $ anvil sequences/data.yseq --json data.json 2>/dev/null
 === data: pass ===
-  [pass] unit/read_serial: serial read
+  [done] unit/read_serial: serial read
   [pass] dmm/measure_voltage: range 10V
   [pass] board/check_led: 
   [pass] rail_in_spec: condición cumplida
@@ -13,7 +13,8 @@ $ cat data.json
   "steps": [
     {
       "name": "unit/read_serial",
-      "status": "pass",
+      "module": "unit/read_serial",
+      "status": "done",
       "phase": "main",
       "message": "serial read",
       "measured_value": null,
@@ -21,6 +22,8 @@ $ cat data.json
       "limit_max": null,
       "expected_value": null,
       "operator": null,
+      "comparison": null,
+      "units": null,
       "inputs": {},
       "outputs": {
         "serial": "SN-0042"
@@ -28,6 +31,7 @@ $ cat data.json
     },
     {
       "name": "dmm/measure_voltage",
+      "module": "dmm/measure_voltage",
       "status": "pass",
       "phase": "main",
       "message": "range 10V",
@@ -36,6 +40,8 @@ $ cat data.json
       "limit_max": 1.9,
       "expected_value": null,
       "operator": null,
+      "comparison": "GELE",
+      "units": null,
       "inputs": {
         "channel": 2.0,
         "range": "10V"
@@ -44,6 +50,7 @@ $ cat data.json
     },
     {
       "name": "board/check_led",
+      "module": "board/check_led",
       "status": "pass",
       "phase": "main",
       "message": "",
@@ -52,11 +59,14 @@ $ cat data.json
       "limit_max": null,
       "expected_value": null,
       "operator": null,
+      "comparison": null,
+      "units": null,
       "inputs": {},
       "outputs": {}
     },
     {
       "name": "rail_in_spec",
+      "module": null,
       "status": "pass",
       "phase": "main",
       "message": "condición cumplida",
@@ -65,6 +75,8 @@ $ cat data.json
       "limit_max": null,
       "expected_value": null,
       "operator": null,
+      "comparison": null,
+      "units": null,
       "inputs": {},
       "outputs": {}
     }

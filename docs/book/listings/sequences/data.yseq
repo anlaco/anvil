@@ -10,18 +10,24 @@ locals:
 
 main:
   - name: unit/read_serial
+    type: action
+    module: unit/read_serial
     executor: bench
 
   - name: dmm/measure_voltage
+    type: numeric_limit
+    module: dmm/measure_voltage
     executor: bench
     inputs:
       channel: '${locals.channel}'
       range: "10V"
-    limit: { type: range, min: 1.7, max: 1.9 }
+    limit: { comparison: GELE, low: 1.7, high: 1.9 }
     assign:
       rail: result.measured_value
 
   - name: board/check_led
+    type: pass_fail
+    module: board/check_led
     executor: bench
     assign:
       led_ok: 'result.status == "pass"'

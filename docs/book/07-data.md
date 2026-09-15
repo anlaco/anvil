@@ -66,18 +66,24 @@ locals:
 
 main:
   - name: unit/read_serial
+    type: action
+    module: unit/read_serial
     executor: bench
 
   - name: dmm/measure_voltage
+    type: numeric_limit
+    module: dmm/measure_voltage
     executor: bench
     inputs:
       channel: '${locals.channel}'
       range: "10V"
-    limit: { type: range, min: 1.7, max: 1.9 }
+    limit: { comparison: GELE, low: 1.7, high: 1.9 }
     assign:
       rail: result.measured_value
 
   - name: board/check_led
+    type: pass_fail
+    module: board/check_led
     executor: bench
     assign:
       led_ok: 'result.status == "pass"'
@@ -90,7 +96,7 @@ main:
 ```console
 $ anvil sequences/data.yseq --json data.json 2>/dev/null
 === data: pass ===
-  [pass] unit/read_serial: serial read
+  [done] unit/read_serial: serial read
   [pass] dmm/measure_voltage: range 10V
   [pass] board/check_led: 
   [pass] rail_in_spec: condición cumplida
@@ -103,7 +109,8 @@ $ cat data.json
   "steps": [
     {
       "name": "unit/read_serial",
-      "status": "pass",
+      "module": "unit/read_serial",
+      "status": "done",
       "phase": "main",
       "message": "serial read",
       "measured_value": null,
@@ -111,6 +118,8 @@ $ cat data.json
       "limit_max": null,
       "expected_value": null,
       "operator": null,
+      "comparison": null,
+      "units": null,
       "inputs": {},
       "outputs": {
         "serial": "SN-0042"
@@ -118,6 +127,7 @@ $ cat data.json
     },
     {
       "name": "dmm/measure_voltage",
+      "module": "dmm/measure_voltage",
       "status": "pass",
       "phase": "main",
       "message": "range 10V",
@@ -126,6 +136,8 @@ $ cat data.json
       "limit_max": 1.9,
       "expected_value": null,
       "operator": null,
+      "comparison": "GELE",
+      "units": null,
       "inputs": {
         "channel": 2.0,
         "range": "10V"
@@ -134,6 +146,7 @@ $ cat data.json
     },
     {
       "name": "board/check_led",
+      "module": "board/check_led",
       "status": "pass",
       "phase": "main",
       "message": "",
@@ -142,11 +155,14 @@ $ cat data.json
       "limit_max": null,
       "expected_value": null,
       "operator": null,
+      "comparison": null,
+      "units": null,
       "inputs": {},
       "outputs": {}
     },
     {
       "name": "rail_in_spec",
+      "module": null,
       "status": "pass",
       "phase": "main",
       "message": "condición cumplida",
@@ -155,6 +171,8 @@ $ cat data.json
       "limit_max": null,
       "expected_value": null,
       "operator": null,
+      "comparison": null,
+      "units": null,
       "inputs": {},
       "outputs": {}
     }
@@ -170,12 +188,14 @@ What happens there:
 - **`inputs`** gives a step its parameters. A plain value is sent as it is
   (`"10V"`); a value in `${...}` is an expression, evaluated before the step
   runs (`${locals.channel}` sends `2`).
-- **`assign`** stores something from the step's `result` in a local after it
-  runs: `result.measured_value`, or an expression such as
-  `result.status == "pass"`.
-- A step with **`type: pass_fail`** calls no executor. Anvil evaluates its
-  `condition` and the step passes or fails on it — the place for a verdict that
-  combines several measurements.
+- **`assign`** stores something from the step's `result` in a local after its
+  module answers: `result.measured_value`, or an expression such as
+  `result.status == "pass"`. It runs **before** the step is judged, so it sees
+  the module's own status, not the limit's verdict.
+- A **`pass_fail`** step with a `condition` and no `module` calls no executor.
+  Anvil evaluates its `condition` and the step passes or fails on it — the place
+  for a verdict that combines several measurements. With a `module` as well, the
+  condition can read the module's `result` too.
 
 The JSON report (chapter 10) records what each step was given in `inputs` and
 what it returned in `outputs`. That is what makes a result reconstructible
@@ -197,6 +217,8 @@ locals:
 
 main:
   - name: unit/read_serial
+    type: action
+    module: unit/read_serial
     executor: bench
     assign:
       serial: result.outputs.serial
@@ -235,16 +257,22 @@ main:
     statement: 'locals.channel = locals.channel + 2'
 
   - name: dmm/measure_voltage
+    type: numeric_limit
+    module: dmm/measure_voltage
     executor: bench
     inputs: { channel: '${locals.channel}' }
-    limit: { type: range, min: 3.0, max: 3.6 }
+    limit: { comparison: GELE, low: 3.0, high: 3.6 }
 
   - name: board/measure_leakage
+    type: numeric_limit
+    module: board/measure_leakage
     executor: bench
     precondition: 'file_globals.station == "bench-1"'
-    limit: { type: comparison, op: le, expected: 0.001 }
+    limit: { comparison: LE, low: 0.001 }
 
   - name: board/read_temperature
+    type: action
+    module: board/read_temperature
     executor: bench
     disable: true
 ```
@@ -252,7 +280,7 @@ main:
 ```console
 $ anvil sequences/flow.yseq 2>/dev/null
 === flow: pass ===
-  [pass] pick_channel: statement ok
+  [done] pick_channel: statement ok
   [pass] dmm/measure_voltage: range auto
   [skipped] board/measure_leakage: precondición falsa
   [skipped] board/read_temperature: disable
@@ -283,6 +311,8 @@ executors:
 
 main:
   - name: dmm/measure_voltage
+    type: pass_fail
+    module: dmm/measure_voltage
     executor: bench
     inputs: { chanel: 2 }
 ```

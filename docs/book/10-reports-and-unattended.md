@@ -12,17 +12,18 @@ the console. `--quiet` removes the console report:
 ```console
 $ anvil sequences/judging.yseq --quiet --csv judging.csv
 $ cat judging.csv
-sequence_name,status,step_name,step_status,message,measured_value,limit_min,limit_max,expected_value,operator,phase,inputs,outputs
-judging,pass,board/measure_rail,pass,,4.98,4.75,5.25,,,main,,
-judging,pass,board/measure_leakage,pass,,0.0004,,,0.001,<=,main,,
-judging,pass,board/check_led,pass,,,,,,,main,,
+sequence_name,status,step_name,step_status,message,measured_value,limit_min,limit_max,expected_value,operator,phase,inputs,outputs,module,comparison,units
+judging,pass,board/measure_rail,pass,,4.98,4.75,5.25,,,main,,,board/measure_rail,GELE,
+judging,pass,board/measure_leakage,pass,,0.0004,,,0.001,<=,main,,,board/measure_leakage,LE,
+judging,pass,board/check_led,pass,,,,,,,main,,,board/check_led,,
 ```
 
 One row per step. Unlike the console, the files carry the measurement and the
-limit it was judged against: `measured_value` with `limit_min` and `limit_max`
-for a range, `expected_value` and `operator` for a comparison. They also carry
-the step's `inputs` and `outputs`, and a subsequence's steps are prefixed with
-the name of their call. The JSON report has the same information, nested
+limit it was judged against: `comparison` holds the TestStand code, with
+`limit_min` and `limit_max` for a two-limit code and `expected_value` and
+`operator` for a one-limit code, and `units` when the limit has them. They also
+carry the step's `module`, its `inputs` and `outputs`, and a subsequence's steps
+are prefixed with the name of their call. The JSON report has the same information, nested
 (chapter 7 showed one).
 
 Notice that `--quiet` did not silence the diagnostics on the error stream
@@ -37,9 +38,9 @@ the sequence, by step name. `sequences/judging.limits.yaml`:
 
 ```yaml
 board/measure_rail:
-  type: range
-  min: 5.0
-  max: 5.1
+  comparison: GELE
+  low: 5.0
+  high: 5.1
 ```
 
 ```console
@@ -49,7 +50,9 @@ $ anvil sequences/judging.yseq --limits sequences/judging.limits.yaml 2>/dev/nul
 ```
 
 The same sequence, a tighter tolerance, a different verdict. The limits file
-applies to every step with that name, in subsequences too.
+applies to every step with that name, in subsequences too, and uses the same
+shape as a limit in the sequence. It can only give a limit to a
+`numeric_limit`: a name that matches a step of another type stops the run.
 
 A name that matches no step would leave the sequence's own limit in force
 without anyone noticing, so Anvil warns — even under `--quiet`. With
@@ -57,9 +60,9 @@ without anyone noticing, so Anvil warns — even under `--quiet`. With
 
 ```yaml
 board/measure_rial:
-  type: range
-  min: 5.0
-  max: 5.1
+  comparison: GELE
+  low: 5.0
+  high: 5.1
 ```
 
 ```console
