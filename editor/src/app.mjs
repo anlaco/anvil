@@ -13,6 +13,7 @@ import { yaml as yamlLang } from "@codemirror/lang-yaml";
 
 import { SequenceDocument, PHASES, SCOPES, STEP_TYPES } from "./document.mjs";
 import { browserPool, connectBridge, EngineHostError } from "./engine-pool.mjs";
+import { gatherFiles } from "./neighbours.mjs";
 import { applyEvent, newRunState, rowKey, runButton } from "./run-state.mjs";
 
 // The shell forwards this window's console to its own stdout by itself
@@ -581,7 +582,7 @@ async function validate() {
   try {
     const { exitCode, stderr } = await engine.run({
       args: [name, "--validate"],
-      files: { [name]: doc.text },
+      files: await filesFor(name, doc.text),
     });
     // The engine's own diagnostics, verbatim. Rewriting them here would mean
     // two sources for the same message, and the loader's is the one with the
@@ -631,7 +632,7 @@ async function run() {
       // native host builds argv (main.rs:604-608). `--events` is what makes the
       // run visible while it happens.
       args: [...engine.engineArgs, "--events", name],
-      files: { [name]: state.doc.text },
+      files: await filesFor(name, state.doc.text),
       onLine: onEvent,
     });
     // The verdict is the console sink's frozen header, `=== name: state ===`,
@@ -716,6 +717,23 @@ async function openBridge(url) {
 }
 
 // ---------------------------------------------------------------- files
+
+/**
+ * What the engine is handed: the document, and the files it references beside
+ * it on disk (editor/src/neighbours.mjs). Only the desktop shell can read the
+ * disk, and only for a document that is a file there; otherwise the document
+ * goes alone, and the loader says what it cannot find.
+ */
+function filesFor(name, text) {
+  const path = inShell() ? state.handle?.path : null;
+  if (!path) return gatherFiles(name, text);
+  const dir = path.slice(0, Math.max(path.lastIndexOf("/"), path.lastIndexOf("\\")));
+  const onDisk = (rel) => `${dir}/${rel}`;
+  return gatherFiles(name, text, {
+    exists: (rel) => window.anvil.fileExists(onDisk(rel)),
+    readText: (rel) => window.anvil.readTextFileIfAny(onDisk(rel)),
+  });
+}
 
 // `.yseq` first: it is a sequence's own extension and is still YAML inside.
 // `.yaml` and `.yml` stay, because sequences already exist under them

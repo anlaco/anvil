@@ -16,17 +16,17 @@
 
 import { strict as assert } from "node:assert";
 import { readFile } from "node:fs/promises";
-import { dirname, join, resolve } from "node:path";
+import { dirname, join } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 import { MessageChannel, Worker } from "node:worker_threads";
 
 import { runEngine as run } from "../src/engine.mjs";
+import { exampleFiles } from "./ejemplos.mjs";
 import { DATA_BYTES } from "../src/wasi/channel.mjs";
 import { closeOpenSockets, tcpCreateSocket, useBridge } from "../src/wasi/sockets.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
-const REPO = resolve(HERE, "..", "..");
 
 const load = (name) => readFile(join(HERE, "..", "generated", name));
 
@@ -95,10 +95,9 @@ test("a socket the guest left open is closed when it exits", async () => {
       "connecting should have reached the bridge and nothing else",
     );
 
-    const yaml = await readFile(join(REPO, "ejemplos", "basica.yaml"), "utf8");
     const { exitCode } = await run({
       args: ["basica.yaml", "--validate"],
-      files: { "basica.yaml": yaml },
+      files: await exampleFiles("basica.yaml"),
       load,
     });
     assert.equal(exitCode, 0);

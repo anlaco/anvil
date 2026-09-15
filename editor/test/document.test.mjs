@@ -33,10 +33,10 @@ test("changing a limit rewrites exactly one line", async () => {
   const original = await basica();
   const doc = new SequenceDocument(original);
 
-  // `medir_voltaje` is the second step of `main`, and its range is 4.5–5.5.
+  // `demo/measure_voltage` is the first step of `main`, and its range is 4.5–5.5.
   const steps = doc.steps("main");
-  const index = steps.findIndex((s) => s.name === "medir_voltaje");
-  assert.notEqual(index, -1, "expected medir_voltaje in main");
+  const index = steps.findIndex((s) => s.name === "demo/measure_voltage");
+  assert.notEqual(index, -1, "expected demo/measure_voltage in main");
   assert.equal(steps[index].limit.max, 5.5, "expected the fixture's 5.5 upper bound");
 
   doc.setStepLimit("main", index, "max", 6.5);
@@ -61,7 +61,7 @@ test("the header comments survive an edit", async () => {
   const commentsBefore = original.split("\n").filter((l) => l.trimStart().startsWith("#"));
   assert.ok(commentsBefore.length >= 9, "fixture should carry its header comments");
 
-  const index = doc.steps("main").findIndex((s) => s.name === "medir_voltaje");
+  const index = doc.steps("main").findIndex((s) => s.name === "demo/measure_voltage");
   doc.setStepLimit("main", index, "max", 6.5);
 
   const commentsAfter = doc.text.split("\n").filter((l) => l.trimStart().startsWith("#"));
@@ -78,7 +78,7 @@ test("a CRLF file keeps its line endings, so an edit is still one line", async (
   const original = (await basica()).replace(/\r\n/g, "\n").replace(/\n/g, "\r\n");
   const doc = new SequenceDocument(original);
 
-  const index = doc.steps("main").findIndex((s) => s.name === "medir_voltaje");
+  const index = doc.steps("main").findIndex((s) => s.name === "demo/measure_voltage");
   doc.setStepLimit("main", index, "max", 6.5);
 
   const changed = changedLines(original, doc.text);
@@ -97,15 +97,15 @@ test("the step view reads the loader's vocabulary", async () => {
   assert.equal(doc.name, "basica");
   assert.deepEqual(
     doc.steps("setup").map((s) => s.name),
-    ["conectar_equipo"],
+    ["demo/connect"],
   );
   assert.deepEqual(
     doc.steps("main").map((s) => s.name),
-    ["medir_voltaje", "verificar_led"],
+    ["demo/measure_voltage", "demo/check_led"],
   );
   assert.deepEqual(
     doc.steps("cleanup").map((s) => s.name),
-    ["desconectar_equipo"],
+    ["demo/disconnect"],
   );
 
   // A declared `retries` is shown as declared.
@@ -141,7 +141,7 @@ test("broken text keeps the last good tree and says so", async () => {
   assert.ok(doc.error, "there must be an error to point at");
   assert.deepEqual(
     doc.steps("main").map((s) => s.name),
-    ["medir_voltaje", "verificar_led"],
+    ["demo/measure_voltage", "demo/check_led"],
     "the last good structure stays visible rather than blanking",
   );
   assert.match(doc.text, /\[unclosed/, "the text stays exactly as typed");

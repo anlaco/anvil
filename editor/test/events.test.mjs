@@ -17,23 +17,22 @@
 
 import { strict as assert } from "node:assert";
 import { readFile } from "node:fs/promises";
-import { dirname, join, resolve } from "node:path";
+import { dirname, join } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 
 import { runEngine as run } from "../src/engine.mjs";
+import { exampleFiles } from "./ejemplos.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
-const REPO = resolve(HERE, "..", "..");
 const load = (name) => readFile(join(HERE, "..", "generated", name));
 
 /** Validates `basica.yaml`, collecting stderr both ways. */
 async function valida() {
-  const yaml = await readFile(join(REPO, "ejemplos", "basica.yaml"), "utf8");
   const lineas = [];
   const r = await run({
     args: ["basica.yaml", "--validate"],
-    files: { "basica.yaml": yaml },
+    files: await exampleFiles("basica.yaml"),
     load,
     onStderrLine: (l) => lineas.push(l),
   });
@@ -63,13 +62,13 @@ test("the delivered lines are exactly the text, in order", async () => {
 });
 
 test("delivery happens during the run, not after it", async () => {
-  const yaml = await readFile(join(REPO, "ejemplos", "basica.yaml"), "utf8");
+  const files = await exampleFiles("basica.yaml");
   let durante = 0;
   let terminado = false;
 
   const p = run({
     args: ["basica.yaml", "--validate"],
-    files: { "basica.yaml": yaml },
+    files,
     load,
     onStderrLine: () => {
       if (!terminado) durante += 1;
@@ -86,10 +85,9 @@ test("delivery happens during the run, not after it", async () => {
 });
 
 test("without a callback nothing changes for the caller", async () => {
-  const yaml = await readFile(join(REPO, "ejemplos", "basica.yaml"), "utf8");
   const { exitCode, stderr } = await run({
     args: ["basica.yaml", "--validate"],
-    files: { "basica.yaml": yaml },
+    files: await exampleFiles("basica.yaml"),
     load,
   });
 

@@ -9,14 +9,14 @@
 
 import { strict as assert } from "node:assert";
 import { readFile } from "node:fs/promises";
-import { dirname, join, resolve } from "node:path";
+import { dirname, join } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 
 import { runEngine as run } from "../src/engine.mjs";
+import { exampleFiles } from "./ejemplos.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
-const REPO = resolve(HERE, "..", "..");
 
 // Node reads the generated core modules from disk; the browser will fetch them.
 // The engine host takes this as a parameter so it need not know which it is.
@@ -25,11 +25,9 @@ const load = (name) => readFile(join(HERE, "..", "generated", name));
 const runEngine = (opts) => run({ ...opts, load });
 
 test("a valid sequence validates clean", async () => {
-  const yaml = await readFile(join(REPO, "ejemplos", "basica.yaml"), "utf8");
-
   const { exitCode, stderr } = await runEngine({
     args: ["basica.yaml", "--validate"],
-    files: { "basica.yaml": yaml },
+    files: await exampleFiles("basica.yaml"),
   });
 
   assert.equal(exitCode, 0, `expected a clean exit, got ${exitCode}:\n${stderr}`);
@@ -71,13 +69,13 @@ test("the network is refused rather than faked", async () => {
   // What matters is that it fails loudly and says what is missing: answering
   // "connection refused" would let an absent *host* read as an executor that
   // was asked and said no — ADR-0019's Rule 2, exactly.
-  const yaml = await readFile(join(REPO, "ejemplos", "basica.yaml"), "utf8");
+  const files = await exampleFiles("basica.yaml");
 
   await assert.rejects(
     () =>
       runEngine({
         args: ["basica.yaml", "--validate", "--with-executors"],
-        files: { "basica.yaml": yaml },
+        files,
       }),
     /no bridge is connected/,
     "reaching the network with no bridge must throw, not degrade quietly",
