@@ -14,8 +14,8 @@ const { contextBridge, ipcRenderer } = require("electron");
 // The shell answers the engine calls with `{ value }` or `{ error }` so that an
 // engine not being installed is not logged as a crash (`anvil:start-bridge` in
 // main.mjs). To the page they are still a promise that resolves or rejects.
-const unwrap = ({ value, error }) => {
-  if (error !== undefined) throw new Error(error);
+const unwrap = ({ value, error, code }) => {
+  if (error !== undefined) throw Object.assign(new Error(error), { code });
   return value;
 };
 
@@ -33,6 +33,8 @@ contextBridge.exposeInMainWorld("anvil", {
    * `ws://` URL it prints and `{ path, version, source, editor }` of the engine used.
    */
   startBridge: (path) => ipcRenderer.invoke("anvil:start-bridge", path).then(unwrap),
+  /** `{ editor, packaged }`: this app's version, and whether it is a release. */
+  versions: () => ipcRenderer.invoke("anvil:versions"),
   /**
    * Asks for the engine's executable, checks it and remembers it. Resolves to
    * `{ path, version, source, editor }`, or null if the dialog was dismissed.

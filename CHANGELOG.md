@@ -26,6 +26,27 @@ applies from 0.6.0 on; by it, 0.6.0 itself would have been 0.5.1.
 
 ## [Unreleased]
 
+### Added
+
+- **The Sequence Editor shows its version and the engine's**, in the bottom
+  right corner of the desktop app: `Editor 0.6.3 · anvil 0.6.3`. The engine's
+  half is the `anvil` Run uses, reads `anvil not found` when there is none, and
+  is highlighted when its version differs from the editor's.
+- **Help ▸ Check for Updates…** checks the latest published release by hand and
+  says what it found, including that there is nothing newer. Its dialog also
+  turns the check at start back on.
+
+### Changed
+
+- **The desktop editor asks before it downloads an update.** At start it offers
+  a newer release with *Update*, *Later* or *Never*. *Update* downloads it and
+  then asks whether to restart now or install when the editor closes; *Later*
+  does nothing and asks again at the next start; *Never* stops checking at
+  start, and Help ▸ Check for Updates… still works. Until now it downloaded in
+  the background and installed on close unless told otherwise. Editors from
+  0.6.0 to 0.6.2 still update to this release the old way; the new questions
+  start with the release after it.
+
 ## [0.6.2] — 2026-09-15
 
 ### Fixed

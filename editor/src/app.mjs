@@ -55,6 +55,7 @@ const ui = {
   filename: el("filename"),
   statusLight: el("status-light"),
   statusText: el("status-text"),
+  versions: el("versions"),
   run: el("run"),
   menus: document.querySelector(".menus"),
 };
@@ -75,6 +76,10 @@ const state = {
   // the engine…). Kept so the next status line does not bury it: validation
   // finishes after the failed start more often than not.
   runUnavailable: null,
+  // For the corner of the status bar: `{ editor, packaged }` from the shell,
+  // and the version of the engine Run last used, or why there is none.
+  versions: null,
+  engineVersion: null,
   /**
    * What the engine is doing right now, fed by the NDJSON of `--events`.
    * The state machine that reads it lives in ./run-state.mjs, out of the DOM so
@@ -771,12 +776,18 @@ async function connectLocalBridge(sequencePath) {
   try {
     status("busy", "starting the engine…");
     const { url, engine } = await window.anvil.startBridge(sequencePath);
+    state.engineVersion = engine.version;
+    renderVersions();
     await openBridge(url);
     if (state.bridge) {
       status("pass", `bridge connected — Run is available (${engineNote(engine)})`);
     }
   } catch (e) {
     state.runUnavailable = ipcMessage(e) || "could not start the local engine";
+    if (e?.code === "no-engine") {
+      state.engineVersion = "not found";
+      renderVersions();
+    }
     status("error", state.runUnavailable);
     renderAll();
   }
@@ -788,6 +799,29 @@ async function connectLocalBridge(sequencePath) {
 function engineNote({ path, version, editor }) {
   const differs = editor && version !== editor;
   return `anvil ${version} at ${path}` + (differs ? ` — the editor is ${editor}` : "");
+}
+
+// "Editor 0.6.2 · anvil 0.6.2" in the status bar's corner. The engine's half
+// is marked when it differs from a released editor's version: the editor
+// validates with the engine it carries and runs with the installed one
+// (ADR-0031), so a mismatch means the two can disagree about one file.
+function renderVersions() {
+  if (!state.versions) return;
+  const { editor, packaged } = state.versions;
+  const engine = state.engineVersion;
+  const known = engine && engine !== "not found";
+  ui.versions.replaceChildren(
+    document.createTextNode(`Editor ${packaged ? editor : "dev"} · `),
+    Object.assign(document.createElement("span"), {
+      className: "engine",
+      textContent: engine === "not found" ? "anvil not found" : `anvil ${engine ?? "—"}`,
+    }),
+  );
+  ui.versions.dataset.mismatch = String(packaged && known && engine !== editor);
+  ui.versions.title = packaged
+    ? "The editor's version, and the version of the anvil engine Run uses"
+    : "Running from a source checkout, and the anvil engine Run uses";
+  ui.versions.hidden = false;
 }
 
 // Electron wraps an error thrown in the shell as "Error invoking remote method
@@ -802,6 +836,8 @@ async function locateEngine() {
   try {
     const engine = await window.anvil.locateEngine();
     if (!engine) return;
+    state.engineVersion = engine.version;
+    renderVersions();
     const path = state.handle?.path;
     if (path && !state.runInFlight) await connectLocalBridge(path);
     else status("pass", `engine located: ${engineNote(engine)}`);
@@ -1033,6 +1069,10 @@ function wireMenus() {
     ui.menus.hidden = true;
     window.anvil.onMenu((action) => actions[action]?.());
     window.anvil.onSaveThenLeave(saveThenLeave);
+    window.anvil.versions().then((v) => {
+      state.versions = v;
+      renderVersions();
+    });
   }
 
   for (const b of document.querySelectorAll(".views button")) {

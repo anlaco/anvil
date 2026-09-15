@@ -185,7 +185,7 @@ async function findEngine() {
     if (existsSync(candidate)) return checkEngine(candidate, "PATH");
   }
 
-  throw new Error(
+  throw engineError(
     `the Anvil engine (${ENGINE_EXE}) was not found on PATH` +
       (remembered ? ` nor at ${remembered}, where it was located before` : "") +
       ` — install it from the release page, then File ▸ Locate Anvil Engine…`,
@@ -210,7 +210,7 @@ function checkEngine(file, source) {
     try {
       child = spawn(file, ["--version"], { stdio: ["ignore", "pipe", "pipe"] });
     } catch (e) {
-      reject(new Error(`${file} (${source}) could not be started: ${e.message}`));
+      reject(engineError(`${file} (${source}) could not be started: ${e.message}`));
       return;
     }
     const timer = setTimeout(() => child.kill(), 5000);
@@ -218,7 +218,7 @@ function checkEngine(file, source) {
     child.stderr.on("data", (d) => (out += d));
     child.on("error", (e) => {
       clearTimeout(timer);
-      reject(new Error(`${file} (${source}) could not be started: ${e.message}`));
+      reject(engineError(`${file} (${source}) could not be started: ${e.message}`));
     });
     child.on("close", () => {
       clearTimeout(timer);
@@ -229,7 +229,7 @@ function checkEngine(file, source) {
       if (version) resolve({ path: file, version, source, editor });
       else
         reject(
-          new Error(
+          engineError(
             `${file} (${source}) is not the Anvil engine: \`--version\` did not answer "anvil <version>"`,
           ),
         );
@@ -252,7 +252,14 @@ async function locateEngine(window) {
 }
 
 /** Resolves to `{ value }` or `{ error }`; see `anvil:start-bridge`. */
-const answer = (promise) => promise.then((value) => ({ value }), (e) => ({ error: e.message }));
+const answer = (promise) =>
+  promise.then(
+    (value) => ({ value }),
+    (e) => ({ error: e.message, code: e.code }),
+  );
+
+/** An error meaning "there is no usable engine", as opposed to a bridge that failed. */
+const engineError = (message) => Object.assign(new Error(message), { code: "no-engine" });
 
 // ---------------------------------------------------------------- the IPC
 
@@ -307,6 +314,10 @@ function wireIpc() {
     if (kind === "close") window?.close();
     else window?.webContents.reload();
   });
+  ipcMain.handle("anvil:versions", () => ({
+    editor: app.getVersion(),
+    packaged: app.isPackaged,
+  }));
   ipcMain.on("anvil:work-state", (_event, state) => {
     work = {
       running: Boolean(state?.running),
@@ -326,25 +337,63 @@ function wireIpc() {
 let work = { running: false, dirty: false, name: null };
 /** The version downloaded and waiting for a restart, if any. */
 let downloaded = null;
-/** Whether the restart question is on screen or was already answered. */
-let asked = false;
+/** Whether a check or a download is under way, so a second one waits. */
+let busy = false;
 
 // Updates come from the published GitHub Releases — never a draft, so a
-// release under review reaches nobody — and download on their own. Installing
-// is the part that is never done behind anyone's back: this app drives
-// equipment, and a restart in the middle of a run leaves a bench wherever the
-// run had it, with no `cleanup`. So the question waits until nothing is
-// running, and "Later" installs when the editor is next closed.
+// release under review reaches nobody. Nothing happens behind anyone's back:
+// at start the editor asks whether to update (Update / Later / Never), it
+// downloads only after "Update", and it installs only when the person says so,
+// never while a run is in flight — a restart mid-run leaves a bench wherever
+// the run had it, with no `cleanup`. "Never" turns the check at start off;
+// Help ▸ Check for Updates… still checks by hand, and turns it back on.
 //
 // Only the NSIS installer and the AppImage update themselves. A `.deb` belongs
 // to the system's package manager, and a dev tree to git.
-function startUpdates() {
-  const updatable = process.platform === "win32" || Boolean(process.env.APPIMAGE);
-  if (!app.isPackaged || !updatable) return;
+const updatable = () =>
+  app.isPackaged && (process.platform === "win32" || Boolean(process.env.APPIMAGE));
 
+const updatePrefs = () => path.join(app.getPath("userData"), "updates.json");
+
+async function checksAtStart() {
+  try {
+    return JSON.parse(await readFile(updatePrefs(), "utf8")).checkAtStart !== false;
+  } catch {
+    return true;
+  }
+}
+
+async function setChecksAtStart(on) {
+  await writeFile(updatePrefs(), JSON.stringify({ checkAtStart: on }, null, 2), "utf8");
+  log(`checking for updates at start: ${on ? "on" : "off"}`);
+}
+
+function log(message) {
+  console.log(`[updater] ${message}`);
+}
+
+/// The answers to the update questions, without showing them:
+/// `ANVIL_EDITOR_UPDATE_ANSWERS=update,close` answers the first question
+/// "update" and the second "close", in order. Native dialogs cannot be clicked
+/// unattended, so without this none of these paths could be exercised.
+const scripted = (process.env.ANVIL_EDITOR_UPDATE_ANSWERS ?? "").split(",").filter(Boolean);
+
+async function ask(window, options, answers) {
+  if (scripted.length > 0) {
+    const answer = scripted.shift();
+    log(`"${options.message}" answered "${answer}" (ANVIL_EDITOR_UPDATE_ANSWERS)`);
+    return { response: answers.indexOf(answer), checkboxChecked: options.checkboxChecked };
+  }
+  const { response, checkboxChecked } = await dialog.showMessageBox(window, options);
+  return { response, checkboxChecked };
+}
+
+function startUpdates() {
+  if (!updatable()) return;
   const { autoUpdater } = updater;
-  autoUpdater.autoDownload = true;
-  autoUpdater.autoInstallOnAppQuit = true;
+  autoUpdater.autoDownload = false;
+  // Nothing to install until the person has said "Update" (`checkForUpdates`).
+  autoUpdater.autoInstallOnAppQuit = false;
   // Its own trail on this process's stdout, like the renderer's (ADR-0037 §e).
   autoUpdater.logger = { info: log, warn: log, error: log, debug: () => {} };
 
@@ -359,34 +408,145 @@ function startUpdates() {
     downloaded = info.version;
     offerRestart();
   });
-  // No network, or GitHub down, is not something to interrupt anyone for: the
-  // editor works exactly as it did, and the next start tries again.
-  autoUpdater.on("error", (e) => log(`update check failed: ${e?.message ?? e}`));
-  autoUpdater.checkForUpdates().catch(() => {});
+
+  checksAtStart().then((on) => {
+    if (on) checkForUpdates({ manual: false });
+    else log("not checking at start (turned off with Never)");
+  });
 }
 
-function log(message) {
-  console.log(`[updater] ${message}`);
+/// Checks the latest published release and offers it.
+///
+/// At start (`manual: false`) a failure or "nothing new" says nothing: no
+/// network is not something to interrupt anyone for. By hand, every outcome
+/// gets an answer, and the dialog carries the "check at start" switch so Never
+/// can be undone where it is noticed.
+async function checkForUpdates({ manual }) {
+  const window = BrowserWindow.getAllWindows()[0];
+  if (!updatable()) {
+    if (manual) {
+      await dialog.showMessageBox(window, {
+        type: "info",
+        title: "Check for Updates",
+        message: "This copy of the editor does not update itself.",
+        detail: app.isPackaged
+          ? "Installed from a .deb, it is updated by the system's package manager."
+          : "It is running from a source checkout.",
+      });
+    }
+    return;
+  }
+  if (downloaded) return offerRestart({ again: true });
+  if (busy) return;
+  busy = true;
+  try {
+    const result = await updater.autoUpdater.checkForUpdates();
+    const current = app.getVersion();
+    const atStart = await checksAtStart();
+
+    if (!result?.isUpdateAvailable) {
+      if (manual) {
+        const { checkboxChecked } = await ask(
+          window,
+          {
+            type: "info",
+            title: "Check for Updates",
+            message: `Anvil Sequence Editor ${current} is the latest version.`,
+            buttons: ["OK"],
+            checkboxLabel: "Check for updates when the editor starts",
+            checkboxChecked: atStart,
+          },
+          ["ok"],
+        );
+        if (checkboxChecked !== atStart) await setChecksAtStart(checkboxChecked);
+      }
+      return;
+    }
+
+    const version = result.updateInfo.version;
+    const buttons = manual ? ["Update", "Later"] : ["Update", "Later", "Never"];
+    const { response, checkboxChecked } = await ask(
+      window,
+      {
+        type: "info",
+        title: "Update available",
+        message: `Anvil Sequence Editor ${version} is available.`,
+        detail:
+          `You have ${current}. Update downloads it now and asks before restarting.` +
+          (manual ? "" : " Never stops checking at start; Help ▸ Check for Updates… still works."),
+        buttons,
+        defaultId: 0,
+        cancelId: 1,
+        noLink: true,
+        ...(manual
+          ? { checkboxLabel: "Check for updates when the editor starts", checkboxChecked: atStart }
+          : {}),
+      },
+      ["update", "later", "never"],
+    );
+    if (manual && checkboxChecked !== atStart) await setChecksAtStart(checkboxChecked);
+
+    if (response === 2) {
+      await setChecksAtStart(false);
+      return;
+    }
+    if (response !== 0) {
+      log(`${version} offered; asking again next time`);
+      return;
+    }
+    log(`downloading ${version}`);
+    // Before the download, not after the restart question: electron-updater
+    // registers its install-on-quit handler the moment a download finishes,
+    // and only if this is already true then
+    // (`node_modules/electron-updater/out/BaseUpdater.js:31-33`, 6.8.9). Set
+    // once the restart question is answered, it came too late and closing the
+    // editor installed nothing. Both answers to that question install — now,
+    // or on close — so from "Update" on this is simply true.
+    updater.autoUpdater.autoInstallOnAppQuit = true;
+    await updater.autoUpdater.downloadUpdate();
+  } catch (e) {
+    log(`update check failed: ${e?.message ?? e}`);
+    if (manual) {
+      await dialog.showMessageBox(window, {
+        type: "error",
+        title: "Check for Updates",
+        message: "Could not check for updates.",
+        detail: String(e?.message ?? e),
+      });
+    }
+  } finally {
+    busy = false;
+  }
 }
 
-async function offerRestart() {
-  if (!downloaded || asked || work.running) return;
+let restartAsked = false;
+
+/// Once a download is in: restart now, or install when the editor closes. Held
+/// back while a run is in flight (`anvil:work-state` calls this again when it
+/// ends).
+async function offerRestart({ again = false } = {}) {
+  if (!downloaded || work.running || (restartAsked && !again)) return;
   const window = BrowserWindow.getAllWindows()[0];
   if (!window) return;
-  asked = true;
+  restartAsked = true;
   log(`${downloaded} downloaded; asking whether to restart now`);
 
-  const { response } = await dialog.showMessageBox(window, {
-    type: "info",
-    title: "Update ready",
-    message: `Anvil Sequence Editor ${downloaded} is ready to install.`,
-    detail: work.dirty
-      ? "There are unsaved changes: restarting asks whether to save them first. Later installs it when you close the editor."
-      : "Restart now to use it, or Later to install it when you close the editor.",
-    buttons: ["Restart now", "Later"],
-    defaultId: work.dirty ? 1 : 0,
-    cancelId: 1,
-  });
+  const { response } = await ask(
+    window,
+    {
+      type: "info",
+      title: "Update ready",
+      message: `Anvil Sequence Editor ${downloaded} is ready to install.`,
+      detail: work.dirty
+        ? "There are unsaved changes: restarting asks whether to save them first."
+        : "Restart the editor now to use it, or install it when you close the editor.",
+      buttons: ["Restart now", "When I close the editor"],
+      defaultId: work.dirty ? 1 : 0,
+      cancelId: 1,
+      noLink: true,
+    },
+    ["restart", "close"],
+  );
   // A run may have started while the question was on screen.
   // No `killBridge` here: the unsaved-changes question can still cancel the
   // quit, and `will-quit` stops the bridge once it is really happening.
@@ -515,6 +675,16 @@ function buildMenu() {
         ],
       },
       { role: "windowMenu" },
+      {
+        label: "&Help",
+        submenu: [
+          {
+            id: "check-for-updates",
+            label: "Check for &Updates…",
+            click: () => checkForUpdates({ manual: true }),
+          },
+        ],
+      },
     ]),
   );
 }
