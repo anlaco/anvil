@@ -17,11 +17,16 @@
 # all three rows.
 
 name: regresion_csv_nombre
+executors:
+  - { name: demo, type: wasm, path: ../../../ejemplos/departamento/dist/anvil-exec-wasm }
 main:
-  - name: verificar_led
+  - name: demo/check_led
+    executor: demo
     retries: 1
-  - name: abrir_rele
+  - name: demo/open_relay
+    executor: demo
     retries: 1
-  - name: medir_voltaje
+  - name: demo/measure_voltage
+    executor: demo
     retries: 1
     limit: { type: comparison, op: ge, expected: 4.0 }

@@ -17,19 +17,26 @@
 # Acceptance criterion: the loader should refuse (or at least warn about) an
 # `assign` whose target is a name declared in `parameters:`.
 
+#
+# It declares no `executors:`: a subsequence file cannot, and `demo` is the
+# parent's. Run on its own (DEF-3a) the loader refuses it for the shadow
+# before it gets to resolving executors.
 name: sub_asigna_parameter
 parameters:
   p: 0.0
 main:
-  - name: medir_voltaje
+  - name: demo/measure_voltage
+    executor: demo
     retries: 1
     assign:
       p: '${result.measured_value}'
   # reads the PARAMETER: still 0.0 -> skipped
-  - name: verificar_led
+  - name: demo/check_led
+    executor: demo
     retries: 1
     precondition: 'parameters.p > 4.0'
-  # lee el LOCAL homonimo creado por asigna: vale 4.2 -> se ejecuta
-  - name: abrir_rele
+  # reads the same-named LOCAL that assign created: holds 4.2 -> runs
+  - name: demo/open_relay
+    executor: demo
     retries: 1
     precondition: 'locals.p > 4.0'

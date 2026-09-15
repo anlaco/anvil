@@ -42,7 +42,7 @@ check() {  # check <id> <description> <0=ok|1=fail>
 echo "== Beta 2026-08 regression ========================================"
 
 # ---- DEF-1: --limits must reach the operator's sequence under a PM ----
-$A --process-model process_models/sequential.yaml \
+$A --process-model $R/pm-minimal.yaml \
    ejemplos/limites.yaml --limits ejemplos/limites.limits.yaml \
    >"$TMP/d1.out" 2>"$TMP/d1.err"
 afectados=$(grep -oE 'aplicado \([0-9]+ paso' "$TMP/d1.err" | grep -oE '[0-9]+' | head -1)
@@ -63,7 +63,10 @@ check DEF-2 "CSV column 1 = sequence name (got: '${col1}')" $?
 # came out green, because the `grep` for the failure mark did not match an
 # empty file. DEF-3b passed exactly that way.
 asigna_no_ensombrece() {  # <stdout> <stderr>
-  if grep -qiE 'inválida|invalida' "$2"; then
+  # The refusal counts only if it is *this* refusal: any other load error (an
+  # executor these files do not declare, say) used to satisfy a bare
+  # 'inválida' and turned the case green for a reason unrelated to the shadow.
+  if grep -qiE 'ensombrece' "$2"; then
     return 0            # the loader refuses it: an acceptable fix
   fi
   if ! grep -q '===' "$1"; then
@@ -113,7 +116,7 @@ check DIAG-3 "phase (setup/main/cleanup) in the JSON and the CSV" $res
 # ---- DIAG-4: under a PM, which operator sequence was run ----
 # `sequence` is the PM's name, so the test has to travel as a field of its
 # own: without it, the archived result does not record what was run.
-$A --process-model process_models/sequential.yaml \
+$A --process-model $R/pm-minimal.yaml \
    ejemplos/limites.yaml --json "$TMP/d4.json" >/dev/null 2>&1
 grep -q '"user_sequence": "ejemplos/limites.yaml"' "$TMP/d4.json"
 check DIAG-4 "the operator's sequence is a JSON field" $?
@@ -123,7 +126,7 @@ check DIAG-4 "the operator's sequence is a JSON field" $?
 # phantom bug "the sidecar does not work with a process model" came from.
 cat >"$TMP/envoltorio.limits.yaml" <<'YAML'
 limits:
-  medir_voltaje:
+  demo/measure_voltage:
     type: comparison
     op: ge
     expected: 4.0
@@ -157,14 +160,6 @@ check DIAG-5c "an unknown flag is reported as unknown" $?
 # ---- DIAG-5e: -h and -V exist (the beta did not use them once) ----
 $A -h 2>&1 | grep -qE '^uso: anvil' && $A -V 2>&1 | grep -qE '^anvil [0-9]'
 check DIAG-5e "-h and -V answer like --help and --version" $?
-
-# ---- DIAG-5f: no executor if the engine is not going to run a step ----
-# Announcing 'escuchando en 9100' ahead of the help or the error pollutes the
-# output, and with the MVP's fixed port it blocked another anvil that was going
-# to run (two `--validate` in parallel clashed).
-! $A -h 2>&1 | grep -qi 'escuchando' &&
-  ! $A ejemplos/limites.yaml --validate 2>&1 | grep -qi 'escuchando'
-check DIAG-5f "no embedded executor for -h/--validate" $?
 
 # ---- DIAG-5d: a .wasm that is a core module, not a component ----
 # The 8 header bytes are a valid, empty core module: enough for the executor to
@@ -225,14 +220,17 @@ check DIAG-5g "a path to a .wasm says the executor's binary is expected" $?
 # spread the pattern to 19 sequences and 51 preconditions.
 cat >"$TMP/lec1.yaml" <<'YAML'
 name: regresion_result_outside_assign
+executors:
+  - { name: demo, type: wasm, path: ../../../../ejemplos/departamento/dist/anvil-exec-wasm }
 locals:
   v_real: 5.0
 main:
-  - name: medir_voltaje
+  - name: demo/measure_voltage
+    executor: demo
     precondition: 'locals.v_real > 4.9 && result.measured_value != nothing'
 YAML
 $A "$TMP/lec1.yaml" --validate 2>&1 |
-  grep -qE "medir_voltaje.*result.measured_value|result.measured_value.*precondicion"
+  grep -qE "measure_voltage.*result.measured_value|result.measured_value.*precondicion"
 check LEC-1 "result.* in a precondition is a load error" $?
 
 # ---- LEC-2: a green that skipped steps has to say so ----
@@ -240,15 +238,19 @@ check LEC-1 "result.* in a precondition is a load error" $?
 # campaign came out green skipping ≥30% of their steps without it showing.
 cat >"$TMP/lec2.yaml" <<'YAML'
 name: regresion_visible_skips
+executors:
+  - { name: demo, type: wasm, path: ../../../../ejemplos/departamento/dist/anvil-exec-wasm }
 locals:
   activo: false
 main:
   - name: preparar
     type: statement
     statement: 'locals.activo = false'
-  - name: medir_voltaje
+  - name: demo/measure_voltage
+    executor: demo
     precondition: 'locals.activo'
-  - name: verificar_led
+  - name: demo/check_led
+    executor: demo
     disable: true
 YAML
 $A "$TMP/lec2.yaml" --json "$TMP/lec2.json" >"$TMP/lec2.out" 2>/dev/null
@@ -276,10 +278,6 @@ for f in "$TMP/n1a.out" "$TMP/n1b.out"; do
   grep -q '=== basica:' "$f" || res=1
 done
 check NOTA-1 "two simultaneous anvil run without a port clash" $res
-
-# ---- NOTA-1b: an explicit --port pins executor and engine, not just the engine ----
-$A ejemplos/basica.yaml --port 9300 2>&1 | grep -qE 'escuchando en 9300'
-check NOTA-1b "--port also pins the embedded executor's port" $?
 
 # ---- EXIT-1: the exit code must reflect the aggregate verdict (#16) ----
 # `main` discarded `ejecuta_programa`'s `Ok` and only looked at the `Err` (which

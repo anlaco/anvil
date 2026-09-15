@@ -14,6 +14,8 @@
 # and verificar_led runs.
 
 name: padre_asigna_parameter
+executors:
+  - { name: demo, type: wasm, path: ../../../ejemplos/departamento/dist/anvil-exec-wasm }
 locals:
   t: 0.0
 main:
@@ -21,6 +23,7 @@ main:
     type: sequence_call
     sequence: ./bug3-sub-asigna-parameter.yaml
     args: { p: locals.t }
-  - name: verificar_led
+  - name: demo/check_led
+    executor: demo
     retries: 1
     precondition: 'locals.t > 4.0'
