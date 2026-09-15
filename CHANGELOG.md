@@ -26,6 +26,54 @@ applies from 0.6.0 on; by it, 0.6.0 itself would have been 0.5.1.
 
 ## [Unreleased]
 
+### Removed
+
+- **The step executor built into `anvil`**
+  ([ADR-0041](docs/adr/0041-there-is-no-embedded-executor.md)). The binary now
+  carries the engine and nothing else; every step is served by an executor the
+  sequence declares. Gone with it: `type: embedded`, the steps it served
+  (`medir_voltaje`, `verificar_led`, `conectar_equipo`…), the SCPI step
+  `medir_voltaje_scpi` with `ejemplos/scpi.yaml`, and
+  `process_models/sequential.yaml`, whose two plug-ins stood in for an operator
+  prompt that does not exist yet. `--process-model` itself stays.
+- **`--port`.** It placed the embedded executor; it is now an unknown flag.
+
+### Changed
+
+- **A step that calls an executor must name it.** A `grpc` step without
+  `executor:` no longer falls back to anything: the sequence does not load, and
+  the message says what to add and which executors are declared.
+- **An entry under `executors:` must name its `type`** (`wasm` or `grpc`).
+  `type: embedded` is refused with a message pointing at the demo bench.
+- **The examples run against a demo bench** that ships in the package: the WASM
+  component `ejemplos/departamento/demo`, served by the
+  `ejemplos/departamento/dist/anvil-exec-wasm` next to it. Its steps are
+  `demo/connect`, `demo/measure_voltage` (inputs `channel`, `offset`; outputs
+  `channel_used`, `temperature`), `demo/check_led`, `demo/open_relay`,
+  `demo/disconnect` and `demo/instrument_offline`. Nothing else needs to be
+  installed or started to run them.
+- **A declared executor that does not answer is named.** The error reads
+  `could not connect to the step executors: executor 'bench' at
+  127.0.0.1:9201: …` after one waiting line, instead of naming the embedded
+  executor on a port nobody declared after hundreds of retry lines
+  ([#78](https://github.com/anlaco/anvil/issues/78)).
+- **The engine connects only to the executors a sequence uses.** A sequence of
+  `statement` and `pass_fail` steps opens no connection at all.
+
+### Fixed
+
+- **The Sequence Editor validates and runs sequences that reference files beside
+  them.** It handed the engine only the open file, so a `type: wasm` executor
+  and a subsequence called by path were reported as missing. The desktop app
+  now hands it what the sequence references on disk; a plain browser still
+  cannot, and says which file it did not find.
+- **A sequence path naming an executor binary without `.exe` works on
+  Windows.** `path: departamento/dist/anvil-exec-wasm` finds
+  `anvil-exec-wasm.exe`, so one sequence runs on Linux and Windows.
+- **`ejemplos/variables.yaml` and `ejemplos/veredicto.yaml` compared
+  `result.status` with `"paso"`**, a status that no longer exists, so a
+  condition reading the led's result could never pass.
+
 ## [0.6.3] — 2026-09-15
 
 ### Added
