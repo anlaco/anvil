@@ -199,15 +199,7 @@ impl Motor {
             return Ok(r);
         }
         let endpoint = endpoint.as_str();
-        let peticion = StepRequest {
-            name: def.nombre.clone(),
-            attempt: intento,
-            inputs: parametros
-                .iter()
-                .filter_map(|(n, v)| ProtoValue::desde_value(n, v))
-                .collect(),
-            contract: CONTRACT,
-        };
+        let peticion = peticion_de(def, intento, parametros);
         let cliente = self
             .conexiones
             .get_mut(endpoint)
@@ -453,6 +445,21 @@ impl InvocaPasos for Motor {
         parametros: &[(String, Value)],
     ) -> Result<ResultadoStep, Error> {
         self.ejecuta_con_reintentos(def, programa, parametros)
+    }
+}
+
+/// The request for one invocation. It carries the step's **module** — what the
+/// executor serves — and not its name, which is the sequence's own label for it
+/// (ADR-0040 §1).
+fn peticion_de(def: &DefinicionPaso, intento: i32, parametros: &[(String, Value)]) -> StepRequest {
+    StepRequest {
+        name: def.modulo().to_string(),
+        attempt: intento,
+        inputs: parametros
+            .iter()
+            .filter_map(|(n, v)| ProtoValue::desde_value(n, v))
+            .collect(),
+        contract: CONTRACT,
     }
 }
 
@@ -887,7 +894,12 @@ fn corre_un_paso<I: InvocaPasos>(
         // inventado da un número que parece bueno y no lo es.
         TipoPaso::Grpc => match evalua_entradas(p, ent) {
             Ok(parametros) => {
-                let r = inv.ejecuta_paso_grpc(p, ctx.programa, &parametros)?;
+                let mut r = inv.ejecuta_paso_grpc(p, ctx.programa, &parametros)?;
+                // The report names the step as the sequence does. What the
+                // executor echoes back is the module it served, and two steps
+                // calling one module would otherwise read as the same step.
+                r.nombre = p.nombre.clone();
+                r.module = Some(p.modulo().to_string());
                 normaliza_estado_de_ejecutor(r)
             }
             Err(r) => *r,
@@ -2567,6 +2579,60 @@ mod tests {
         p.tipo = TipoPaso::Statement;
         p.statement = Some(expr::parse_sentencias("locals.v = 1.0").unwrap());
         p
+    }
+
+    /// ADR-0040 §1: what travels is the module, and a step without one still
+    /// asks for its own name.
+    #[test]
+    fn the_request_carries_the_module_not_the_name() {
+        let mut def = DefinicionPaso::nuevo("Measure 5V rail", 1);
+        def.module = Some("dmm/measure_voltage".into());
+        assert_eq!(peticion_de(&def, 2, &[]).name, "dmm/measure_voltage");
+        assert_eq!(peticion_de(&def, 2, &[]).attempt, 2);
+
+        let plain = DefinicionPaso::nuevo("demo/check_led", 1);
+        assert_eq!(peticion_de(&plain, 1, &[]).name, "demo/check_led");
+    }
+
+    /// Two steps calling one module are two steps in the report: the name is
+    /// the sequence's, whatever the executor echoes, and the module is stamped
+    /// beside it.
+    #[test]
+    fn the_report_names_the_step_and_stamps_its_module() {
+        struct EchoesModule;
+        impl InvocaPasos for EchoesModule {
+            fn ejecuta_paso_grpc(
+                &mut self,
+                def: &DefinicionPaso,
+                _: &Programa,
+                _: &[(String, Value)],
+            ) -> Result<ResultadoStep, Error> {
+                Ok(ResultadoStep::nuevo(def.modulo(), "pass", "ok"))
+            }
+        }
+        let mut five = DefinicionPaso::nuevo("Measure 5V rail", 1);
+        five.module = Some("dmm/measure_voltage".into());
+        let mut twelve = DefinicionPaso::nuevo("Measure 12V rail", 1);
+        twelve.module = Some("dmm/measure_voltage".into());
+        let def = DefinicionSecuencia {
+            nombre: "s".into(),
+            pasos_main: vec![five, twelve],
+            ..Default::default()
+        };
+        let (sec, _) = corre_con(&mut EchoesModule, &def);
+
+        let seen: Vec<(&str, Option<&str>)> = sec
+            .pasos
+            .iter()
+            .map(|p| (p.nombre.as_str(), p.module.as_deref()))
+            .collect();
+        assert_eq!(
+            seen,
+            vec![
+                ("Measure 5V rail", Some("dmm/measure_voltage")),
+                ("Measure 12V rail", Some("dmm/measure_voltage")),
+            ]
+        );
     }
 
     /// A `done` step does not cut its phase (ADR-0040 §6): a `statement` in

@@ -311,6 +311,10 @@ struct PasoYaml {
     /// `grpc` step of a program must name one (ADR-0041).
     #[serde(default)]
     executor: Option<String>,
+    /// What the step calls on its executor (ADR-0040 §1). Without it the step's
+    /// `name` is also what it calls.
+    #[serde(default)]
+    module: Option<String>,
 }
 
 fn reintentos_por_defecto() -> u32 {
@@ -600,7 +604,7 @@ impl From<noyalib::Error> for ErrorCarga {
 /// errata. Es una ayuda de diagnóstico, no una fuente de verdad: el schema lo
 /// imponen los `struct` con `deny_unknown_fields`, y si esta lista se queda
 /// corta lo único que se pierde es una sugerencia.
-const CAMPOS_DEL_SCHEMA: [&str; 28] = [
+const CAMPOS_DEL_SCHEMA: [&str; 29] = [
     // SecuenciaYaml
     "name",
     "setup",
@@ -625,6 +629,7 @@ const CAMPOS_DEL_SCHEMA: [&str; 28] = [
     "inputs",
     "args",
     "executor",
+    "module",
     // EjecutorYaml
     "path",
     "host",
@@ -2463,6 +2468,21 @@ impl PasoYaml {
                 self.name, self.kind
             )));
         }
+        // `module` is what an executor is asked for, so only a step that asks
+        // an executor can have one.
+        if self.module.is_some() && !matches!(tipo, TipoPaso::Grpc) {
+            return Err(ErrorCarga::Validacion(format!(
+                "step '{}' is '{}' and has 'module': only a step that calls an executor \
+                 has a module",
+                self.name, self.kind
+            )));
+        }
+        if self.module.as_deref().is_some_and(|m| m.trim().is_empty()) {
+            return Err(ErrorCarga::Validacion(format!(
+                "step '{}' has an empty 'module': name what it calls on its executor",
+                self.name
+            )));
+        }
 
         Ok(DefinicionPaso {
             nombre: self.name,
@@ -2479,6 +2499,7 @@ impl PasoYaml {
             parametros,
             entradas,
             ejecutor: self.executor,
+            module: self.module,
         })
     }
 }
@@ -4319,6 +4340,34 @@ main:
         let err = cargar_programa_de_archivo(y.to_str().unwrap()).unwrap_err();
         assert!(
             matches!(&err, ErrorCarga::Validacion(m) if m.contains("no existe")),
+            "{err}"
+        );
+    }
+
+    /// `module` is read on a step that calls an executor, and refused where
+    /// nothing is called or where it names nothing (ADR-0040 §1).
+    #[test]
+    fn module_is_read_on_a_grpc_step_and_refused_elsewhere() {
+        let s = cargar_de_texto(
+            "name: s\nmain:\n  - name: Measure 5V rail\n    module: dmm/measure_voltage\n",
+        )
+        .unwrap();
+        assert_eq!(s.pasos_main[0].nombre, "Measure 5V rail");
+        assert_eq!(s.pasos_main[0].modulo(), "dmm/measure_voltage");
+
+        let err = cargar_de_texto(
+            "name: s\nlocals: { x: 0.0 }\nmain:\n  - name: a\n    type: statement\n    \
+             statement: 'locals.x = 1'\n    module: dmm/x\n",
+        )
+        .unwrap_err();
+        assert!(
+            matches!(&err, ErrorCarga::Validacion(m) if m.contains("has 'module'")),
+            "{err}"
+        );
+
+        let err = cargar_de_texto("name: s\nmain:\n  - name: a\n    module: ' '\n").unwrap_err();
+        assert!(
+            matches!(&err, ErrorCarga::Validacion(m) if m.contains("empty 'module'")),
             "{err}"
         );
     }

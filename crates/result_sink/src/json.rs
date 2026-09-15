@@ -86,6 +86,9 @@ pub(crate) fn paso_a_json(p: &ResultadoStep) -> Value {
 pub(crate) fn paso_a_json_con(p: &ResultadoStep, anidar: bool) -> Value {
     let base = json!({
         "name": p.nombre,
+        // What the step called on its executor (ADR-0040 §1); null for a step
+        // that calls none.
+        "module": p.module,
         "status": p.estado,
         "phase": p.fase.como_texto(),
         "message": p.mensaje,
@@ -194,6 +197,20 @@ mod tests {
             "led encendido",
         ));
         s
+    }
+
+    /// ADR-0040 §1: a step's module is written beside its name, and is null
+    /// for a step that called nothing.
+    #[test]
+    fn the_module_is_written_beside_the_name() {
+        let mut called = ResultadoStep::nuevo("Measure 5V rail", "pass", "ok");
+        called.module = Some("dmm/measure_voltage".into());
+        let v = paso_a_json_con(&called, true);
+        assert_eq!(v["name"], "Measure 5V rail");
+        assert_eq!(v["module"], "dmm/measure_voltage");
+
+        let statement = ResultadoStep::nuevo("set_x", "done", "statement ok");
+        assert!(paso_a_json_con(&statement, true)["module"].is_null());
     }
 
     #[test]

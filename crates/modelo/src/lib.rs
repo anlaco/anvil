@@ -265,6 +265,10 @@ pub struct ResultadoStep {
     /// Vienen del cable (tag 7). No participan en el veredicto: `asigna` los
     /// lee como `resultado.salidas.<nombre>` y los sinks los escriben.
     pub salidas: Vec<(String, expr::Value)>,
+    /// What the step called on its executor (ADR-0040 §1), stamped by the
+    /// engine. `None` for a step that calls nothing. It is not the step's
+    /// `nombre`: two steps can call one module and be told apart by name.
+    pub module: Option<String>,
 }
 
 impl ResultadoStep {
@@ -283,6 +287,7 @@ impl ResultadoStep {
             fase: Fase::Main,
             parametros: Vec::new(),
             salidas: Vec::new(),
+            module: None,
         }
     }
 
@@ -695,6 +700,11 @@ pub struct DefinicionPaso {
     /// in `Programa.ejecutores` (ADR-0041); it is `None` only on steps that call
     /// no executor, or in a sequence loaded on its own, outside a program.
     pub ejecutor: Option<String>,
+    /// What the step calls on its executor (ADR-0040 §1): the name that travels
+    /// as `StepRequest.name` and that the executor's catalog lists. `nombre` is
+    /// then only the step's own name, for the report, the editor and the
+    /// events. `None` means the step's name is also what it calls.
+    pub module: Option<String>,
 }
 
 impl DefinicionPaso {
@@ -714,7 +724,15 @@ impl DefinicionPaso {
             parametros: None,
             entradas: None,
             ejecutor: None,
+            module: None,
         }
+    }
+
+    /// What the step calls on its executor: its `module`, or — until ADR-0040
+    /// makes `module` the only way to say it — its name, which is what a step
+    /// without one has always called.
+    pub fn modulo(&self) -> &str {
+        self.module.as_deref().unwrap_or(&self.nombre)
     }
 
     /// Como `nuevo` pero fijando un límite. Lo usa el cargador al traducir el

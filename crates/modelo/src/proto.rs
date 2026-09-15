@@ -521,6 +521,9 @@ impl From<StepResult> for crate::ResultadoStep {
             parametros: Vec::new(),
             // `a_resultado` fills the outputs in; it validates the `oneof`s.
             salidas: Vec::new(),
+            // What was called is the engine's to stamp: it knows the module it
+            // asked for, and the echoed name is not trusted for it.
+            module: None,
         }
     }
 }

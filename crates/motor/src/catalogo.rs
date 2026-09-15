@@ -63,6 +63,10 @@ pub enum Hallazgo {
     /// The executor describes itself and this step is not in its catalog.
     PasoDesconocido {
         paso: String,
+        /// What the step asked for (ADR-0040 §1). Named apart from `paso`,
+        /// because two steps can ask for one module and only the name says
+        /// which of them is wrong.
+        modulo: String,
         ejecutor: String,
         conocidos: Vec<String>,
     },
@@ -104,8 +108,20 @@ impl std::fmt::Display for Hallazgo {
         match self {
             Hallazgo::PasoDesconocido {
                 paso,
+                modulo,
                 ejecutor,
                 conocidos,
+            } if paso != modulo => write!(
+                f,
+                "step '{paso}' calls '{modulo}': executor '{ejecutor}' does not serve it \
+                 (it serves: {})",
+                lista(conocidos)
+            ),
+            Hallazgo::PasoDesconocido {
+                paso,
+                ejecutor,
+                conocidos,
+                ..
             } => write!(
                 f,
                 "step '{paso}': executor '{ejecutor}' does not serve it (it serves: {})",
@@ -394,11 +410,12 @@ fn comprueba_paso(
         }
     };
 
-    let spec = match catalogo.step(&def.nombre) {
+    let spec = match catalogo.step(def.modulo()) {
         Some(s) => s,
         None => {
             informe.hallazgos.push(Hallazgo::PasoDesconocido {
                 paso: def.nombre.clone(),
+                modulo: def.modulo().to_string(),
                 ejecutor: visible,
                 conocidos: catalogo.steps.iter().map(|s| s.name.clone()).collect(),
             });
@@ -773,6 +790,34 @@ mod tests {
         assert!(
             informe.sin_comprobar.is_empty(),
             "ni siquiera sin comprobar"
+        );
+    }
+
+    /// The catalog is asked for the step's module, not its name (ADR-0040 §1),
+    /// and a module it does not serve is named as such.
+    #[test]
+    fn the_catalog_is_asked_for_the_module() {
+        let mut named = paso("Measure 5V rail");
+        named.module = Some("medir_voltaje".into());
+        let informe = comprueba_programa(
+            &programa_con(vec![named]),
+            &catalogos_del_banco(Descripcion::Describe(catalogo_demo())),
+        );
+        assert!(!informe.hay_hallazgos(), "{:?}", informe.hallazgos);
+        assert_eq!(informe.comprobados, 1);
+
+        let mut wrong = paso("Measure 5V rail");
+        wrong.module = Some("medir_voltaje_mal".into());
+        let informe = comprueba_programa(
+            &programa_con(vec![wrong]),
+            &catalogos_del_banco(Descripcion::Describe(catalogo_demo())),
+        );
+        assert!(
+            informe.hallazgos.iter().any(|h| h
+                .to_string()
+                .contains("'Measure 5V rail' calls 'medir_voltaje_mal'")),
+            "{:?}",
+            informe.hallazgos
         );
     }
 
