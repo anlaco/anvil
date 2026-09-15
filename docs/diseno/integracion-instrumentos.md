@@ -1,9 +1,11 @@
 # Diseño: Integración de instrumentos
 
-> **Prioridad:** MVP-parcial. **Implementado en M5**: adapter gRPC pulido
-> con `pasos_scpi` (paso real SCPI/TCP + mock determinista, ver
-> [ADR-0017](../adr/0017-adapter-grpc-de-instrumento-real-por-scpi-tcp.md)).
-> PyVISA/`wasi-visa` nativo es post-MVP.
+> **Prioridad:** MVP-parcial. En M5 se implementó un adapter gRPC con
+> `pasos_scpi` (paso real SCPI/TCP + mock determinista,
+> [ADR-0017](../adr/0017-adapter-grpc-de-instrumento-real-por-scpi-tcp.md)),
+> y **se retiró** con el ejecutor embebido que lo servía
+> ([ADR-0041](../adr/0041-there-is-no-embedded-executor.md) §7). Hoy no hay
+> adapter de instrumento en el repo. PyVISA/`wasi-visa` nativo es post-MVP.
 
 Cómo Anvil habla con hardware real. Trazable a [ADR-0003](../adr/0003-pasos-por-grpc-por-nombre.md)
 y [ADR-0006](../adr/0006-wasi-grpc-propio.md).
@@ -15,15 +17,16 @@ invoca por gRPC por nombre (ADR-0003): el motor no sabe si el paso habla
 SCPI, VISA, un REST privado o nada. El instrumento vive **detrás del paso**,
 opaco al motor.
 
-**Dónde corre el paso (ADR-0013):** en el ejecutor WASM embebido (built-in,
-de serie, en loopback), o en un **ejecutor de lenguaje** distribuido
+**Dónde corre el paso (ADR-0013):** en un **ejecutor de lenguaje** distribuido
 (`executors/`, p. ej. Python) que puede correr en loopback (M5-ext.1,
 routing `ejecutores:`/`ejecutor:`) o, en el futuro, en un **LID** (SO legacy
 con aislamiento declarado, aplazado a post-M5-ext) cuando las
-DLLs/drivers del fabricante lo exijan. Anvil solo ve endpoints gRPC; ver
+DLLs/drivers del fabricante lo exijan. Un componente WASM no sirve para esto:
+corre sin red. Anvil solo ve endpoints gRPC; ver
 [executores-lenguaje.md](executores-lenguaje.md).
 
-Hoy (`pasos_demo`) los pasos son simulados (no tocan hardware). La
+Los pasos del banco de demo (`ejemplos/departamento/demo`) son simulados
+(no tocan hardware). La
 frontera gRPC motor↔paso es real (M5-ext.1 la generaliza a varios
 endpoints); la integración con el instrumento es interna del paso.
 
@@ -35,7 +38,7 @@ Motor ──gRPC──▶ Paso (Rust/Python/…)
                         └─▶ Instrumento físico
 ```
 
-1. **MVP-parcial — paso gRPC (implementado en M5):** un paso Rust que envía
+1. **MVP-parcial — paso gRPC (implementado en M5, retirado con ADR-0041):** un paso Rust que envía
    comandos SCPI por TCP y parsea la respuesta. Vive en `crates/pasos_scpi`
    (`medir_voltaje_scpi`), se despacha por nombre y se testa contra un
    servidor TCP mock en loopback. La dirección va en `ANVIL_SCPI_ADDR`

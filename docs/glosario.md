@@ -19,9 +19,8 @@ término de TestStand no se replica igual en Anvil, se dice explícitamente.
 
 - **Secuencia.** Una lista ordenada de pasos agrupados en Setup, Main y
   Cleanup. En Anvil es **datos** (`DefinicionSecuencia`), no código: el
-  motor la recorre sin saber qué hace cada paso. Hoy se construye en código
-  (`crates/motor/src/bin/basica_datos.rs`); el objetivo es cargarla desde
-  YAML (ver [diseno/formato-de-secuencia.md](diseno/formato-de-secuencia.md)).
+  motor la recorre sin saber qué hace cada paso. Se carga desde YAML (ver
+  [diseno/formato-de-secuencia.md](diseno/formato-de-secuencia.md)).
 
 - **Paso.** La unidad de test. Se invoca **por gRPC por su nombre**; el
   motor nunca lo llama directamente. Definido por `DefinicionPaso{nombre,
@@ -35,12 +34,13 @@ término de TestStand no se replica igual en Anvil, se dice explícitamente.
     el primer fallo**.
   - **Cleanup**: libera recursos. Corre **siempre**, pase lo que pase antes
     — un equipo que se quedó encendido es peor que una secuencia que falló.
-  Semántica implementada en `crates/motor/src/lib.rs::ejecuta_secuencia`.
+  Semántica implementada en `crates/motor/src/lib.rs::ejecuta_programa`.
 
 - **Despacho por nombre.** El motor pide un paso por su `nombre` (string) al
   ejecutor por gRPC; el ejecutor lo ata a una función concreta. Es el único
-  punto donde el nombre del cable se ata a código (hoy en
-  `crates/pasos_demo/src/lib.rs::despacha`). Un nombre desconocido devuelve
+  punto donde el nombre del cable se ata a código (en el puente WASM,
+  `executors/wasm/src/main.rs::resolve` elige el módulo y el registro del SDK,
+  `executors/rust/anvil-step/src/registry.rs`, la función). Un nombre desconocido devuelve
   `error`, no pánico: una secuencia mal escrita no debe tumbar el ejecutor.
 
 - **Reintento.** Cada paso declara cuántos intentos admite (`reintentos`).
@@ -78,14 +78,15 @@ término de TestStand no se replica igual en Anvil, se dice explícitamente.
   paso: los pide por nombre al ejecutor. Crate `crates/motor`.
 
 - **Ejecutor de pasos.** El servidor gRPC que despacha pasos por nombre: el
-  adaptador entre el motor genérico y los pasos concretos. Hoy es
-  `crates/ejecutor_pasos` (binario que escucha en `127.0.0.1:9100`).
+  adaptador entre el motor genérico y los pasos concretos. Es un proceso aparte
+  que la secuencia declara en `executors:`; `anvil` no lleva ninguno
+  ([ADR-0041](adr/0041-there-is-no-embedded-executor.md)).
 
 - **Ejecutor de lenguaje.** Ejecutor de pasos distribuido como **módulo
   aparte** (`executors/`), uno por sistema (Python, LabVIEW, MATLAB, …),
   que habla el mismo `paso.proto` con gRPC nativo de su ecosistema. Son
-  **alternativas opt-in** al ejecutor WASM embebido; pueden mezclarse en la
-  misma secuencia. Licencia Apache-2.0. Ver
+  **alternativas** entre sí y al puente WASM (`anvil-exec-wasm`); pueden
+  mezclarse en la misma secuencia. Licencia Apache-2.0. Ver
   [diseno/executores-lenguaje.md](diseno/executores-lenguaje.md) y
   [ADR-0012](adr/0012-executores-de-lenguaje-como-modulos.md).
 
@@ -141,7 +142,8 @@ término de TestStand no se replica igual en Anvil, se dice explícitamente.
 
 - **Routing nombre→endpoint.** (M5-ext.1, implementado) El YAML declara
   `ejecutores:` y cada paso `grpc` su `ejecutor:`; el motor despacha por
-  nombre contra una tabla de conexiones (embebido por defecto). Override por
+  nombre contra una tabla de conexiones; no hay ejecutor por defecto
+  (ADR-0041). Override por
   CLI `--executor nombre=host:puerto`. Ver
   [ADR-0013](adr/0013-cargador-wasm-host-side-y-routing.md).
 

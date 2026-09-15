@@ -5,16 +5,16 @@
 > types son post-MVP.
 
 Cómo se define, registra, descubre y versiona un paso. Trazable a
-`crates/pasos_demo/src/lib.rs` y [ADR-0003](../adr/0003-pasos-por-grpc-por-nombre.md).
+`ejemplos/departamento/demo/src/lib.rs` (el banco de demo) y [ADR-0003](../adr/0003-pasos-por-grpc-por-nombre.md).
 
 ## El adapter es gRPC
 
 En TestStand, un *adapter* es el puente a un lenguaje (LabVIEW, C/C++, .NET,
 Python). En Anvil **el adapter es gRPC**: cualquier lenguaje que hable el
 contrato protobuf es un adapter, sin código de pegamento en el motor y sin
-runtime de vendor (ADR-0003). Hoy el prototipo hospeda `pasos_demo` en el
-mismo `.wasm` del ejecutor; el objetivo es que un paso pueda ser un
-**servidor gRPC en cualquier lenguaje**.
+runtime de vendor (ADR-0003). Un paso lo sirve un ejecutor en su propio
+proceso —el puente WASM, Python o C#—; `anvil` no lleva ninguno
+([ADR-0041](../adr/0041-there-is-no-embedded-executor.md)).
 
 **Materializado en M5-ext (ADR-0013/0014):** Anvil distribuye **executores de
 lenguaje** como módulos (`executors/`, primero Python) y el routing
@@ -28,16 +28,17 @@ ADR-0013/0014). Ver
 ## Despacho por nombre
 
 El motor pide un paso por `nombre`; el ejecutor lo ata a una función. El
-despacho es el **único** punto donde el nombre del cable se ata a código
-(hoy `pasos_demo::despacha`):
+despacho es el **único** punto donde el nombre del cable se ata a código. En
+el puente WASM, `resolve` (`executors/wasm/src/main.rs`) elige el módulo por
+el prefijo `<módulo>/` y el registro del SDK
+(`executors/rust/anvil-step/src/registry.rs`) elige la función; un paso que el
+componente no sirve devuelve:
 
 ```rust
-match nombre {
-    "conectar_equipo" => conectar(intento),
-    "medir_voltaje"   => medir_voltaje(intento),
-    ...
-    _ => ResultadoStep::nuevo("desconocido", "error", "paso no reconocido"),
-}
+Outcome::error(format!(
+    "this component does not serve a step called '{}' (it serves: {})",
+    ctx.step_name, known
+))
 ```
 
 Un nombre desconocido es `error`, **no pánico**: una secuencia mal escrita
@@ -60,8 +61,8 @@ el motor sigue siendo genérico (ADR-0005).
 ### Cómo se encarnan en M3
 
 - **pass/fail** y **action** no necesitan lógica nueva: son pasos normales que
-  devuelven `paso`/`fallo`/`error` (con o sin medida). `pasos_demo::verificar_led`
-  es pass/fail; `pasos_demo::abrir_rele` es action.
+  devuelven `paso`/`fallo`/`error` (con o sin medida). En el banco de demo,
+  `demo/check_led` es pass/fail y `demo/open_relay` es action.
 - **limit test** se habilita con los **límites como datos** (RF-29,
   [limites-y-estados.md](limites-y-estados.md)): el paso mide y devuelve
   `valor_medido`; el motor evalúa el `Limite` del YAML y produce el estado

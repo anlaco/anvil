@@ -48,8 +48,8 @@ while !resultado.paso() && intento < max:
 ```
 
 El `intento` (desde 1) viaja al paso en `PeticionPaso.intento`. Un paso lo
-usa para simular fallos transitorios (ver `pasos_demo::conectar`: falla el
-1, pasa el 2+).
+usa para simular fallos transitorios (ver `demo/connect` en
+`ejemplos/departamento/demo`: falla el 1, pasa el 2+).
 
 > **Decisión:** un paso que falla consume reintentos; un paso que da
 > `error` también se reintenta (el motor solo distingue `paso` del resto).
@@ -74,8 +74,7 @@ Un `error` manda sobre un `fallo` aunque llegue antes (testeado en
 - **Fallo del paso** (`estado = "fallo"`): resultado válido, no corta la
   ejecución del motor (sí corta el Main).
 - **Error del motor** (`Error::Red` / `Error::Protobuf`): la comunicación
-  se rompió. La secuencia se interrumpe (`basica_datos.rs` sale con código
-  != 0). **No** se confunde con un paso que falla (RF-11).
+  se rompió. La secuencia se interrumpe (`anvil` sale con código != 0). **No** se confunde con un paso que falla (RF-11).
 
 ## Control de flujo (MVP-parcial)
 

@@ -105,8 +105,8 @@ decimales). El paso **decide** `paso`/`fallo` comparando `valor` contra
 `[min, max]` — la comparación vive en el lado del paso (ADR-0005: el motor
 no conoce el dominio).
 
-Ejemplo del repo (`pasos_demo::medir_voltaje`): mide 4.2 contra rango
-4.5–5.5 → `fallo` ("voltaje fuera de rango").
+Ejemplo del repo (`demo/measure_voltage` en `ejemplos/basica.yaml`): mide 4.2
+contra rango 4.5–5.5 → `fail`.
 
 ## Límites como datos first-class (MVP-parcial, implementado en M3)
 

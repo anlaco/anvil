@@ -65,7 +65,7 @@ service StepExecutor {
 | Campo | Tipo | Significado |
 |---|---|---|
 | `name` | string | El paso a invocar. El ejecutor lo ata a una función en `despacha`; desconocido → `error` (RF-12). |
-| `attempt` | int32 | Número de intento **desde 1**. Llega al paso para simular fallos transitorios (ver `pasos_demo::conectar`: falla el 1, pasa el 2+). |
+| `attempt` | int32 | Número de intento **desde 1**. Llega al paso para simular fallos transitorios (ver `demo/connect` en `ejemplos/departamento/demo`: falla el 1, pasa el 2+). |
 | `inputs` | repeated Valor | Los parámetros del paso, **ya evaluados**: el motor resuelve las expresiones `${...}` del YAML contra su entorno antes de llamar (ADR-0009). El paso no ve `locals`; se le pasan valores. Un `oneof` sin rama es `error` (ADR-0019, Regla 2). |
 | `contract` | int32 | La versión de contrato que habla el motor. Ver «Versionado» más abajo. |
 
@@ -325,7 +325,7 @@ este catálogo.
 El contrato **no cambia** desde el punto de vista del motor: un paso lo
 atiende un **ejecutor de lenguaje** distribuido (`executors/`, p. ej.
 Python), un **componente `.wasm` cargado por path** (M5-ext.2; lo carga el
-host, ADR-0015) o el ejecutor embebido — el motor siempre habla el mismo
+host, ADR-0015) — el motor siempre habla el mismo
 `paso.proto` por gRPC y solo añade routing **nombre→endpoint** en su lado
 (`ejecutores:`/`ejecutor:` en el YAML, M5-ext.1).
 

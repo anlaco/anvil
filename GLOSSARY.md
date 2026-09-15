@@ -82,7 +82,7 @@ Sin cambio: `min`, `max`, `op` y los operadores (`ge`, `le`, `gt`, `lt`, `eq`,
 
 | Antes | Ahora |
 |---|---|
-| `tipo: embebido` | `type: embedded` |
+| `tipo: embebido` | `type: embedded` (retirado: ya no hay ejecutor embebido, ADR-0041) |
 | `puerto` | `port` |
 
 Sin cambio: `host`, `path`, `tipo: wasm|grpc`.
@@ -184,7 +184,7 @@ Sin cambio: `setup`, `main`, `cleanup` como valores de `phase`.
 | `--solo-loopback` | `--loopback-only` |
 
 Sin cambio: `--json`, `--csv`, `--limits`, `--validate`, `--process-model`,
-`--port`, `--wasm`, `--quiet`.
+`--wasm`, `--quiet`. (`--port` se retiró con ADR-0041.)
 
 ## Lo que todavía está en castellano y acabará en inglés
 

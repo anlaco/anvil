@@ -1,7 +1,7 @@
 # Ejecutor de pasos en Python (ADR-0012)
 
 Módulo distribuido de Anvil: un **ejecutor de lenguaje** que habla el mismo
-contrato gRPC (`paso.proto`) que el ejecutor WASM embebido. El motor lo ve
+contrato gRPC (`paso.proto`) que el puente WASM `anvil-exec-wasm`. El motor lo ve
 como un endpoint más; no sabe que detrás hay Python. Es el primero de la
 familia `executors/` (LabVIEW, MATLAB, … futuros), licencia **Apache-2.0**
 (adoptable y extensible, [ADR-0012](../../docs/adr/0012-executores-de-lenguaje-como-modulos.md)).
@@ -278,16 +278,19 @@ nunca una excepción (RF-12).
 ## Usarlo desde Anvil
 
 El motor despacha por **nombre→endpoint** (`executors:` en el YAML, o el flag
-`--executor nombre=host:puerto`). Ejemplo con el ejecutor embebido y éste en la
-misma secuencia:
+`--executor nombre=host:puerto`). Ejemplo con el banco de demo (un componente
+WASM que sirve `anvil-exec-wasm`) y éste en la misma secuencia; cada paso nombra
+su ejecutor, porque `anvil` no lleva uno propio
+([ADR-0041](../../docs/adr/0041-there-is-no-embedded-executor.md)):
 
 ```yaml
 name: demo_ejecutores
 executors:
-  - { name: embebido, type: embedded }
+  - { name: demo, type: wasm, path: departamento/dist/anvil-exec-wasm }
   - { name: python, type: grpc, host: 127.0.0.1, port: 9101 }
 main:
-  - name: verificar_led          # servido por el ejecutor WASM embebido
+  - name: demo/check_led         # servido por el banco de demo
+    executor: demo
   # Los del ejecutor Python van con su módulo delante: viven en
   # `steps/instrument.py`, así que el módulo es `instrument`.
   - name: instrument/medir_simulador

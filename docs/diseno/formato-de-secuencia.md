@@ -5,27 +5,13 @@
 > subconjunto estricto que crece de forma deliberada.
 
 La secuencia es **datos** (ADR-0002). El cargador (`crates/cargador`) lee el
-YAML y lo traduce a `DefinicionSecuencia` sin tocar el motor (ADR-0005); el
-binario `crates/motor/src/bin/basica_datos.rs` es la misma secuencia expresada
-en Rust, para referencia.
+YAML y lo traduce a `DefinicionSecuencia` sin tocar el motor (ADR-0005). La
+secuencia de referencia es `ejemplos/basica.yaml`.
 
 ## Estado actual
 
-Hoy la secuencia "basica" se construye en Rust:
-
-```rust
-DefinicionSecuencia {
-    nombre: "basica_datos".into(),
-    pasos_setup: vec![DefinicionPaso::nuevo("conectar_equipo", 3)],
-    pasos_main: vec![
-        DefinicionPaso::nuevo("medir_voltaje", 1),
-        DefinicionPaso::nuevo("verificar_led", 1),
-    ],
-    pasos_cleanup: vec![DefinicionPaso::nuevo("desconectar_equipo", 1)],
-}
-```
-
-El objetivo: expresar lo mismo en YAML, cargarlo y traducirlo a
+Hasta M1 la secuencia "basica" se construía en Rust (`basica_datos.rs`, ya
+retirado con ADR-0041); desde entonces es un YAML que el cargador traduce a
 `DefinicionSecuencia` sin tocar el motor (ADR-0005).
 
 ## Schema YAML propuesto
@@ -102,11 +88,11 @@ Reglas:
   nombre; el `nombre:` de una inline es opcional (cae al de su clave).
 - Desde **M5-ext.1** (RF-36.3, ver [executores-lenguaje.md](executores-lenguaje.md)):
   `ejecutores:` a nivel de secuencia declara la **tabla de ejecutores** y un
-  paso `grpc` puede declarar `ejecutor: <nombre>` (si se omite, va al
-  embebido). Cada ejecutor tiene `nombre` y `tipo`:
-  - `tipo: embebido` — el ejecutor WASM de serie, en loopback. Default. Sin
-    campos adicionales. El puerto lo elige el host (efímero por proceso, o el
-    de `--port`); 9100 es el default del guest ejecutor suelto.
+  paso `grpc` **debe** declarar `executor: <nombre>`: no hay ejecutor por
+  defecto, y omitirlo es error de carga que lista los declarados
+  ([ADR-0041](../adr/0041-there-is-no-embedded-executor.md)). Cada ejecutor
+  tiene `name` y `type`, y `type` es obligatorio (`type: embedded` ya no
+  existe y es error de carga que señala el banco de demo):
   - `tipo: wasm` — componente `.wasm` propio cargado por el **host** por
     path (M5-ext.2, ADR-0014/0015; implementado). Campo `path` (relativo
     al YAML, debe existir). El host spawnea el puente `anvil-exec-wasm`,
@@ -123,8 +109,7 @@ Reglas:
   Antes se descartaba en silencio, incluso cuando contradecía a la de la raíz
   (issue anlaco/Anvil-Test#21).
 
-  El nombre `__anvil_embebido__` está reservado (lo usa el motor); el
-  cargador lo rechaza. `ejecutor:` en un paso `statement`/`sequence_call`
+  `ejecutor:` en un paso `statement`/`sequence_call`
   es error (sólo aplica a `grpc`). Override por CLI:
   `--executor nombre=host:puerto` (re-apunta o convierte un ejecutor sin
   tocar el YAML, patrón `--limits`).
@@ -246,9 +231,10 @@ orquesta el motor contra su propio entorno; un paso gRPC no.
 
 Un **process model** (PM) es una secuencia YAML envoltorio: una
 `DefinicionSecuencia` más, cuyo `main` lleva un `sequence_call` a la
-secuencia del usuario. El PM canónico es `process_models/sequential.yaml`
-(`identificar_uut` en `setup`, `sequence_call` al usuario en `main`,
-`notificar_resultado` en `cleanup`).
+secuencia del usuario. No se distribuye ninguno: el que había,
+`process_models/sequential.yaml`, se retiró con ADR-0041 (sus plug-ins los
+servía el ejecutor embebido). La regresión usa uno mínimo,
+`docs/qa/regresion/pm-minimal.yaml`.
 
 Convención: el PM autora el call con `secuencia: secuencia_usuario` (un
 **nombre reservado**, no un path). El cargador, en

@@ -1,6 +1,7 @@
 # Design: language executors and the `.wasm` loader
 
-> **Priority:** extended MVP. The embedded WASM executor already exists; the
+> **Priority:** extended MVP. `anvil` carries no executor of its own since
+> [ADR-0041](../adr/0041-there-is-no-embedded-executor.md); the
 > name→endpoint routing is **implemented in M5-ext.1** (ADR-0013); the
 > `.wasm` loader by path is **implemented in M5-ext.2** (ADR-0014, agnostic
 > to the `.wasm`'s origin); LID is a deployment pattern **postponed to
@@ -20,15 +21,12 @@ on the loader and the routing),
 
 ```
                     ┌──────────────────────────────────────────────┐
-                    │  anvil-host (native bin, ADR-0011)           │
-                    │  ┌────────────────┐    ┌──────────────────┐  │
-Motor (WASM) ─gRPC─▶│  │ ejecutor.wasm  │◀──▶│  .wasm modules   │  │
- name→endpoint      │  │  (embedded)    │    │  loaded by        │  │
-                    │  │  · pasos_demo  │    │  path (.vi model) │  │
-                    │  │  · built-in    │    │  · own Store      │  │
-                    │  └────────────────┘    └──────────────────┘  │
-                    └───────────┬──────────────────────────────────┘
-                                │ gRPC (same contract)
+                    │  anvil-exec-wasm (spawned by anvil-host)     │
+Motor (WASM) ─gRPC─▶│  serves the .wasm modules next to its binary │
+ name→endpoint │    │  (.vi model) · e.g. the demo bench `demo`    │
+               │    └──────────────────────────────────────────────┘
+               │ gRPC (same contract)
+               └────────────────┐
                     ┌───────────▼──────────────────────────────┐
                     │  executors/  (Apache-2.0 modules)        │
                     │  python/  ·  labview/ (future)  ·  ...    │
@@ -41,40 +39,42 @@ Motor (WASM) ─gRPC─▶│  │ ejecutor.wasm  │◀──▶│  .wasm modu
 ```
 
 - The engine dispatches by **name→endpoint**: it neither knows nor cares
-  whether the step is served by the embedded executor, a loaded `.wasm`, or
-  a Python executor on another machine.
+  whether the step is served by a loaded `.wasm`, a Python executor, or a C#
+  one on another machine.
 - They all speak the **same `paso.proto`**. The contract does not change
   (RNF-05).
 
-## The embedded WASM executor (the default one)
+## No executor inside `anvil` (ADR-0041)
 
-- **Zero-install**: it lives inside `anvil-host` (ADR-0011). WASM/Rust is
-  the **default language** of a test executor.
-- It serves the **built-in** steps: `pasos_demo` compiled in (pass/fail,
-  limit test, action, simulated connect/measure/disconnect). Always
-  available, on `127.0.0.1:9100`.
-- It does **not** load `.wasm` by path: a WASM guest cannot instantiate
-  wasmtime inside itself (ADR-0013). That is the **host's** job (see
-  below).
+- Before ADR-0041 the binary embedded a WASM executor serving simulated steps,
+  and a step with no `executor:` went to it. It was removed: a step that calls
+  an executor **names it**, and every entry under `executors:` names its
+  `type` (`wasm` or `grpc`).
+- The zero-install demonstration is now a **WASM component**, `demo`
+  (`ejemplos/departamento/demo`: connect, measure_voltage, check_led,
+  open_relay, disconnect, instrument_offline), served by `anvil-exec-wasm`
+  and shipped in the package.
 
 ### Name→endpoint routing (M5-ext.1, implemented)
 
 The YAML declares `executors:` and each `grpc` step may declare
 `executor:`. The engine dispatches by **name→endpoint** (connection table in
-`Motor::desde_programa`); without a declaration, everything goes to the
-embedded executor (M4b compatibility).
+`Motor::desde_programa`). A `grpc` step without `executor:` is a load error
+(ADR-0041).
 
 ```yaml
 executors:
-  - name: embebido        # the default WASM executor (127.0.0.1:9100)
-    type: embedded
+  - name: demo            # the demo bench, a WASM department
+    type: wasm
+    path: departamento/dist/anvil-exec-wasm
   - name: python          # a separate language executor
     type: grpc
     host: 127.0.0.1         # or 192.168.x.y (future LID) — only if declared
     port: 9101
 main:
-  - name: verificar_led   # embedded (default)
-  - name: medir_simulador
+  - name: demo/check_led
+    executor: demo
+  - name: instrument/medir_simulador
     executor: python
 ```
 
@@ -116,8 +116,7 @@ executors:
   port (`bind 127.0.0.1:0`).
 - **The engine never runs `Wasm`** (ADR-0014/0015): the host composes a
   synthetic `--executor name=127.0.0.1:<port>` override (M5-ext.1, which
-  already turns `wasm` into `grpc`), so the engine only sees
-  `embebido`/`grpc`, as always. Running `anvil.wasm` loose with the wasmtime
+  already turns `wasm` into `grpc`), so the engine only sees `grpc`. Running `anvil.wasm` loose with the wasmtime
   CLI (no host) against a `wasm` executor gives `Error::EjecutorWasmSinHost`
   with a clear message.
 - **Remote case (Raspberry Pi, ADR-0023)**: the bridge ships as a file next
@@ -179,13 +178,10 @@ an executor.
 Three things the scheme is **not**:
 
 - It is **not** the `type:` of the sequence. The YAML types by transport —
-  `embedded`, `wasm`, `grpc` — because the engine does not know what language
+  `wasm`, `grpc` — because the engine does not know what language
   sits behind an endpoint and must not (ADR-0013). `anvil-exec-python` and
   `anvil-exec-labview` are both `type: grpc`. Only `wasm` names a runtime,
   because it is the only one Anvil loads itself.
-- It is **not** a rename of the embedded executor. That one is inside the
-  `anvil` binary and is never launched by hand, so it has no file name to
-  carry (ADR-0011).
 - It does **not** replace `server.py`, which stays runnable exactly as before.
   `anvil-exec-python` is a launcher over it: it puts the executor's own
   directory on `sys.path` and hands the command line to `server.main()`.
@@ -205,7 +201,7 @@ A bench session, an instrument connection, a driver handle: a thing with open
 sockets and vendor locks that **cannot cross the wire and must not be reopened
 per step**. It stays in the executor's process, and the sequence carries a
 `Reference` to it — which is the one thing a language executor can offer that
-the embedded WASM one cannot, since `anvil:step` is a function with no state
+a WASM component cannot, since `anvil:step` is a function with no state
 between calls.
 
 Two duties fall on whoever writes an executor, and **Anvil cannot check either
@@ -257,11 +253,9 @@ Embedded first, sidecar later (same as the limits, RF-30):
 
    ```yaml
    executors:
-     - name: embebido        # the default WASM executor
-       type: embedded
-     - name: mi_paso_wasm    # .wasm module loaded by path
-       type: wasm
-       path: ./pasos/mi_paso.wasm
+     - name: mi_paso_wasm    # a WASM department: the executor binary, its
+       type: wasm            # .wasm modules beside it (ADR-0027)
+       path: ./pasos/anvil-exec-wasm
      - name: python          # a separate language executor
        type: grpc              # same contract, other process/host
        host: 127.0.0.1         # or 192.168.x.y (LID) — only if declared
@@ -269,7 +263,7 @@ Embedded first, sidecar later (same as the limits, RF-30):
    ```
 
    And each step references its executor: `executor: python` in
-   `DefinicionPaso` (or a default executor if none is declared).
+   `DefinicionPaso`. It is required: there is no default (ADR-0041).
 
 2. **CLI flag override** (MVP): `--executor python=192.168.1.50:9100` to
    point an executor at another endpoint without touching the YAML (R&D vs.
@@ -278,23 +272,23 @@ Embedded first, sidecar later (same as the limits, RF-30):
 3. **Reusable sidecar** (post-MVP): a config file shared by several
    sequences.
 
-With no `executors:` declared, everything goes to the embedded executor on
-loopback — identical behavior to M4b (ADR-0011 compatibility).
+With no `executors:` declared, a sequence can only hold steps that call no
+executor (`statement`, `pass_fail`, `sequence_call`).
 
 ## Demo M5-ext.1 (done, no Docker)
 
-The real demo is `ejemplos/demo_ejecutores.yaml`: **embedded + Python on
-loopback** (no Docker, no LID).
+The real demo is `ejemplos/demo_ejecutores.yaml`: **the demo bench (WASM) +
+Python on loopback** (no Docker, no LID).
 
 ```yaml
 name: demo_ejecutores
 executors:
-  - { name: embebido, type: embedded }
+  - { name: demo, type: wasm, path: departamento/dist/anvil-exec-wasm }
   - { name: python, type: grpc, host: 127.0.0.1, port: 9101 }
 main:
-  - name: verificar_led        # embedded (default)
-  - name: medir_simulador, executor: python
-  - name: conectar_equipo, executor: python
+  - { name: demo/check_led, executor: demo }
+  - { name: instrument/medir_simulador, executor: python }
+  - { name: instrument/conectar_equipo, executor: python }
 ```
 
 Verification: the sequence passes/fails per step, and the report shows steps
@@ -302,7 +296,8 @@ served by two different executors without the engine knowing anything about
 the language. The demo with an own `.wasm` step (`tipo: wasm`) is
 `ejemplos/demo_wasm.yaml` (M5-ext.2, ADR-0015): the host spawns the bridge,
 which loads the `ejemplos/hola-paso` component (the "hello world") and calls
-its `run`; the engine dispatches the three steps (embedded + component) with
+its `run`; the engine dispatches its steps (`demo/check_led` and the
+component's) with
 the limit and retries evaluated by the engine. See
 [ADR-0015](../adr/0015-el-wasm-del-usuario-es-una-funcion-puenteado-a-grpc.md).
 
