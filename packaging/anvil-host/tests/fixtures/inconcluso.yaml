@@ -10,7 +10,7 @@
 # motor, así que el veredicto es determinista y no depende de la red.
 #
 #   === exit_inconcluso: inconcluso ===
-#   [paso] init: statement ok
+#   [done] init: statement ok
 #   [saltado] verdict: precondición falsa
 #   (1 de 2 pasos saltados)
 

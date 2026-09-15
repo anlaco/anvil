@@ -131,7 +131,9 @@ pub const CAMPOS_RESULTADO: [&str; 3] = ["status", "message", "measured_value"];
 ///
 /// `saltado` **no está en la escala**: es neutral (RF-33/34) y por eso mapea a
 /// `Paso`, que es el mínimo. No significa que un paso saltado haya pasado —
-/// significa que no mueve el veredicto.
+/// significa que no mueve el veredicto. `done` —a step that completed and
+/// judged nothing (ADR-0040 §6)— is neutral in the same way and for the same
+/// reason.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Default)]
 pub enum Severidad {
     #[default]
@@ -165,8 +167,8 @@ impl Severidad {
             "error" => Severidad::Error,
             "fail" => Severidad::Fallo,
             "inconclusive" => Severidad::Inconcluso,
-            // Neutrales: `paso` afirma, `saltado` no mueve el veredicto.
-            "pass" | "skipped" => Severidad::Paso,
+            // Neutrales: `paso` afirma; `saltado` y `done` no mueven el veredicto.
+            "pass" | "skipped" | "done" => Severidad::Paso,
             // Lo que no se reconoce no se juzga (Regla 2).
             _ => Severidad::Error,
         }
@@ -846,6 +848,20 @@ mod tests {
             "led encendido",
         ));
         assert_eq!(s.estado(), "error");
+    }
+
+    /// `done` completed and judged nothing (ADR-0040 §6): neutral, like
+    /// `skipped` — a sequence of them fails nothing — and never a pass an
+    /// executor could claim, because it is not in `ESTADOS_DE_EJECUTOR`.
+    #[test]
+    fn done_is_neutral_and_engine_only() {
+        assert_eq!(Severidad::de("done"), Severidad::Paso);
+        assert!(!ESTADOS_DE_EJECUTOR.contains(&"done"));
+
+        let mut s = ResultadoSecuencia::nueva("s");
+        s.registra(ResultadoStep::nuevo("set_x", "done", "statement ok"));
+        s.registra(ResultadoStep::nuevo("measure", "fail", "out of range"));
+        assert_eq!(s.estado(), "fail", "done does not hide a fail");
     }
 
     /// Los dos vocabularios cerrados de la Regla 2, fijados: cada estado que un

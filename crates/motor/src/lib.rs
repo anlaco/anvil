@@ -727,7 +727,7 @@ fn ejecuta_secuencia_interna<I: InvocaPasos>(
     let mut setup_ok = true;
     for (indice, p) in def.pasos_setup.iter().enumerate() {
         let r = corre_un_paso(inv, p, &mut entorno, sink, &ctx(Fase::Setup, indice))?;
-        let fallo = !r.paso() && r.estado != "skipped";
+        let fallo = mueve_el_veredicto(&r);
         secuencia.registra(r.clone());
         if fallo {
             setup_ok = false;
@@ -745,7 +745,7 @@ fn ejecuta_secuencia_interna<I: InvocaPasos>(
     if setup_ok {
         for (indice, p) in def.pasos_main.iter().enumerate() {
             let r = corre_un_paso(inv, p, &mut entorno, sink, &ctx(Fase::Main, indice))?;
-            let fallo = !r.paso() && r.estado != "skipped";
+            let fallo = mueve_el_veredicto(&r);
             if p.tipo == TipoPaso::PassFail && r.estado != "skipped" {
                 veredicto_evaluado = true;
             }
@@ -784,6 +784,14 @@ fn ejecuta_secuencia_interna<I: InvocaPasos>(
         sink.on_fin_secuencia(&secuencia);
     }
     Ok((secuencia, entorno))
+}
+
+/// Whether a step's status is one that cuts a phase: anything above the neutral
+/// statuses of the severity scale. `pass`, `skipped` and `done` do not
+/// (ADR-0040 §6); reading it off the scale rather than listing them is what
+/// keeps a new neutral status from cutting `setup` by omission.
+fn mueve_el_veredicto(r: &ResultadoStep) -> bool {
+    modelo::Severidad::de(&r.estado) > modelo::Severidad::Paso
 }
 
 /// Lo que un paso necesita saber de la corrida que lo envuelve: la secuencia
@@ -1108,7 +1116,9 @@ fn ejecuta_statement_puro(
         return ResultadoStep::nuevo(nombre, "error", "statement sin sentencia");
     };
     match eval_sentencias(stmts, ent) {
-        Ok(()) => ResultadoStep::nuevo(nombre, "pass", "statement ok"),
+        // `done`, not `pass`: a statement did something and checked nothing
+        // (ADR-0040 §9), and the report must not say it passed.
+        Ok(()) => ResultadoStep::nuevo(nombre, "done", "statement ok"),
         Err(e) => ResultadoStep::nuevo(nombre, "error", format!("statement: {e}")),
     }
 }
@@ -1444,7 +1454,7 @@ mod tests {
         let mut env = entorno_con_locals(&[("ok", ValorDefinicion::Bool(true))]);
         let stmts = expr::parse_sentencias("locals.ok = false").unwrap();
         let r = ejecuta_statement_puro(Some(&stmts), "init", &mut env);
-        assert_eq!(r.estado, "pass");
+        assert_eq!(r.estado, "done", "a statement checks nothing (ADR-0040 §9)");
         assert_eq!(env.locals().get("ok"), Some(&expr::Value::Bool(false)));
     }
 
@@ -1557,6 +1567,11 @@ mod tests {
         assert_eq!(
             r.estado, "error",
             "un ejecutor no puede declararse a sí mismo no concluyente"
+        );
+        let r = normaliza_estado_de_ejecutor(ResultadoStep::nuevo("p", "done", "m"));
+        assert_eq!(
+            r.estado, "error",
+            "done is the engine's to give (ADR-0040 §6); an executor cannot claim it"
         );
     }
 
@@ -2552,6 +2567,31 @@ mod tests {
         p.tipo = TipoPaso::Statement;
         p.statement = Some(expr::parse_sentencias("locals.v = 1.0").unwrap());
         p
+    }
+
+    /// A `done` step does not cut its phase (ADR-0040 §6): a `statement` in
+    /// `setup` lets `main` run, and one in `main` lets the next step run.
+    #[test]
+    fn done_does_not_cut_setup_or_main() {
+        let mut def = DefinicionSecuencia {
+            nombre: "s".into(),
+            ..Default::default()
+        };
+        def.locals.insert("v".into(), ValorDefinicion::Numero(0.0));
+        def.pasos_setup = vec![stmt("prepare")];
+        def.pasos_main = vec![stmt("first"), stmt("second")];
+        let (sec, _) = corre_con(&mut InvocadorMock, &def);
+
+        let seen: Vec<(&str, &str)> = sec
+            .pasos
+            .iter()
+            .map(|p| (p.nombre.as_str(), p.estado.as_str()))
+            .collect();
+        assert_eq!(
+            seen,
+            vec![("prepare", "done"), ("first", "done"), ("second", "done")]
+        );
+        assert_eq!(sec.estado(), "pass", "done fails nothing");
     }
 
     #[test]

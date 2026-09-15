@@ -171,7 +171,7 @@ function renderSequence() {
       const mark = document.createElement("span");
       mark.className = "run-mark";
       const rs = row.dataset.run;
-      const MARKS = { running: "▶", pass: "✓", fail: "✕", error: "!", skipped: "–" };
+      const MARKS = { running: "▶", pass: "✓", done: "•", fail: "✕", error: "!", skipped: "–" };
       mark.textContent = rs ? (MARKS[rs] ?? "?") : "";
       if (rs) mark.title = rs;
 

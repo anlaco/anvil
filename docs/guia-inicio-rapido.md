@@ -176,9 +176,9 @@ stderr; stdout stays clean for the report.
 ```
 === basica: pass ===
   [pass] preparar: sequence call 'init_comun' → pass
-    [pass] preparar_canal: statement ok
+    [done] preparar_canal: statement ok
   [pass] test_fuentes: sequence call 'ejemplos/medir_fuentes.yaml' → pass
-    [pass] ajustar_canal: statement ok
+    [done] ajustar_canal: statement ok
     [pass] demo/measure_voltage: measured: 4.2 V (channel 1)
     [pass] demo/disconnect: instrument disconnected
 ```
