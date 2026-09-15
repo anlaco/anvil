@@ -29,9 +29,9 @@ are statically linked against musl: they need no Rust, no cargo, no glibc,
 nothing installed on the system.
 
 ```sh
-curl -LO https://github.com/anlaco/anvil/releases/download/v0.6.2/anvil-v0.6.2-x86_64-linux-musl.tar.gz
-tar xzf anvil-v0.6.2-x86_64-linux-musl.tar.gz
-cd anvil-v0.6.2-x86_64-linux-musl
+curl -LO https://github.com/anlaco/anvil/releases/download/v0.6.3/anvil-v0.6.3-x86_64-linux-musl.tar.gz
+tar xzf anvil-v0.6.3-x86_64-linux-musl.tar.gz
+cd anvil-v0.6.3-x86_64-linux-musl
 
 ./anvil ejemplos/subsecuencia.yaml --json ./out.json --csv ./out.csv
 ```
