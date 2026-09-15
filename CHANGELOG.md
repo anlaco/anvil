@@ -26,7 +26,44 @@ applies from 0.6.0 on; by it, 0.6.0 itself would have been 0.5.1.
 
 ## [Unreleased]
 
+**Sequences written for 0.6 do not load.** A step now says how it is judged, in
+TestStand's terms, and names what it calls; the loader refuses the old shape
+with a message that says what to write for each step.
+
+### Added
+
+- **Step types in TestStand's terms**
+  ([ADR-0040](docs/adr/0040-a-step-type-says-how-a-step-is-judged-not-what-it-calls.md),
+  [ADR-0042](docs/adr/0042-what-adr-0040-left-unsaid.md)). `type` is
+  required and says how a step is judged:
+  - `action` calls its module and judges nothing: success is `done`.
+  - `pass_fail` passes or fails on its module's answer, on a `condition`, or on
+    a `condition` that reads the module's `result`.
+  - `numeric_limit` judges a number — the module's measurement, or `value` —
+    against its `limit`; with no number to judge it is `error`.
+  - `statement` and `sequence_call` as before.
+- **`module`** is what a step calls on its executor; `name` is only how the
+  report, the editor and the events show the step, so two steps can call one
+  module with different inputs under names of their own.
+- **A new status, `done`**, for a step that completed and judged nothing. It is
+  neutral: it stops no phase and fails no sequence, and an executor cannot
+  return it.
+- **Limits in TestStand's shape**:
+  `limit: { comparison: GELE, low: 4.75, high: 5.25, units: V }`, with EQ, NE,
+  GT, LT, GE, LE; GTLT, GELE, GELT, GTLE; LTGT, LEGE, LEGT, LTGE; EQT (nominal,
+  lower, upper, threshold `percent|ppm|delta`); and `none`, which records the
+  value and gives `done`. `units` is report text only. The limits sidecar uses
+  the same shape.
+- **The report carries `module`, `comparison` and `units`**: new keys in the
+  JSON and new last columns in the CSV.
+- **The Sequence Editor offers the new types**, and shows a step's module,
+  executor and limit fields.
+
 ### Removed
+
+- **`type: grpc`, the default step type, and `limit: { type: range|comparison }`.**
+  Each is refused at load with its replacement spelled out, e.g.
+  `limit: { comparison: GELE, low: 4.5, high: 5.5 }` for a range.
 
 - **The step executor built into `anvil`**
   ([ADR-0041](docs/adr/0041-there-is-no-embedded-executor.md)). The binary now
@@ -40,9 +77,18 @@ applies from 0.6.0 on; by it, 0.6.0 itself would have been 0.5.1.
 
 ### Changed
 
-- **A step that calls an executor must name it.** A `grpc` step without
-  `executor:` no longer falls back to anything: the sequence does not load, and
-  the message says what to add and which executors are declared.
+- **A step that calls an executor must name it.** A step without `executor:`
+  no longer falls back to anything: the sequence does not load, and the message
+  says what to add and which executors are declared.
+- **A `statement` that succeeds reports `done`**, not `pass`: it did something
+  and checked nothing.
+- **For a step with a module, `assign` runs before the step is judged**, so it
+  copies what the module returned, not the verdict; a module that returned
+  `error` is neither copied out nor judged.
+- **The report names a step as the sequence does**, not by what its executor
+  echoes back.
+- **A limit from the sidecar on a step that is not a `numeric_limit` stops the
+  run**, naming the step, instead of being applied where it means nothing.
 - **An entry under `executors:` must name its `type`** (`wasm` or `grpc`).
   `type: embedded` is refused with a message pointing at the demo bench.
 - **The examples run against a demo bench** that ships in the package: the WASM
