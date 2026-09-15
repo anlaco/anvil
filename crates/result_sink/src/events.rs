@@ -65,7 +65,7 @@ impl<W: Write> SinkEventos<W> {
         };
         texto.push('\n');
         // Una sola escritura, salto incluido: `writeln!` la parte en dos
-        // llamadas, y fd 2 lo comparten el motor, el ejecutor embebido y los
+        // llamadas, y fd 2 lo comparten el motor y los
         // ejecutores lanzados. Otro escritor que se cuele entre el contenido
         // y el salto convierte dos líneas válidas en una rota.
         //

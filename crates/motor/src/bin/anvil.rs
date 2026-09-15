@@ -8,7 +8,6 @@
 //!   --json <ruta>           vuelca el reporte a JSON
 //!   --csv <ruta>            vuelca el reporte a CSV
 //!   --limits <ruta>         sidecar de límites (RF-30, inyecta por nombre de paso)
-//!   --port <n>              puerto del ejecutor (default 9100)
 //!   --validate              carga y valida sin ejecutar ni conectar (dry-run)
 //!   --with-executors        con --validate: además pregunta a los ejecutores qué
 //!                           pasos ofrecen y comprueba las firmas (ADR-0021)
@@ -21,9 +20,8 @@
 //! dejar stdout limpio para el sink de consola. Parseo manual, sin clap: el
 //! flag set es pequeño y se evita peso en el `.wasm` (ADR-0001).
 //!
-//! En el binario único (ADR-0011) el host hereda estos args al guest motor y
-//! ya espera al ejecutor; los flags fluyen solos. `--port` es útil para dos
-//! terminales (wasmtime) o un ejecutor externo.
+//! En el binario único (ADR-0011) el host hereda estos args al guest motor;
+//! the executors it starts reach the engine as `--executor` overrides.
 
 use cargador::{
     aplicar_limites_programa, aplicar_override_ejecutores, cargar_limites_de_archivo,
@@ -36,9 +34,8 @@ use std::fs::File;
 use std::thread;
 use std::time::Duration;
 
-const PUERTO_DEFAULT: u16 = 9100;
-/// Reintentos de conexión al ejecutor × `ESPERA_MS` = 5 s máx, como
-/// `esperar_ejecutor` del host. Sin backoff exponencial (post-MVP).
+/// Reintentos de conexión a los ejecutores × `ESPERA_MS` = 5 s máx. Sin
+/// backoff exponencial (post-MVP).
 const REINTENTOS_CONEX: u32 = 500;
 const ESPERA_MS: u64 = 10;
 
@@ -61,7 +58,6 @@ struct Cli {
     limits: Option<String>,
     /// Overrides `nombre=host:puerto` de `--executor` (RF-36.3), acumulables.
     ejecutores: Vec<String>,
-    port: u16,
     validate: bool,
     /// ADR-0021: `--validate` promises "loads and validates without running or
     /// connecting (CI with no hardware)", and asking an executor for its
@@ -84,7 +80,6 @@ fn usage() {
 --csv <ruta>            vuelca el reporte a CSV\n  \
 --limits <ruta>         sidecar de límites (RF-30)\n  \
 --executor n=host:puerto  re-apunta un ejecutor declarado (RF-36.3)\n  \
---port <n>              puerto del ejecutor embebido (default {PUERTO_DEFAULT})\n  \
 --validate              carga y valida sin ejecutar ni conectar\n  \
 --with-executors        con --validate: conecta y comprueba las firmas contra los\n                          catálogos de los ejecutores (ADR-0021)\n  \
 --quiet                 silencia el reporte de consola y logs stderr\n  \
@@ -106,7 +101,6 @@ fn parse_cli(args: Vec<String>) -> Result<Cli, AccionEarlyExit> {
         csv: None,
         limits: None,
         ejecutores: Vec::new(),
-        port: PUERTO_DEFAULT,
         validate: false,
         with_executors: false,
         quiet: false,
@@ -121,7 +115,7 @@ fn parse_cli(args: Vec<String>) -> Result<Cli, AccionEarlyExit> {
             "--with-executors" => cli.with_executors = true,
             "--quiet" => cli.quiet = true,
             "--events" => cli.events = true,
-            "--process-model" | "--json" | "--csv" | "--limits" | "--executor" | "--port" => {
+            "--process-model" | "--json" | "--csv" | "--limits" | "--executor" => {
                 let valor = match args.next() {
                     Some(v) => v,
                     None => {
@@ -136,11 +130,6 @@ fn parse_cli(args: Vec<String>) -> Result<Cli, AccionEarlyExit> {
                     "--csv" => cli.csv = Some(valor),
                     "--limits" => cli.limits = Some(valor),
                     "--executor" => cli.ejecutores.push(valor),
-                    "--port" => {
-                        cli.port = valor.parse().map_err(|_| {
-                            AccionEarlyExit::Uso(format!("--port inválido: {valor}"))
-                        })?;
-                    }
                     _ => unreachable!(),
                 }
             }
@@ -304,14 +293,11 @@ fn main() {
         // it is opted into, never assumed — and when it is, nothing is
         // executed: `Describe` asks, it does not measure.
         if cli.with_executors {
-            let mut motor = match conecta_con_reintento(&programa, "127.0.0.1", cli.port, cli.quiet)
-            {
+            let mut motor = match conecta_con_reintento(&programa, cli.quiet) {
                 Ok(m) => m,
                 Err(e) => {
                     eprintln!(
-                        "--with-executors necesita los ejecutores levantados y no se pudo \
-                         conectar (embebido en 127.0.0.1:{}): {e}",
-                        cli.port
+                        "--with-executors needs the executors up, and could not connect: {e}"
                     );
                     std::process::exit(1);
                 }
@@ -335,30 +321,21 @@ fn main() {
     });
     let mut csv = abrir_sink(&cli.csv, "CSV", SinkCsv::nuevo);
 
-    // Conexión con reintento (RF-40) al ejecutor embebido + una conexión por
-    // ejecutor `grpc` declarado (M5-ext.1, RF-36.3). `Motor::conecta` caía al
-    // primer intento si el ejecutor no estaba listo; el host embebido ya
-    // espera, así que esto cubre dos terminales y arranques lentos.
-    let mut motor = match conecta_con_reintento(&programa, "127.0.0.1", cli.port, cli.quiet) {
+    // One connection per declared `grpc` executor (M5-ext.1, RF-36.3), with
+    // retries (RF-40) for an executor that is still starting. The error names
+    // the executor and its address (#52, #78): which one did not answer is the
+    // whole diagnosis.
+    let mut motor = match conecta_con_reintento(&programa, cli.quiet) {
         Ok(m) => m,
         Err(e) => {
-            // El endpoint va en el mensaje (#52): sin él, un `connection-refused`
-            // no dice contra qué puerto se intentó, y el puerto es justamente el
-            // dato que distingue «el ejecutor no llegó a tiempo» de «nadie
-            // arrancó un ejecutor y el motor cayó al 9100 por defecto».
-            eprintln!(
-                "no se pudo conectar a los ejecutores de pasos \
-                 (embebido en 127.0.0.1:{}): {e}",
-                cli.port
-            );
+            eprintln!("could not connect to the step executors: {e}");
             std::process::exit(1);
         }
     };
-    if !cli.quiet {
-        eprintln!(
-            "conectado a los ejecutores de pasos (embebido en 127.0.0.1:{})",
-            cli.port
-        );
+    if !cli.quiet && !programa.ejecutores.is_empty() {
+        let mut nombres: Vec<&str> = programa.ejecutores.keys().map(String::as_str).collect();
+        nombres.sort_unstable();
+        eprintln!("connected to the step executors ({})", nombres.join(", "));
     }
 
     // ADR-0021: se pregunta el catálogo **una vez por endpoint y antes del
@@ -467,7 +444,7 @@ fn comprueba_firmas(motor: &mut Motor, programa: &Programa, quiet: bool) -> bool
                 "aviso: la secuencia declara referencias del ejecutor '{}', y no publica una \
                  vida en su catálogo: si se reinicia a mitad de corrida, Anvil no lo va a \
                  poder detectar (lo detectará el propio ejecutor al recibir la referencia)",
-                modelo::nombre_visible_de_ejecutor(&endpoint)
+                endpoint
             );
         }
     }
@@ -500,21 +477,16 @@ fn cargar(cli: &Cli) -> Result<Programa, cargador::ErrorCarga> {
     }
 }
 
-/// Reintenta `Motor::desde_programa_en` hasta `REINTENTOS_CONEX × ESPERA_MS`
-/// (5 s), como `esperar_ejecutor` del host. Sin backoff exponencial (post-MVP).
-fn conecta_con_reintento(
-    programa: &Programa,
-    host: &str,
-    port: u16,
-    quiet: bool,
-) -> Result<Motor, motor::Error> {
+/// Reintenta `Motor::desde_programa` hasta `REINTENTOS_CONEX × ESPERA_MS`
+/// (5 s). Sin backoff exponencial (post-MVP).
+fn conecta_con_reintento(programa: &Programa, quiet: bool) -> Result<Motor, motor::Error> {
     let mut ultimo: Option<motor::Error> = None;
     for i in 0..REINTENTOS_CONEX {
-        match Motor::desde_programa_en(programa, host, port) {
+        match Motor::desde_programa(programa) {
             Ok(m) => return Ok(m),
             Err(e) => {
                 if !quiet && i == 0 {
-                    eprintln!("esperando al ejecutor en {host}:{port}…");
+                    eprintln!("waiting for the step executors ({e})…");
                 }
                 ultimo = Some(e);
                 thread::sleep(Duration::from_millis(ESPERA_MS));
@@ -589,7 +561,6 @@ mod tests {
         assert_eq!(c.csv.as_deref(), Some("o.csv"));
         assert!(!c.validate);
         assert!(!c.quiet);
-        assert_eq!(c.port, PUERTO_DEFAULT);
     }
 
     #[test]
@@ -617,17 +588,13 @@ mod tests {
         ));
     }
 
+    /// `--port` placed the embedded executor, which is gone (ADR-0041): it is
+    /// now an unknown flag like any other.
     #[test]
-    fn parse_port() {
-        let c = parse_cli(vec!["s.yaml".into(), "--port".into(), "1234".into()]).unwrap();
-        assert_eq!(c.port, 1234);
-    }
-
-    #[test]
-    fn parse_port_invalido_es_uso() {
+    fn port_is_no_longer_a_flag() {
         assert!(matches!(
-            parse_cli(vec!["s.yaml".into(), "--port".into(), "noes".into()]),
-            Err(AccionEarlyExit::Uso(_))
+            parse_cli(vec!["s.yaml".into(), "--port".into(), "1234".into()]),
+            Err(AccionEarlyExit::Uso(ref m)) if m.contains("--port")
         ));
     }
 

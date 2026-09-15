@@ -168,10 +168,16 @@ anvil ejemplos/basica.yaml --bridge      # prints a URL with a token
 Open the URL it prints, adding `&open=/ejemplos/basica.yaml`. Run is disabled
 until a bridge is attached, and says so on hover.
 
-The bridge sends the engine's arguments — the embedded executor's ephemeral
-port, an `--executor` per declared one — in its first frame, because there is
-no argv to inject them into when the engine runs in a browser. Without them the
-engine falls back to port 9100 and reaches nothing.
+The bridge sends the engine's arguments — an `--executor` for each `type: wasm`
+executor the host started — in its first frame, because there is no argv to
+inject them into when the engine runs in a browser. Without them the engine
+reaches none of those executors.
+
+In the desktop app the editor also hands the engine the files the sequence
+references beside it on disk — the binary of each `type: wasm` executor and each
+subsequence called by path — because the loader reads them
+(`src/neighbours.mjs`). In a plain browser it cannot, and the engine says which
+file it did not find.
 
 ## Tests
 

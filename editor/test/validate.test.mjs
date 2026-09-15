@@ -69,13 +69,18 @@ test("the network is refused rather than faked", async () => {
   // What matters is that it fails loudly and says what is missing: answering
   // "connection refused" would let an absent *host* read as an executor that
   // was asked and said no — ADR-0019's Rule 2, exactly.
-  const files = await exampleFiles("basica.yaml");
+  //
+  // A `grpc` executor, because that is what the engine itself connects to: a
+  // `wasm` one reaches it only as the `--executor` override a host adds.
+  const yaml =
+    "name: remote\nexecutors:\n  - { name: bench, type: grpc, host: 127.0.0.1, port: 9101 }\n" +
+    "main:\n  - name: measure\n    executor: bench\n";
 
   await assert.rejects(
     () =>
       runEngine({
-        args: ["basica.yaml", "--validate", "--with-executors"],
-        files,
+        args: ["remote.yaml", "--validate", "--with-executors"],
+        files: { "remote.yaml": yaml },
       }),
     /no bridge is connected/,
     "reaching the network with no bridge must throw, not degrade quietly",
@@ -88,8 +93,9 @@ test("the network is refused rather than faked", async () => {
 // `.yseq` sibling with no slash must be read as a file, not as an inline name.
 test("a .yseq sequence validates, and its .yseq subsequence is found as a file", async () => {
   const parent =
-    "name: parent\nmain:\n  - name: c\n    type: sequence_call\n    sequence: child.yseq\n";
-  const child = "name: child\nmain:\n  - name: m\n    type: grpc\n";
+    "name: parent\nexecutors:\n  - { name: e, type: grpc, host: 127.0.0.1, port: 9101 }\n" +
+    "main:\n  - name: c\n    type: sequence_call\n    sequence: child.yseq\n";
+  const child = "name: child\nmain:\n  - name: m\n    type: grpc\n    executor: e\n";
 
   const { exitCode, stderr } = await runEngine({
     args: ["sequence.yseq", "--validate"],

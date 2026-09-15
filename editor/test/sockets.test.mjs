@@ -7,10 +7,10 @@
 // closes them itself, the relay on the far side of the bridge outlives the run
 // that opened it.
 //
-// The cost of that is not a leak, it is a dead Run button. The step executor
-// serves one connection at a time (crates/ejecutor_pasos/src/main.rs:90-104),
-// so a connection left behind holds it for good and the next run's connection
-// waits in the accept queue for ever (#61). Found by driving the editor against
+// The cost of that is not a leak, it is a dead Run button. An executor that
+// serves one connection at a time — as the one built into anvil did until
+// ADR-0041 removed it — is held for good by a connection left behind, and the
+// next run's connection waits in the accept queue for ever (#61). Found by driving the editor against
 // a real bridge and watching `ss` show two connections to the executor, the
 // second with its request sitting unread in the receive queue.
 

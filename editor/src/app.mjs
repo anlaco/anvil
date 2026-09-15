@@ -374,7 +374,7 @@ function renderStep() {
       fields,
       "Executor",
       textInput(step.executor, (v) => edit("executor", v || undefined)),
-      "Which declared executor serves this step. Empty means the embedded one.",
+      "Which declared executor serves this step. Required: anvil has no executor of its own.",
     );
   }
 

@@ -1,9 +1,9 @@
 # Anvil — build orchestration.
 #
-# `anvil` is a binary that embeds two WASM guests and the `.wasm` bridge
-# (ADR-0011, ADR-0015), so three things must be built in order: the guests and
-# the bridge first, the host last (its `build.rs` copies them, it does not
-# build them). This exists so that order does not have to be remembered.
+# `anvil` is a binary that embeds the engine's WASM guest and ships the `.wasm`
+# bridge next to it (ADR-0011, ADR-0023), so three things must be built in
+# order: the guest and the bridge first, the host last (its `build.rs` copies
+# them, it does not build them). This exists so that order does not have to be remembered.
 #
 #   make build     everything in debug
 #   make release   everything in release  ← the binary that gets distributed
@@ -29,7 +29,7 @@ EXAMPLE := ejemplos/hola-paso/Cargo.toml
 # The two-module department (`ejemplos/departamento`), what
 # `demo_departamento.yaml` loads (ADR-0025).
 DEPT    := ejemplos/departamento/Cargo.toml
-GUESTS  := -p motor -p ejecutor_pasos
+GUESTS  := -p motor
 TARGET  := wasm32-wasip2
 
 # Windows names every executable with `.exe`; `OS` is `Windows_NT` there,

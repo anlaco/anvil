@@ -489,19 +489,14 @@ pub enum TipoPaso {
     PassFail,
 }
 
-/// Cómo se invoca un ejecutor de pasos (M5-ext.1, RF-36.3). El motor
-/// despacha por el nombre de ejecutor declarado en `DefinicionPaso.ejecutor`;
-/// sin declaración, va al embebido (default). El motor no sabe qué hay
-/// detrás de cada endpoint: WASM embebido, `.wasm` cargado por el host
-/// (M5-ext.2, ADR-0013) o un gRPC remoto (ADR-0013).
+/// How a step executor is reached (M5-ext.1, RF-36.3). The engine dispatches by
+/// the executor name a step declares in `DefinicionPaso.ejecutor`, which is
+/// required on every step that calls one: there is no default executor
+/// (ADR-0041). The engine does not know what is behind each endpoint.
 #[derive(Debug, Clone, PartialEq)]
 pub enum TipoEjecutor {
-    /// El ejecutor WASM de serie, compilado dentro del host (ADR-0011).
-    /// Endpoint fijo `127.0.0.1:9100`. Default si el paso no declara
-    /// `ejecutor`.
-    Embebido,
     /// Módulo `.wasm` propio que el **host** carga por path en runtime
-    /// (RF-36.2, M5-ext.2; el ejecutor embebido no puede, ADR-0013). Es una
+    /// (RF-36.2, M5-ext.2, ADR-0013). Es una
     /// **directiva de carga para el host** (ADR-0014): el cargador la valida
     /// al cargar (el path debe existir), el host la instancia y la expone
     /// como `grpc` (override `--executor`); el motor **nunca la ejecuta**
@@ -519,8 +514,7 @@ pub enum TipoEjecutor {
 #[derive(Debug, Clone, PartialEq)]
 pub struct DefinicionEjecutor {
     /// Nombre declarado en el YAML; los pasos lo referencian con
-    /// `ejecutor: <nombre>`. El nombre interno `__anvil_embebido__` está
-    /// reservado (lo usa el motor; el cargador lo rechaza).
+    /// `ejecutor: <nombre>`.
     pub nombre: String,
     pub tipo: TipoEjecutor,
 }
@@ -571,26 +565,6 @@ pub struct Argumento {
 pub enum EntradaPaso {
     Literal(ValorDefinicion),
     Expresion(expr::Expresion),
-}
-
-/// The engine's internal key for the connection to the built-in WASM executor
-/// (ADR-0011).
-///
-/// It cannot be declared in a YAML — the loader rejects an executor with this
-/// name — and it lives here, in the lowest crate, because three of them need
-/// the same string and must not disagree: the loader (to reject it and to
-/// resolve routing), the engine (to key its connections) and the report sinks
-/// (to render a reference's executor without printing plumbing).
-pub const EJECUTOR_EMBEBIDO: &str = "__anvil_embebido__";
-
-/// How an executor's routing key is written for a human: the reserved key of
-/// the built-in one is plumbing and is shown by the name the docs use.
-pub fn nombre_visible_de_ejecutor(clave: &str) -> &str {
-    if clave == EJECUTOR_EMBEBIDO {
-        "embebido"
-    } else {
-        clave
-    }
 }
 
 /// El valor literal de una variable declarada en el YAML (scopes
@@ -714,10 +688,10 @@ pub struct DefinicionPaso {
     /// Ordenado por nombre al cargar: el orden del cable tiene que ser
     /// determinista para que dos corridas iguales produzcan bytes iguales.
     pub entradas: Option<Vec<(String, EntradaPaso)>>,
-    /// M5-ext.1 (RF-36.3): nombre del ejecutor que atiende este paso. Si es
-    /// `None`, el motor usa el ejecutor **embebido** (default,
-    /// `127.0.0.1:9100`) — compat con M4b. El cargador valida que el nombre
-    /// exista en `Programa.ejecutores` (fail-fast al cargar).
+    /// The executor that serves this step (M5-ext.1, RF-36.3). The loader
+    /// requires it on every `grpc` step of a program and checks the name exists
+    /// in `Programa.ejecutores` (ADR-0041); it is `None` only on steps that call
+    /// no executor, or in a sequence loaded on its own, outside a program.
     pub ejecutor: Option<String>,
 }
 
@@ -794,8 +768,8 @@ pub struct Programa {
     pub archivos: HashMap<String, DefinicionSecuencia>,
     /// M5-ext.1 (RF-36.3): ejecutores declarados en `ejecutores:` del YAML
     /// de la secuencia raíz, keyed por nombre. El motor los consulta para
-    /// despachar por `DefinicionPaso.ejecutor`. Sin entradas, todo va al
-    /// ejecutor embebido (compat con M4b, ADR-0011).
+    /// despachar por `DefinicionPaso.ejecutor`. There is no default executor
+    /// (ADR-0041): a program with executor steps and no entries does not load.
     pub ejecutores: HashMap<String, DefinicionEjecutor>,
 }
 
@@ -1307,7 +1281,7 @@ mod tests {
         assert!(p.ejecutores.is_empty());
     }
 
-    /// M5-ext.1: un paso nuevo no declara ejecutor → embebido (compat M4b),
+    /// M5-ext.1: a new step declares no executor until the loader requires one,
     /// y el `Programa` vacío no trae ejecutores.
     #[test]
     fn paso_nuevo_sin_ejecutor_y_programa_sin_ejecutores() {
@@ -1319,10 +1293,9 @@ mod tests {
         );
     }
 
-    /// M5-ext.1: los tres variantes de `TipoEjecutor` se construyen.
+    /// M5-ext.1: both variants of `TipoEjecutor` are built.
     #[test]
-    fn tipo_ejecutor_tres_variantes() {
-        assert_eq!(TipoEjecutor::Embebido, TipoEjecutor::Embebido);
+    fn tipo_ejecutor_dos_variantes() {
         assert_eq!(
             TipoEjecutor::Wasm {
                 path: "./p.wasm".into()

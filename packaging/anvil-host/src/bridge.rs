@@ -40,13 +40,13 @@
 //! | 0x06 | Hello  | → editor  | JSON, once on connect       |
 //!
 //! `Hello` is the first frame the bridge sends, and it carries the arguments
-//! the engine would have been given had it run here — the ephemeral port of the
-//! embedded executor, and an `--executor name=host:port` for each `type: wasm`
-//! one. The native host injects these into the guest's argv
-//! (`main.rs:548-576`); with the engine in a browser there is no argv to inject
-//! into, so they travel over the wire instead. Without them the engine falls
-//! back to port 9100 and cannot reach anything, which is exactly what happened
-//! the first time this ran end to end.
+//! the engine would have been given had it run here — an
+//! `--executor name=host:port` for each `type: wasm` executor. The native host
+//! injects these into the guest's argv (`main.rs`, where the wasm executors are
+//! spawned); with the engine in a browser there is no argv to inject into, so
+//! they travel over the wire instead. Without them the engine cannot reach the
+//! executors, which is exactly what happened the first time this ran end to
+//! end.
 //!
 //! `Failed` carries a reason because the editor shows it to a person: a
 //! refused address and an unreachable one are different problems, and a shim

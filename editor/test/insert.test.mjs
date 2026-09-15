@@ -92,3 +92,16 @@ test("inserted names do not collide", async () => {
   const names = doc.steps("main").map((s) => s.name);
   assert.equal(new Set(names).size, names.length, `names collided: ${names.join(", ")}`);
 });
+
+test("a grpc step names the first declared executor, and needs one to exist", async () => {
+  // There is no executor built into anvil to fall back on (ADR-0041): a grpc
+  // step with no `executor` does not load, so the palette must fill it in, and
+  // must refuse when there is nothing to fill it in with.
+  const doc = new SequenceDocument(await fixture("basica.yaml"));
+  const index = doc.addStep("main", "grpc");
+  assert.equal(doc.steps("main")[index].executor, "demo");
+
+  const bare = new SequenceDocument("name: bare\nmain:\n  - name: s\n    type: statement\n    statement: 'locals.x = 1'\nlocals: { x: 0.0 }\n");
+  assert.match(bare.cannotAdd("grpc") ?? "", /no executors/);
+  assert.throws(() => bare.addStep("main", "grpc"), /no executors/);
+});

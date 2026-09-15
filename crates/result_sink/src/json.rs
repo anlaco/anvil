@@ -156,7 +156,7 @@ fn valor_a_json(v: &expr::Value) -> Value {
         expr::Value::Bool(b) => json!(b),
         expr::Value::Reference(r) => json!({
             "type": "reference",
-            "executor": modelo::nombre_visible_de_ejecutor(&r.executor),
+            "executor": r.executor,
             "lifetime": r.lifetime,
             "payload": r.payload,
         }),
@@ -439,16 +439,5 @@ mod tests {
         // El payload, tal cual: `serde_json` lo entrecomilla y no hay
         // separador nuestro que se pueda romper.
         assert_eq!(v["payload"], "rack;canal=2");
-    }
-
-    /// El nombre interno del ejecutor embebido es fontanería y no se enseña.
-    #[test]
-    fn el_ejecutor_embebido_sale_por_su_nombre_legible() {
-        let v = valor_a_json(&expr::Value::Reference(expr::Reference {
-            executor: modelo::EJECUTOR_EMBEBIDO.into(),
-            lifetime: String::new(),
-            payload: "s1".into(),
-        }));
-        assert_eq!(v["executor"], "embebido");
     }
 }

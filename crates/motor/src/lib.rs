@@ -33,19 +33,14 @@ pub use entorno::EntornoMotor;
 use expr::{eval, eval_sentencias, Entorno, Expresion, Scope, Sentencia, Value};
 use std::collections::HashMap;
 
-/// Clave interna de la conexión al ejecutor embebido en `Motor.conexiones`.
-/// No es declarable en el YAML: el cargador rechaza un ejecutor con este
-/// nombre (ver `cargador::NOMBRE_EMBEDIDO_RESERVADO`).
-pub const EMBEDIDO: &str = modelo::EJECUTOR_EMBEBIDO;
-
 /// El motor: un cliente gRPC contra los ejecutores de pasos. M5-ext.1
 /// (RF-36.3): despacha cada paso al endpoint del ejecutor que declara su
-/// `DefinicionPaso.ejecutor`; sin declaración, va al embebido (`EMBEDIDO`).
+/// `DefinicionPaso.ejecutor`. There is no default executor (ADR-0041).
 /// La tabla `conexiones` se abre en `desde_programa` y cada `Grpc`
 /// declarado tiene su `Cliente` propio.
 pub struct Motor {
-    /// Conexiones abiertas, keyed por nombre de ejecutor (o `EMBEDIDO`
-    /// para el embebido). Un `TipoEjecutor::Wasm` **no** abre conexión: el
+    /// Conexiones abiertas, keyed por nombre de ejecutor. Un
+    /// `TipoEjecutor::Wasm` **no** abre conexión: el
     /// motor nunca lo ejecuta (ADR-0014) — el host lo traduce a `grpc`
     /// (override `--executor`) antes de que llegue aquí; si llega sin
     /// traducir, `Error::EjecutorWasmSinHost`.
@@ -74,8 +69,19 @@ pub enum Error {
     /// defense in depth.
     EjecutorNoDeclarado(String),
     /// El ejecutor del paso no tiene conexión abierta (debería abrirse en
-    /// `desde_programa` para los `grpc`; el embebido siempre la tiene).
+    /// `desde_programa` para los `grpc`).
     EjecutorNoConectado(String),
+    /// A step that calls an executor names none. The loader refuses that in a
+    /// program (ADR-0041); this is defence in depth for a sequence that
+    /// reaches the engine some other way.
+    PasoSinEjecutor(String),
+    /// A declared executor did not accept the connection. Named with its
+    /// declared name and address, so the message says which one (#78).
+    NoSeConecto {
+        ejecutor: String,
+        destino: String,
+        causa: net::Error,
+    },
     /// El paso declara `ejecutor: <nombre>` con `tipo: wasm` y llegó al motor
     /// **sin traducir**. Eso sólo pasa si se corre el guest motor suelto
     /// (`wasmtime run anvil.wasm`) sin el host: el cargador de `.wasm` por
@@ -96,6 +102,14 @@ impl std::fmt::Display for Error {
             Error::EjecutorNoConectado(n) => {
                 write!(f, "el ejecutor '{n}' no tiene conexión abierta")
             }
+            Error::PasoSinEjecutor(paso) => {
+                write!(f, "step '{paso}' calls an executor and names none")
+            }
+            Error::NoSeConecto {
+                ejecutor,
+                destino,
+                causa,
+            } => write!(f, "executor '{ejecutor}' at {destino}: {causa}"),
             Error::EjecutorWasmSinHost(n) => write!(
                 f,
                 "el ejecutor '{n}' es 'wasm': el cargador de `.wasm` por path vive en \
@@ -121,43 +135,32 @@ impl From<prost::DecodeError> for Error {
 }
 
 impl Motor {
-    /// Conecta al ejecutor embebido (`127.0.0.1:9100`) — compat con M4b
-    /// (una secuencia sin `ejecutores:` se corre entera contra él). Es lo
-    /// que usa `ejecuta_secuencia` (legacy).
-    pub fn conecta(host: &str, puerto: u16) -> Result<Self, Error> {
+    /// Abre una conexión por cada ejecutor `grpc` declarado en
+    /// `Programa.ejecutores` (M5-ext.1, RF-36.3), and to nothing else: a
+    /// sequence that calls no executor opens no connection (ADR-0041). Un
+    /// ejecutor `wasm` **no** abre conexión aquí: the host has already turned it
+    /// into `grpc` with an `--executor` override.
+    pub fn desde_programa(programa: &Programa) -> Result<Self, Error> {
         let mut conexiones = HashMap::new();
-        conexiones.insert(EMBEDIDO.into(), Cliente::conectar(host, puerto)?);
+        for (nombre, def) in &programa.ejecutores {
+            if let TipoEjecutor::Grpc { host, puerto } = &def.tipo {
+                let cliente =
+                    Cliente::conectar(host, *puerto).map_err(|causa| Error::NoSeConecto {
+                        ejecutor: nombre.clone(),
+                        destino: format!("{host}:{puerto}"),
+                        causa,
+                    })?;
+                conexiones.insert(nombre.clone(), cliente);
+            }
+        }
         Ok(Motor {
             conexiones,
             vidas: HashMap::new(),
         })
     }
 
-    /// Conecta al embebido y abre una conexión por cada ejecutor `grpc`
-    /// declarado en `Programa.ejecutores` (M5-ext.1, RF-36.3). Un ejecutor
-    /// `wasm` **no** abre conexión aquí (M5-ext.1 no lo instancia); un
-    /// `embebido` declarado explícitamente usa la conexión `EMBEDIDO`.
-    pub fn desde_programa(programa: &Programa) -> Result<Self, Error> {
-        Self::desde_programa_en(programa, "127.0.0.1", 9100)
-    }
-
-    /// Igual que `desde_programa`, con el endpoint del **embebido** explícito:
-    /// lo necesita el CLI para honrar `--port` (RF-40) y reintentar la
-    /// conexión mientras el ejecutor arranca.
-    pub fn desde_programa_en(programa: &Programa, host: &str, puerto: u16) -> Result<Self, Error> {
-        let mut motor = Self::conecta(host, puerto)?;
-        for (nombre, def) in &programa.ejecutores {
-            if let TipoEjecutor::Grpc { host, puerto } = &def.tipo {
-                motor
-                    .conexiones
-                    .insert(nombre.clone(), Cliente::conectar(host, *puerto)?);
-            }
-        }
-        Ok(motor)
-    }
-
     /// Resuelve el endpoint de un paso (M5-ext.1, RF-36.3): sin `ejecutor`
-    /// declarado → embebido; `Embebido` declarado → embebido; `Grpc` →
+    /// declarado → error (ADR-0041); `Grpc` →
     /// su nombre (clave de `conexiones`); `Wasm` → error (M5-ext.2: el motor
     /// no ejecuta `Wasm`; el host lo traduce a `grpc` antes de llegar aquí).
     ///
@@ -171,7 +174,7 @@ impl Motor {
         programa: &'a Programa,
     ) -> Result<&'a str, Error> {
         match cargador::resolver_endpoint(def.ejecutor.as_deref(), &programa.ejecutores) {
-            cargador::Endpoint::Embebido => Ok(EMBEDIDO),
+            cargador::Endpoint::SinEjecutor => Err(Error::PasoSinEjecutor(def.nombre.clone())),
             cargador::Endpoint::Grpc(n) => Ok(n),
             cargador::Endpoint::Wasm(n) => Err(Error::EjecutorWasmSinHost(n.to_string())),
             cargador::Endpoint::NoDeclarado(n) => Err(Error::EjecutorNoDeclarado(n.to_string())),
@@ -234,7 +237,7 @@ impl Motor {
                 return Ok(ResultadoStep::nuevo(
                     &def.nombre,
                     "error",
-                    format!("el ejecutor '{}' devolvió {e}", nombre_visible(endpoint)),
+                    format!("el ejecutor '{}' devolvió {e}", endpoint),
                 ))
             }
         };
@@ -277,8 +280,7 @@ impl Motor {
                              '{}', y su catálogo dice que está en la '{vida}'. Una referencia \
                              que no es de la vida de quien la acuña no la va a poder resolver \
                              nadie (ADR-0022 §6)",
-                            nombre_visible(endpoint),
-                            referencia.lifetime
+                            endpoint, referencia.lifetime
                         ),
                     ));
                 }
@@ -338,8 +340,8 @@ impl Motor {
                         "el parámetro '{nombre}' lleva una referencia del ejecutor '{}' y este \
                          paso se despacha a '{}'. Una referencia sólo significa algo dentro del \
                          ejecutor que la acuñó (ADR-0022 §3)",
-                        nombre_visible(&r.executor),
-                        nombre_visible(endpoint)
+                        r.executor.as_str(),
+                        endpoint
                     ),
                 ));
             }
@@ -384,8 +386,14 @@ impl Motor {
         Ok(aplicar_limite(def, resultado))
     }
 
-    /// Corre una secuencia completa y vierte el resultado a `sink` a medida
-    /// que avanza. La semántica es la de la spec y no cambia:
+    /// Ejecuta un **programa** (M4b, RF-27): la secuencia raíz, con sus
+    /// `sequence_call` resueltos a subsecuencias inline (por nombre) o a
+    /// archivos externos (por path, ya cargados en `programa.archivos`).
+    /// El motor **no** abre ficheros: todo vino resuelto del cargador
+    /// (ADR-0005). El render lo hacen los sinks de formato en
+    /// `on_fin_secuencia`, que aquí sí se dispara (es la raíz).
+    ///
+    /// La semántica es la de la spec y no cambia:
     ///
     /// - **Setup**: corren todos; si alguno no pasa, el Main se salta entero.
     /// - **Main**: solo si el Setup fue bien, y **corta en el primer fallo**.
@@ -407,30 +415,6 @@ impl Motor {
     /// secuencia se interrumpe y **no** se dispara `on_fin_paso` ni
     /// `on_fin_secuencia` del paso en curso: el lifecycle completo solo se
     /// garantiza si la secuencia no se interrumpe por error de red.
-    pub fn ejecuta_secuencia(
-        &mut self,
-        definicion: &DefinicionSecuencia,
-        sink: &mut impl ResultSink,
-    ) -> Result<ResultadoSecuencia, Error> {
-        // API legacy (M1–M4): una secuencia sin subsecuencias. Construye un
-        // `Programa` trivial y delega en `ejecuta_secuencia_interna`.
-        let programa = Programa {
-            raiz: definicion.clone(),
-            archivos: HashMap::new(),
-            ejecutores: HashMap::new(),
-        };
-        let entorno = EntornoMotor::desde_definicion(&programa.raiz);
-        let (secuencia, _) =
-            ejecuta_secuencia_interna(self, &programa.raiz, entorno, sink, &programa, RAIZ)?;
-        Ok(secuencia)
-    }
-
-    /// Ejecuta un **programa** (M4b, RF-27): la secuencia raíz, con sus
-    /// `sequence_call` resueltos a subsecuencias inline (por nombre) o a
-    /// archivos externos (por path, ya cargados en `programa.archivos`).
-    /// El motor **no** abre ficheros: todo vino resuelto del cargador
-    /// (ADR-0005). El render lo hacen los sinks de formato en
-    /// `on_fin_secuencia`, que aquí sí se dispara (es la raíz).
     pub fn ejecuta_programa(
         &mut self,
         programa: &Programa,
@@ -527,13 +511,6 @@ fn evalua_entradas(
     Ok(fuera)
 }
 
-/// Cómo se nombra un endpoint en un mensaje para el usuario. `EMBEDIDO` es
-/// una clave interna que no se puede declarar en el YAML, así que enseñarla
-/// tal cual sería enseñar un detalle de implementación.
-pub(crate) fn nombre_visible(endpoint: &str) -> &str {
-    modelo::nombre_visible_de_ejecutor(endpoint)
-}
-
 /// The liveness verdict, separated from the network so it can be tested
 /// (ADR-0022 §6).
 ///
@@ -563,7 +540,7 @@ fn veredicto_de_vida(
                      ({motivo}). El paso lleva una referencia suya y no se invoca: medir \
                      contra un ejecutor que ya no se sabe si es el mismo sería medir contra \
                      otro banco (ADR-0022 §6)",
-                    nombre_visible(endpoint)
+                    endpoint
                 ),
             ))
         }
@@ -580,8 +557,7 @@ fn veredicto_de_vida(
                  '{nombre}' lleva una referencia de la vida '{}' y el ejecutor dice estar \
                  ahora en la '{ahora}'. Esa referencia ya no apunta a nada, así que el paso \
                  no se invoca y no mide (ADR-0022 §6)",
-                nombre_visible(endpoint),
-                r.lifetime
+                endpoint, r.lifetime
             ),
         ));
     }
@@ -625,7 +601,7 @@ pub(crate) fn veredicto_del_eco(
             "el ejecutor '{}' entiende el contrato {cual} y este paso necesita el {CONTRACT}: \
              sus 'parametros' se habrían perdido sin aviso y habría medido otra cosa. \
              Recompila o actualiza ese ejecutor.",
-            nombre_visible(endpoint),
+            endpoint,
         ),
     ))
 }
@@ -2173,36 +2149,34 @@ mod tests {
             _programa: &Programa,
             _parametros: &[(String, Value)],
         ) -> Result<ResultadoStep, Error> {
-            let mensaje = match def.ejecutor.as_deref() {
-                None => "embebido",
-                Some(n) => n,
-            };
+            let mensaje = def.ejecutor.as_deref().unwrap_or("none");
             Ok(ResultadoStep::nuevo(&def.nombre, "pass", mensaje))
         }
     }
 
-    /// Un `Programa` con raíz + un ejecutor `grpc` (python) y un `embebido`.
+    /// Un `Programa` con raíz, dos ejecutores `grpc` (python, bench) y un `wasm`.
     fn programa_ruteado() -> Programa {
         let mut raiz = DefinicionSecuencia {
             nombre: "s".into(),
             ..Default::default()
         };
         let mut p1 = DefinicionPaso::nuevo("a", 1);
-        p1.ejecutor = None; // embebido por defecto
+        p1.ejecutor = Some("bench".into());
         let mut p2 = DefinicionPaso::nuevo("b", 1);
         p2.ejecutor = Some("python".into());
-        let mut p3 = DefinicionPaso::nuevo("c", 1);
-        p3.ejecutor = Some("embebido".into());
-        raiz.pasos_main = vec![p1, p2, p3];
+        raiz.pasos_main = vec![p1, p2];
         Programa {
             raiz,
             archivos: HashMap::new(),
             ejecutores: HashMap::from([
                 (
-                    "embebido".to_string(),
+                    "bench".to_string(),
                     DefinicionEjecutor {
-                        nombre: "embebido".into(),
-                        tipo: TipoEjecutor::Embebido,
+                        nombre: "bench".into(),
+                        tipo: TipoEjecutor::Grpc {
+                            host: "127.0.0.1".into(),
+                            puerto: 9102,
+                        },
                     },
                 ),
                 (
@@ -2229,13 +2203,14 @@ mod tests {
     }
 
     #[test]
-    fn resolver_endpoint_embebido_por_defecto_y_por_nombre() {
+    fn resolver_endpoint_sin_ejecutor_es_error_y_por_nombre_rutea() {
         let programa = programa_ruteado();
         let p = DefinicionPaso::nuevo("a", 1);
-        assert_eq!(Motor::resolver_endpoint(&p, &programa).unwrap(), EMBEDIDO);
-        let mut p = DefinicionPaso::nuevo("b", 1);
-        p.ejecutor = Some("embebido".into());
-        assert_eq!(Motor::resolver_endpoint(&p, &programa).unwrap(), EMBEDIDO);
+        let err = Motor::resolver_endpoint(&p, &programa).unwrap_err();
+        assert!(
+            matches!(err, Error::PasoSinEjecutor(ref n) if n == "a"),
+            "no executor is not a default executor (ADR-0041): {err}"
+        );
         let mut p = DefinicionPaso::nuevo("b", 1);
         p.ejecutor = Some("python".into());
         assert_eq!(Motor::resolver_endpoint(&p, &programa).unwrap(), "python");
@@ -2278,12 +2253,8 @@ mod tests {
             RAIZ,
         )
         .unwrap();
-        assert_eq!(sec.pasos[0].mensaje, "embebido", "sin ejecutor → embebido");
+        assert_eq!(sec.pasos[0].mensaje, "bench", "ejecutor: bench → bench");
         assert_eq!(sec.pasos[1].mensaje, "python", "ejecutor: python → python");
-        assert_eq!(
-            sec.pasos[2].mensaje, "embebido",
-            "ejecutor: embebido explícito → embebido"
-        );
     }
 
     /// El caso de DIAG-2 end-to-end: un veredicto compuesto falso **corta**
@@ -2891,11 +2862,11 @@ mod tests_adr0020 {
     /// test de eco que sólo recorre el camino feliz no protege de nada.
     #[test]
     fn un_ejecutor_de_contrato_1_con_parametros_es_error() {
-        let r = veredicto_del_eco(&paso_con_parametros(), EMBEDIDO, 0)
+        let r = veredicto_del_eco(&paso_con_parametros(), "bench", 0)
             .expect("el eco insuficiente tiene que producir un veredicto");
         assert_eq!(r.estado, "error", "nunca 'fallo': no es culpa de la unidad");
         assert!(
-            r.mensaje.contains("embebido"),
+            r.mensaje.contains("bench"),
             "nombra el endpoint: {}",
             r.mensaje
         );
@@ -2929,7 +2900,7 @@ mod tests_adr0020 {
     #[test]
     fn un_paso_sin_parametros_sigue_valiendo_con_contrato_1() {
         let viejo = DefinicionPaso::nuevo("verificar_led", 1);
-        assert!(veredicto_del_eco(&viejo, EMBEDIDO, 0).is_none());
+        assert!(veredicto_del_eco(&viejo, "bench", 0).is_none());
     }
 
     /// El caso que estrena el contrato 3: un ejecutor que entiende el 2 —el
@@ -2940,7 +2911,7 @@ mod tests_adr0020 {
     /// Visto en rojo devolviendo `CONTRACT` como eco.
     #[test]
     fn un_ejecutor_del_contrato_anterior_tampoco_vale() {
-        let r = veredicto_del_eco(&paso_con_parametros(), EMBEDIDO, CONTRACT - 1)
+        let r = veredicto_del_eco(&paso_con_parametros(), "bench", CONTRACT - 1)
             .expect("el contrato anterior ya no basta");
         assert_eq!(r.estado, "error");
         assert!(
@@ -2952,7 +2923,7 @@ mod tests_adr0020 {
 
     #[test]
     fn con_el_eco_correcto_no_hay_veredicto() {
-        assert!(veredicto_del_eco(&paso_con_parametros(), EMBEDIDO, CONTRACT).is_none());
+        assert!(veredicto_del_eco(&paso_con_parametros(), "bench", CONTRACT).is_none());
     }
 
     /// `lee_salidas` recorre el AST entero: la lectura puede estar dentro de

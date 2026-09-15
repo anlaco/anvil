@@ -169,10 +169,10 @@ export class TcpSocket {
  * sockets. In the editor the guest is one short-lived instance inside a page
  * that stays up, so the relay on the far side of the bridge outlives it.
  *
- * That is worse than a leak. The step executor serves one connection at a time
- * (crates/ejecutor_pasos/src/main.rs:90-104), so a connection a finished run
- * left behind keeps it busy for good and the next run's connection waits in the
- * accept queue for ever. That is the second Run that never returns (#61): the
+ * That is worse than a leak. An executor that serves one connection at a time
+ * — as the one built into anvil did until it was removed (ADR-0041) — is kept
+ * busy for good by a connection a finished run left behind, and the next run's
+ * connection waits in the accept queue for ever. That is the second Run that never returns (#61): the
  * engine blocks on a read the executor will never get to.
  */
 export function closeOpenSockets() {

@@ -69,8 +69,8 @@ struct SecuenciaYaml {
     /// éstas. Es recursivo: una inline es otra `SecuenciaYaml` completa.
     #[serde(default)]
     subsequences: HashMap<String, SecuenciaYaml>,
-    /// M5-ext.1 (RF-36.3): ejecutores declarados en el YAML. Sin esta
-    /// sección, todo paso va al ejecutor embebido (default, compat M4b).
+    /// M5-ext.1 (RF-36.3): ejecutores declarados en el YAML. A program whose
+    /// steps call executors needs them here: there is no default (ADR-0041).
     #[serde(default)]
     executors: Vec<EjecutorYaml>,
 }
@@ -83,13 +83,15 @@ struct SecuenciaYaml {
 #[serde(deny_unknown_fields)]
 struct EjecutorYaml {
     name: String,
-    /// `"embedded"` (default), `"wasm"` o `"grpc"`.
+    /// `"wasm"` or `"grpc"`, and required (ADR-0041). An `Option` only so its
+    /// absence gets a message that says what to write, not serde's
+    /// "missing field".
     ///
     /// `kind` y no `type`: `type` es palabra reservada de Rust. El
     /// `serde(rename)` es por el lenguaje, no por el idioma — en el YAML la
     /// clave es `type`.
-    #[serde(default = "tipo_ejecutor_por_defecto", rename = "type")]
-    kind: String,
+    #[serde(default, rename = "type")]
+    kind: Option<String>,
     /// Sólo si `tipo == "wasm"`. Path relativo al directorio del YAML.
     #[serde(default)]
     path: Option<String>,
@@ -100,10 +102,6 @@ struct EjecutorYaml {
     /// Sólo si `type == "grpc"`. Puerto.
     #[serde(default)]
     port: Option<u16>,
-}
-
-fn tipo_ejecutor_por_defecto() -> String {
-    "embedded".into()
 }
 
 /// A variable declared in a scope of M4 (`locals:`, `parameters:`,
@@ -309,8 +307,8 @@ struct PasoYaml {
     #[serde(default)]
     args: Option<HashMap<String, ValorYaml>>,
     /// M5-ext.1 (RF-36.3): nombre del ejecutor que atiende este paso. Debe
-    /// existir en `ejecutores` de la secuencia (fail-fast al cargar). Si se
-    /// omite, el paso va al ejecutor embebido (default).
+    /// existir en `ejecutores` de la secuencia (fail-fast al cargar), and a
+    /// `grpc` step of a program must name one (ADR-0041).
     #[serde(default)]
     executor: Option<String>,
 }
@@ -413,30 +411,31 @@ pub fn con_sufijo(path: &Path, suffix: &str) -> PathBuf {
     PathBuf::from(s)
 }
 
-/// Nombre de ejecutor reservado del motor (clave interna de la conexión al
-/// ejecutor embebido). No declarable en el YAML: el cargador lo rechaza.
-pub const NOMBRE_EMBEDIDO_RESERVADO: &str = modelo::EJECUTOR_EMBEBIDO;
-
 impl EjecutorYaml {
     /// Traduce a `modelo::DefinicionEjecutor`, validando la coherencia entre
     /// `tipo` y sus campos (fail-fast). `dir_yaml` es el directorio del
     /// archivo que declara el ejecutor: los paths `wasm` se resuelven
     /// relativo a él.
     fn a_definicion(self, dir_yaml: &Path) -> Result<DefinicionEjecutor, ErrorCarga> {
-        if self.name == NOMBRE_EMBEDIDO_RESERVADO {
+        let Some(kind) = self.kind.as_deref() else {
             return Err(ErrorCarga::Validacion(format!(
-                "el ejecutor '{NOMBRE_EMBEDIDO_RESERVADO}' está reservado; elige otro nombre"
+                "executor '{}' names no 'type': write 'type: wasm' with the 'path' of an \
+                 executor binary, or 'type: grpc' with its 'host' and 'port'",
+                self.name
             )));
-        }
-        let tipo = match self.kind.as_str() {
+        };
+        let tipo = match kind {
+            // Named apart from any unknown type because a sequence written
+            // before 0.7.0 says exactly this, and the way out is known.
             "embedded" => {
-                if self.path.is_some() || self.host.is_some() || self.port.is_some() {
-                    return Err(ErrorCarga::Validacion(format!(
-                        "el ejecutor '{}' es 'embedded' pero trae 'path'/'host'/'port' (no aplican)",
-                        self.name
-                    )));
-                }
-                TipoEjecutor::Embebido
+                return Err(ErrorCarga::Validacion(format!(
+                    "executor '{}' is 'type: embedded', and there is no executor built into \
+                     anvil any more (ADR-0041). Declare the one that serves these steps — \
+                     the package's demo bench is 'type: wasm' with \
+                     'path: ejemplos/departamento/dist/anvil-exec-wasm', relative to where \
+                     the sequence is",
+                    self.name
+                )))
             }
             "wasm" => {
                 if self.host.is_some() || self.port.is_some() {
@@ -495,7 +494,7 @@ impl EjecutorYaml {
             }
             otro => {
                 return Err(ErrorCarga::Validacion(format!(
-                    "el ejecutor '{}' tiene 'type' '{otro}' desconocido (embedded|wasm|grpc)",
+                    "el ejecutor '{}' tiene 'type' '{otro}' desconocido (wasm|grpc)",
                     self.name
                 )))
             }
@@ -513,7 +512,7 @@ impl EjecutorYaml {
 ///
 /// - El `nombre` debe existir en `ejecutores` (fail-fast): si no, error.
 /// - Un ejecutor `grpc` se re-apunta a `host:puerto`.
-/// - Un ejecutor `embebido` o `wasm` se **convierte** a `grpc` (el override
+/// - Un ejecutor `wasm` se **convierte** a `grpc` (el override
 ///   explícito fuerza remoto, igual que el host re-escribe los `.wasm`).
 ///
 /// Devuelve cuántos ejecutores se sobreescribieron (para el log del CLI).
@@ -1428,9 +1427,10 @@ pub fn cargar_programa_de_archivo(ruta: &str) -> Result<Programa, ErrorCarga> {
 /// as a sequence that validates and then measures against the wrong bench.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Endpoint<'a> {
-    /// The built-in WASM executor. **Every** `type: embedded` collapses here:
-    /// they are all the same process, whatever the sequence calls them.
-    Embebido,
+    /// The step names no executor. The loader refuses that for a `grpc` step of
+    /// a program (ADR-0041), so the engine only meets it on a sequence loaded on
+    /// its own.
+    SinEjecutor,
     /// A gRPC executor, keyed by the name the YAML gave it.
     Grpc(&'a str),
     /// A `type: wasm` executor. The engine never runs one — the host
@@ -1445,7 +1445,7 @@ impl<'a> Endpoint<'a> {
     /// steps must share to be talking to the same process.
     pub fn clave(&self) -> &'a str {
         match self {
-            Endpoint::Embebido => NOMBRE_EMBEDIDO_RESERVADO,
+            Endpoint::SinEjecutor => "",
             Endpoint::Grpc(n) | Endpoint::Wasm(n) | Endpoint::NoDeclarado(n) => n,
         }
     }
@@ -1457,20 +1457,13 @@ pub fn resolver_endpoint<'a>(
     ejecutores: &HashMap<String, DefinicionEjecutor>,
 ) -> Endpoint<'a> {
     let Some(nombre) = ejecutor else {
-        return Endpoint::Embebido;
+        return Endpoint::SinEjecutor;
     };
     match ejecutores.get(nombre).map(|e| &e.tipo) {
-        Some(TipoEjecutor::Embebido) => Endpoint::Embebido,
         Some(TipoEjecutor::Grpc { .. }) => Endpoint::Grpc(nombre),
         Some(TipoEjecutor::Wasm { .. }) => Endpoint::Wasm(nombre),
         None => Endpoint::NoDeclarado(nombre),
     }
-}
-
-/// How an endpoint is named to a human. `__anvil_embebido__` is an internal
-/// key nobody can declare, so printing it would be printing plumbing.
-pub fn nombre_visible_de_endpoint(clave: &str) -> &str {
-    modelo::nombre_visible_de_ejecutor(clave)
 }
 
 /// Everything about object references that can be decided by reading the files
@@ -1576,7 +1569,7 @@ fn validar_referencias_de(
                      (ADR-0022 §3)",
                     p.nombre,
                     def.nombre,
-                    nombre_visible_de_endpoint(destino.clave()),
+                    destino.clave(),
                 )));
             }
         }
@@ -1601,7 +1594,7 @@ fn validar_referencias_de(
                      equivocado (ADR-0022 §3)",
                     p.nombre,
                     def.nombre,
-                    nombre_visible_de_endpoint(destino.clave()),
+                    destino.clave(),
                     a.var
                 )));
             }
@@ -1829,6 +1822,28 @@ fn procesar_secuencia(
 /// DFS de validación sobre el grafo de llamadas. `id` identifica al nodo
 /// (path canónico de un archivo, o `{id_archivo}::{nombre_inline}`).
 /// `camino` lleva los ids en curso para detectar `A → B → A`.
+/// Why a `grpc` step with no `executor:` does not load, and what to write.
+fn error_paso_sin_ejecutor(
+    paso: &DefinicionPaso,
+    def: &DefinicionSecuencia,
+    programa: &Programa,
+) -> String {
+    let mut declarados: Vec<&str> = programa.ejecutores.keys().map(String::as_str).collect();
+    declarados.sort_unstable();
+    let opciones = if declarados.is_empty() {
+        "the root sequence declares no 'executors:'; declare the one that serves it there"
+            .to_string()
+    } else {
+        format!("declared in the root sequence: {}", declarados.join(", "))
+    };
+    format!(
+        "step '{}' of sequence '{}' calls an executor and names none: add \
+         'executor: <name>' ({opciones}). There is no executor built into anvil to \
+         fall back on (ADR-0041)",
+        paso.nombre, def.nombre
+    )
+}
+
 fn visitar(
     programa: &Programa,
     id: &str,
@@ -1850,6 +1865,14 @@ fn visitar(
         .chain(&def.pasos_main)
         .chain(&def.pasos_cleanup)
     {
+        // A step that calls an executor names it (ADR-0041). Checked here, per
+        // program, because this is where the executor table is known: a
+        // subsequence file declares none and uses its root's.
+        if paso.tipo == TipoPaso::Grpc && paso.ejecutor.is_none() {
+            return Err(ErrorCarga::Validacion(error_paso_sin_ejecutor(
+                paso, def, programa,
+            )));
+        }
         // M5-ext.1 (RF-36.3): un paso con `ejecutor:` debe referenciar un
         // nombre declarado en `ejecutores:` del YAML de la raíz (fail-fast).
         // `a_definicion` ya garantizó que sólo un paso `grpc` lo trae.
@@ -2573,20 +2596,26 @@ mod tests {
     fn basica_yaml() -> &'static str {
         "\
 name: basica
+executors:
+  - { name: bench, type: grpc, host: 127.0.0.1, port: 9101 }
 setup:
   - name: conectar_equipo
+    executor: bench
     retries: 3
 main:
   - name: medir_voltaje
+    executor: bench
     retries: 1
     limit:
       type: range
       min: 4.5
       max: 5.5
   - name: verificar_led
+    executor: bench
     retries: 1
 cleanup:
   - name: desconectar_equipo
+    executor: bench
     retries: 1
 "
     }
@@ -2602,21 +2631,25 @@ cleanup:
 
     #[test]
     fn la_traduccion_coincide_con_el_ejemplo_en_codigo() {
-        // El mismo contenido que crates/motor/src/bin/basica_datos.rs. Los
-        // scopes de M4 quedan vacíos (no los usa `basica.yaml`).
+        // The YAML and the same sequence built in code agree. The M4 scopes
+        // stay empty (`basica.yaml` does not use them).
         let s = cargar_de_texto(basica_yaml()).unwrap();
+        let en_bench = |mut p: DefinicionPaso| {
+            p.ejecutor = Some("bench".into());
+            p
+        };
         let esperada = modelo::DefinicionSecuencia {
             nombre: "basica".into(),
-            pasos_setup: vec![DefinicionPaso::nuevo("conectar_equipo", 3)],
+            pasos_setup: vec![en_bench(DefinicionPaso::nuevo("conectar_equipo", 3))],
             pasos_main: vec![
-                DefinicionPaso::con_limite(
+                en_bench(DefinicionPaso::con_limite(
                     "medir_voltaje",
                     1,
                     Limite::Rango { min: 4.5, max: 5.5 },
-                ),
-                DefinicionPaso::nuevo("verificar_led", 1),
+                )),
+                en_bench(DefinicionPaso::nuevo("verificar_led", 1)),
             ],
-            pasos_cleanup: vec![DefinicionPaso::nuevo("desconectar_equipo", 1)],
+            pasos_cleanup: vec![en_bench(DefinicionPaso::nuevo("desconectar_equipo", 1))],
             ..Default::default()
         };
         assert_eq!(s, esperada);
@@ -2956,13 +2989,13 @@ main:
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(
             dir.join("child.yseq"),
-            "name: child\nmain:\n  - name: m\n    type: grpc\n",
+            "name: child\nmain:\n  - name: m\n    type: grpc\n    executor: e\n",
         )
         .unwrap();
         let parent = dir.join("parent.yseq");
         std::fs::write(
             &parent,
-            "name: parent\nmain:\n  - name: c\n    type: sequence_call\n    sequence: child.yseq\n",
+            "name: parent\nexecutors:\n  - { name: e, type: grpc, host: 127.0.0.1, port: 9101 }\nmain:\n  - name: c\n    type: sequence_call\n    sequence: child.yseq\n",
         )
         .unwrap();
 
@@ -2981,13 +3014,13 @@ main:
         let hija = dir.join("hija.yaml");
         std::fs::write(
             &hija,
-            "name: hija\nparameters: { canal: 0.0 }\nmain:\n  - name: m\n    type: grpc\n",
+            "name: hija\nparameters: { canal: 0.0 }\nmain:\n  - name: m\n    type: grpc\n    executor: e\n",
         )
         .unwrap();
         let padre = dir.join("padre.yaml");
         std::fs::write(
             &padre,
-            "name: padre\nlocals: { canal: 1.0 }\nmain:\n  - name: c\n    type: sequence_call\n    sequence: ./hija.yaml\n    args: { canal: locals.canal }\n",
+            "name: padre\nexecutors:\n  - { name: e, type: grpc, host: 127.0.0.1, port: 9101 }\nlocals: { canal: 1.0 }\nmain:\n  - name: c\n    type: sequence_call\n    sequence: ./hija.yaml\n    args: { canal: locals.canal }\n",
         )
         .unwrap();
 
@@ -3343,7 +3376,7 @@ main:
         let usuario = dir.join("usuario.yaml");
         std::fs::write(
             &usuario,
-            "name: usuario\nmain:\n  - name: medir_voltaje\n    type: grpc\n",
+            "name: usuario\nexecutors:\n  - { name: e, type: grpc, host: 127.0.0.1, port: 9101 }\nmain:\n  - name: medir_voltaje\n    type: grpc\n    executor: e\n",
         )
         .unwrap();
 
@@ -3385,13 +3418,13 @@ main:
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(
             dir.join("hija.yaml"),
-            "name: hija\nmain:\n  - name: medir_voltaje\n    type: grpc\n",
+            "name: hija\nmain:\n  - name: medir_voltaje\n    type: grpc\n    executor: e\n",
         )
         .unwrap();
         let padre = dir.join("padre.yaml");
         std::fs::write(
             &padre,
-            "name: padre\nsubsequences:\n  inline:\n    name: inline\n    main:\n      - name: medir_voltaje\n        type: grpc\nmain:\n  - name: medir_voltaje\n    type: grpc\n  - name: c1\n    type: sequence_call\n    sequence: ./hija.yaml\n  - name: c2\n    type: sequence_call\n    sequence: inline\n",
+            "name: padre\nexecutors:\n  - { name: e, type: grpc, host: 127.0.0.1, port: 9101 }\nsubsequences:\n  inline:\n    name: inline\n    main:\n      - name: medir_voltaje\n        type: grpc\n        executor: e\nmain:\n  - name: medir_voltaje\n    type: grpc\n    executor: e\n  - name: c1\n    type: sequence_call\n    sequence: ./hija.yaml\n  - name: c2\n    type: sequence_call\n    sequence: inline\n",
         )
         .unwrap();
 
@@ -4134,8 +4167,8 @@ main:
 
     // ---- M5-ext.1: ejecutores ----
 
-    /// `ejecutores:` con un embebido y un grpc; pasos que los referencian
-    /// por nombre → `Programa.ejecutores` correcto.
+    /// `ejecutores:` con dos grpc; pasos que los referencian por nombre →
+    /// `Programa.ejecutores` correcto.
     #[test]
     fn ejecutores_yaml_se_parsean() {
         let dir = std::env::temp_dir().join(format!("anvil_m5ext_{}", "parse"));
@@ -4146,10 +4179,11 @@ main:
             "\
 name: demo
 executors:
-  - { name: embebido, type: embedded }
+  - { name: bench, type: grpc, host: 127.0.0.1, port: 9102 }
   - { name: python, type: grpc, host: 127.0.0.1, port: 9101 }
 main:
   - name: a
+    executor: bench
   - name: b
     executor: python
 ",
@@ -4157,7 +4191,13 @@ main:
         .unwrap();
         let prog = cargar_programa_de_archivo(y.to_str().unwrap()).unwrap();
         assert_eq!(prog.ejecutores.len(), 2);
-        assert_eq!(prog.ejecutores["embebido"].tipo, TipoEjecutor::Embebido);
+        assert_eq!(
+            prog.ejecutores["bench"].tipo,
+            TipoEjecutor::Grpc {
+                host: "127.0.0.1".into(),
+                puerto: 9102
+            }
+        );
         assert_eq!(
             prog.ejecutores["python"].tipo,
             TipoEjecutor::Grpc {
@@ -4165,8 +4205,7 @@ main:
                 puerto: 9101
             }
         );
-        // Pasos: el primero sin ejecutor (embebido por defecto), el segundo python.
-        assert_eq!(prog.raiz.pasos_main[0].ejecutor, None);
+        assert_eq!(prog.raiz.pasos_main[0].ejecutor.as_deref(), Some("bench"));
         assert_eq!(prog.raiz.pasos_main[1].ejecutor.as_deref(), Some("python"));
     }
 
@@ -4176,10 +4215,47 @@ main:
         let dir = std::env::temp_dir().join(format!("anvil_m5ext_{}", "vacio"));
         std::fs::create_dir_all(&dir).unwrap();
         let y = dir.join("s.yaml");
-        std::fs::write(&y, "name: s\nmain:\n  - name: a\n").unwrap();
+        std::fs::write(
+            &y,
+            "name: s\nlocals: { x: 0.0 }\nmain:\n  - name: a\n    type: statement\n    statement: 'locals.x = 1'\n",
+        )
+        .unwrap();
         let prog = cargar_programa_de_archivo(y.to_str().unwrap()).unwrap();
         assert!(prog.ejecutores.is_empty());
-        assert_eq!(prog.raiz.pasos_main[0].ejecutor, None);
+    }
+
+    /// A `grpc` step that names no executor does not load, and the error says
+    /// what to add and which executors there are (ADR-0041). The executor
+    /// built into anvil it used to fall back on is gone.
+    #[test]
+    fn a_grpc_step_without_executor_is_refused_and_says_what_to_add() {
+        let dir = std::env::temp_dir().join(format!("anvil_adr41_sin_{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let y = dir.join("s.yaml");
+        std::fs::write(&y, "name: s\nmain:\n  - name: a\n").unwrap();
+        let none = cargar_programa_de_archivo(y.to_str().unwrap()).unwrap_err();
+
+        std::fs::write(
+            &y,
+            "name: s\nexecutors:\n  - { name: bench, type: grpc, host: 127.0.0.1, port: 9101 }\n\
+             subsequences:\n  inner:\n    main:\n      - name: deep\nmain:\n  - name: c\n    \
+             type: sequence_call\n    sequence: inner\n",
+        )
+        .unwrap();
+        let nested = cargar_programa_de_archivo(y.to_str().unwrap()).unwrap_err();
+        std::fs::remove_dir_all(&dir).ok();
+
+        assert!(
+            matches!(&none, ErrorCarga::Validacion(m)
+                if m.contains("step 'a'") && m.contains("executor: <name>")
+                    && m.contains("declares no 'executors:'")),
+            "{none}"
+        );
+        assert!(
+            matches!(&nested, ErrorCarga::Validacion(m)
+                if m.contains("step 'deep'") && m.contains("bench")),
+            "an inline subsequence's step is checked too, naming what is declared: {nested}"
+        );
     }
 
     /// Un paso con `ejecutor: X` donde X no está declarado → error al cargar.
@@ -4310,16 +4386,26 @@ main:
         );
     }
 
-    /// `embebido` con campos de más → error; tipo desconocido → error.
+    /// `type: embedded` says what to write instead; an unknown type names
+    /// itself; no type at all says what types there are (ADR-0041).
     #[test]
-    fn embebido_con_campos_y_tipo_desconocido_son_errores() {
+    fn embedded_missing_and_unknown_executor_types_are_errors() {
         let dir = std::env::temp_dir().join(format!("anvil_m5ext_{}", "emb"));
         std::fs::create_dir_all(&dir).unwrap();
         let y = dir.join("s.yaml");
-        std::fs::write(&y, "name: s\nexecutors:\n  - { name: e, type: embedded, path: ./p.wasm }\nmain:\n  - name: a\n").unwrap();
+        std::fs::write(&y, "name: s\nexecutors:\n  - { name: e, type: embedded }\nmain:\n  - name: a\n    executor: e\n").unwrap();
         let err = cargar_programa_de_archivo(y.to_str().unwrap()).unwrap_err();
         assert!(
-            matches!(&err, ErrorCarga::Validacion(m) if m.contains("no aplican")),
+            matches!(&err, ErrorCarga::Validacion(m)
+                if m.contains("no executor built into") && m.contains("type: wasm")),
+            "{err}"
+        );
+
+        std::fs::write(&y, "name: s\nexecutors:\n  - { name: e, host: 127.0.0.1, port: 9101 }\nmain:\n  - name: a\n    executor: e\n").unwrap();
+        let err = cargar_programa_de_archivo(y.to_str().unwrap()).unwrap_err();
+        assert!(
+            matches!(&err, ErrorCarga::Validacion(m)
+                if m.contains("names no 'type'") && m.contains("type: grpc")),
             "{err}"
         );
 
@@ -4335,23 +4421,16 @@ main:
         );
     }
 
-    /// Dos ejecutores con el mismo nombre → error. Nombre reservado → error.
+    /// Dos ejecutores con el mismo nombre → error.
     #[test]
-    fn nombres_duplicados_y_reservados_son_errores() {
+    fn nombres_duplicados_son_errores() {
         let dir = std::env::temp_dir().join(format!("anvil_m5ext_{}", "dups"));
         std::fs::create_dir_all(&dir).unwrap();
         let y = dir.join("s.yaml");
-        std::fs::write(&y, "name: s\nexecutors:\n  - { name: a, type: embedded }\n  - { name: a, type: embedded }\nmain:\n  - name: p\n").unwrap();
+        std::fs::write(&y, "name: s\nexecutors:\n  - { name: a, type: grpc, host: 127.0.0.1, port: 9101 }\n  - { name: a, type: grpc, host: 127.0.0.1, port: 9102 }\nmain:\n  - name: p\n    executor: a\n").unwrap();
         let err = cargar_programa_de_archivo(y.to_str().unwrap()).unwrap_err();
         assert!(
             matches!(&err, ErrorCarga::Validacion(m) if m.contains("más de una vez")),
-            "{err}"
-        );
-
-        std::fs::write(&y, format!("name: s\nexecutors:\n  - {{ name: {NOMBRE_EMBEDIDO_RESERVADO}, type: embedded }}\nmain:\n  - name: p\n")).unwrap();
-        let err = cargar_programa_de_archivo(y.to_str().unwrap()).unwrap_err();
-        assert!(
-            matches!(&err, ErrorCarga::Validacion(m) if m.contains("reservado")),
             "{err}"
         );
     }
@@ -4362,7 +4441,7 @@ main:
         let dir = std::env::temp_dir().join(format!("anvil_m5ext_{}", "tipo"));
         std::fs::create_dir_all(&dir).unwrap();
         let y = dir.join("s.yaml");
-        std::fs::write(&y, "name: s\nexecutors:\n  - { name: e, type: embedded }\nmain:\n  - name: a\n    type: statement\n    statement: 'locals.x = 1'\n    executor: e\n").unwrap();
+        std::fs::write(&y, "name: s\nexecutors:\n  - { name: e, type: grpc, host: 127.0.0.1, port: 9101 }\nmain:\n  - name: a\n    type: statement\n    statement: 'locals.x = 1'\n    executor: e\n").unwrap();
         let err = cargar_programa_de_archivo(y.to_str().unwrap()).unwrap_err();
         assert!(
             matches!(&err, ErrorCarga::Validacion(m) if m.contains("reservado para 'grpc'")),
@@ -4378,7 +4457,7 @@ main:
         let y = dir.join("s.yaml");
         std::fs::write(
             &y,
-            "name: s\nexecutors:\n  - { name: e, type: embedded, foo: bar }\nmain:\n  - name: a\n",
+            "name: s\nexecutors:\n  - { name: e, type: grpc, host: 127.0.0.1, port: 9101, foo: bar }\nmain:\n  - name: a\n    executor: e\n",
         )
         .unwrap();
         let err = cargar_programa_de_archivo(y.to_str().unwrap()).unwrap_err();
@@ -4426,13 +4505,14 @@ main:
     }
 
     /// Override `--executor nombre=host:puerto`: re-apunta un grpc, convierte
-    /// un embebido, y falla si el nombre no está declarado.
+    /// un wasm, y falla si el nombre no está declarado.
     #[test]
     fn override_de_ejecutores() {
         let dir = std::env::temp_dir().join(format!("anvil_m5ext_{}", "override"));
         std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("anvil-exec-wasm"), b"").unwrap();
         let y = dir.join("s.yaml");
-        std::fs::write(&y, "name: s\nexecutors:\n  - { name: e, type: embedded }\n  - { name: py, type: grpc, host: 127.0.0.1, port: 9101 }\nmain:\n  - name: a\n").unwrap();
+        std::fs::write(&y, "name: s\nexecutors:\n  - { name: e, type: wasm, path: ./anvil-exec-wasm }\n  - { name: py, type: grpc, host: 127.0.0.1, port: 9101 }\nmain:\n  - name: a\n    executor: py\n").unwrap();
         let mut prog = cargar_programa_de_archivo(y.to_str().unwrap()).unwrap();
 
         // Re-apuntar un grpc a remoto.
@@ -4447,7 +4527,7 @@ main:
             }
         );
 
-        // Convertir un embebido en grpc (el usuario fuerza remoto).
+        // Convertir un wasm en grpc (el usuario fuerza remoto, como hace el host).
         let n =
             aplicar_override_ejecutores(&mut prog, &["e=192.168.1.60:9300".to_string()]).unwrap();
         assert_eq!(n, 1);
@@ -4475,22 +4555,18 @@ main:
 
     // ---- M5: process model Sequential (RF-38) ----
 
+    /// A process model that only wraps the user's sequence. Its plug-in steps
+    /// are gone with the executor that served them (ADR-0041 §6); what these
+    /// tests exercise is the wrapping, which does not need them.
     fn pm_yaml() -> &'static str {
         "\
 name: sequential
-locals: { uut_id: \"\", estado_usuario: \"\" }
-setup:
-  - name: identificar_uut
-    retries: 1
-    assign: { uut_id: \"${result.message}\" }
+locals: { estado_usuario: \"\" }
 main:
   - name: correr_secuencia_usuario
     type: sequence_call
     sequence: secuencia_usuario
     assign: { estado_usuario: \"${result.status}\" }
-cleanup:
-  - name: notificar_resultado
-    retries: 1
 "
     }
 
@@ -5392,7 +5468,7 @@ executors:
         let err = programa_de(
             "sin_ejecutor",
             &format!(
-                "name: s\n{EJECUTORES_DOS}locals:\n  rack: {{ type: reference, executor: bancoo }}\nmain:\n  - name: a\n"
+                "name: s\n{EJECUTORES_DOS}locals:\n  rack: {{ type: reference, executor: bancoo }}\nmain:\n  - name: a\n    executor: banco\n"
             ),
         )
         .unwrap_err();

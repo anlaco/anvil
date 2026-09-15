@@ -196,6 +196,9 @@ export class SequenceDocument {
     const step = { name: uniqueName(this, type) };
     // `type: grpc` is the default and writing it out adds noise to every diff.
     if (type !== "grpc") step.type = type;
+    // The first declared executor, which the person changes in the step's
+    // settings if the step is served by another one.
+    if (type === "grpc") step.executor = this.executorNames()[0];
 
     if (type === "statement") {
       // A statement must assign to a declared variable, or the loader rejects
@@ -277,7 +280,19 @@ export class SequenceDocument {
     if (type === "sequence_call" && this.subsequenceNames().length === 0) {
       return "this sequence declares no subsequences to call";
     }
+    // A grpc step must name its executor, and there is none built into anvil
+    // to fall back on (ADR-0041): with no `executors:` there is nothing to name.
+    if (type === "grpc" && this.executorNames().length === 0) {
+      return "this sequence declares no executors to call";
+    }
     return null;
+  }
+
+  /** The executors this file declares under `executors:`, by name. */
+  executorNames() {
+    const list = this.#doc.get("executors");
+    if (!isSeq(list)) return [];
+    return list.items.map((e) => e?.get?.("name")).filter((n) => typeof n === "string");
   }
 
   /** Removes a step from a phase. */

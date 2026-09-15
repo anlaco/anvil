@@ -163,7 +163,7 @@ pub struct StepRequest {
     #[prost(string, tag = "1")]
     pub name: String,
     /// Attempt number, starting at 1. Steps receive it so they can simulate
-    /// transient failures (see `pasos_demo`).
+    /// transient failures (see the demo bench's `connect`).
     #[prost(int32, tag = "2")]
     pub attempt: i32,
     /// This invocation's inputs, already evaluated (ADR-0020 §1).

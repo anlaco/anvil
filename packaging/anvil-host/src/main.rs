@@ -1,7 +1,6 @@
 //! Anvil's native host (ADR-0011): a single binary that **hosts wasmtime as
-//! a library** and orchestrates the two WASM guests — `anvil-guest.wasm`
-//! (engine) and `ejecutor_pasos.wasm` (executor) — embedded in the binary
-//! itself.
+//! a library** and runs the engine guest, `anvil-guest.wasm`, embedded in the
+//! binary itself. It carries no step executor (ADR-0041).
 //!
 //! The user downloads a binary and runs:
 //!
@@ -16,29 +15,20 @@
 //!     `executors:` — the declared non-loopback IPs (ADR-0011's bounded
 //!     relaxation: only the declared ones are allowed) and, in M5-ext.2, the
 //!     `.wasm` files to load by path.
-//!  2. Starts the executor (thread) that binds `127.0.0.1:<port>` in its
-//!     sandbox (loopback-only, no relaxation). The port is ephemeral per
-//!     process unless the user pins it with `--port` (#15), and the host
-//!     hands it to the engine so both ends agree. That decision comes
-//!     **from the arguments alone**: if step 1 could not read the YAML, the
-//!     executor starts all the same — the host does not predict the guest's
-//!     verdict (#52).
-//!  3. Waits for it to listen (a probe `connect`; the executor discards it).
-//!  4. **M5-ext.2 (ADR-0015, ADR-0027):** instantiates every `tipo: wasm`
+//!  2. **M5-ext.2 (ADR-0015, ADR-0027):** instantiates every `tipo: wasm`
 //!     executor in the YAML by spawning **the binary the sequence names in its
 //!     `path:`** with `--port <ephemeral>`, and nothing else: which modules
 //!     that executor serves is its own business — it finds them next to its
 //!     binary. Waits for each one (readiness).
-//!  5. Starts the engine (main) whose sandbox allows loopback **plus** the
+//!  3. Starts the engine (main) whose sandbox allows loopback **plus** the
 //!     non-loopback IPs declared in `executors:` (only those). Connects,
 //!     runs the sequence and exits.
-//!  6. Propagates the engine's exit. The executor threads get aborted when
-//!     the process ends.
+//!  4. Propagates the engine's exit. The spawned executors exit when the host
+//!     does (their stdin closes).
 //!
-//! The guests speak over gRPC on **restricted loopback TCP**
+//! The engine speaks gRPC to the executors on **restricted loopback TCP**
 //! (`socket_addr_check → is_loopback`), except for the non-loopback IPs
-//! declared in `executors:` (ADR-0011, bounded relaxation). The WASM sandbox
-//! and the engine↔executor isolation (one `Store` per guest) are preserved.
+//! declared in `executors:` (ADR-0011, bounded relaxation).
 
 use std::collections::{HashMap, HashSet};
 use std::net::{IpAddr, TcpListener, TcpStream};
@@ -51,21 +41,12 @@ use wasmtime_wasi::{DirPerms, FilePerms, WasiCtx, WasiCtxBuilder, WasiCtxView, W
 
 mod bridge;
 
-/// Embedded guests (built for `wasm32-wasip2` and copied into `OUT_DIR` by
-/// `build.rs`). The bridge binary is NOT embedded: it ships as a file next to
+/// The embedded engine guest (built for `wasm32-wasip2` and copied into
+/// `OUT_DIR` by `build.rs`). The bridge binary is NOT embedded: it ships as a file next to
 /// this one (ADR-0023), and from there it gets **copied into whatever folder
 /// is to be a department** — the sequence names the binary to spawn
 /// (ADR-0027), so there is no lookup here any more.
 const ANVIL_GUEST: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/anvil-guest.wasm"));
-const EJECUTOR: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/ejecutor_pasos.wasm"));
-
-/// Port of the embedded executor when the user pins it with `--port`.
-/// Without that flag an **ephemeral** port per process is used (see
-/// [`reserve_port`]): with a fixed port, two `anvil` processes could not
-/// coexist — the second died with `address in use`, which is what blocked
-/// parallelizing a campaign by launching N processes (#15). 9100 remains the
-/// loose guest executor's default, for the two-terminal README flow.
-const COMPAT_PORT: u16 = 9100;
 
 /// Each guest's state: the WASI context (sockets/preopens/args) + the
 /// resource table `wasmtime-wasi` needs.
@@ -83,20 +64,10 @@ impl WasiView for State {
     }
 }
 
-/// The `WasiCtxBuilder` base with inherited stdio and **sockets restricted to
-/// loopback** (only `127.0.0.0/8` and `::1`). `inherit_network` grants access
-/// to the host's network; `socket_addr_check` rejects any non-loopback IP.
-fn wasi_loopback() -> WasiCtxBuilder {
-    let mut b = WasiCtx::builder();
-    b.inherit_stdio().inherit_network();
-    b.socket_addr_check(|addr, _| Box::pin(async move { addr.ip().is_loopback() }));
-    b
-}
-
-/// Like `wasi_loopback`, but **relaxing loopback in a bounded way**
-/// (ADR-0011, M5-ext.1): besides loopback, exactly the non-loopback IPs
-/// declared in the sequence's `executors:` are allowed. With no declaration,
-/// behavior is identical to `wasi_loopback` (loopback-only).
+/// The engine's `WasiCtxBuilder`: inherited stdio and sockets restricted to
+/// loopback, **relaxed in a bounded way** (ADR-0011, M5-ext.1): besides
+/// loopback, exactly the non-loopback IPs declared in the sequence's
+/// `executors:` are allowed. With no declaration, loopback only.
 fn wasi_loopback_con_declaradas(ips_declaradas: HashSet<IpAddr>) -> WasiCtxBuilder {
     let mut b = WasiCtx::builder();
     b.inherit_stdio().inherit_network();
@@ -110,61 +81,26 @@ fn wasi_loopback_con_declaradas(ips_declaradas: HashSet<IpAddr>) -> WasiCtxBuild
 /// CLI flags of the engine guest that **consume the next argument**
 /// (M5, RF-40). The host only knows them to tell which argument is the
 /// sequence's path; the real parsing is the guest's job.
-const FLAGS_CON_VALOR: [&str; 6] = [
+const FLAGS_CON_VALOR: [&str; 5] = [
     "--process-model",
     "--json",
     "--csv",
     "--limits",
     "--executor",
-    "--port",
 ];
 
-/// The port the user pinned with `--port`, if any.
-///
-/// The flag used to only tell the **engine** where to connect, while the
-/// host bound 9100 come what may: `anvil x.yaml --port 9200` brought the
-/// executor up on 9100, the engine looked for 9200, and `connection refused`
-/// came out. The guide even recommended it as a fix for port clashes, and it
-/// did not work. It now pins **both ends**.
-fn puerto_pedido(args: &[String]) -> Option<u16> {
-    let mut it = args.iter();
-    while let Some(a) = it.next() {
-        if a == "--port" {
-            return it.next().and_then(|v| v.parse().ok());
-        }
-    }
-    None
-}
-
-/// Reserves an ephemeral loopback port and returns it. The same mechanism the
-/// host already used for the `.wasm` bridges (`instanciar_wasm`): binding
-/// port 0 lets the OS pick a free one, it gets read back and released for the
-/// guest to take. The window between the `drop` and the guest's `bind` is the
-/// same as the bridge's, and it has given no trouble.
-fn reservar_puerto() -> Result<u16, String> {
-    let listener = TcpListener::bind("127.0.0.1:0")
-        .map_err(|e| format!("no se pudo reservar puerto para el ejecutor embebido: {e}"))?;
-    let puerto = listener
-        .local_addr()
-        .map_err(|e| format!("no se pudo leer el puerto reservado: {e}"))?
-        .port();
-    drop(listener);
-    Ok(puerto)
-}
-
 /// If the engine is going to exit without invoking a step, **nothing that
-/// serves steps** should come up: neither the embedded executor nor the
-/// bridges of the declared `.wasm` files. Starting them announces
-/// `escuchando en …` ahead of the help or the verdict, and with the MVP's
-/// fixed port it would block another `anvil` that did mean to run. Covers
+/// serves steps** should come up: none of the declared `type: wasm`
+/// executors. Starting them announces their modules and port ahead of the
+/// help or the verdict. Covers
 /// what is decided **by the arguments alone** —`-h`, `-V`, `--validate`
 /// (which loads without connecting) and a missing sequence—; an unknown flag
 /// does not, because the host does not parse the command line (that is the
 /// guest's job) and duplicating the full flag set here would be a worse
 /// trade.
 ///
-/// Issue #22: this existed from the start, but it only guarded the embedded
-/// executor. The `.wasm` loop never consulted it, so `anvil s.yaml
+/// Issue #22: this existed from the start, but it only guarded the executor
+/// then built into anvil. The `.wasm` loop never consulted it, so `anvil s.yaml
 /// --validate` with a declared `tipo: wasm` spawned `anvil-exec-wasm`,
 /// which bound an ephemeral port and printed two lines — exactly what the
 /// manual promises `--validate` does not do, and in the scenario (CI, no
@@ -219,8 +155,7 @@ fn ruta_de_secuencia(args: &[String]) -> Option<String> {
 }
 
 /// The subset of `FLAGS_CON_VALOR` whose value is a filesystem path, as
-/// opposed to `--port` (a number) or `--executor` (a `name=addr` pair with no
-/// path in it).
+/// opposed to `--executor` (a `name=addr` pair with no path in it).
 const FLAGS_DE_RUTA: [&str; 4] = ["--process-model", "--json", "--csv", "--limits"];
 
 /// Every path-valued argument bound for the engine guest: the sequence's own
@@ -410,21 +345,6 @@ fn esperar_wasm(exec: &EjecutorWasm) -> Result<(), String> {
     ))
 }
 
-/// Waits for the executor to listen on `127.0.0.1:port` with a probe
-/// `connect`. The executor (its accept loop) discards that connection.
-fn esperar_ejecutor(puerto: u16) {
-    let addr = format!("127.0.0.1:{puerto}");
-    for _ in 0..SONDEOS_ARRANQUE {
-        if let Ok(c) = TcpStream::connect(&addr) {
-            drop(c); // conexión de prueba: se cierra; el ejecutor la descarta.
-            return;
-        }
-        thread::sleep(Duration::from_millis(10));
-    }
-    eprintln!("el ejecutor de pasos no empezó a escuchar en {addr}");
-    std::process::exit(1);
-}
-
 fn main() {
     // The host parses a single flag of its own: `--loopback-only` (rejects
     // any declared non-loopback `grpc`, for CI/paranoia). The rest of the
@@ -500,8 +420,8 @@ fn main() {
     let mut ejecutores_wasm: Vec<EjecutorWasm> = Vec::new();
     let mut overrides_motor: Vec<String> = Vec::new();
     // How many arguments came from the user. Everything appended past this
-    // point is synthetic — the `--executor` overrides and the `--port` — and in
-    // bridge mode only those travel: the engine in the browser supplies the
+    // point is synthetic — the `--executor` overrides — and in bridge mode only
+    // those travel: the engine in the browser supplies the
     // sequence itself, and sending the user's positional too would hand it two.
     let args_del_usuario = args_motor.len();
     let mut args_motor_final: Vec<String> = args_motor;
@@ -514,10 +434,9 @@ fn main() {
     // host to have parsed the YAML, which assumed a YAML the host rejects
     // would be rejected by the guest all the same. As soon as host and guest
     // stop sharing a loader — a half-built tree suffices — the premise is
-    // false: the guest loads the sequence, nobody started the embedded
-    // executor, and the user sees `connection-refused` against 9100 without
-    // a single line saying why. The host does not predict the guest's
-    // verdict.
+    // false: the guest loads the sequence, nobody started its executors, and
+    // the user sees `connection-refused` without a single line saying why. The
+    // host does not predict the guest's verdict.
     let va_a_ejecutar = va_a_ejecutar_pasos(&args_motor_final);
     if va_a_ejecutar {
         if let Some(p) = programa.as_ref() {
@@ -573,55 +492,6 @@ fn main() {
         args_motor_final.push(o.clone());
     }
 
-    // --- Executor thread: binds inside its sandbox, loopback-only (it does
-    // --- not serve external IPs). It does not start if the engine will never
-    // --- invoke a step (help, version, `--validate`, missing sequence).
-    //
-    // The port is **ephemeral per process** unless the user pins it with
-    // `--port`: that way two simultaneous `anvil` processes do not clash
-    // (#15). It is handed to the executor via `ANVIL_PORT` — the channel
-    // already used for path-loaded `.wasm` executors (ADR-0014) — and to the
-    // engine as `--port`, which is how it locates the embedded executor.
-    let arranca_ejecutor = va_a_ejecutar;
-    let puerto_ejecutor = match puerto_pedido(&args_motor_final) {
-        Some(p) => p,
-        // Without an embedded executor there is nobody to assign a port to
-        // (and reserving one would touch the network for nothing: DIAG-5f).
-        None if !arranca_ejecutor => COMPAT_PORT,
-        None => match reservar_puerto() {
-            Ok(p) => {
-                args_motor_final.push("--port".into());
-                args_motor_final.push(p.to_string());
-                p
-            }
-            // No ephemeral port available: the usual 9100. Worse is not
-            // starting at all.
-            Err(e) => {
-                eprintln!("aviso: {e}; se usa el puerto {COMPAT_PORT}");
-                COMPAT_PORT
-            }
-        },
-    };
-    let exec_handle = if arranca_ejecutor {
-        let exec_engine = engine.clone();
-        let h = thread::spawn(move || {
-            let mut b = wasi_loopback();
-            b.env("ANVIL_PORT", puerto_ejecutor.to_string());
-            let wasi = b.build();
-            // The executor is an infinite accept loop: if it ends, that is a
-            // failure. The error goes to stderr — otherwise the user only
-            // sees `wait_executor()`'s timeout without the cause.
-            if let Err(e) = correr_guest(&exec_engine, wasi, EJECUTOR) {
-                eprintln!("el ejecutor de pasos terminó con error: {e:?}");
-            }
-        });
-        // --- Wait for it to listen before launching the engine (no retry).
-        esperar_ejecutor(puerto_ejecutor);
-        Some(h)
-    } else {
-        None
-    };
-
     // --- Bridge mode: everything above already happened — the declared
     // --- executors are up — and instead of running the engine here, we serve
     // --- the one in the browser (ADR-0030). The engine is the same component
@@ -646,8 +516,8 @@ fn main() {
 
         // The engine gets its arguments over the wire instead of through argv:
         // there is no argv to inject into when it runs in a browser. These are
-        // the same synthetic `--port` and `--executor` the native path builds
-        // above; without them the engine falls back to 9100 and reaches nothing.
+        // the same synthetic `--executor` overrides the native path builds
+        // above; without them the engine reaches none of the wasm executors.
         let politica = bridge::Policy::new(ips_no_loopback);
         if let Err(e) = bridge::serve(
             listener,
@@ -722,10 +592,9 @@ fn main() {
         }
     };
 
-    // The executor threads (infinite accept loops) get aborted on exit. The
-    // loaded `.wasm` components stay in the process until then (preload,
-    // TestStand's default); there is no orderly shutdown in the MVP.
-    drop(exec_handle);
+    // The spawned executors keep their components loaded until the host exits
+    // (preload, TestStand's default); dropping them closes their stdin, and
+    // they exit on EOF. There is no orderly shutdown in the MVP.
     drop(ejecutores_wasm);
     std::process::exit(exit_code);
 }
@@ -823,9 +692,9 @@ mod tests {
 
     #[test]
     fn rutas_de_argumentos_ignora_flags_sin_ruta() {
-        // `--port` and `--executor` take a value too, but it is not a path:
-        // it must not end up preopened as one.
-        let a = args(&["s.yaml", "--port", "9200", "--executor", "n=127.0.0.1:1"]);
+        // `--executor` takes a value too, but it is not a path: it must not end
+        // up preopened as one.
+        let a = args(&["s.yaml", "--executor", "n=127.0.0.1:1"]);
         assert_eq!(rutas_de_argumentos(&a), vec!["s.yaml".to_string()]);
     }
 
@@ -854,10 +723,10 @@ mod tests {
         );
     }
 
-    /// The embedded executor opens a fixed port and announces it on stderr:
-    /// it must not start when the engine will exit without invoking any step.
+    /// A declared wasm executor binds a port and announces it on stderr: it must
+    /// not start when the engine will exit without invoking any step.
     #[test]
-    fn el_ejecutor_embebido_solo_arranca_si_hay_pasos_que_correr() {
+    fn los_ejecutores_solo_arrancan_si_hay_pasos_que_correr() {
         use super::va_a_ejecutar_pasos as necesita;
         assert!(necesita(&args(&["s.yaml"])));
         assert!(necesita(&args(&["--process-model", "pm.yaml", "s.yaml"])));

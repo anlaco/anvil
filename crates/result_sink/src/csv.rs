@@ -167,7 +167,7 @@ fn nombrados_a_csv(vs: &[(String, expr::Value)]) -> String {
 fn referencia_a_token(r: &expr::Reference) -> String {
     format!(
         "ref:{}/{}/{}",
-        pct(modelo::nombre_visible_de_ejecutor(&r.executor)),
+        pct(&r.executor),
         pct(&r.lifetime),
         pct(&r.payload)
     )
