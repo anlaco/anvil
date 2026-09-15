@@ -43,7 +43,7 @@ test("an unknown field is named, located and corrected", async () => {
   // is what the editor will show, so it is what this asserts.
   const { exitCode, stderr } = await runEngine({
     args: ["broken.yaml", "--validate"],
-    files: { "broken.yaml": "name: broken\nsteps:\n  - name: measure\n" },
+    files: { "broken.yaml": "name: broken\nsteps:\n  - name: measure\n    type: pass_fail\n    module: measure\n" },
   });
 
   assert.equal(exitCode, 1, "a sequence with an unknown field must be rejected");
@@ -56,7 +56,7 @@ test("a sequence with no main is rejected", async () => {
   // `main` is required and non-empty (crates/cargador/src/lib.rs:2126-2146).
   const { exitCode, stderr } = await runEngine({
     args: ["empty.yaml", "--validate"],
-    files: { "empty.yaml": "name: empty\nsetup:\n  - name: connect\n" },
+    files: { "empty.yaml": "name: empty\nsetup:\n  - name: connect\n    type: pass_fail\n    module: connect\n" },
   });
 
   assert.equal(exitCode, 1, "a sequence without `main` must be rejected");
@@ -74,7 +74,7 @@ test("the network is refused rather than faked", async () => {
   // `wasm` one reaches it only as the `--executor` override a host adds.
   const yaml =
     "name: remote\nexecutors:\n  - { name: bench, type: grpc, host: 127.0.0.1, port: 9101 }\n" +
-    "main:\n  - name: measure\n    executor: bench\n";
+    "main:\n  - name: measure\n    type: pass_fail\n    module: measure\n    executor: bench\n";
 
   await assert.rejects(
     () =>
@@ -95,7 +95,7 @@ test("a .yseq sequence validates, and its .yseq subsequence is found as a file",
   const parent =
     "name: parent\nexecutors:\n  - { name: e, type: grpc, host: 127.0.0.1, port: 9101 }\n" +
     "main:\n  - name: c\n    type: sequence_call\n    sequence: child.yseq\n";
-  const child = "name: child\nmain:\n  - name: m\n    type: grpc\n    executor: e\n";
+  const child = "name: child\nmain:\n  - name: m\n    module: m\n    type: pass_fail\n    executor: e\n";
 
   const { exitCode, stderr } = await runEngine({
     args: ["sequence.yseq", "--validate"],

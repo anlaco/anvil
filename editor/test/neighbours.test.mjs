@@ -82,7 +82,7 @@ test("an external subsequence is mounted, and so is what it references", async (
 });
 
 test("a Windows binary is mounted under its .exe name", async () => {
-  const text = "name: s\nexecutors:\n  - { name: d, type: wasm, path: dist/anvil-exec-wasm }\nmain:\n  - { name: d/x, executor: d }\n";
+  const text = "name: s\nexecutors:\n  - { name: d, type: wasm, path: dist/anvil-exec-wasm }\nmain:\n  - { name: d/x, type: pass_fail, module: d/x, executor: d }\n";
   const files = await gatherFiles("s.yaml", text, mapReader({ "dist/anvil-exec-wasm.exe": "" }));
   assert.deepEqual(Object.keys(files).sort(), ["dist/anvil-exec-wasm.exe", "s.yaml"]);
 });

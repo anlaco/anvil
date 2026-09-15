@@ -161,9 +161,9 @@ function renderSequence() {
 
       const kind = document.createElement("span");
       kind.className = "kind";
-      // `grpc` is the default and saying so on every row is noise; the other
-      // three are the ones worth seeing at a glance.
-      kind.textContent = step.type === "grpc" ? "" : step.type;
+      // A step with no type does not load; saying so on the row is how the
+      // person finds it.
+      kind.textContent = step.type ?? "no type";
 
       // A mark, not just a colour: a row that says pass or fail by hue alone is
       // unreadable to whoever cannot tell the hues apart, and this gets read
@@ -191,9 +191,10 @@ function renderSequence() {
 // palette offers no fifth, because a step the loader does not know is a step
 // the editor must not be able to create (AP-04).
 const STEP_TYPE_DOC = {
-  grpc: "Calls a step served by an executor.",
+  action: "Calls a module to do something; judges nothing.",
+  pass_fail: "Passes or fails: on an expression, or on what a module answers.",
+  numeric_limit: "Judges a number against a limit.",
   statement: "Assigns to variables. The engine runs it; no executor involved.",
-  pass_fail: "Passes or fails on an expression.",
   sequence_call: "Calls a subsequence.",
 };
 
@@ -352,8 +353,8 @@ function renderStep() {
   field(
     fields,
     "Type",
-    select(STEP_TYPES, step.type, (v) => edit("type", v === "grpc" ? undefined : v)),
-    "grpc calls an executor; the other three the engine runs itself.",
+    select(STEP_TYPES, step.type, (v) => edit("type", v)),
+    "How the step is judged. What it calls is its module.",
   );
   field(
     fields,
@@ -369,7 +370,13 @@ function renderStep() {
   );
   field(fields, "Disabled", disabled);
 
-  if (step.type === "grpc") {
+  if (step.module !== null || step.type === "action") {
+    field(
+      fields,
+      "Module",
+      textInput(step.module, (v) => edit("module", v || undefined)),
+      "What the step calls on its executor.",
+    );
     field(
       fields,
       "Executor",
@@ -379,17 +386,22 @@ function renderStep() {
   }
 
   if (step.limit) {
-    group(fields, `Limit — ${step.limit.type}`);
+    group(fields, `Limit — ${step.limit.comparison ?? "?"}`);
     const setLimit = (key, v) => {
       doc.setStepLimit(sel.phase, sel.index, key, v);
       afterEdit();
     };
-    if (step.limit.type === "range") {
-      field(fields, "Min", numberInput(step.limit.min, (v) => setLimit("min", v)));
-      field(fields, "Max", numberInput(step.limit.max, (v) => setLimit("max", v)));
-    } else {
-      field(fields, "Operator", textInput(step.limit.op, () => {}));
-      field(fields, "Expected", numberInput(step.limit.expected, (v) => setLimit("expected", v)));
+    // Only the fields the limit already has: which fields a comparison uses is
+    // the loader's rule (ADR-0040 §7), and offering the others would build a
+    // limit it refuses. Changing the comparison itself is the text view's job
+    // for now.
+    for (const key of ["low", "high", "nominal", "lower", "upper"]) {
+      if (key in step.limit) {
+        field(fields, key, numberInput(step.limit[key], (v) => setLimit(key, v)));
+      }
+    }
+    if ("units" in step.limit) {
+      field(fields, "units", textInput(step.limit.units, (v) => setLimit("units", v)));
     }
   }
 

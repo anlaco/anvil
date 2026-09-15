@@ -26,11 +26,13 @@ export const PHASES = ["setup", "main", "cleanup"];
 export const SCOPES = ["locals", "parameters", "file_globals"];
 
 /**
- * The four step types the engine understands
- * (`crates/cargador/src/lib.rs:2191-2203`). `grpc` is the default when a step
- * says nothing (`lib.rs:322`).
+ * The step types the engine understands, TestStand's (ADR-0040). A step must
+ * say which: there is no default.
  */
-export const STEP_TYPES = ["grpc", "statement", "sequence_call", "pass_fail"];
+export const STEP_TYPES = ["action", "pass_fail", "numeric_limit", "statement", "sequence_call"];
+
+/** The types that call an executor when they are inserted. */
+const CALLS_AN_EXECUTOR = new Set(["action", "numeric_limit"]);
 
 /**
  * A sequence document.
@@ -109,10 +111,11 @@ export class SequenceDocument {
     return seq.items.map((item, index) => ({
       index,
       name: item.get?.("name") ?? null,
-      type: item.get?.("type") ?? "grpc",
+      type: item.get?.("type") ?? null,
       retries: item.get?.("retries") ?? 1,
       disable: item.get?.("disable") ?? false,
       executor: item.get?.("executor") ?? null,
+      module: item.get?.("module") ?? null,
       limit: readLimit(item),
     }));
   }
@@ -152,8 +155,8 @@ export class SequenceDocument {
    * Sets one bound of a step's `limit`.
    *
    * Split out from `setStepField` because `limit` is a nested map with its own
-   * coherence rules — `range` needs `min` and `max` and forbids `op`/`expected`
-   * (`crates/cargador/src/lib.rs:352-405`) — and because changing a threshold is
+   * coherence rules — each comparison code uses its own fields and refuses the
+   * rest (ADR-0040 §7) — and because changing a threshold is
    * the single most common edit anyone makes to a sequence.
    */
   setStepLimit(phase, index, key, value) {
@@ -179,7 +182,7 @@ export class SequenceDocument {
    * the rule that the editor cannot build what the loader refuses (AP-04), so
    * the placeholders are part of the insert, not something to fill in later.
    */
-  addStep(phase, type = "grpc") {
+  addStep(phase, type = "action") {
     assertPhase(phase);
     if (!STEP_TYPES.includes(type)) {
       throw new Error(`unknown step type '${type}'`);
@@ -193,12 +196,18 @@ export class SequenceDocument {
       seq = this.#doc.get(phase);
     }
 
-    const step = { name: uniqueName(this, type) };
-    // `type: grpc` is the default and writing it out adds noise to every diff.
-    if (type !== "grpc") step.type = type;
-    // The first declared executor, which the person changes in the step's
-    // settings if the step is served by another one.
-    if (type === "grpc") step.executor = this.executorNames()[0];
+    const step = { name: uniqueName(this, type), type };
+    // A step that calls something names a module and its executor: the first
+    // declared one, which the person changes in the step's settings. The
+    // module is a placeholder the catalog check will name as unknown until it
+    // is set — not something that runs quietly.
+    if (CALLS_AN_EXECUTOR.has(type)) {
+      step.module = step.name;
+      step.executor = this.executorNames()[0];
+    }
+    // `none` records the value and judges nothing (ADR-0040 §8): a new limit
+    // that reads `done` until its comparison is set, never a pass.
+    if (type === "numeric_limit") step.limit = { comparison: "none" };
 
     if (type === "statement") {
       // A statement must assign to a declared variable, or the loader rejects
@@ -280,9 +289,10 @@ export class SequenceDocument {
     if (type === "sequence_call" && this.subsequenceNames().length === 0) {
       return "this sequence declares no subsequences to call";
     }
-    // A grpc step must name its executor, and there is none built into anvil
-    // to fall back on (ADR-0041): with no `executors:` there is nothing to name.
-    if (type === "grpc" && this.executorNames().length === 0) {
+    // A step that calls an executor must name it, and there is none built into
+    // anvil to fall back on (ADR-0041): with no `executors:` there is nothing to
+    // name.
+    if (CALLS_AN_EXECUTOR.has(type) && this.executorNames().length === 0) {
       return "this sequence declares no executors to call";
     }
     return null;
@@ -363,7 +373,7 @@ export class SequenceDocument {
 // so a new one must not silently collide with an existing one.
 function uniqueName(doc, type) {
   const taken = new Set(doc.allSteps().map((s) => s.name));
-  const base = type === "grpc" ? "new_step" : `new_${type}`;
+  const base = `new_${type}`;
   if (!taken.has(base)) return base;
   for (let n = 2; ; n++) {
     if (!taken.has(`${base}_${n}`)) return `${base}_${n}`;

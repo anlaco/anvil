@@ -37,9 +37,9 @@ test("changing a limit rewrites exactly one line", async () => {
   const steps = doc.steps("main");
   const index = steps.findIndex((s) => s.name === "demo/measure_voltage");
   assert.notEqual(index, -1, "expected demo/measure_voltage in main");
-  assert.equal(steps[index].limit.max, 5.5, "expected the fixture's 5.5 upper bound");
+  assert.equal(steps[index].limit.high, 5.5, "expected the fixture's 5.5 upper bound");
 
-  doc.setStepLimit("main", index, "max", 6.5);
+  doc.setStepLimit("main", index, "high", 6.5);
 
   const changed = changedLines(original, doc.text);
   assert.equal(
@@ -48,7 +48,7 @@ test("changing a limit rewrites exactly one line", async () => {
     `expected exactly one changed line, got ${changed.length}:\n` +
       changed.map(([n, a, b]) => `  line ${n}: ${JSON.stringify(a)} -> ${JSON.stringify(b)}`).join("\n"),
   );
-  assert.match(changed[0][2], /max:\s*6\.5/, "the changed line must be the upper bound");
+  assert.match(changed[0][2], /high:\s*6\.5/, "the changed line must be the upper bound");
 });
 
 test("the header comments survive an edit", async () => {
@@ -62,7 +62,7 @@ test("the header comments survive an edit", async () => {
   assert.ok(commentsBefore.length >= 9, "fixture should carry its header comments");
 
   const index = doc.steps("main").findIndex((s) => s.name === "demo/measure_voltage");
-  doc.setStepLimit("main", index, "max", 6.5);
+  doc.setStepLimit("main", index, "high", 6.5);
 
   const commentsAfter = doc.text.split("\n").filter((l) => l.trimStart().startsWith("#"));
   assert.deepEqual(commentsAfter, commentsBefore, "no comment may be dropped or reworded");
@@ -79,7 +79,7 @@ test("a CRLF file keeps its line endings, so an edit is still one line", async (
   const doc = new SequenceDocument(original);
 
   const index = doc.steps("main").findIndex((s) => s.name === "demo/measure_voltage");
-  doc.setStepLimit("main", index, "max", 6.5);
+  doc.setStepLimit("main", index, "high", 6.5);
 
   const changed = changedLines(original, doc.text);
   assert.equal(changed.length, 1, `expected exactly one changed line, got ${changed.length}`);
@@ -114,10 +114,10 @@ test("the step view reads the loader's vocabulary", async () => {
 });
 
 test("absent fields are shown as the engine will read them", async () => {
-  // `retries` defaults to 1 when absent (crates/cargador/src/lib.rs:318) and
-  // `type` to grpc (lib.rs:322). The panel must show the effective value, not a
-  // blank: a step that will be retried once must not look like a step that will
-  // not be retried at all.
+  // `retries` defaults to 1 when absent. The panel must show the effective
+  // value, not a blank: a step that will be retried once must not look like a
+  // step that will not be retried at all. `type` has no default (ADR-0040 §2),
+  // and a step without one reads as having none.
   //
   // This needs its own fixture. Every step in `ejemplos/basica.yaml` declares
   // `retries`, so asserting the defaults against it passes no matter what the
@@ -126,7 +126,7 @@ test("absent fields are shown as the engine will read them", async () => {
 
   const [step] = doc.steps("main");
   assert.equal(step.retries, 1, "an undeclared retries reads as 1");
-  assert.equal(step.type, "grpc", "an undeclared type reads as grpc");
+  assert.equal(step.type, null, "an undeclared type is no type, not a default");
   assert.equal(step.disable, false, "an undeclared disable reads as false");
 });
 
@@ -135,7 +135,7 @@ test("broken text keeps the last good tree and says so", async () => {
   assert.equal(doc.stale, false);
 
   // Mid-keystroke state: a value opened and not closed.
-  doc.setText("name: basica\nmain:\n  - name: [unclosed\n");
+  doc.setText("name: basica\nmain:\n  - name: [unclosed\n    type: pass_fail\n    module: [unclosed\n");
 
   assert.equal(doc.stale, true, "the view must be marked as not reflecting the text");
   assert.ok(doc.error, "there must be an error to point at");
@@ -151,7 +151,7 @@ test("recovering from broken text clears the mark", async () => {
   const original = await basica();
   const doc = new SequenceDocument(original);
 
-  doc.setText("name: basica\nmain:\n  - name: [unclosed\n");
+  doc.setText("name: basica\nmain:\n  - name: [unclosed\n    type: pass_fail\n    module: [unclosed\n");
   assert.equal(doc.stale, true);
 
   doc.setText(original);

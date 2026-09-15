@@ -86,22 +86,23 @@ test("an inserted step is readable by the step view straight away", async () => 
 
 test("inserted names do not collide", async () => {
   const doc = new SequenceDocument(await fixture("basica.yaml"));
-  doc.addStep("main", "grpc");
-  doc.addStep("main", "grpc");
+  doc.addStep("main", "action");
+  doc.addStep("main", "action");
 
   const names = doc.steps("main").map((s) => s.name);
   assert.equal(new Set(names).size, names.length, `names collided: ${names.join(", ")}`);
 });
 
-test("a grpc step names the first declared executor, and needs one to exist", async () => {
-  // There is no executor built into anvil to fall back on (ADR-0041): a grpc
-  // step with no `executor` does not load, so the palette must fill it in, and
-  // must refuse when there is nothing to fill it in with.
+test("a step that calls an executor names the first declared one, and needs one to exist", async () => {
+  // There is no executor built into anvil to fall back on (ADR-0041): a step
+  // that calls one with no `executor` does not load, so the palette must fill it
+  // in, and must refuse when there is nothing to fill it in with.
   const doc = new SequenceDocument(await fixture("basica.yaml"));
-  const index = doc.addStep("main", "grpc");
+  const index = doc.addStep("main", "action");
   assert.equal(doc.steps("main")[index].executor, "demo");
 
   const bare = new SequenceDocument("name: bare\nmain:\n  - name: s\n    type: statement\n    statement: 'locals.x = 1'\nlocals: { x: 0.0 }\n");
-  assert.match(bare.cannotAdd("grpc") ?? "", /no executors/);
-  assert.throws(() => bare.addStep("main", "grpc"), /no executors/);
+  assert.match(bare.cannotAdd("action") ?? "", /no executors/);
+  assert.match(bare.cannotAdd("numeric_limit") ?? "", /no executors/);
+  assert.throws(() => bare.addStep("main", "action"), /no executors/);
 });
