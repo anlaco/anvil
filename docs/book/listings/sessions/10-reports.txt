@@ -1,8 +1,4 @@
 $ anvil sequences/judging.yseq --quiet --csv judging.csv
-ejecutor de pasos escuchando en 46037
-motor conectado
-catálogo pedido
-conexión cerrada; esperando otra
 $ cat judging.csv
 sequence_name,status,step_name,step_status,message,measured_value,limit_min,limit_max,expected_value,operator,phase,inputs,outputs
 judging,pass,board/measure_rail,pass,,4.98,4.75,5.25,,,main,,

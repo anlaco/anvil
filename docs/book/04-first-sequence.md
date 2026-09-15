@@ -37,9 +37,9 @@ It is YAML. Line by line:
 - **`limit`** is the acceptance criterion: a `range` passes when the
   measurement is between `min` and `max`.
 
-**Always write `executor:` on a step.** A step without one is sent to a small
-executor built into the engine for its own demonstrations, which does not know
-your steps.
+**Every step that calls an executor names it with `executor:`.** Anvil has no
+executor of its own to fall back on, so a step without one is refused when the
+sequence loads, with a message that says what to add.
 
 The extension can be `.yseq` or `.yaml`; Anvil reads both the same way.
 
@@ -47,15 +47,11 @@ The extension can be `.yseq` or `.yaml`; Anvil reads both the same way.
 
 ```console
 $ anvil sequences/first.yseq
-ejecutor de pasos escuchando en 40243
 secuencia 'first' cargada (1 pasos en main, 0 subsecuencia(s) externa(s), 1 ejecutor(es))
-motor conectado
-conectado a los ejecutores de pasos (embebido en 127.0.0.1:40243)
-catálogo pedido
+connected to the step executors (bench)
 1 paso(s) comprobados contra el catálogo de su ejecutor
 === first: pass ===
   [pass] board/measure_rail: 
-conexión cerrada; esperando otra
 $ echo $?
 0
 ```
@@ -66,9 +62,8 @@ The **report** is the part between `=== first: pass ===` and the step lines
 under it: the sequence passed, and so did its one step. It goes to standard
 output.
 
-Everything else is **diagnostics** on the error stream: the engine starting its
-built-in executor on a free port, loading the file, connecting, and — the line
-that matters — `1 paso(s) comprobados contra el catálogo de su ejecutor`,
+Everything else is **diagnostics** on the error stream: loading the file,
+connecting to `bench`, and — the line that matters — `1 paso(s) comprobados contra el catálogo de su ejecutor`,
 "1 step checked against its executor's catalog". Before running anything,
 Anvil asked `bench` what it serves and checked that the sequence only asks for
 steps that exist. These messages are still in Spanish in 0.5.0
@@ -107,9 +102,9 @@ main:
 
 ```console
 $ anvil sequences/unknown.yseq 2>&1 | tail -n 3
+connected to the step executors (bench)
 la secuencia no casa con lo que ofrecen los ejecutores (1 problema(s)):
   - step 'board/measure_rial': executor 'bench' does not serve it (it serves: board/measure_rail)
-conexión cerrada; esperando otra
 ```
 
 "The sequence does not match what the executors offer": `bench` does not serve

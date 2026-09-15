@@ -4209,7 +4209,8 @@ main:
         assert_eq!(prog.raiz.pasos_main[1].ejecutor.as_deref(), Some("python"));
     }
 
-    /// Sin `ejecutores:` → tabla vacía y todos los pasos al embebido (compat M4b).
+    /// Without `executors:` the table is empty, and a program that calls no
+    /// executor still loads (ADR-0041).
     #[test]
     fn sin_ejecutores_tabla_vacia() {
         let dir = std::env::temp_dir().join(format!("anvil_m5ext_{}", "vacio"));

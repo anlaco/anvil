@@ -307,7 +307,7 @@ fn validate_sigue_comprobando_que_el_wasm_existe() {
 /// Sin `--quiet` porque el exit 1 a secas no distingue esto de un error de
 /// carga: lo que se comprueba es que los dos nombres aparezcan nombrados. Y
 /// tiene que llegar a preguntar, así que este es el único caso en que
-/// `--validate` levanta el ejecutor embebido (excepción explícita al #22).
+/// `--validate` levanta los ejecutores declarados (excepción explícita al #22).
 ///
 /// Visto en rojo escribiendo los dos nombres bien: sale 0 y sin hallazgos.
 #[test]

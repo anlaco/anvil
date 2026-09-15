@@ -531,8 +531,8 @@ mod tests {
     use std::collections::HashMap;
 
     /// The catalog of an executor that serves `medir_voltaje(canal?, offset?)`
-    /// and returns `temperatura` — the same shape the embedded executor
-    /// publishes, written by hand so these tests need no network.
+    /// and returns `temperatura` — the shape of a measuring step, written by
+    /// hand so these tests need no network.
     fn catalogo_demo() -> Catalog {
         Catalog::descrito(vec![StepSpec {
             name: "medir_voltaje".into(),

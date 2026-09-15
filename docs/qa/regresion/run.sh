@@ -263,10 +263,10 @@ grep -q ': pass ===' "$TMP/lec2.out" || res=1
 check LEC-2 "a green with skipped steps declares it (console and JSON)" $res
 
 # ---- NOTA-1: two simultaneous `anvil` must not clash on a port ----
-# The embedded executor bound a fixed 9100: the second process died with
-# `address in use`, which prevented parallelising a campaign by launching N
-# processes. The `--port` the guide recommended as a remedy only moved the
-# engine's end, so it gave `connection refused`.
+# The executor once built into anvil bound a fixed 9100: the second process
+# died with `address in use`, which prevented parallelising a campaign by
+# launching N processes. That executor is gone (ADR-0041); the case stays
+# because each run still spawns its declared executors on ports of its own.
 $A ejemplos/basica.yaml >"$TMP/n1a.out" 2>&1 &
 p1=$!
 $A ejemplos/basica.yaml >"$TMP/n1b.out" 2>&1 &

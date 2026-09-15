@@ -11,10 +11,6 @@ the console. `--quiet` removes the console report:
 
 ```console
 $ anvil sequences/judging.yseq --quiet --csv judging.csv
-ejecutor de pasos escuchando en 46037
-motor conectado
-catálogo pedido
-conexión cerrada; esperando otra
 $ cat judging.csv
 sequence_name,status,step_name,step_status,message,measured_value,limit_min,limit_max,expected_value,operator,phase,inputs,outputs
 judging,pass,board/measure_rail,pass,,4.98,4.75,5.25,,,main,,
@@ -68,20 +64,16 @@ board/measure_rial:
 
 ```console
 $ anvil sequences/judging.yseq --limits sequences/judging.typo.limits.yaml
-ejecutor de pasos escuchando en 40627
 secuencia 'judging' cargada (3 pasos en main, 0 subsecuencia(s) externa(s), 1 ejecutor(es))
 sidecar de límites 'sequences/judging.typo.limits.yaml' aplicado (0 paso(s) afectado(s))
 aviso: 1 límite(s) del sidecar 'sequences/judging.typo.limits.yaml' no afectan a ningún paso: board/measure_rial
 aviso: el sidecar no afectó a ningún paso. Comprueba que los nombres coincidan con los de los pasos de la secuencia
-motor conectado
-conectado a los ejecutores de pasos (embebido en 127.0.0.1:40627)
-catálogo pedido
+connected to the step executors (bench)
 3 paso(s) comprobados contra el catálogo de su ejecutor
 === judging: pass ===
   [pass] board/measure_rail: 
   [pass] board/measure_leakage: 
   [pass] board/check_led: 
-conexión cerrada; esperando otra
 ```
 
 The `aviso` lines say that one limit in the file affects no step,
@@ -133,6 +125,6 @@ carries the same data as `--json`, instrument addresses included.
 ## Not covered here
 
 `--process-model` wraps a sequence in a process model that identifies the unit
-and reports on it. The only process model in 0.5.0 relies on the engine's
-built-in demonstration steps, and it is not in the release archive, so this
-book leaves it out.
+and reports on it. Anvil does not ship one: the process model it had stood in
+for an operator prompt that does not exist yet, and was removed, so this book
+leaves it out.

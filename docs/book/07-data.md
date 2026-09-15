@@ -204,9 +204,9 @@ main:
 
 ```console
 $ anvil sequences/serial.yseq 2>&1 | tail -n 3
+1 paso(s) comprobados contra el catálogo de su ejecutor
 la secuencia no casa con lo que ofrecen los ejecutores (1 problema(s)):
   - step 'unit/read_serial' (bench): 'assign' reads result.outputs.serial and the step does not return it (it returns: none)
-conexión cerrada; esperando otra
 ```
 
 Anvil checks `assign` against the outputs a step declares in its catalog, and
@@ -292,16 +292,12 @@ $ anvil sequences/typo.yseq --validate
 secuencia 'typo' cargada (1 pasos en main, 0 subsecuencia(s) externa(s), 1 ejecutor(es))
 'typo' válida (1 paso(s) en main, 0 subsecuencia(s) externa(s))
 $ anvil sequences/typo.yseq --validate --with-executors
-ejecutor de pasos escuchando en 46505
 secuencia 'typo' cargada (1 pasos en main, 0 subsecuencia(s) externa(s), 1 ejecutor(es))
 'typo' válida (1 paso(s) en main, 0 subsecuencia(s) externa(s))
-motor conectado
-catálogo pedido
 1 paso(s) comprobados contra el catálogo de su ejecutor
 la secuencia no casa con lo que ofrecen los ejecutores (2 problema(s)):
   - step 'dmm/measure_voltage' (bench): it takes no input called 'chanel' (it takes: channel, range)
   - step 'dmm/measure_voltage' (bench): the input 'channel' is required and the sequence does not send it
-conexión cerrada; esperando otra
 ```
 
 `--validate` loads the file and checks it — the schema, the expressions, the

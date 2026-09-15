@@ -20,9 +20,11 @@ run sequences, read the reports — follow [The Anvil Book](docs/book/README.md)
 
 ## Run the example
 
-**One binary** (`anvil`, ADR-0011) hosts wasmtime and the two WASM guests in
-a sandbox. The package also carries `anvil-exec-wasm` next to it — the
-executor that serves your `.wasm` steps (ADR-0023). You copy that file into a
+**One binary** (`anvil`, ADR-0011) hosts wasmtime and the engine's WASM guest
+in a sandbox. It carries no step executor of its own (ADR-0041): the package
+also carries `anvil-exec-wasm` next to it — the executor that serves `.wasm`
+steps (ADR-0023) — and a demo bench built with it, which the examples run
+against. You copy that file into a
 folder together with your `.wasm` modules — that folder is a *department* —
 and a sequence names its binary in `path:`; `anvil` spawns it (ADR-0027). Both
 are statically linked against musl: they need no Rust, no cargo, no glibc,
@@ -40,7 +42,8 @@ Linux x86_64, any libc. The [release page][rel] publishes one `SHA256SUMS`
 for every download; to check the tarball, download it alongside and run
 `sha256sum -c --ignore-missing SHA256SUMS` (it lists the Windows downloads
 too, which you did not fetch). The `.yaml` files ship in the package because
-`subsecuencia.yaml` invokes `medir_fuentes.yaml` by relative path.
+`subsecuencia.yaml` invokes `medir_fuentes.yaml` by relative path, and the demo
+bench ships in `ejemplos/departamento/dist/` because every example names it.
 
 **Windows** (ADR-0036): the [release page][rel] also publishes
 `anvil-vX.Y.Z-x86_64-windows.zip` — the same engine, `anvil.exe` and
@@ -86,7 +89,7 @@ cd anvil
 ```
 
 ```sh
-make release   # WASM guests → bridge → host, in that order
+make release   # WASM guest and example components → bridge → host, in that order
 
 ./packaging/anvil-host/target/release/anvil ejemplos/subsecuencia.yaml --json ./out.json --csv ./out.csv
 ```
@@ -96,7 +99,7 @@ it does not build them), and the order matters; the `Makefile` exists so you
 do not have to remember it. By hand:
 
 ```sh
-cargo build --release --target wasm32-wasip2 -p motor -p ejecutor_pasos      # guests
+cargo build --release --target wasm32-wasip2 -p motor                        # guest
 cargo build --release --manifest-path executors/wasm/Cargo.toml              # bridge (ADR-0015)
 cargo build --release --manifest-path packaging/anvil-host/Cargo.toml        # host (embedded wasmtime)
 ```
@@ -116,19 +119,21 @@ bridge for their target triple, and the host's `build.rs` finds it there
 script on the platform it is for and drafts the Release.
 
 `make build` does the same in debug. Use it for development, but expect that
-binary to **start in tens of seconds**: wasmtime compiles the guests
+binary to **start in tens of seconds**: wasmtime compiles the guest
 unoptimized every time. The release one starts in ~1 s.
 
-To debug the guests on their own with the wasmtime CLI (two terminals):
+To debug the engine guest on its own with the wasmtime CLI (two terminals),
+start the demo bench's executor by hand and point the guest at it — the host
+is what would otherwise start it and pass that `--executor`:
 
 ```sh
-cargo build --target wasm32-wasip2 -p ejecutor_pasos -p motor
+make release
 # terminal 1
-wasmtime -S cli -S tcp=y -S inherit-network=y \
-  target/wasm32-wasip2/debug/ejecutor_pasos.wasm
+ejemplos/departamento/dist/anvil-exec-wasm --port 9300
 # terminal 2
 wasmtime -S cli -S tcp=y -S inherit-network=y --dir=. \
-  target/wasm32-wasip2/debug/anvil-guest.wasm ejemplos/basica.yaml
+  target/wasm32-wasip2/release/anvil-guest.wasm ejemplos/basica.yaml \
+  --executor demo=127.0.0.1:9300
 ```
 
 The wasmtime flags are not optional: without `-S tcp=y -S
@@ -143,12 +148,9 @@ crates/
   cargador/        YAML → model: validates, resolves paths, detects cycles
   expr/            expression engine (a Julia-syntax subset)
   result_sink/     report sinks: console, JSON, CSV
-  pasos_demo/      the example sequence's steps
-  pasos_scpi/      a real step over SCPI on TCP (ADR-0017)
-  ejecutor_pasos/  gRPC server: dispatches steps by name
   motor/           gRPC client: walks the sequence (bin `anvil-guest`)
 packaging/
-  anvil-host/      native host: one binary hosting wasmtime + the two guests
+  anvil-host/      native host: one binary hosting wasmtime + the engine guest
                    (its own workspace; the core drags no wasmtime)
 executors/
   python/          the Python executor: a downloadable module (ADR-0012)
