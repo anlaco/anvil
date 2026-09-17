@@ -44,41 +44,56 @@ Outcome::error(format!(
 Un nombre desconocido es `error`, **no pánico**: una secuencia mal escrita
 no tumba el ejecutor (RF-12).
 
-## Step types built-in (MVP)
+## Los tipos de paso
 
-| Tipo | Qué hace | MVP |
+Un paso declara su `type`, y **es obligatorio**: dice *cómo se juzga el paso*,
+no qué llama ([ADR-0040](../adr/0040-a-step-type-says-how-a-step-is-judged-not-what-it-calls.md)).
+Lo que llama es `module`, y son cosas distintas: dos pasos pueden llamar al
+mismo `module` y juzgarse de forma distinta, y un `pass_fail` puede no llamar a
+nadie.
+
+| Tipo | Cómo se juzga | Necesita |
 |---|---|---|
-| **pass/fail** | Hace algo y reporta `paso`/`fallo` sin medida. El más simple. | ✅ hecho (M3) |
-| **limit test** | Mide y compara contra high/low o comparación → `paso`/`fallo`. | ✅ hecho (M3) |
-| **action** | Ejecuta una acción (mover un fixture, abrir un relé); el estado es `paso` si no hubo `error`. | MVP-parcial · hecho (M3) |
-| **sequence call** | Invoca otra secuencia anidada. | MVP-parcial · hecho (M4b) |
-| **statement** | Evalúa una expresión del expression engine (asignación). | MVP-parcial · hecho (M4-núcleo) |
-| **pass_fail (por expresión)** | El **motor** evalúa una `condicion` booleana sobre variables ya pobladas → `paso`/`fallo`. El veredicto **compuesto**. | ✅ hecho (post-MVP, ADR-0018) |
+| **`action`** | No juzga. El `pass` del módulo se informa como `done`; su `fail` o su `error` se mantienen. | `module` |
+| **`pass_fail`** | El estado del módulo **es** el veredicto; si hay `condition`, decide la expresión (y puede leer `result.*`). | `module`, `condition`, o los dos |
+| **`numeric_limit`** | El motor compara un número contra el `limit` (ADR-0008). El número es `value`, o la medida del módulo. | `limit`, y `module` o `value` |
+| **`statement`** | No juzga: si las sentencias terminan bien, `done`. | `statement` |
+| **`sequence_call`** | El agregado de la subsecuencia. | `sequence` |
 
-Los built-in son **comportamientos** del lado del ejecutor, no del motor:
-el motor sigue siendo genérico (ADR-0005).
+Los tipos son del **motor**, no del ejecutor: el ejecutor sólo devuelve
+`pass`/`fail`/`error`/`skipped` y, si mide, un número; quién decide qué
+significa eso es el motor, con lo que dice la secuencia. Sigue siendo genérico
+(ADR-0005): ninguno de los cinco sabe qué se está midiendo.
 
-### Cómo se encarnan en M3
+### Por qué `done` y no `pass`
 
-- **pass/fail** y **action** no necesitan lógica nueva: son pasos normales que
-  devuelven `paso`/`fallo`/`error` (con o sin medida). En el banco de demo,
-  `demo/check_led` es pass/fail y `demo/open_relay` es action.
-- **limit test** se habilita con los **límites como datos** (RF-29,
-  [limites-y-estados.md](limites-y-estados.md)): el paso mide y devuelve
+Un `action` que abre un relé no ha juzgado la unidad, así que informarlo como
+`pass` era decir que algo salió bien cuando lo único que pasó es que se hizo.
+`done` es **neutral**: no corta el Main, no hace verde una secuencia por sí
+solo y no cuenta como medida (ADR-0040 §6). Lo mismo para un `statement` y para
+un `numeric_limit` con `comparison: none`, que registra el valor sin
+compararlo.
+
+### Cómo se encarnan
+
+- **`action` y `pass_fail`** no necesitan lógica en el ejecutor: son pasos
+  normales que devuelven `pass`/`fail`/`error`. En el banco de demo,
+  `demo/check_led` es un `pass_fail` y `demo/open_relay` un `action`.
+- **`numeric_limit`** se apoya en los **límites como datos** (RF-29,
+  [limites-y-estados.md](limites-y-estados.md)): el módulo mide y devuelve
   `valor_medido`; el motor evalúa el `Limite` del YAML y produce el estado
-  (ADR-0008). No hace falta un paso "limit test" dedicado ni tocar el
-  contrato — cualquier paso que mida puede llevar un límite declarado.
-- **sequence call** y **statement** quedan para M4: dependen, respectivamente,
-  de la infraestructura de subsecuencias y del *expression engine* (RF-35).
-  **statement** se implementó en M4-núcleo; **sequence call**, en M4b (ver
+  (ADR-0008). No hace falta un paso «limit test» dedicado ni tocar el
+  contrato. Un `numeric_limit` **sin número que juzgar** es `error`, no un
+  límite que no se aplica en silencio (ADR-0040 §5).
+- **`statement`** se implementó en M4-núcleo; **`sequence_call`**, en M4b (ver
   abajo).
 
-### El veredicto compuesto (`tipo: pass_fail`, ADR-0018)
+### El veredicto compuesto (`type: pass_fail` sin `module`, ADR-0018)
 
 Las dos vías anteriores fallan sobre **un** paso y **una** medida: el paso lo
-decide, o el motor evalúa el `limite` de su medida. El criterio de aceptación
+decide, o el motor evalúa el `limit` de su medida. El criterio de aceptación
 que **combina varias medidas** —el que un ingeniero escribe al final de la
-secuencia— es un paso `pass_fail`:
+secuencia— es un `pass_fail` que no llama a nadie:
 
 ```yaml
 - name: verificar_dut
@@ -86,16 +101,18 @@ secuencia— es un paso `pass_fail`:
   condition: 'locals.v > 4.9 && locals.v < 5.1 && locals.temp < 50.0'
 ```
 
-Lo evalúa el **motor**, no el paso (mismo patrón que `limite` y `precondicion`):
-`true` → `paso`, `false` → `fallo`, no-Bool → `error`. Bool estricto, sin
+Lo evalúa el **motor**, no el paso (mismo patrón que `limit` y `precondition`):
+`true` → `pass`, `false` → `fail`, no-Bool → `error`. Bool estricto, sin
 truthiness. Es el análogo del step type `Pass/Fail Test` de TestStand, cuyo
 data source es una expresión booleana.
 
 `statement` se queda **sólo con asignación**, a propósito: cada construcción
 hace una cosa, y así olvidar un `=` sigue siendo un error de sintaxis en vez de
-un cambio silencioso de significado. Un `pass_fail` no admite `reintentos > 1`
-(evalúa una expresión pura: el veredicto no cambia entre intentos), ni
-`asigna`, ni `limite`, ni `ejecutor` — todos son error al cargar.
+un cambio silencioso de significado. Un `pass_fail` o un `numeric_limit` **sin
+`module`** no admite `retries > 1` (evalúa una expresión pura: el veredicto no
+cambia entre intentos), ni `assign`, ni `executor`; **con `module`** admite los
+dos primeros, porque entonces sí llama a alguien (ADR-0042 §3). Un `pass_fail`
+nunca admite `limit`. Todo lo demás es error al cargar.
 
 ### Cómo se encarna sequence call en M4b
 
@@ -117,15 +134,19 @@ un cambio silencioso de significado. Un `pass_fail` no admite `reintentos > 1`
   Ver [variables-y-alcances.md](variables-y-alcances.md),
   [formato-de-secuencia.md](formato-de-secuencia.md) y ADR-0010.
 
-## Registro y descubrimiento de pasos (MVP-parcial, aplazado a post-M3)
+## Registro y descubrimiento de pasos (hecho)
 
-Hoy el despacho es un `match` hardcodeado. Para que un ejecutor pueda
-**descubrir** qué pasos ofrece, y para que un editor los liste, hace falta
-un **registro** de pasos:
+Un ejecutor **describe su catálogo**: qué módulos sirve, con qué entradas y
+qué salidas (ADR-0021, y en Rust por firma, ADR-0024). El registro del SDK es
+lo que despacha y lo que se publica, así que no hay dos listas que puedan
+divergir.
 
-- **Propuesta:** un ejecutor expone el catálogo de pasos que despacha (nombre
-  +, post-MVP, su firma). El motor/editor lo consulta.
-- Esto es la base de la **introspección de firma** que necesita el editor
+- El motor lo consulta nada más conectar, antes del primer paso, y sin banco
+  con `--validate --with-executors`; compara contra la secuencia los `inputs` y
+  los `result.outputs.<nombre>` (`motor::comprueba_programa`). Un ejecutor que
+  no describe su catálogo se queda sin comprobar, y se avisa: negarse a correr
+  cerraría la puerta a terceros.
+- Es la base de la **introspección de firma** que necesita el editor
   visual (ver [ui-vs-headless.md](ui-vs-headless.md) y
   [contrato-grpc.md](../contrato-grpc.md)): el registro pasa de "nombre" a
   "nombre + parámetros + retorno", para que arrastrar el archivo del code

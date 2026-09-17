@@ -35,10 +35,10 @@ Prioridad: **MVP** (Must), **MVP-parcial** (Should), **post-MVP** (Could),
 
 | ID | Requisito | Prioridad | Trazabilidad |
 |---|---|---|---|
-| RF-10 | Cada resultado tiene un **estado**: `paso`, `fallo` o `error` (texto, no enum). | MVP | `modelo/src/lib.rs::ResultadoStep.estado` |
-| RF-11 | Un `fallo` (criterio de aceptación no cumplido) es un resultado **válido**, no un error del motor. | MVP | `motor/src/lib.rs::Error` (solo Red/Protobuf) |
+| RF-10 | Cada resultado tiene un **estado** (texto, no enum). Un ejecutor devuelve `pass`, `fail`, `error` o `skipped`, y sólo esos; el motor añade `done` (terminó sin juzgar, ADR-0040) e `inconclusive` como agregado (ADR-0019). | MVP | `modelo/src/lib.rs::ESTADOS_DE_EJECUTOR`, `ResultadoStep.estado` |
+| RF-11 | Un `fail` (criterio de aceptación no cumplido) es un resultado **válido**, no un error del motor. | MVP | `motor/src/lib.rs::Error` (solo Red/Protobuf) |
 | RF-12 | Un nombre de paso desconocido produce `error`, no pánico. | MVP | `executors/wasm/src/main.rs::resolve` (módulo desconocido) y `executors/rust/anvil-step/src/registry.rs` (paso desconocido) |
-| RF-13 | Agregado de secuencia: `error` si alguno dio `error`; si no, `fallo` si alguno dio `fallo`; si no, `paso`. | MVP | `modelo/src/lib.rs::ResultadoSecuencia::estado` |
+| RF-13 | Agregado de secuencia: el máximo en la escala `pass < inconclusive < fail < error`, con `skipped` y `done` fuera de ella (neutrales). | MVP | `modelo/src/lib.rs::Severidad`, `ResultadoSecuencia::estado` |
 
 ### Contrato del paso (gRPC)
 
@@ -70,9 +70,9 @@ Prioridad: **MVP** (Must), **MVP-parcial** (Should), **post-MVP** (Could),
 
 | ID | Requisito | Prioridad | Trazabilidad |
 |---|---|---|---|
-| RF-25 | Built-in **pass/fail** (sin medida, solo `paso`/`fallo`), por las dos vías: lo decide el **paso**, o lo decide el **motor** evaluando una expresión declarada (`tipo: pass_fail`, veredicto compuesto). | MVP | paso: `ejemplos/departamento/demo/src/lib.rs::check_led`; motor: `motor/src/lib.rs::evalua_pass_fail` (ADR-0018); [diseno/modelo-de-pasos.md](diseno/modelo-de-pasos.md) |
-| RF-26 | Built-in **limit test** (medida contra high/low o comparación). | MVP | `motor/src/lib.rs::aplicar_limite`; `modelo/src/lib.rs::Limite` (ADR-0008) |
-| RF-27 | Built-in **action**, **sequence call**, **statement**. | MVP-parcial | action: `ejemplos/departamento/demo/src/lib.rs::open_relay`; statement: `motor/src/lib.rs::ejecuta_statement_puro` (M4-núcleo); sequence call: `motor/src/lib.rs::ejecuta_sequence_call` (M4b, inline + path, by-reference; ADR-0010) |
+| RF-25 | Built-in **pass/fail** (sin medida, solo `pass`/`fail`), por las dos vías: lo decide el **módulo**, o lo decide el **motor** evaluando una expresión declarada (`type: pass_fail` con `condition`, veredicto compuesto). | MVP | paso: `ejemplos/departamento/demo/src/lib.rs::check_led`; motor: `motor/src/lib.rs::evalua_pass_fail` (ADR-0018); [diseno/modelo-de-pasos.md](diseno/modelo-de-pasos.md) |
+| RF-26 | Built-in **limit test**: `type: numeric_limit` con un `limit` en los códigos de TestStand (`EQ`…`LE`, `GELE`…, `LTGT`…, `EQT`, `none`). Sin número que juzgar, `error`. | MVP | `motor/src/lib.rs::juzga_limite_numerico` + `aplicar_limite`; `modelo/src/lib.rs::{Limite, Criterio}` (ADR-0008, ADR-0040 §5 y §7) |
+| RF-27 | Built-in **action**, **sequence call**, **statement**. El `type` del paso es obligatorio y dice cómo se juzga; `module` dice qué llama (ADR-0040). | MVP-parcial | action: `ejemplos/departamento/demo/src/lib.rs::open_relay`; statement: `motor/src/lib.rs::ejecuta_statement_puro` (M4-núcleo); sequence call: `motor/src/lib.rs::ejecuta_sequence_call` (M4b, inline + path, by-reference; ADR-0010) |
 | RF-28 | **Custom step types** con substeps encapsulados. | post-MVP | diseno/modelo-de-pasos.md |
 | RF-29 | Los límites son **datos first-class** (no aserciones ad-hoc). | MVP-parcial | `modelo/src/lib.rs::Limite`; `cargador/src/lib.rs::LimiteYaml`; [ADR-0008](adr/0008-limites-evaluados-por-el-motor.md) |
 | RF-30 | **Property loader**: límites desde un fichero externo. | MVP-parcial | `cargador/src/lib.rs::cargar_limites_de_archivo` + `aplicar_limites` |

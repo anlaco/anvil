@@ -119,6 +119,21 @@ survivable while nothing is executed — a validate touches only memory. It will
 not be survivable once Run reaches hardware: killing the thread mid-sequence
 leaves the bench exactly as it was, with no `cleanup` run.
 
+## A step's type, and its module
+
+The step panel shows `type` as a closed list —`action`, `pass_fail`,
+`numeric_limit`, `statement`, `sequence_call`— because the type is *how the
+step is judged*, and what it calls goes in **Module**
+([ADR-0040](../docs/adr/0040-a-step-type-says-how-a-step-is-judged-not-what-it-calls.md)).
+It is the same split as TestStand's step-properties and Module tabs.
+
+A new `numeric_limit` is created with `comparison: none`, which reads `done`
+until a comparison is chosen: an empty limit that judged nothing would still
+have to report *something*, and that something must not be a `pass`. The panel
+edits only the fields the limit already uses — which fields each comparison
+code takes is a rule of the loader, and inventing them here would produce a
+file the engine refuses. Changing the comparison itself is the text view's job.
+
 ## Numbers are not localised
 
 Limit and retry fields are `type="text"`, not `type="number"`, on purpose. A

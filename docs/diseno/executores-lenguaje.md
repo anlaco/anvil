@@ -57,10 +57,10 @@ Motor (WASM) ─gRPC─▶│  serves the .wasm modules next to its binary │
 
 ### Name→endpoint routing (M5-ext.1, implemented)
 
-The YAML declares `executors:` and each `grpc` step may declare
+The YAML declares `executors:` and every step that calls one declares
 `executor:`. The engine dispatches by **name→endpoint** (connection table in
-`Motor::desde_programa`). A `grpc` step without `executor:` is a load error
-(ADR-0041).
+`Motor::desde_programa`). A step with a `module` and no `executor:` is a load
+error (ADR-0041), and so is the other way round.
 
 ```yaml
 executors:
@@ -73,10 +73,19 @@ executors:
     port: 9101
 main:
   - name: demo/check_led
+    type: pass_fail
+    module: demo/check_led     # what the executor serves (ADR-0040)
     executor: demo
-  - name: instrument/medir_simulador
+  - name: Measure the simulator
+    type: numeric_limit
+    module: instrument/medir_simulador
     executor: python
+    limit: { comparison: GELE, low: 4.0, high: 5.0 }
 ```
+
+`name` is the label in the report and `module` is what is dispatched, so the
+same `module` can appear twice under two different names — and the sequence
+says how each one is judged.
 
 CLI override: `--executor python=192.168.1.50:9101` (the `--limits`
 pattern). Non-loopback IPs only if declared (ADR-0011's bounded loopback
@@ -121,7 +130,7 @@ executors:
   with a clear message.
 - **Remote case (Raspberry Pi, ADR-0023)**: the bridge ships as a file next
   to `anvil` and is run with `--bind 0.0.0.0`; the YAML declares
-  `tipo: grpc, host: 192.168.x.y`. Anvil cannot tell: the local bridge and
+  `type: grpc, host: 192.168.x.y`. Anvil cannot tell: the local bridge and
   the Pi's are the same binary.
 - **Performance (50+ modules)**: wasmtime compiles **JIT to native** (it
   does not interpret). AOT precompile to `.cwasm` + `StoreLimitsBuilder`
@@ -286,14 +295,18 @@ executors:
   - { name: demo, type: wasm, path: departamento/dist/anvil-exec-wasm }
   - { name: python, type: grpc, host: 127.0.0.1, port: 9101 }
 main:
-  - { name: demo/check_led, executor: demo }
-  - { name: instrument/medir_simulador, executor: python }
-  - { name: instrument/conectar_equipo, executor: python }
+  - { name: demo/check_led, type: pass_fail, module: demo/check_led, executor: demo }
+  - name: instrument/medir_simulador
+    type: numeric_limit
+    module: instrument/medir_simulador
+    executor: python
+    limit: { comparison: GELE, low: 4.0, high: 5.0 }
+  - { name: instrument/conectar_equipo, type: action, module: instrument/conectar_equipo, executor: python, retries: 3 }
 ```
 
 Verification: the sequence passes/fails per step, and the report shows steps
 served by two different executors without the engine knowing anything about
-the language. The demo with an own `.wasm` step (`tipo: wasm`) is
+the language. The demo with an own `.wasm` step (`type: wasm`) is
 `ejemplos/demo_wasm.yaml` (M5-ext.2, ADR-0015): the host spawns the bridge,
 which loads the `ejemplos/hola-paso` component (the "hello world") and calls
 its `run`; the engine dispatches its steps (`demo/check_led` and the

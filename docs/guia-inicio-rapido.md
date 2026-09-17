@@ -180,15 +180,21 @@ stderr; stdout stays clean for the report.
   [pass] test_fuentes: sequence call 'ejemplos/medir_fuentes.yaml' → pass
     [done] ajustar_canal: statement ok
     [pass] demo/measure_voltage: measured: 4.2 V (channel 1)
-    [pass] demo/disconnect: instrument disconnected
+    [done] demo/disconnect: instrument disconnected
 ```
+
+`[done]` is a step that finished and judged nothing — here an `action`
+(ADR-0040). It is neutral: it neither passes nor fails the sequence.
 
 **`out.json`**: nested `sub_steps`; `demo/measure_voltage` with
 `measured_value: 4.2`, `limit_min`/`limit_max` and its `outputs`
 (`channel_used`, `temperature`).
 
 **`out.csv`**: one row per step; flattening adds no columns of its own, and
-the header ends in `phase,inputs,outputs`.
+the header ends in `phase,inputs,outputs,module,comparison,units` — the last
+three added by ADR-0040, so a measurement can be reconstructed afterwards
+(Rule 3 of ADR-0019): what was called, with what comparison code, in what
+units.
 
 ## M4b variations (subsequences)
 
@@ -407,7 +413,9 @@ install beyond the Rust toolchain.** Official reference: `ejemplos/hola-paso/`.
 ### One executor, several modules (ADR-0025)
 
 One executor serves every `*.wasm` it finds beside its own binary, and each is
-a module named after its file. A step is then named `<module>/<step>`:
+a module named after its file. What a step calls is then `<module>/<step>`,
+and it goes in `module:` — `name:` is just the label in the report
+([ADR-0040](adr/0040-a-step-type-says-how-a-step-is-judged-not-what-it-calls.md)):
 
 ```yaml
 executors:
@@ -415,10 +423,16 @@ executors:
     type: wasm
     path: departamento/dist/anvil-exec-wasm
 main:
-  - name: multimetro/medir_voltaje
+  - name: Rail voltage
+    type: numeric_limit
+    module: multimetro/medir_voltaje
     executor: instrumentos
-  - name: plc/medir_voltaje        # same step name, different instrument
+    limit: { comparison: GELE, low: 4.5, high: 5.5, units: V }
+  - name: PLC rail voltage         # same step name, different instrument
+    type: numeric_limit
+    module: plc/medir_voltaje
     executor: instrumentos
+    limit: { comparison: GELE, low: 23.0, high: 25.0, units: V }
 ```
 
 The extension and the module's location never appear in the sequence, so a

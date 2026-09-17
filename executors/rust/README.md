@@ -95,7 +95,11 @@ problem comes out as `error`.
 
 **The threshold is not the step's business**: return the measurement and let the
 engine judge it against the sequence's `limit`
-([ADR-0008](../../docs/adr/0008-limites-evaluados-por-el-motor.md)).
+([ADR-0008](../../docs/adr/0008-limites-evaluados-por-el-motor.md)). Nor is the
+kind of judgement: the sequence picks it with the step's `type`, and names your
+module in `module:`
+([ADR-0040](../../docs/adr/0040-a-step-type-says-how-a-step-is-judged-not-what-it-calls.md)).
+Under `type: action` a `pass` of yours is reported as `done`.
 
 The distinction that matters most is between the two reds:
 

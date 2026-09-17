@@ -31,7 +31,8 @@ message Value {
 }
 
 message StepRequest {
-  string name = 1;     // el paso a invocar (despacho por nombre, ADR-0003)
+  string name = 1;     // el MÓDULO a invocar (despacho por nombre, ADR-0003):
+                       // el `module:` del paso, no su `name:` (ADR-0040)
   int32  attempt = 2;  // nº de intento, desde 1 (para simular fallos transitorios)
   repeated Value inputs = 3;  // ya evaluados por el motor (ADR-0020)
   int32  contract = 4;            // la versión que habla el motor
@@ -74,7 +75,7 @@ service StepExecutor {
 | Campo | Tipo | Significado |
 |---|---|---|
 | `name` | string | Nombre del paso (devuelto por el paso). |
-| `status` | string | `"pass"` / `"fail"` / `"error"`. **Texto, no enum**: viaja así y admite pasos en cualquier lenguaje (RF-10). El motor solo interpreta esto para el agregado. |
+| `status` | string | `"pass"` / `"fail"` / `"error"` / `"skipped"`, y **sólo** esos cuatro. **Texto, no enum**: viaja así y admite pasos en cualquier lenguaje (RF-10). Lo que el motor haga con él lo decide el `type` del paso (ADR-0040): en un `action`, un `pass` se informa como `done`. |
 | `mensaje` | string | Texto humano del resultado. |
 | `measured_value` | string | La medida, como texto. **Vacío** si el paso no mide (Pass/Fail). |
 | `limit_min` / `limit_max` | string | Límites high/low, como texto. Vacíos si no aplican. |
@@ -212,14 +213,18 @@ El `estado` es `string`, no un `enum` protobuf. Es deliberado (ADR-0005):
 
 - El contrato admite **pasos escritos en cualquier lenguaje**; un enum
   protobuf ataría a quien genere bindings.
-- El motor **solo** necesita distinguir `paso`/`fallo`/`error` para la
-  semántica (corte en 1er fallo, agregado `error > fallo`); cualquier otro
-  valor se trataría como no-`paso`.
+- El motor lo necesita para la semántica (corte en el primer fallo, agregado
+  por severidad) y para juzgar el paso según su `type`.
 
-> Implicación: el motor confía en que el paso emita exactamente uno de los
-> tres textos. Un valor distinto no es `paso` → se comporta como fallo en el
-> agregado. Restringirlo es responsabilidad del lado del paso (o de un
-> validator futuro).
+Que el **tipo** sea texto no hace abierto el **vocabulario**: son cuatro y
+cerrados (`modelo::ESTADOS_DE_EJECUTOR`). Cualquier otra cadena —`"Pass"`,
+`"ok"`, `"inconclusive"`— la convierte el motor en **`error`**, nombrando el
+valor recibido y enumerando los válidos (ADR-0019, Regla 2, issue #28).
+Tratarla como no-`pass` sería declarar fallida una unidad sobre un estado que
+Anvil no entiende; tratarla como `pass` sería peor.
+
+Los estados que el motor produce y ningún ejecutor devuelve —`done` e
+`inconclusive`— no viajan por el cable: se ponen de este lado.
 
 ## Versionado del contrato
 

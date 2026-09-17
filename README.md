@@ -180,9 +180,17 @@ meaning to:
   instrument left switched on is worse than a sequence that failed.
 - **Retries per step.** Each step declares how many attempts it allows. The
   attempt number reaches the step, which may use it.
-- **A closed vocabulary of statuses:** `pass`, `fail`, `error` and `skipped`.
-  In the sequence aggregate an `error` wins over a `fail`, and the engine may
-  add `inconclusive` when it could not judge (ADR-0019).
+- **A closed vocabulary of statuses:** an executor returns `pass`, `fail`,
+  `error` or `skipped`, and nothing else. In the sequence aggregate an `error`
+  wins over a `fail`; the engine adds two of its own, `done` for a step that
+  finished without judging anything (ADR-0040) and `inconclusive` when it could
+  not judge (ADR-0019). Both are neutral.
+- **A step says how it is judged, not what it calls.** `type` is required and
+  is one of `action`, `pass_fail`, `numeric_limit`, `statement`,
+  `sequence_call`; `module` is what its executor serves, and `name` is only
+  the label in the report (ADR-0040). A `numeric_limit` carries a `limit` in
+  TestStand's comparison codes (`GELE`, `GE`, `EQT`, …), which the engine
+  evaluates — the step never learns the threshold (ADR-0008).
 - **The contract** lives in `crates/modelo/paso.proto`: `StepRequest`,
   `StepResult` and `service StepExecutor { rpc Invoke, rpc Describe }`. It is
   the source of truth; the `prost` structs of `crates/modelo/src/proto.rs`

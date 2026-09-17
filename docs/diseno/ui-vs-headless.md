@@ -50,19 +50,21 @@ El contrato del binario es **binario**:
 
 | Código | Significa |
 |---|---|
-| `0` | la secuencia corrió y el veredicto agregado es `paso` |
-| `1` | cualquier otra cosa: veredicto `fallo`, `error` o `inconcluso`, error de carga, error de uso, ejecución interrumpida |
+| `0` | la secuencia corrió y el veredicto agregado es `pass` |
+| `1` | cualquier otra cosa: veredicto `fail`, `error` o `inconclusive`, error de carga, error de uso, ejecución interrumpida |
 
 El veredicto sale de `ResultadoSecuencia::estado()`, que agrega **al paso más
-severo** en la escala `paso < inconcluso < fallo < error` (ADR-0019, Regla 1).
-`saltado` queda fuera de la escala y es neutral (RF-33/34: un paso saltado por
-`disable` o por precondición falsa no es un fallo). `--quiet` no lo altera:
+severo** en la escala `pass < inconclusive < fail < error` (ADR-0019, Regla 1).
+`skipped` y `done` quedan fuera de la escala y son neutrales (RF-33/34: un paso
+saltado por `disable` o por precondición falsa no es un fallo; y un `action` o
+un `statement` no juzgaron nada, ADR-0040 §6). Una secuencia entera de pasos
+`done` agrega a `pass` y **sale 0**: nada dijo que la unidad estuviera mal. `--quiet` no lo altera:
 silencia el reporte, no el veredicto.
 
 `inconcluso` es el estado que produce el motor cuando la secuencia declara un
-veredicto (`tipo: pass_fail` en `main`) y ninguno llega a evaluarse — issue #31,
+veredicto (`type: pass_fail` en `main`) y ninguno llega a evaluarse — issue #31,
 donde una unidad salía aprobada sin que nadie la midiera. **Sale 1**, como todo
-lo que no es `paso`. El `if` que lo decide niega `"paso"` en vez de enumerar los
+lo que no es `pass`. El `if` que lo decide niega `"pass"` en vez de enumerar los
 estados malos, precisamente para que un estado nuevo no se cuele como éxito: por
 eso este cambio de semántica no tocó una línea del cálculo del exit code.
 

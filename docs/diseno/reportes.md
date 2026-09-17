@@ -16,9 +16,10 @@ formato textual **congelado** (RNF-08), ahora como un sink más
 (`reporte_a(&mut Write)`, reutilizado por `SinkConsola`):
 
 ```
-=== basica: fallo ===
-  [fallo] medir_voltaje: voltaje fuera de rango
-  [paso]  verificar_led: led encendido   # (no llegaría: corta en 1er fallo)
+=== basica: fail ===
+  [done] demo/connect: instrument connected (attempt 2)
+  [fail] demo/measure_voltage: 4.2 fuera de rango [4.5, 5.5]
+  [done] demo/disconnect: instrument disconnected
 ```
 
 El mismo resultado se vierte también a JSON y CSV; SQLite está aplazado
@@ -65,11 +66,11 @@ on_fin_secuencia(resultado)   # el ResultadoSecuencia agregado
 > teniéndolo.
 
 > **Extensión aditiva de M4 (RNF-08):** el reporte añade el estado
-> `"saltado"` para los pasos saltados por `disable` o precondición falsa
+> `"skipped"` para los pasos saltados por `disable` o precondición falsa
 > (RF-33/34). Es un nuevo **valor** de `estado`, no un cambio de formato: la
-> línea sigue siendo `  [estado] nombre: mensaje`. `"saltado"` es **neutral**
+> línea sigue siendo `  [estado] nombre: mensaje`. `"skipped"` es **neutral**
 > en el agregado (queda fuera de la escala de severidad, ADR-0019). Los
-> sinks JSON/CSV lo muestran como string en `estado_paso`/`estado`. Sin
+> sinks JSON/CSV lo muestran como string en `status`/`step_status`. Sin
 > campos nuevos en `ResultadoStep` ni en `paso.proto` (ADR-0009).
 
 > **Extensión aditiva de ADR-0019 (RNF-08):** el **agregado** de una secuencia
@@ -77,11 +78,37 @@ on_fin_secuencia(resultado)   # el ResultadoSecuencia agregado
 > evaluarlo (issue #31). En consola sólo cambia la cabecera
 > (`=== nombre: inconcluso ===`); las líneas de paso no cambian, y el paso que
 > no se evaluó se sigue reportando `[saltado]`, que es lo que ocurrió. En JSON
-> es la clave `estado` de la raíz; en CSV, la columna `estado`. **Nunca aparece
-> como `estado_paso` ni en `sub_pasos`**: lo produce el motor al agregar, y sólo
-> él. El agregado deja de ser la cascada `error > fallo > paso` y pasa a ser el
-> máximo en la escala `paso < inconcluso < fallo < error`, con `saltado` fuera
+> es la clave `status` de la raíz; en CSV, la columna `status`. **Nunca aparece
+> como `step_status` ni en `sub_pasos`**: lo produce el motor al agregar, y sólo
+> él. El agregado deja de ser la cascada `error > fail > pass` y pasa a ser el
+> máximo en la escala `pass < inconclusive < fail < error`, con `skipped` fuera
 > de ella.
+
+> **Extensión aditiva de ADR-0040 (RNF-08):** dos cosas más, y ninguna cambia
+> el formato de línea.
+>
+> El estado **`done`**: un paso terminó y no juzgó nada (un `action`, un
+> `statement`, un `numeric_limit` con `comparison: none`). Es otro valor de
+> `estado`, **neutral** como `skipped`, y se lee en consola igual:
+> `  [done] demo/connect: instrument connected (attempt 2)`.
+>
+> Y tres campos por paso, que son los que permiten **reconstruir la medida
+> después** —Regla 3 de ADR-0019—: **`module`** (qué se llamó, ahora que
+> `name` es sólo la etiqueta del informe), **`comparison`** (el código
+> TestStand que se aplicó: `GELE`, `GE`, `EQT`…) y **`units`** (el texto de
+> unidades del límite). En JSON son claves del paso; en CSV, tres columnas
+> **al final** de la cabecera, para no mover las que ya había:
+>
+> ```
+> ...,phase,inputs,outputs,module,comparison,units
+> ...,main,,channel_used=1;temperature=21.5,demo/measure_voltage,GELE,
+> ```
+>
+> (la cola de la cabecera y de una fila de `ejemplos/basica.yaml`; lo que va
+> delante no cambia)
+>
+> Sin campos nuevos en `paso.proto`: `comparison` y `units` los pone el motor
+> desde la secuencia, y `module` sale de la definición del paso.
 
 > **Anidamiento de M4b (RNF-08):** un paso `sequence_call` produce un
 > `ResultadoStep` cuyo `estado` es el agregado de la subsecuencia y que lleva

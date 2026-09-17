@@ -101,6 +101,13 @@ value against the `limit` declared in the sequence
 step serves a board with another acceptance criterion without being recompiled,
 and whoever audits reads the criterion in the sequence.
 
+**Nor is the kind of judgement.** The sequence decides that with the step's
+`type`, and your module is named in its `module:`
+([ADR-0040](../../docs/adr/0040-a-step-type-says-how-a-step-is-judged-not-what-it-calls.md)).
+The same module can be a `numeric_limit` in one step and a `pass_fail` in
+another; if the sequence declares it an `action`, your `pass` is reported as
+`done` — it did something, it judged nothing.
+
 **`fail` is about the unit; `error` is about the bench.** A step that cannot
 judge answers `Outcome.Errored`, never `pass` and never `fail` (ADR-0019,
 Rule 2). An exception you let escape becomes `error` too, and does not take the
@@ -150,9 +157,11 @@ serves `set_voltage`; `expectLit` is written `expect_lit`. Override either with
 Write them as `double` and let the SDK put them on the wire. It has one place
 that formats a number and it uses the invariant culture, because a measurement
 crosses as **text** and the engine parses it with `s.parse::<f64>()`: under a
-Spanish locale a bare `ToString()` writes `"0,8"`, the parse yields nothing,
-the engine applies no limit without a measurement, and the step's own `pass`
-stands. A false green out of the operator's locale.
+Spanish locale a bare `ToString()` writes `"0,8"` and the parse yields nothing.
+Today a `numeric_limit` with no number to judge is `error` (ADR-0040 §5), so
+that is a lost measurement rather than the false green it used to be — the
+engine used to apply no limit and let the step's own `pass` stand. It is still
+a measurement thrown away by the operator's locale.
 
 The package raises `CA1305` to an **error in your project too**, so formatting
 a SCPI command without a culture does not compile. That is deliberate: a
