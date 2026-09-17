@@ -11,7 +11,13 @@ import { EditorView, basicSetup } from "codemirror";
 import { EditorState } from "@codemirror/state";
 import { yaml as yamlLang } from "@codemirror/lang-yaml";
 
-import { SequenceDocument, PHASES, SCOPES, STEP_TYPES } from "./document.mjs";
+import {
+  SequenceDocument,
+  PHASES,
+  SCOPES,
+  STEP_TYPES,
+  COMPARISON_CODES,
+} from "./document.mjs";
 import { browserPool, connectBridge, EngineHostError } from "./engine-pool.mjs";
 import { gatherFiles } from "./neighbours.mjs";
 import { applyEvent, newRunState, rowKey, runButton } from "./run-state.mjs";
@@ -181,10 +187,133 @@ function renderSequence() {
         renderSequence();
         renderStep();
       });
+      makeDraggable(row, { kind: "move", phase, index: step.index });
+      makeDropTarget(row, phase, () => step.index);
       ui.list.append(row);
+    }
+
+    // A phase with no steps still has to be a target, or a sequence that starts
+    // empty can never receive its first step by dragging.
+    if (steps.length === 0) {
+      const empty = document.createElement("div");
+      empty.className = "phase-empty";
+      empty.textContent = "(empty)";
+      makeDropTarget(empty, phase, () => 0);
+      ui.list.append(empty);
     }
   }
 }
+
+// What is being dragged: a step being moved, or a type being inserted from the
+// palette. Kept here rather than in `dataTransfer` because Chromium does not
+// expose the payload during `dragover`, and the drop indicator has to know
+// whether the drag is a move before the drop happens.
+let dragging = null;
+
+function makeDraggable(el, payload) {
+  el.draggable = true;
+  el.addEventListener("dragstart", (e) => {
+    dragging = payload;
+    e.dataTransfer.effectAllowed = "move";
+    // Firefox refuses to start a drag with no data set.
+    e.dataTransfer.setData("text/plain", payload.kind);
+    el.classList.add("dragging");
+  });
+  el.addEventListener("dragend", () => {
+    dragging = null;
+    el.classList.remove("dragging");
+    clearDropMarks();
+  });
+}
+
+function clearDropMarks() {
+  for (const el of ui.list.querySelectorAll(".drop-before, .drop-after")) {
+    el.classList.remove("drop-before", "drop-after");
+  }
+}
+
+/**
+ * Makes an element take a drop, and say where the step would land.
+ *
+ * The half of the row the pointer is on decides before or after, which is what
+ * every list with drag and drop does and what someone dragging expects. Order
+ * inside a phase is execution order, so landing one row off is a different
+ * sequence, not a cosmetic slip — hence the line showing exactly where.
+ */
+function makeDropTarget(el, phase, indexOf) {
+  el.addEventListener("dragover", (e) => {
+    if (!dragging) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = "move";
+    const box = el.getBoundingClientRect();
+    const after = e.clientY > box.top + box.height / 2;
+    clearDropMarks();
+    el.classList.add(after ? "drop-after" : "drop-before");
+  });
+  el.addEventListener("dragleave", () => el.classList.remove("drop-before", "drop-after"));
+  el.addEventListener("drop", (e) => {
+    if (!dragging) return;
+    e.preventDefault();
+    const box = el.getBoundingClientRect();
+    const after = e.clientY > box.top + box.height / 2;
+    const at = indexOf() + (after ? 1 : 0);
+    const payload = dragging;
+    dragging = null;
+    clearDropMarks();
+    dropAt(payload, phase, at);
+  });
+}
+
+function dropAt(payload, phase, at) {
+  const doc = state.doc;
+  if (!doc) return;
+  try {
+    if (payload.kind === "insert") {
+      const why = doc.cannotAdd(payload.type);
+      if (why) {
+        status("fail", `Cannot insert a ${payload.type} step: ${why}`);
+        return;
+      }
+      const index = doc.addStep(phase, payload.type, at);
+      state.selected = { phase, index };
+    } else {
+      // Dropping a step after itself, or on its own place, is not a move.
+      const sameSpot =
+        payload.phase === phase && (at === payload.index || at === payload.index + 1);
+      if (sameSpot) return;
+      // Removing the step first shifts everything after it down by one.
+      const target = payload.phase === phase && at > payload.index ? at - 1 : at;
+      const index = doc.moveStepTo(payload.phase, payload.index, phase, target);
+      state.selected = { phase, index };
+    }
+  } catch (e) {
+    status("fail", e.message);
+    return;
+  }
+  afterEdit();
+}
+
+// What each comparison code means, in the words of someone choosing one. The
+// codes are TestStand's and are not translated (ADR-0040 §7): someone arriving
+// from there recognises them, which is the whole reason they were adopted.
+const COMPARISON_DOC = {
+  EQ: "Equal to low.",
+  NE: "Not equal to low.",
+  GT: "Greater than low.",
+  LT: "Less than low.",
+  GE: "Greater than or equal to low.",
+  LE: "Less than or equal to low.",
+  GTLT: "Inside low..high, both excluded.",
+  GELE: "Inside low..high, both included.",
+  GELT: "Inside low..high, low included.",
+  GTLE: "Inside low..high, high included.",
+  LTGT: "Outside low..high, both excluded.",
+  LEGE: "Outside low..high, both included.",
+  LEGT: "Outside low..high, low included.",
+  LTGE: "Outside low..high, high included.",
+  EQT: "Nominal with a tolerance: nominal -lower/+upper.",
+  none: "Records the value and judges nothing: the step reads 'done'.",
+};
 
 // What each step type is, in the words of someone deciding which to insert.
 // These four are the engine's own (crates/cargador/src/lib.rs:2191-2203); the
@@ -224,12 +353,15 @@ function renderPalette() {
     item.append(doc);
     item.title = blocked
       ? `Cannot insert a ${type} step: ${blocked}`
-      : `Insert a ${type} step at the end of ${phase}`;
+      : `Drag a ${type} step where you want it, or click to add it at the end of ${phase}`;
     item.addEventListener("click", () => {
+      // Clicking still appends: it is the path that needs no pointer skill, and
+      // dragging is not available to everyone.
       const index = state.doc.addStep(phase, type);
       state.selected = { phase, index };
       afterEdit();
     });
+    if (!item.disabled) makeDraggable(item, { kind: "insert", type });
     ui.palette.append(item);
   }
 
@@ -240,7 +372,7 @@ function renderPalette() {
   // missing beats an empty list that looks like an executor with no steps —
   // the distinction ADR-0019's Rule 2 is about.
   note.textContent = state.doc
-    ? `Inserts at the end of ${phase}. Steps served by executors will appear here once the bridge can ask them for their catalog.`
+    ? `Drag one onto the sequence to put it where you want, or click to add it at the end of ${phase}. Steps served by executors will appear here once the bridge can ask them for their catalog.`
     : "Open a sequence to insert steps.";
   ui.palette.append(note);
 }
@@ -370,38 +502,159 @@ function renderStep() {
   );
   field(fields, "Disabled", disabled);
 
-  if (step.module !== null || step.type === "action") {
+  // Offered by type, not by whether the step already has one: a `pass_fail`
+  // starts with no module, and hiding the field until it had one meant the only
+  // way to give it one was the text view. `statement` and `sequence_call` never
+  // call an executor, and the loader refuses a module on them.
+  if (["action", "pass_fail", "numeric_limit"].includes(step.type)) {
     field(
       fields,
       "Module",
       textInput(step.module, (v) => edit("module", v || undefined)),
-      "What the step calls on its executor.",
+      step.type === "action"
+        ? "What the step calls on its executor."
+        : "What the step calls on its executor. Empty means it calls nothing.",
     );
-    field(
-      fields,
-      "Executor",
-      textInput(step.executor, (v) => edit("executor", v || undefined)),
-      "Which declared executor serves this step. Required: anvil has no executor of its own.",
-    );
+    if (step.module !== null) {
+      field(
+        fields,
+        "Executor",
+        textInput(step.executor, (v) => edit("executor", v || undefined)),
+        "Which declared executor serves this step. Required: anvil has no executor of its own.",
+      );
+    }
   }
 
+  // The fields a type judges with. Each is offered only where the loader
+  // accepts it — a `condition` on anything but a `pass_fail` is a load error,
+  // and so is a `value` outside a `numeric_limit`.
+  if (step.type === "pass_fail") {
+    field(
+      fields,
+      "Condition",
+      textInput(step.condition ?? "", (v) => edit("condition", v || undefined)),
+      step.module
+        ? "Decides the verdict instead of the module's status. Leave it empty to let the module decide."
+        : "A boolean expression the engine evaluates. Required when the step calls no module.",
+    );
+  }
+  if (step.type === "statement") {
+    field(
+      fields,
+      "Statement",
+      textInput(step.statement ?? "", (v) => edit("statement", v || undefined)),
+      "Runs in the engine: assigns to a declared variable.",
+    );
+  }
+  if (step.type === "numeric_limit") {
+    field(
+      fields,
+      "Value",
+      textInput(step.value ?? "", (v) => edit("value", v || undefined)),
+      "Which number to judge. Empty means the module's measurement.",
+    );
+  }
+  field(
+    fields,
+    "Precondition",
+    textInput(step.precondition ?? "", (v) => edit("precondition", v || undefined)),
+    "If it is false the step is skipped, without spending an attempt.",
+  );
+
+  const pause = document.createElement("input");
+  pause.type = "checkbox";
+  pause.checked = step.pause_on_fail;
+  pause.addEventListener("change", () =>
+    edit("pause_on_fail", pause.checked ? true : undefined),
+  );
+  field(fields, "Pause on fail", pause, "Stops the phase if this step fails.");
+
   if (step.limit) {
-    group(fields, `Limit — ${step.limit.comparison ?? "?"}`);
+    group(fields, "Limit");
     const setLimit = (key, v) => {
       doc.setStepLimit(sel.phase, sel.index, key, v);
       afterEdit();
     };
-    // Only the fields the limit already has: which fields a comparison uses is
-    // the loader's rule (ADR-0040 §7), and offering the others would build a
-    // limit it refuses. Changing the comparison itself is the text view's job
-    // for now.
+    // The comparison decides which fields the limit has, so it is chosen here
+    // and the rest follows (ADR-0040 §7). It used to be the text view's job,
+    // which meant a `numeric_limit` inserted from the palette — `comparison:
+    // none` — could not be given a threshold at all without leaving the editor.
+    field(
+      fields,
+      "Comparison",
+      select(COMPARISON_CODES, step.limit.comparison ?? "none", (code) => {
+        doc.setStepComparison(sel.phase, sel.index, code);
+        afterEdit();
+      }),
+      COMPARISON_DOC[step.limit.comparison] ?? "How the number is judged.",
+    );
     for (const key of ["low", "high", "nominal", "lower", "upper"]) {
       if (key in step.limit) {
         field(fields, key, numberInput(step.limit[key], (v) => setLimit(key, v)));
       }
     }
-    if ("units" in step.limit) {
-      field(fields, "units", textInput(step.limit.units, (v) => setLimit("units", v)));
+    if ("threshold" in step.limit) {
+      field(
+        fields,
+        "threshold",
+        select(["percent", "ppm", "delta"], step.limit.threshold, (v) => setLimit("threshold", v)),
+        "Whether lower/upper are a percentage of nominal, parts per million, or an absolute amount.",
+      );
+    }
+    field(
+      fields,
+      "units",
+      textInput(step.limit.units ?? "", (v) => setLimit("units", v || undefined)),
+      "For the report only: it does not scale or convert anything.",
+    );
+  }
+
+  // `assign` is how a measurement outlives its step: `result.*` can only be
+  // read where the step answered, so anything a later step needs is kept in a
+  // variable here. Without this the only way to keep a reading was to type the
+  // YAML.
+  if (step.module !== null) {
+    group(fields, "Store what it returns");
+    const locals = Object.keys(doc.variables("locals"));
+    for (const [target, expression] of Object.entries(step.assign ?? {})) {
+      const row = document.createElement("div");
+      row.className = "assign-row";
+      row.append(
+        textInput(expression, (v) => {
+          doc.setStepAssign(sel.phase, sel.index, target, v);
+          afterEdit();
+        }),
+        action("Remove", () => {
+          doc.setStepAssign(sel.phase, sel.index, target, undefined);
+          afterEdit();
+        }),
+      );
+      field(fields, target, row, `Kept in locals.${target}.`);
+    }
+    if (locals.length === 0) {
+      const p = document.createElement("p");
+      p.className = "hint";
+      p.textContent =
+        "Declare a local variable first: an assign must name one the sequence declares.";
+      fields.append(p);
+    } else {
+      const pick = select(
+        locals.filter((l) => !(l in (step.assign ?? {}))),
+        null,
+        () => {},
+      );
+      if (pick.options.length > 0) {
+        const add = document.createElement("div");
+        add.className = "assign-row";
+        add.append(
+          pick,
+          action("Keep the measurement", () => {
+            doc.setStepAssign(sel.phase, sel.index, pick.value, "${result.measured_value}");
+            afterEdit();
+          }),
+        );
+        field(fields, "Add", add, "Stores result.measured_value; edit it for another field.");
+      }
     }
   }
 
@@ -443,13 +696,14 @@ function action(label, onClick, disabled = false) {
 function renderVariables() {
   ui.variables.replaceChildren();
   if (!state.doc) return;
+  const doc = state.doc;
 
-  let any = false;
+  renderSequenceFields(doc);
+  renderExecutors(doc);
+
   for (const scope of SCOPES) {
-    const vars = state.doc.variables(scope);
+    const vars = doc.variables(scope);
     const names = Object.keys(vars);
-    if (names.length === 0) continue;
-    any = true;
 
     const head = document.createElement("div");
     head.className = "scope";
@@ -459,23 +713,155 @@ function renderVariables() {
     for (const name of names) {
       const row = document.createElement("div");
       row.className = "var";
-      const k = document.createElement("span");
+
+      // The name is editable in place: renaming through delete-and-add would
+      // move the declaration to the end of its scope, and the file is read in
+      // diffs.
+      const k = textInput(name, (v) => {
+        if (!v || v === name) return;
+        try {
+          doc.renameVariable(scope, name, v);
+        } catch (e) {
+          status("fail", e.message);
+          return;
+        }
+        afterEdit();
+      });
       k.className = "k";
-      k.textContent = name;
-      const v = document.createElement("span");
+
+      // What is typed decides the type, exactly as the loader reads the
+      // scalar: `true` is a bool, `4.5` a number, the rest text (RF-31). A
+      // number field would make `4.5` unreachable on a Spanish locale, and a
+      // text field would turn every variable into a string.
+      const v = textInput(scalarText(vars[name]), (raw) => {
+        doc.setVariable(scope, name, parseScalar(raw));
+        afterEdit();
+      });
       v.className = "v";
-      v.textContent = JSON.stringify(vars[name]);
-      row.append(k, v);
+
+      row.append(k, v, action("Remove", () => {
+        doc.removeVariable(scope, name);
+        afterEdit();
+      }));
       ui.variables.append(row);
     }
+
+    const add = document.createElement("button");
+    add.type = "button";
+    add.className = "action add-var";
+    add.textContent = `Declare a ${scope.replace(/s$/, "")}`;
+    add.addEventListener("click", () => {
+      let n = 1;
+      let name = "new_variable";
+      while (name in doc.variables(scope)) name = `new_variable_${++n}`;
+      doc.setVariable(scope, name, 0);
+      afterEdit();
+    });
+    ui.variables.append(add);
+  }
+}
+
+/** The sequence's own fields. Its name is what the report is headed with. */
+function renderSequenceFields(doc) {
+  const head = document.createElement("div");
+  head.className = "scope";
+  head.textContent = "sequence";
+  ui.variables.append(head);
+
+  const row = document.createElement("div");
+  row.className = "var";
+  const n = textInput(doc.name ?? "", (v) => {
+    if (!v) return;
+    doc.setName(v);
+    afterEdit();
+  });
+  n.className = "v";
+  row.append(n);
+  ui.variables.append(row);
+}
+
+/**
+ * The executors the sequence declares.
+ *
+ * Without one, no step can call anything and the palette refuses half its
+ * types (ADR-0041) — so a sequence started from File ▸ New could not be
+ * completed in the editor at all until this existed.
+ */
+function renderExecutors(doc) {
+  const head = document.createElement("div");
+  head.className = "scope";
+  head.textContent = "executors";
+  ui.variables.append(head);
+
+  for (const ex of doc.executors()) {
+    const row = document.createElement("div");
+    row.className = "var";
+
+    const name = textInput(ex.name, (v) => {
+      if (!v || v === ex.name) return;
+      doc.setExecutorField(ex.name, "name", v);
+      afterEdit();
+    });
+    name.className = "k";
+
+    // `wasm` is the executor binary by path, with its modules beside it;
+    // `grpc` is a process of your own on a host and a port (ADR-0025, ADR-0027).
+    const where =
+      ex.type === "grpc"
+        ? textInput(`${ex.host ?? ""}:${ex.port ?? ""}`, (v) => {
+            const [host, port] = v.split(":");
+            doc.setExecutorField(ex.name, "host", host.trim());
+            doc.setExecutorField(ex.name, "port", Number(port));
+            afterEdit();
+          })
+        : textInput(ex.path ?? "", (v) => {
+            doc.setExecutorField(ex.name, "path", v);
+            afterEdit();
+          });
+    where.className = "v";
+    where.title = ex.type === "grpc" ? "host:port" : "path to the executor binary";
+
+    row.append(name, where, action("Remove", () => {
+      doc.removeExecutor(ex.name);
+      afterEdit();
+    }));
+    ui.variables.append(row);
   }
 
-  if (!any) {
-    const p = document.createElement("p");
-    p.className = "empty";
-    p.textContent = "No variables declared.";
-    ui.variables.append(p);
-  }
+  const add = document.createElement("div");
+  add.className = "assign-row add-var";
+  const kind = select(["wasm", "grpc"], "wasm", () => {});
+  add.append(
+    kind,
+    action("Declare", () => {
+      let n = 1;
+      let name = "bench";
+      while (doc.executorNames().includes(name)) name = `bench_${++n}`;
+      if (kind.value === "grpc") doc.addExecutor(name, "grpc", "127.0.0.1", 9101);
+      else doc.addExecutor(name, "wasm", "departamento/dist/anvil-exec-wasm");
+      afterEdit();
+    }),
+  );
+  ui.variables.append(add);
+}
+
+/** A scalar as it should appear in the file, which is how it is shown. */
+function scalarText(value) {
+  return typeof value === "string" ? value : String(value);
+}
+
+/**
+ * The type a typed scalar has, by the loader's rule (RF-31): `true`/`false` is
+ * a bool, a number is a number, anything else is text. Inferring it here rather
+ * than asking is what makes a variable one field instead of a form — and it is
+ * the same inference the engine does when it reads the file back.
+ */
+function parseScalar(raw) {
+  const t = raw.trim();
+  if (t === "true") return true;
+  if (t === "false") return false;
+  if (/^[+-]?(\d+\.?\d*|\.\d+)$/.test(t)) return Number(t);
+  return raw;
 }
 
 function renderText() {

@@ -35,6 +35,39 @@ export const STEP_TYPES = ["action", "pass_fail", "numeric_limit", "statement", 
 const CALLS_AN_EXECUTOR = new Set(["action", "numeric_limit"]);
 
 /**
+ * Which fields each comparison code uses, and with what value when there is
+ * nothing to carry over. Mirrored from the loader, which refuses a code that
+ * carries a field it does not use and one that is missing a field it does
+ * (`a_limite_teststand`, crates/cargador/src/lib.rs) — so this table is the
+ * editor's half of ADR-0040 §7 and has no opinions of its own.
+ *
+ * The defaults exist because a limit is written the moment the code is chosen:
+ * a `GELE` with no bounds does not load, and asking someone to fix an invalid
+ * file the editor just wrote is the thing AP-04 forbids.
+ */
+export const COMPARISONS = {
+  EQ: { low: 0 },
+  NE: { low: 0 },
+  GT: { low: 0 },
+  LT: { low: 0 },
+  GE: { low: 0 },
+  LE: { low: 0 },
+  GTLT: { low: 0, high: 1 },
+  GELE: { low: 0, high: 1 },
+  GELT: { low: 0, high: 1 },
+  GTLE: { low: 0, high: 1 },
+  LTGT: { low: 0, high: 1 },
+  LEGE: { low: 0, high: 1 },
+  LEGT: { low: 0, high: 1 },
+  LTGE: { low: 0, high: 1 },
+  EQT: { nominal: 0, lower: 1, upper: 1, threshold: "percent" },
+  none: {},
+};
+
+/** The comparison codes, in the order the loader lists them in its error. */
+export const COMPARISON_CODES = Object.keys(COMPARISONS);
+
+/**
  * A sequence document.
  *
  * Holds the parsed tree and the text it came from. When the text stops parsing
@@ -117,6 +150,12 @@ export class SequenceDocument {
       executor: item.get?.("executor") ?? null,
       module: item.get?.("module") ?? null,
       limit: readLimit(item),
+      assign: readMap(item, "assign"),
+      condition: item.get?.("condition") ?? null,
+      statement: item.get?.("statement") ?? null,
+      value: item.get?.("value") ?? null,
+      precondition: item.get?.("precondition") ?? null,
+      pause_on_fail: item.get?.("pause_on_fail") ?? false,
     }));
   }
 
@@ -132,7 +171,7 @@ export class SequenceDocument {
     if (!SCOPES.includes(scope)) {
       throw new Error(`unknown scope '${scope}': expected one of ${SCOPES.join(", ")}`);
     }
-    const map = this.#doc.get(scope);
+    const map = this.#doc.get(scope, true);
     return isMap(map) ? map.toJSON() : {};
   }
 
@@ -148,6 +187,19 @@ export class SequenceDocument {
     const step = this.#stepNode(phase, index);
     if (value === undefined) step.delete(key);
     else step.set(key, value);
+    // A step that names a module must name the executor that serves it, and
+    // there is none built into anvil to fall back on (ADR-0041). Giving a
+    // `pass_fail` a module and stopping there writes a file the loader refuses,
+    // which the editor must not be able to do (AP-04) — so the first declared
+    // executor is filled in, and the person changes it in the field right
+    // below.
+    if (key === "module" && value !== undefined && !step.get("executor")) {
+      const first = this.executorNames()[0];
+      if (first) step.set("executor", first);
+    }
+    // And the other way round: a module removed leaves an `executor` on a step
+    // that no longer calls anything, which is a load error of its own.
+    if (key === "module" && value === undefined) step.delete("executor");
     this.#reemit();
   }
 
@@ -182,7 +234,7 @@ export class SequenceDocument {
    * the rule that the editor cannot build what the loader refuses (AP-04), so
    * the placeholders are part of the insert, not something to fill in later.
    */
-  addStep(phase, type = "action") {
+  addStep(phase, type = "action", at = null) {
     assertPhase(phase);
     if (!STEP_TYPES.includes(type)) {
       throw new Error(`unknown step type '${type}'`);
@@ -190,10 +242,10 @@ export class SequenceDocument {
     const why = this.cannotAdd(type);
     if (why) throw new Error(why);
 
-    let seq = this.#doc.get(phase);
+    let seq = this.#doc.get(phase, true);
     if (!isSeq(seq)) {
-      this.#doc.set(phase, []);
-      seq = this.#doc.get(phase);
+      this.#doc.set(phase, this.#doc.createNode([]));
+      seq = this.#doc.get(phase, true);
     }
 
     const step = { name: uniqueName(this, type), type };
@@ -253,9 +305,169 @@ export class SequenceDocument {
     // `createNode` makes a real YAML node. Adding the plain object works for
     // emitting but leaves an item with no `get`, so the step view reads it back
     // as unnamed until the document is re-parsed.
-    seq.add(this.#doc.createNode(step));
+    // Where it lands is part of the edit: a phase runs in order, so "at the
+    // end" is a decision about execution, not about the view. `at` is where the
+    // person dropped it; clamped, because a drop past the last row means last.
+    const node = this.#doc.createNode(step);
+    // `main: []` — what File ▸ New starts from, because an empty sequence
+    // cannot be written in block style — is a flow list, and everything added
+    // to it inherits that: `[ { name: …, type: … } ]`. Valid YAML, and unlike
+    // every sequence in the repo. These files are reviewed as diffs (AP-05), so
+    // the first step added is where the list becomes a normal block one.
+    seq.flow = false;
+    node.flow = false;
+    const index =
+      at === null ? seq.items.length : Math.max(0, Math.min(seq.items.length, at));
+    seq.items.splice(index, 0, node);
     this.#reemit();
-    return seq.items.length - 1;
+    return index;
+  }
+
+  /**
+   * Sets the sequence's `name`. A file with no name does not load.
+   */
+  setName(name) {
+    this.#doc.set("name", name);
+    this.#reemit();
+  }
+
+  /**
+   * Declares an executor. Without one, no step can call anything (ADR-0041),
+   * so this is the first thing a sequence built from nothing needs.
+   *
+   * `wasm` takes the path of the executor binary, whose modules live beside it
+   * (ADR-0025, ADR-0027); `grpc` takes a host and a port.
+   */
+  addExecutor(name, type, pathOrHost, port = null) {
+    const entry = type === "grpc"
+      ? { name, type, host: pathOrHost, port }
+      : { name, type, path: pathOrHost };
+    let list = this.#doc.get("executors", true);
+    if (!isSeq(list)) {
+      this.#doc.set("executors", this.#doc.createNode([]));
+      list = this.#doc.get("executors", true);
+    }
+    list.add(this.#doc.createNode(entry));
+    this.#reemit();
+  }
+
+  /**
+   * Moves a step to a position, in this phase or another one.
+   *
+   * Crossing phases is a real change of meaning — a step that moves from `main`
+   * to `cleanup` now runs even when the sequence failed — so it is an edit of
+   * the file like any other, not a view arrangement.
+   */
+  moveStepTo(fromPhase, fromIndex, toPhase, toIndex) {
+    assertPhase(fromPhase);
+    assertPhase(toPhase);
+    const from = this.#doc.get(fromPhase);
+    if (!isSeq(from) || !from.items[fromIndex]) {
+      throw new Error(`no step at index ${fromIndex} of '${fromPhase}'`);
+    }
+    const [node] = from.items.splice(fromIndex, 1);
+
+    let to = this.#doc.get(toPhase, true);
+    if (!isSeq(to)) {
+      this.#doc.set(toPhase, this.#doc.createNode([]));
+      to = this.#doc.get(toPhase, true);
+    }
+    const at = Math.max(0, Math.min(to.items.length, toIndex));
+    to.items.splice(at, 0, node);
+    this.#reemit();
+    return at;
+  }
+
+  /**
+   * Gives a step's limit a comparison code, rewriting the limit to exactly the
+   * fields that code uses.
+   *
+   * Bounds that both codes use are carried over: going from `GELE` to `GELT`
+   * changes whether the upper bound is included, and throwing away thresholds
+   * someone measured to find would be its own kind of damage. Fields the new
+   * code does not use are dropped, because the loader refuses them — the editor
+   * must not be able to write a file the engine rejects (AP-04).
+   */
+  setStepComparison(phase, index, code) {
+    if (!(code in COMPARISONS)) {
+      throw new Error(`unknown comparison '${code}'`);
+    }
+    const step = this.#stepNode(phase, index);
+    const previous = readLimit(step) ?? {};
+    const next = { comparison: code };
+    for (const [field, fallback] of Object.entries(COMPARISONS[code])) {
+      next[field] = field in previous ? previous[field] : fallback;
+    }
+    // `units` is report-only and every code accepts it, so it survives.
+    if ("units" in previous) next.units = previous.units;
+    step.set("limit", this.#doc.createNode(next));
+    this.#reemit();
+  }
+
+  /**
+   * Declares a variable, or changes what it starts as.
+   *
+   * The scalar decides the type (`true` → bool, `4.5` → number, the rest text),
+   * which is the loader's rule, not one invented here.
+   */
+  setVariable(scope, name, value) {
+    assertScope(scope);
+    let map = this.#doc.get(scope, true);
+    if (!isMap(map)) {
+      // A plain `{}` is stored as it is and has no `set`, the same trap the
+      // insert path documents for sequences: it must be a node.
+      this.#doc.set(scope, this.#doc.createNode({}));
+      map = this.#doc.get(scope, true);
+    }
+    map.set(name, value);
+    this.#reemit();
+  }
+
+  /** Renames a variable, keeping its position and its value. */
+  renameVariable(scope, from, to) {
+    assertScope(scope);
+    const map = this.#doc.get(scope, true);
+    if (!isMap(map)) throw new Error(`this sequence declares no '${scope}'`);
+    const item = map.items.find((i) => String(i.key) === from);
+    if (!item) throw new Error(`no variable '${from}' in '${scope}'`);
+    // Renaming the key in place keeps the declaration where it was in the file,
+    // so the diff is the one line the person changed.
+    item.key = this.#doc.createNode(to);
+    this.#reemit();
+  }
+
+  /** Removes a variable. */
+  removeVariable(scope, name) {
+    assertScope(scope);
+    const map = this.#doc.get(scope, true);
+    if (!isMap(map)) throw new Error(`this sequence declares no '${scope}'`);
+    map.delete(name);
+    this.#reemit();
+  }
+
+  /**
+   * Keeps one field of what a step returned in a variable (`assign`).
+   *
+   * This is how a measurement outlives its step: `result.*` is only readable
+   * where the step answered, so anything a later step needs has to be dumped
+   * here first. Passing `undefined` removes the entry, and the last one removes
+   * `assign` itself rather than leaving an empty map the loader has to accept.
+   */
+  setStepAssign(phase, index, target, expression) {
+    const step = this.#stepNode(phase, index);
+    let assign = step.get("assign", true);
+    if (!isMap(assign)) {
+      if (expression === undefined) return;
+      step.set("assign", this.#doc.createNode({}));
+      assign = step.get("assign", true);
+    }
+    if (expression === undefined) {
+      assign.delete(target);
+      if (assign.items.length === 0) step.delete("assign");
+    } else {
+      assign.set(target, expression);
+    }
+    this.#reemit();
   }
 
   /** The subsequences this file declares, by name. */
@@ -296,6 +508,57 @@ export class SequenceDocument {
       return "this sequence declares no executors to call";
     }
     return null;
+  }
+
+  /**
+   * The executors this file declares, with the fields their type uses.
+   *
+   * `wasm` names the executor binary by path and its modules live beside it
+   * (ADR-0025, ADR-0027); `grpc` names a host and a port. There is no third
+   * kind and no default: a step that calls one names it (ADR-0041).
+   */
+  executors() {
+    const list = this.#doc.get("executors", true);
+    if (!isSeq(list)) return [];
+    return list.items.map((e) => ({
+      name: e?.get?.("name") ?? null,
+      type: e?.get?.("type") ?? null,
+      path: e?.get?.("path") ?? null,
+      host: e?.get?.("host") ?? null,
+      port: e?.get?.("port") ?? null,
+    }));
+  }
+
+  /** Sets one field of a declared executor. */
+  setExecutorField(name, key, value) {
+    const node = this.#executorNode(name);
+    if (value === undefined) node.delete(key);
+    else node.set(key, value);
+    this.#reemit();
+  }
+
+  /**
+   * Removes an executor. The steps that named it are left alone: they become a
+   * load error that names them, which is the truth — deleting someone's steps
+   * because their executor went away would be a far worse surprise.
+   */
+  removeExecutor(name) {
+    const list = this.#doc.get("executors", true);
+    if (!isSeq(list)) throw new Error("this sequence declares no executors");
+    const index = list.items.findIndex((e) => e?.get?.("name") === name);
+    if (index === -1) throw new Error(`no executor '${name}'`);
+    list.delete(index);
+    if (list.items.length === 0) this.#doc.delete("executors");
+    this.#reemit();
+  }
+
+  #executorNode(name) {
+    const list = this.#doc.get("executors", true);
+    const node = isSeq(list)
+      ? list.items.find((e) => e?.get?.("name") === name)
+      : null;
+    if (!node) throw new Error(`no executor '${name}'`);
+    return node;
   }
 
   /** The executors this file declares under `executors:`, by name. */
@@ -380,10 +643,24 @@ function uniqueName(doc, type) {
   }
 }
 
+function assertScope(scope) {
+  if (!SCOPES.includes(scope)) {
+    throw new Error(`unknown scope '${scope}': expected one of ${SCOPES.join(", ")}`);
+  }
+}
+
 function assertPhase(phase) {
   if (!PHASES.includes(phase)) {
     throw new Error(`unknown phase '${phase}': expected one of ${PHASES.join(", ")}`);
   }
+}
+
+// A step's nested map, as a plain object, or null when it has none.
+function readMap(item, key) {
+  const node = item.get?.(key);
+  if (!node) return null;
+  const plain = typeof node.toJSON === "function" ? node.toJSON() : node;
+  return plain && typeof plain === "object" ? plain : null;
 }
 
 function readLimit(item) {
