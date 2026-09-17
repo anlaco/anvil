@@ -26,6 +26,8 @@ applies from 0.6.0 on; by it, 0.6.0 itself would have been 0.5.1.
 
 ## [Unreleased]
 
+## [0.7.0] — 2026-09-18
+
 **Sequences written for 0.6 do not load.** A step now says how it is judged, in
 TestStand's terms, and names what it calls; the loader refuses the old shape
 with a message that says what to write for each step.
@@ -58,6 +60,16 @@ with a message that says what to write for each step.
   JSON and new last columns in the CSV.
 - **The Sequence Editor offers the new types**, and shows a step's module,
   executor and limit fields.
+- **A sequence can be written in the Sequence Editor without typing YAML.**
+  Steps and palette items are **dragged** where they go — onto a row to land
+  before or after it, onto an empty phase, and across phases, which changes
+  when a step runs. Variables and executors are **declared** in the side panel,
+  a step keeps what its module returned with `assign`, and a `numeric_limit`
+  gets its **comparison** from the panel, which rewrites the limit with the
+  fields that code uses and keeps the bounds it still needs. `condition`,
+  `statement`, `value`, `precondition` and `pause_on_fail` are editable too.
+  The test that holds this up builds `ejemplos/basica.yaml` from an empty
+  sequence and checks it against the file in the repo, step for step.
 
 ### Removed
 
@@ -108,6 +120,10 @@ with a message that says what to write for each step.
 
 ### Fixed
 
+- **A sequence built with File ▸ New says why it does not load yet.** What a
+  sequence references is relative to its own file, and a document that has
+  never been saved has none, so the loader reported a path that "does not
+  exist" — true, and read as a typo. The status bar now says to save it first.
 - **The Sequence Editor validates and runs sequences that reference files beside
   them.** It handed the engine only the open file, so a `type: wasm` executor
   and a subsequence called by path were reported as missing. The desktop app
@@ -1165,6 +1181,7 @@ primera campaña de betatesting externa.
 - *Private vulnerability reporting* no puede activarse mientras el
   repositorio sea privado; hasta entonces vale el correo de `SECURITY.md`.
 
+[0.7.0]: https://github.com/anlaco/anvil/releases/tag/v0.7.0
 [0.6.3]: https://github.com/anlaco/anvil/releases/tag/v0.6.3
 [0.6.2]: https://github.com/anlaco/anvil/releases/tag/v0.6.2
 [0.6.1]: https://github.com/anlaco/anvil/releases/tag/v0.6.1
