@@ -125,3 +125,22 @@ export async function gatherFiles(name, text, reader) {
   }
   return files;
 }
+
+/**
+ * Why a never-saved sequence's paths cannot resolve, or null when that is not
+ * what happened.
+ *
+ * Everything a sequence references — an executor's binary, a subsequence — is
+ * named **relative to the sequence file** (ADR-0025, ADR-0027). A document from
+ * File ▸ New has no file yet, so there is nothing for those paths to be
+ * relative to, and the loader rejects it with a message that is true and
+ * misleading at once: "its 'path' … does not exist" sends someone hunting for a
+ * typo that is not there.
+ *
+ * `saved` is whether the document has a file on disk.
+ */
+export function unsavedPathHint(saved, message) {
+  if (saved) return null;
+  if (!/'path'|'sequence'|no existe|does not exist/.test(message)) return null;
+  return "save the sequence first: what it references is relative to the file, and this one has no file yet";
+}

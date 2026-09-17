@@ -19,7 +19,7 @@ import {
   COMPARISON_CODES,
 } from "./document.mjs";
 import { browserPool, connectBridge, EngineHostError } from "./engine-pool.mjs";
-import { gatherFiles } from "./neighbours.mjs";
+import { gatherFiles, unsavedPathHint } from "./neighbours.mjs";
 import { applyEvent, newRunState, rowKey, runButton } from "./run-state.mjs";
 
 // The shell forwards this window's console to its own stdout by itself
@@ -989,7 +989,10 @@ async function validate() {
     const last = stderr.trim().split("\n").filter(Boolean).pop() ?? "";
     const verdict = last || (exitCode === 0 ? "valid" : "rejected");
     const run = state.runUnavailable ? ` — Run is unavailable: ${state.runUnavailable}` : "";
-    status(exitCode === 0 ? "pass" : "fail", verdict + run);
+    // A sequence built with File ▸ New is rejected for a reason the loader
+    // cannot know: its paths are relative to a file it does not have yet.
+    const hint = exitCode === 0 ? null : unsavedPathHint(Boolean(state.handle), last);
+    status(exitCode === 0 ? "pass" : "fail", verdict + (hint ? ` — ${hint}` : "") + run);
   } catch (e) {
     // A host failure is not a verdict about the sequence, and must not read as
     // one (ADR-0019, Rule 2). It gets its own colour, not "fail".

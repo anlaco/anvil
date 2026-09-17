@@ -8,7 +8,13 @@ import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 
 import { runEngine as run } from "../src/engine.mjs";
-import { gatherFiles, isPath, joinRelative, referencesOf } from "../src/neighbours.mjs";
+import {
+  gatherFiles,
+  isPath,
+  joinRelative,
+  referencesOf,
+  unsavedPathHint,
+} from "../src/neighbours.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO = resolve(HERE, "..", "..");
@@ -92,4 +98,26 @@ test("a missing file is not invented, and a cycle ends", async () => {
   const b = "name: b\nmain:\n  - { name: c, type: sequence_call, sequence: ./a.yaml }\n";
   const files = await gatherFiles("a.yaml", a, mapReader({ "a.yaml": a, "b.yaml": b }));
   assert.deepEqual(Object.keys(files).sort(), ["a.yaml", "b.yaml"]);
+});
+
+test("a sequence that was never saved is told why its paths do not resolve", () => {
+  // Found by building a sequence with File ▸ New and watching it be rejected:
+  // an executor's `path` is relative to the sequence file, and a document that
+  // has never been saved has no file to be relative to. The loader's message is
+  // true — the path does not exist — but it reads as a typo, and the person
+  // then goes looking for a mistake that is not in the file.
+  const refused =
+    "secuencia inválida: el ejecutor 'demo' es 'wasm' y su 'path' " +
+    "'departamento/dist/anvil-exec-wasm' no existe";
+
+  assert.match(unsavedPathHint(false, refused), /save/i);
+  // Saved: the message is about the path, and the loader's own wording is the
+  // precise one. Adding a hint there would send someone to save a file that is
+  // already on disk.
+  assert.equal(unsavedPathHint(true, refused), null);
+  // Unsaved, but the complaint is not about a path: nothing to add.
+  assert.equal(
+    unsavedPathHint(false, "secuencia inválida: la sección 'main' es obligatoria"),
+    null,
+  );
 });
