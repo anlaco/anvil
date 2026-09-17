@@ -1,10 +1,14 @@
 # Quick-start guide
 
 Anvil is **one binary**: you download it and run it. Inside, it hosts
-`wasmtime` and the two WASM guests (engine + executor) in a sandbox,
-speaking gRPC over loopback. You need no `wasmtime` install nor any runtime
-— it is embedded. The download also carries `anvil-exec-wasm`, the executor
-that serves `.wasm` steps, as a file next to it (ADR-0023). You copy that file
+`wasmtime` and the engine's WASM guest in a sandbox, which speaks gRPC to the
+step executors. You need no `wasmtime` install nor any runtime — it is
+embedded. The binary carries no step executor of its own
+([ADR-0041](adr/0041-there-is-no-embedded-executor.md)): every step names the
+executor that serves it. The download also carries `anvil-exec-wasm`, the
+executor that serves `.wasm` steps, as a file next to it (ADR-0023), and a
+demo bench built with it in `ejemplos/departamento/dist/`, which the examples
+run against. You copy that file
 into a folder together with your `.wasm` modules — that folder is a
 *department* — and a sequence names its binary; `anvil` brings it up itself
 (ADR-0027). See
@@ -31,10 +35,11 @@ Then run:
 ```sh
 ./anvil <sequence.yaml> [--process-model <pm.yaml>] [--json <path>] \
   [--csv <path>] [--limits <path>] [--executor name=host:port] \
-  [--port <n>] [--validate [--with-executors]] [--quiet]
+  [--validate [--with-executors]] [--quiet]
 ```
 
-Examples (the repo's own are in `ejemplos/` and `process_models/`):
+Examples (the repo's own are in `ejemplos/`; they call the demo bench's steps,
+`demo/<step>`, on the executor they declare as `demo`):
 
 ```sh
 ./anvil ejemplos/subsecuencia.yaml --json ./out.json --csv ./out.csv
@@ -42,10 +47,8 @@ Examples (the repo's own are in `ejemplos/` and `process_models/`):
 ./anvil ejemplos/limites.yaml
 ./anvil ejemplos/variables.yaml
 ./anvil ejemplos/basica.yaml --limits ejemplos/limites.limits.yaml
-./anvil ejemplos/demo_ejecutores.yaml      # routing: embedded + Python on loopback
+./anvil ejemplos/demo_ejecutores.yaml      # routing: demo bench + Python on loopback
 ./anvil ejemplos/demo_ejecutores.yaml --executor python=127.0.0.1:9200
-# With a process model (identifies the UUT, runs the sequence, notifies):
-./anvil ejemplos/basica.yaml --process-model process_models/sequential.yaml
 # Validate without executing or touching hardware (CI):
 ./anvil ejemplos/subsecuencia.yaml --validate
 # And with the executors up, also check step names, parameter names and
@@ -61,21 +64,22 @@ same YAML, with an extension that says what the file is for, and a
 The console prints the textual report to **stdout** (diagnostics go to
 stderr, so they do not pollute it — `anvil --version` included, for now:
 [#75](https://github.com/anlaco/anvil/issues/75)). `--json`/`--csv` dump to a file.
-`--process-model` wraps the sequence in a Sequential PM (RF-38, ADR-0016);
+`--process-model` wraps the sequence in a process model file (RF-38, ADR-0016;
+none ships since ADR-0041 removed `process_models/sequential.yaml`);
 `--validate` loads and validates without executing; `--quiet` silences the
 console. There are no dependencies to install.
 
 > **Executor routing (M5-ext.1, ADR-0013):** `ejemplos/demo_ejecutores.yaml`
-> demonstrates the name→endpoint dispatch: `verificar_led` is served by the
-> embedded executor (default) and `instrument/medir_simulador` /
+> demonstrates the name→endpoint dispatch: `demo/check_led` is served by the
+> demo bench (`type: wasm`, which the host starts) and `instrument/medir_simulador` /
 > `instrument/conectar_equipo` by a Python executor on `127.0.0.1:9101` (start
 > `simulador_tcp.py` and `server.py` from `executors/python/` in two other
 > terminals). Those two carry a module prefix because a Python step is named
 > `<module>/<step>` — the module being the `.py` it lives in
 > ([ADR-0026](adr/0026-the-python-executor-is-a-department-too.md)). The flag
 > `--executor name=host:port` re-points an executor without touching the YAML
-> (the `--limits` pattern). With no `executors:` declared, everything goes to
-> the embedded executor.
+> (the `--limits` pattern). There is no default executor: a step that calls one
+> and names none is a load error.
 >
 > **Writing your own Python step** does not require touching the executor:
 > you decorate a function with `@step` and drop the file where `--steps`
@@ -110,8 +114,9 @@ console. There are no dependencies to install.
 
 ### Building
 
-The host embeds the two `.wasm` files **and the bridge**, so all three are
-built in order. The root `Makefile` does it:
+The host embeds the engine's `.wasm` and ships **the bridge** next to it, and
+the example department is assembled from the bridge and the example
+components, so they are built in order. The root `Makefile` does it:
 
 ```sh
 make build      # debug   → packaging/anvil-host/target/debug/anvil
@@ -122,8 +127,8 @@ What it does inside, if you prefer it by hand (add `--release` to all three
 for the distribution binary):
 
 ```sh
-# 1. WASM guests (motor + ejecutor) — core workspace
-cargo build --target wasm32-wasip2 -p motor -p ejecutor_pasos
+# 1. WASM guest (motor) — core workspace
+cargo build --target wasm32-wasip2 -p motor
 
 # 2. gRPC↔component bridge (M5-ext.2, ADR-0015) — its own workspace
 cargo build --manifest-path executors/wasm/Cargo.toml
@@ -133,8 +138,8 @@ cargo build --manifest-path packaging/anvil-host/Cargo.toml
 ```
 
 > **Debug starts slow, and that is normal.** The debug binary takes tens of
-> seconds to bring the executor up because wasmtime compiles the guests
-> unoptimized on every start (measured: ~26 s in debug, ~1.2 s in release).
+> seconds to start because wasmtime compiles the guest unoptimized on every
+> start (measured: ~26 s in debug, ~1.2 s in release).
 > That is why the host's startup timeout is 60 s (`SONDEOS_ARRANQUE`). For
 > anything other than debugging the host itself, use `make release`.
 
@@ -143,7 +148,7 @@ cargo build --manifest-path packaging/anvil-host/Cargo.toml
 > (ADR-0011 decision). That is why it builds with `--manifest-path` (or `cd
 > packaging/anvil-host && cargo build`), not with `-p anvil-host`.
 
-The host's `build.rs` copies the already-compiled `.wasm` files (from the
+The host's `build.rs` copies the already-compiled engine `.wasm` (from the
 core's `target/`) into `OUT_DIR`; if they are missing, it fails naming the
 step-1 command.
 
@@ -161,29 +166,35 @@ cargo test -p motor        # sequence call with a mock (no gRPC)
 ./packaging/anvil-host/target/debug/anvil ejemplos/subsecuencia.yaml --json ./out.json --csv ./out.csv
 ```
 
-Same nested/JSON/CSV report as the smoke test. The executor's logs
-("paso pedido: …") go to stderr; stdout stays clean for the report.
+Same nested/JSON/CSV report as the smoke test. The executors' logs go to
+stderr; stdout stays clean for the report.
 
 ## What to look at
 
 **On the console** (nested textual report, M4b):
 
 ```
-=== basica: paso ===
-  [paso] preparar: sequence call 'init_comun' → paso
-    [paso] preparar_canal: statement ok
-  [paso] test_fuentes: sequence call 'ejemplos/medir_fuentes.yaml' → paso
-    [paso] ajustar_canal: statement ok
-    [paso] medir_voltaje: medido: 4.2 V
-    [paso] desconectar_equipo: equipo desconectado
+=== basica: pass ===
+  [pass] preparar: sequence call 'init_comun' → pass
+    [done] preparar_canal: statement ok
+  [pass] test_fuentes: sequence call 'ejemplos/medir_fuentes.yaml' → pass
+    [done] ajustar_canal: statement ok
+    [pass] demo/measure_voltage: measured: 4.2 V (channel 1)
+    [done] demo/disconnect: instrument disconnected
 ```
 
-**`out.json`**: nested `sub_pasos`; `medir_voltaje` with `valor_medido: 4.2`
-and `limite_min/max`.
+`[done]` is a step that finished and judged nothing — here an `action`
+(ADR-0040). It is neutral: it neither passes nor fails the sequence.
 
-**`out.csv`**: flattened rows `test_fuentes/medir_voltaje`; flattening adds
-no columns of its own, and the last header column is `fase`
-(`setup`/`main`/`cleanup`).
+**`out.json`**: nested `sub_steps`; `demo/measure_voltage` with
+`measured_value: 4.2`, `limit_min`/`limit_max` and its `outputs`
+(`channel_used`, `temperature`).
+
+**`out.csv`**: one row per step; flattening adds no columns of its own, and
+the header ends in `phase,inputs,outputs,module,comparison,units` — the last
+three added by ADR-0040, so a measurement can be reconstructed afterwards
+(Rule 3 of ADR-0019): what was called, with what comparison code, in what
+units.
 
 ## M4b variations (subsequences)
 
@@ -207,13 +218,13 @@ parent picks it up) does not show up in the report — the sinks do not expose
 
 ```
 anvil <sequence.yaml> [--process-model <pm.yaml>] [--json <path>] [--csv <path>]
-      [--limits <path>] [--executor name=host:port] [--port <n>]
+      [--limits <path>] [--executor name=host:port]
       [--validate [--with-executors]] [--quiet] [--help] [--version]
 ```
 
 - The sequence is the first positional argument (required).
 - Console unless `--quiet`; `--json`/`--csv` optional (file).
-- `--process-model` wraps the sequence in a Sequential PM (RF-38).
+- `--process-model` wraps the sequence in a process model file (RF-38).
 - `--validate` loads and validates without executing or connecting (CI with
   no hardware). It opens no ports: it does not even bring up the bridge of a
   `type: wasm` executor, though it does check the declared `.wasm` exists.
@@ -235,9 +246,6 @@ anvil <sequence.yaml> [--process-model <pm.yaml>] [--json <path>] [--csv <path>]
   silence. WASM steps used to be that case and no longer are — since
   `anvil:step@0.4.0` a component publishes its catalog like anyone else
   ([ADR-0024](adr/0024-the-signature-is-the-catalog-in-rust-too.md)).
-- `--port` fixes the port of the embedded executor — both the executor's and
-  the one the engine looks for. Without it, the host takes an **ephemeral**
-  port per process, so several `anvil` processes can run at once (#15).
 - `--limits` injects a limits sidecar keyed by step name (RF-30),
   overriding the embedded ones. It matches **any** sequence of the program
   —the root, the external and inline subsequences, and the operator's
@@ -256,58 +264,32 @@ anvil <sequence.yaml> [--process-model <pm.yaml>] [--json <path>] [--csv <path>]
 
 ## Debugging with the wasmtime CLI (advanced)
 
-To run the guests **loose** (without the host), you need the `wasmtime` CLI
-and two terminals:
+To run the engine guest **loose** (without the host), you need the `wasmtime`
+CLI and two terminals. The host is what would start the demo bench's executor
+and hand the engine its address, so here you do both by hand:
 
 ```sh
-cargo build --target wasm32-wasip2 -p ejecutor_pasos -p motor
-# Terminal 1 — executor (gRPC on 127.0.0.1:9100)
-wasmtime -S cli -S tcp=y -S inherit-network=y \
-  target/wasm32-wasip2/debug/ejecutor_pasos.wasm
-# Terminal 2 — engine
+make release
+# Terminal 1 — the demo bench's executor
+ejemplos/departamento/dist/anvil-exec-wasm --port 9300
+# Terminal 2 — engine, pointed at it
 wasmtime -S cli -S tcp=y -S inherit-network=y --dir=. \
-  target/wasm32-wasip2/debug/anvil-guest.wasm ejemplos/subsecuencia.yaml
+  target/wasm32-wasip2/release/anvil-guest.wasm ejemplos/basica.yaml \
+  --executor demo=127.0.0.1:9300
 ```
 
-The executor in this mode **does not exit by itself** (accept loop); Ctrl-C
-when done. It is only for debugging the guests separately; for normal use,
-the `anvil` binary (host) is the recommended path.
+The executor in this mode **does not exit by itself**; Ctrl-C when done. It is
+only for debugging the guest separately; for normal use, the `anvil` binary
+(host) is the recommended path.
 
-## Measuring against an instrument that does not exist
+## Measuring against an instrument over SCPI
 
-`ejemplos/scpi.yaml` needs no Keithley on the bench. The step
-`medir_voltaje_scpi` opens a socket to `ANVIL_SCPI_ADDR` (default
-`127.0.0.1:5025`) and sends `MEASURE:VOLTAGE?`; whatever answers on the other
-side does not matter as long as it speaks SCPI.
-[Crucible](https://github.com/anlaco/Crucible) serves exactly that from a
-YAML.
-
-With the Crucible repo cloned alongside and `cargo build` done there, one
-more terminal:
-
-```sh
-# Terminal 3 — the digital twin, on 5025
-./target/debug/crucible perfiles/keithley_2400_demo.yaml
-```
-
-And the engine against the SCPI sequence instead of the subsequence one:
-
-```sh
-wasmtime -S cli -S tcp=y -S inherit-network=y --dir=. \
-  target/wasm32-wasip2/debug/anvil-guest.wasm ejemplos/scpi.yaml
-```
-
-```
-=== scpi_demo: paso ===
-  [paso] medir_voltaje_scpi: SCPI medido: 4.501385029307777 V
-```
-
-Verified on 2026-08-12. It uses the `_demo` profile, not the reference one:
-the reference profile starts at rest —`output: false`, like an instrument
-just switched on— and since this step measures without configuring anything
-first, the answer would be `0.0` and the 4.0–5.0 limit would fail it. The
-decimals vary on every run: Crucible's measurement model adds Gaussian
-noise.
+The SCPI step that used to be built into `anvil` was removed with the executor
+that served it ([ADR-0041](adr/0041-there-is-no-embedded-executor.md) §7), and
+nothing in this repo replaces it. A step that talks to an instrument needs
+network access, which a WASM component does not have: write it on the
+[Python](../executors/python/README.md) or [C#](../executors/csharp/README.md)
+SDK.
 
 ## Writing your own step in Rust (ADR-0015, ADR-0024)
 
@@ -431,7 +413,9 @@ install beyond the Rust toolchain.** Official reference: `ejemplos/hola-paso/`.
 ### One executor, several modules (ADR-0025)
 
 One executor serves every `*.wasm` it finds beside its own binary, and each is
-a module named after its file. A step is then named `<module>/<step>`:
+a module named after its file. What a step calls is then `<module>/<step>`,
+and it goes in `module:` — `name:` is just the label in the report
+([ADR-0040](adr/0040-a-step-type-says-how-a-step-is-judged-not-what-it-calls.md)):
 
 ```yaml
 executors:
@@ -439,10 +423,16 @@ executors:
     type: wasm
     path: departamento/dist/anvil-exec-wasm
 main:
-  - name: multimetro/medir_voltaje
+  - name: Rail voltage
+    type: numeric_limit
+    module: multimetro/medir_voltaje
     executor: instrumentos
-  - name: plc/medir_voltaje        # same step name, different instrument
+    limit: { comparison: GELE, low: 4.5, high: 5.5, units: V }
+  - name: PLC rail voltage         # same step name, different instrument
+    type: numeric_limit
+    module: plc/medir_voltaje
     executor: instrumentos
+    limit: { comparison: GELE, low: 23.0, high: 25.0, units: V }
 ```
 
 The extension and the module's location never appear in the sequence, so a
@@ -538,14 +528,19 @@ regresses named defects already covered there).
   a precondition is evaluated *before* invoking it, so there is no result to
   read. Dump the measurement into a local with `asigna` and read it from
   there (see [variables-y-alcances.md](diseno/variables-y-alcances.md)).
-- **`el ejecutor de pasos no empezó a escuchar`** → the executor guest failed
-  to start; the concrete error goes to stderr. If it is slow but does not
-  fail, it is the slow debug startup (see above): use `make release`.
-- **`address in use` with two `anvil` processes at once** → should no longer
-  happen: since #15 the embedded executor takes an **ephemeral** port per
-  process, so you can launch N `anvil` in parallel. If you pin `--port`, that
-  port serves the executor **and** the engine, so two processes with the same
-  `--port` do collide — that is what you asked for.
+- **`el ejecutor '…' (…) no empezó a escuchar en …`** → a `type: wasm`
+  executor did not come up; the concrete error goes to stderr. If it is slow
+  but does not fail, it is the slow debug startup (see above): use
+  `make release`.
+- **`could not connect to the step executors: executor '…' at …`** → a
+  declared `grpc` executor is not listening at that address. Start it, or
+  re-point it with `--executor`.
+- **`step '…' of sequence '…' calls an executor and names none`** → add
+  `executor: <name>` to the step; the message lists the executors the root
+  sequence declares. There is no executor built into `anvil` to fall back on.
+- **`address in use` with two `anvil` processes at once** → should not
+  happen: the host starts each `type: wasm` executor on an **ephemeral** port
+  per process, so you can launch N `anvil` in parallel (#15).
 - **`el ejecutor '…' es 'wasm' y su 'path' '…' no existe`** → a `type: wasm`
   executor's `path:` names a file that is not there. `path` is **the
   executor's binary** — a department's `anvil-exec-wasm` — relative to the

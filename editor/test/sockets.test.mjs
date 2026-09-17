@@ -7,26 +7,26 @@
 // closes them itself, the relay on the far side of the bridge outlives the run
 // that opened it.
 //
-// The cost of that is not a leak, it is a dead Run button. The step executor
-// serves one connection at a time (crates/ejecutor_pasos/src/main.rs:90-104),
-// so a connection left behind holds it for good and the next run's connection
-// waits in the accept queue for ever (#61). Found by driving the editor against
+// The cost of that is not a leak, it is a dead Run button. An executor that
+// serves one connection at a time — as the one built into anvil did until
+// ADR-0041 removed it — is held for good by a connection left behind, and the
+// next run's connection waits in the accept queue for ever (#61). Found by driving the editor against
 // a real bridge and watching `ss` show two connections to the executor, the
 // second with its request sitting unread in the receive queue.
 
 import { strict as assert } from "node:assert";
 import { readFile } from "node:fs/promises";
-import { dirname, join, resolve } from "node:path";
+import { dirname, join } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 import { MessageChannel, Worker } from "node:worker_threads";
 
 import { runEngine as run } from "../src/engine.mjs";
+import { exampleFiles } from "./ejemplos.mjs";
 import { DATA_BYTES } from "../src/wasi/channel.mjs";
 import { closeOpenSockets, tcpCreateSocket, useBridge } from "../src/wasi/sockets.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
-const REPO = resolve(HERE, "..", "..");
 
 const load = (name) => readFile(join(HERE, "..", "generated", name));
 
@@ -95,10 +95,9 @@ test("a socket the guest left open is closed when it exits", async () => {
       "connecting should have reached the bridge and nothing else",
     );
 
-    const yaml = await readFile(join(REPO, "ejemplos", "basica.yaml"), "utf8");
     const { exitCode } = await run({
       args: ["basica.yaml", "--validate"],
-      files: { "basica.yaml": yaml },
+      files: await exampleFiles("basica.yaml"),
       load,
     });
     assert.equal(exitCode, 0);

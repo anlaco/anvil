@@ -13,6 +13,7 @@ import { yaml as yamlLang } from "@codemirror/lang-yaml";
 
 import { SequenceDocument, PHASES, SCOPES, STEP_TYPES } from "./document.mjs";
 import { browserPool, connectBridge, EngineHostError } from "./engine-pool.mjs";
+import { gatherFiles } from "./neighbours.mjs";
 import { applyEvent, newRunState, rowKey, runButton } from "./run-state.mjs";
 
 // The shell forwards this window's console to its own stdout by itself
@@ -160,9 +161,9 @@ function renderSequence() {
 
       const kind = document.createElement("span");
       kind.className = "kind";
-      // `grpc` is the default and saying so on every row is noise; the other
-      // three are the ones worth seeing at a glance.
-      kind.textContent = step.type === "grpc" ? "" : step.type;
+      // A step with no type does not load; saying so on the row is how the
+      // person finds it.
+      kind.textContent = step.type ?? "no type";
 
       // A mark, not just a colour: a row that says pass or fail by hue alone is
       // unreadable to whoever cannot tell the hues apart, and this gets read
@@ -170,7 +171,7 @@ function renderSequence() {
       const mark = document.createElement("span");
       mark.className = "run-mark";
       const rs = row.dataset.run;
-      const MARKS = { running: "▶", pass: "✓", fail: "✕", error: "!", skipped: "–" };
+      const MARKS = { running: "▶", pass: "✓", done: "•", fail: "✕", error: "!", skipped: "–" };
       mark.textContent = rs ? (MARKS[rs] ?? "?") : "";
       if (rs) mark.title = rs;
 
@@ -190,9 +191,10 @@ function renderSequence() {
 // palette offers no fifth, because a step the loader does not know is a step
 // the editor must not be able to create (AP-04).
 const STEP_TYPE_DOC = {
-  grpc: "Calls a step served by an executor.",
+  action: "Calls a module to do something; judges nothing.",
+  pass_fail: "Passes or fails: on an expression, or on what a module answers.",
+  numeric_limit: "Judges a number against a limit.",
   statement: "Assigns to variables. The engine runs it; no executor involved.",
-  pass_fail: "Passes or fails on an expression.",
   sequence_call: "Calls a subsequence.",
 };
 
@@ -351,8 +353,8 @@ function renderStep() {
   field(
     fields,
     "Type",
-    select(STEP_TYPES, step.type, (v) => edit("type", v === "grpc" ? undefined : v)),
-    "grpc calls an executor; the other three the engine runs itself.",
+    select(STEP_TYPES, step.type, (v) => edit("type", v)),
+    "How the step is judged. What it calls is its module.",
   );
   field(
     fields,
@@ -368,27 +370,38 @@ function renderStep() {
   );
   field(fields, "Disabled", disabled);
 
-  if (step.type === "grpc") {
+  if (step.module !== null || step.type === "action") {
+    field(
+      fields,
+      "Module",
+      textInput(step.module, (v) => edit("module", v || undefined)),
+      "What the step calls on its executor.",
+    );
     field(
       fields,
       "Executor",
       textInput(step.executor, (v) => edit("executor", v || undefined)),
-      "Which declared executor serves this step. Empty means the embedded one.",
+      "Which declared executor serves this step. Required: anvil has no executor of its own.",
     );
   }
 
   if (step.limit) {
-    group(fields, `Limit — ${step.limit.type}`);
+    group(fields, `Limit — ${step.limit.comparison ?? "?"}`);
     const setLimit = (key, v) => {
       doc.setStepLimit(sel.phase, sel.index, key, v);
       afterEdit();
     };
-    if (step.limit.type === "range") {
-      field(fields, "Min", numberInput(step.limit.min, (v) => setLimit("min", v)));
-      field(fields, "Max", numberInput(step.limit.max, (v) => setLimit("max", v)));
-    } else {
-      field(fields, "Operator", textInput(step.limit.op, () => {}));
-      field(fields, "Expected", numberInput(step.limit.expected, (v) => setLimit("expected", v)));
+    // Only the fields the limit already has: which fields a comparison uses is
+    // the loader's rule (ADR-0040 §7), and offering the others would build a
+    // limit it refuses. Changing the comparison itself is the text view's job
+    // for now.
+    for (const key of ["low", "high", "nominal", "lower", "upper"]) {
+      if (key in step.limit) {
+        field(fields, key, numberInput(step.limit[key], (v) => setLimit(key, v)));
+      }
+    }
+    if ("units" in step.limit) {
+      field(fields, "units", textInput(step.limit.units, (v) => setLimit("units", v)));
     }
   }
 
@@ -581,7 +594,7 @@ async function validate() {
   try {
     const { exitCode, stderr } = await engine.run({
       args: [name, "--validate"],
-      files: { [name]: doc.text },
+      files: await filesFor(name, doc.text),
     });
     // The engine's own diagnostics, verbatim. Rewriting them here would mean
     // two sources for the same message, and the loader's is the one with the
@@ -631,7 +644,7 @@ async function run() {
       // native host builds argv (main.rs:604-608). `--events` is what makes the
       // run visible while it happens.
       args: [...engine.engineArgs, "--events", name],
-      files: { [name]: state.doc.text },
+      files: await filesFor(name, state.doc.text),
       onLine: onEvent,
     });
     // The verdict is the console sink's frozen header, `=== name: state ===`,
@@ -716,6 +729,23 @@ async function openBridge(url) {
 }
 
 // ---------------------------------------------------------------- files
+
+/**
+ * What the engine is handed: the document, and the files it references beside
+ * it on disk (editor/src/neighbours.mjs). Only the desktop shell can read the
+ * disk, and only for a document that is a file there; otherwise the document
+ * goes alone, and the loader says what it cannot find.
+ */
+function filesFor(name, text) {
+  const path = inShell() ? state.handle?.path : null;
+  if (!path) return gatherFiles(name, text);
+  const dir = path.slice(0, Math.max(path.lastIndexOf("/"), path.lastIndexOf("\\")));
+  const onDisk = (rel) => `${dir}/${rel}`;
+  return gatherFiles(name, text, {
+    exists: (rel) => window.anvil.fileExists(onDisk(rel)),
+    readText: (rel) => window.anvil.readTextFileIfAny(onDisk(rel)),
+  });
+}
 
 // `.yseq` first: it is a sequence's own extension and is still YAML inside.
 // `.yaml` and `.yml` stay, because sequences already exist under them

@@ -1,27 +1,45 @@
-# Secuencia de ejemplo "basica", expresada como datos (ADR-0002).
-# Es el mismo contenido que crates/motor/src/bin/basica_datos.rs, pero en
-# YAML: cargarla con `anvil ejemplos/basica.yaml` produce la misma
-# ejecución que el binario de referencia.
+# The basic example: setup, main and cleanup against the demo bench.
 #
-# Schema de M1/M3: nombre, reintentos, las tres secciones y, desde M3, el
-# `limite` por paso (RF-29). El umbral de medir_voltaje vive aquí, no en el
-# código del paso: el paso mide 4.2 V y el motor evalúa el rango 4.5–5.5
-# (ADR-0008). Campos de hitos posteriores (disable, pause_on_fail, etc.)
-# aún se rechazan —llegan en M4.
+# The steps are served by `demo`, a WASM component in the example department,
+# which `anvil-exec-wasm` serves from next to its own binary (ADR-0025,
+# ADR-0041). Nothing else needs to be installed or started.
+#
+# `demo/measure_voltage` reads 4.2 V and the threshold lives here, not in the
+# step: the engine judges the reading against the 4.5–5.5 range (ADR-0008), so
+# this sequence fails on purpose.
+#
+#   === basica: fail ===
+#     [done] demo/connect: instrument connected (attempt 2)
+#     [fail] demo/measure_voltage: 4.2 fuera de rango [4.5, 5.5]
+#     [done] demo/disconnect: instrument disconnected
 
 name: basica
+executors:
+  - { name: demo, type: wasm, path: departamento/dist/anvil-exec-wasm }
 setup:
-  - name: conectar_equipo
+  - name: demo/connect
+    type: action
+    module: demo/connect
+    executor: demo
     retries: 3
 main:
-  - name: medir_voltaje
+  - name: demo/measure_voltage
+    type: numeric_limit
+    module: demo/measure_voltage
+    executor: demo
     retries: 1
     limit:
-      type: range
-      min: 4.5
-      max: 5.5
-  - name: verificar_led
+      comparison: GELE
+      low: 4.5
+      high: 5.5
+  - name: demo/check_led
+    type: pass_fail
+    module: demo/check_led
+    executor: demo
     retries: 1
 cleanup:
-  - name: desconectar_equipo
+  - name: demo/disconnect
+    type: action
+    module: demo/disconnect
+    executor: demo
     retries: 1

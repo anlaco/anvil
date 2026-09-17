@@ -33,8 +33,8 @@ export const ERROR = -1;
  * Not a network timeout — the bridge and the executors have their own. This is
  * the last resort against a wedged network worker, because a thread parked in
  * `Atomics.wait` with no timeout is a thread that never comes back, and the
- * engine would hang with no message. `wasi-grpc` has no deadlines of its own
- * (crates/ejecutor_pasos/src/main.rs:122-124), so nothing below would notice.
+ * engine would hang with no message. `wasi-grpc` has no deadlines of its own,
+ * so nothing below would notice.
  */
 const WAIT_MS = 120_000;
 

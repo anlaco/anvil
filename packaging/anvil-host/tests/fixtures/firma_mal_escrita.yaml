@@ -1,22 +1,28 @@
-# Fixture de `tests/exit_codes.rs`: ADR-0021 / issues #45 y #54 — un dedazo en
-# el nombre de un parámetro y otro en el de una salida.
+# Fixture for `tests/exit_codes.rs`: ADR-0021 / issues #45 and #54 — a typo in
+# a parameter's name and another in an output's.
 #
-# Los dos son del ejecutor embebido, que sí describe su catálogo:
-#   - `medir_voltaje` toma `canal` y `offset`; aquí pone `canall`.
-#   - devuelve `canal_usado` y `temperatura`; aquí lee `temperaturaa`.
+# Both are on the demo bench, which does describe its catalog:
+#   - `demo/measure_voltage` takes `channel` and `offset`; here it says `channell`.
+#   - it returns `channel_used` and `temperature`; here it reads `temperaturee`.
 #
-# Hasta ADR-0021 esto cargaba sin una queja (ADR-0020 §3 lo dejó escrito como
-# la excepción a la regla de detección de ADR-0019) y sólo se notaba con la
-# unidad ya en el banco. Ahora sale 1 sin ejecutar un solo paso.
+# Until ADR-0021 this loaded without a complaint (ADR-0020 §3 wrote it down as
+# the exception to ADR-0019's detection rule) and was only noticed with the
+# unit already on the bench. Now it exits 1 without running a single step.
 
 name: firma_mal_escrita
+
+executors:
+  - { name: demo, type: wasm, path: ../../../../ejemplos/departamento/dist/anvil-exec-wasm }
 
 locals:
   t: 0.0
 
 main:
-  - name: medir_voltaje
+  - name: demo/measure_voltage
+    type: pass_fail
+    module: demo/measure_voltage
+    executor: demo
     inputs:
-      canall: 3
+      channell: 3
     assign:
-      t: result.outputs.temperaturaa
+      t: result.outputs.temperaturee

@@ -39,6 +39,12 @@ La dirección del instrumento se toma de la env var `ANVIL_SCPI_ADDR`
 — la variante parametrizable — para no competir por la env var entre tests
 paralelos y no cuelgar (el mock hace `accept` con timeout).
 
+> **Overruled by [ADR-0041](0041-there-is-no-embedded-executor.md)
+> (2026-09-15):** `pasos_scpi` and the executor that composed it are removed,
+> and nothing in this repo replaces the SCPI step. A step that talks to an
+> instrument is written on an SDK whose executor has network access — Python or
+> C# — since a WASM component has none.
+
 ## Por qué esta forma
 
 - **Mantiene el adapter gRPC** (ADR-0003/0006): no se reescribe el

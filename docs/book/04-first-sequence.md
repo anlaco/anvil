@@ -21,8 +21,10 @@ executors:
 
 main:
   - name: board/measure_rail
+    type: numeric_limit
+    module: board/measure_rail
     executor: bench
-    limit: { type: range, min: 4.75, max: 5.25 }
+    limit: { comparison: GELE, low: 4.75, high: 5.25 }
 ```
 
 It is YAML. Line by line:
@@ -32,14 +34,20 @@ It is YAML. Line by line:
   `name` you choose, a `type` — `grpc` for a process listening on a port, as
   your C# executor is — and where to find it.
 - **`main`** is the list of steps to run. Chapter 6 adds `setup` and `cleanup`.
-- Each step has the **`name`** the executor publishes and the **`executor`**
-  that serves it, by the name you gave it above.
-- **`limit`** is the acceptance criterion: a `range` passes when the
-  measurement is between `min` and `max`.
+- Each step has a **`name`**, which is how the report shows it, and a
+  **`type`**, which says how it is judged. `numeric_limit` judges a number
+  against a limit; chapter 5 shows the others. They are TestStand's step types.
+- **`module`** is what the step calls — the name the executor publishes — and
+  **`executor`** is who serves it, by the name you gave it above. Here the
+  step is named after its module; two steps calling one module with different
+  inputs would each get a name of their own.
+- **`limit`** is the acceptance criterion, in TestStand's terms: `GELE` passes
+  when the measurement is greater than or equal to `low` and less than or equal
+  to `high`.
 
-**Always write `executor:` on a step.** A step without one is sent to a small
-executor built into the engine for its own demonstrations, which does not know
-your steps.
+**Every step that calls an executor names it with `executor:`.** Anvil has no
+executor of its own to fall back on, so a step without one is refused when the
+sequence loads, with a message that says what to add.
 
 The extension can be `.yseq` or `.yaml`; Anvil reads both the same way.
 
@@ -47,15 +55,11 @@ The extension can be `.yseq` or `.yaml`; Anvil reads both the same way.
 
 ```console
 $ anvil sequences/first.yseq
-ejecutor de pasos escuchando en 40243
 secuencia 'first' cargada (1 pasos en main, 0 subsecuencia(s) externa(s), 1 ejecutor(es))
-motor conectado
-conectado a los ejecutores de pasos (embebido en 127.0.0.1:40243)
-catálogo pedido
+connected to the step executors (bench)
 1 paso(s) comprobados contra el catálogo de su ejecutor
 === first: pass ===
   [pass] board/measure_rail: 
-conexión cerrada; esperando otra
 $ echo $?
 0
 ```
@@ -66,9 +70,8 @@ The **report** is the part between `=== first: pass ===` and the step lines
 under it: the sequence passed, and so did its one step. It goes to standard
 output.
 
-Everything else is **diagnostics** on the error stream: the engine starting its
-built-in executor on a free port, loading the file, connecting, and — the line
-that matters — `1 paso(s) comprobados contra el catálogo de su ejecutor`,
+Everything else is **diagnostics** on the error stream: loading the file,
+connecting to `bench`, and — the line that matters — `1 paso(s) comprobados contra el catálogo de su ejecutor`,
 "1 step checked against its executor's catalog". Before running anything,
 Anvil asked `bench` what it serves and checked that the sequence only asks for
 steps that exist. These messages are still in Spanish in 0.5.0
@@ -102,14 +105,16 @@ executors:
 
 main:
   - name: board/measure_rial
+    type: pass_fail
+    module: board/measure_rial
     executor: bench
 ```
 
 ```console
 $ anvil sequences/unknown.yseq 2>&1 | tail -n 3
+connected to the step executors (bench)
 la secuencia no casa con lo que ofrecen los ejecutores (1 problema(s)):
   - step 'board/measure_rial': executor 'bench' does not serve it (it serves: board/measure_rail)
-conexión cerrada; esperando otra
 ```
 
 "The sequence does not match what the executors offer": `bench` does not serve

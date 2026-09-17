@@ -18,12 +18,10 @@ The WASM one is the exception: your steps compile to a WASM component that the
 | LabVIEW, MATLAB, … | Future ones. Each in its own subdirectory, with the same shape. |
 
 They are **alternatives, not layers**: you pick the one you need, you can run
-several at once, and mix them in the same sequence. The WASM executor Anvil
-ships by default (`crates/ejecutor_pasos`) is a different piece: it is part
-of the core, lives in `crates/`, and goes embedded in the binary. What does
-live here is its **bridge** — the process that takes a user's `.wasm` step
-component and serves it over gRPC like any other executor:
-[`wasm/`](wasm/).
+several at once, and mix them in the same sequence. `anvil` carries no executor
+of its own (ADR-0041): every step is served by one of these, declared in the
+sequence. The package's ready-to-run demo is a WASM component served by the
+[`wasm/`](wasm/) bridge.
 
 ## License: **Apache-2.0**, and not the rest of the repo's
 

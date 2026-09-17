@@ -8,7 +8,7 @@ Licencia del `README.md` y [`LICENSE`](../LICENSE).
 
 | Pieza | Licencia | Por qué |
 |---|---|---|
-| **anvil** (motor, ejecutor, modelo, pasos_demo) | **AGPL-3.0-or-later** | Es el producto: se *usa*, no se linka. La AGPL impide que alguien lo cierre y lo revenda. |
+| **anvil** (motor, cargador, modelo, expr, result_sink, host) | **AGPL-3.0-or-later** | Es el producto: se *usa*, no se linka. La AGPL impide que alguien lo cierre y lo revenda. |
 | `wasi-grpc`, `wasi-visa` | **Apache-2.0** | Se linkan en código ajeno (los pasos). Queremos que se adopten como referencia. |
 | `executors/` (ejecutores de lenguaje) | **Apache-2.0** | Su SDK entra dentro del código de quien escribe un paso: `from anvil_step import step`. Es el mismo caso que `wasi-grpc`. Licencia propia en [`executors/LICENSE`](../executors/LICENSE), porque el `LICENSE` de la raíz es AGPL y sin una explícita ahí mandaría ése. |
 | Interfaces WIT | **Apache-2.0** | Igual: referencia adoptable. |

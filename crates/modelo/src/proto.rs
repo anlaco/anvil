@@ -163,7 +163,7 @@ pub struct StepRequest {
     #[prost(string, tag = "1")]
     pub name: String,
     /// Attempt number, starting at 1. Steps receive it so they can simulate
-    /// transient failures (see `pasos_demo`).
+    /// transient failures (see the demo bench's `connect`).
     #[prost(int32, tag = "2")]
     pub attempt: i32,
     /// This invocation's inputs, already evaluated (ADR-0020 §1).
@@ -521,6 +521,12 @@ impl From<StepResult> for crate::ResultadoStep {
             parametros: Vec::new(),
             // `a_resultado` fills the outputs in; it validates the `oneof`s.
             salidas: Vec::new(),
+            // What was called is the engine's to stamp: it knows the module it
+            // asked for, and the echoed name is not trusted for it.
+            module: None,
+            // The limit is the sequence's, not the wire's (ADR-0008).
+            comparacion: None,
+            unidades: None,
         }
     }
 }

@@ -35,8 +35,8 @@ fn measure_voltage(canal: Option<f64>) -> Outcome {
 
 /// Connects to the instrument; fails once, then passes.
 ///
-/// The same shape as `pasos_demo::conectar` in the embedded executor: a
-/// transient failure on attempt 1 that passes from attempt 2 — which is how the
+/// The same shape as `demo/connect` on the demo bench: a transient failure on
+/// attempt 1 that passes from attempt 2 — which is how the
 /// attempt number reaching the step is exercised (RF-09). It takes a `ctx`
 /// because it asks for one; the step above does not.
 #[step(name = "conectar_equipo")]

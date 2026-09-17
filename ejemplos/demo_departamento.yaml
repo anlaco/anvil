@@ -32,19 +32,23 @@ main:
   # collision the qualified name exists to resolve: without the module prefix
   # there would be no way to say which of the two measures.
   - name: multimetro/medir_voltaje
+    type: numeric_limit
+    module: multimetro/medir_voltaje
     executor: instrumentos
     retries: 1
     inputs:
       canal: 3
     limit:
-      type: range
-      min: 4.0
-      max: 5.0
+      comparison: GELE
+      low: 4.0
+      high: 5.0
 
   - name: plc/medir_voltaje
+    type: numeric_limit
+    module: plc/medir_voltaje
     executor: instrumentos
     retries: 1
     limit:
-      type: range
-      min: 23.0
-      max: 25.0
+      comparison: GELE
+      low: 23.0
+      high: 25.0

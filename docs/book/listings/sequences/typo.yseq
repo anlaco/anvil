@@ -5,5 +5,7 @@ executors:
 
 main:
   - name: dmm/measure_voltage
+    type: pass_fail
+    module: dmm/measure_voltage
     executor: bench
     inputs: { chanel: 2 }

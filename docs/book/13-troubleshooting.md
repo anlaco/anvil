@@ -3,23 +3,18 @@
 ## The executor is not running
 
 The most common mistake: you run a sequence and forgot to start the executor
-in the other terminal. In 0.5.0 Anvil does not say so clearly. It retries the
-connection for several seconds, printing hundreds of lines of `motor conectado`
-and `conexión cerrada; esperando otra` ("engine connected", "connection
-closed; waiting for another"), and then ends with:
+in the other terminal. Anvil retries the connection for a few seconds, in case
+the executor is still starting, and then ends with:
 
 ```console
 $ anvil sequences/first.yseq 2>&1 | tail -n 2
-conexión cerrada; esperando otra
-no se pudo conectar a los ejecutores de pasos (embebido en 127.0.0.1:33973): WASI socket error: ErrorCode { code: 14, name: "connection-refused", message: "The TCP connection was forcefully rejected" }
+waiting for the step executors (executor 'bench' at 127.0.0.1:9201: WASI socket error: ErrorCode { code: 14, name: "connection-refused", message: "The TCP connection was forcefully rejected" })…
+could not connect to the step executors: executor 'bench' at 127.0.0.1:9201: WASI socket error: ErrorCode { code: 14, name: "connection-refused", message: "The TCP connection was forcefully rejected" }
 ```
 
-"Could not connect to the step executors … connection refused". Two things in
-that message are misleading. It names `embebido`, the engine's built-in
-executor, and a port that is not the one you declared — but the executor that
-refused is yours, `bench` on 9201
-([#78](https://github.com/anlaco/anvil/issues/78)). When you see `connection-refused`, check
-first that every `grpc` executor in the sequence is running:
+The message names the executor that refused and where it was looked for:
+`bench`, on 9201. When you see `connection-refused`, check first that every
+`grpc` executor in the sequence is running:
 
 ```console
 $ ss -ltn | grep 9201

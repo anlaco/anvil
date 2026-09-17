@@ -35,9 +35,10 @@ The underlying decisions live in the [ADRs](adr/); this doc is the *how*.
 - **Operator** runs the sequence on the bench, headless/CLI in the MVP.
 - **Anvil (sequencer)** = the WASM engine. Walks the sequence and asks for
   each step over gRPC.
-- **Step executor** = a gRPC server that dispatches steps by name. In the
-  MVP it hosts the steps in the same `.wasm`; the goal is for steps to be
-  **gRPC services in any language**.
+- **Step executor** = a gRPC server that dispatches steps by name, a process
+  of its own that the sequence declares: the WASM bridge `anvil-exec-wasm`,
+  the Python executor or a C# one. `anvil` carries none of its own
+  ([ADR-0041](adr/0041-there-is-no-embedded-executor.md)).
 - **Steps / code modules** = the measurement logic, in any language. They
   touch the **instruments** (SCPI/VISA post-MVP).
 - **ResultSinks** receive results as open data (today `println!`).
@@ -57,16 +58,16 @@ Things that deploy or exist independently:
         │ gRPC  /EjecutorPasos/Invoca   (wasi-grpc, one stream/call)
         ▼
 ┌─────────────────────────────────────────────────────────────┐
-│  Step executor  (crates/ejecutor_pasos → .wasm, wasmtime)     │
-│  gRPC server on 127.0.0.1:9100. Dispatches by name.           │
-│  MVP: hosts pasos_demo in the same .wasm. Stateless across    │
-│  calls.                                                       │
+│  Step executors  (declared in the sequence, one process each) │
+│  anvil-exec-wasm (executors/wasm), Python, C#…                 │
+│  gRPC server on loopback or a declared host. Dispatches by    │
+│  name. anvil carries none (ADR-0041).                         │
 └─────────────────────────────────────────────────────────────┘
-        │ in-process direct call (MVP)  ──── future: gRPC to
-        ▼                                      step servers
+        │ in-process call (WASM component, Python module, C# method)
+        ▼
 ┌─────────────────────────────────────────────────────────────┐
-│  Steps  (crates/pasos_demo today; any language tomorrow)     │
-│  Code modules: medir_voltaje, verificar_led, conectar…        │
+│  Steps  (e.g. ejemplos/departamento/demo, the demo bench)     │
+│  Code modules: demo/measure_voltage, demo/check_led…          │
 └─────────────────────────────────────────────────────────────┘
 
 ┌──────────────┐   ┌──────────────────────┐   ┌─────────────────┐
@@ -86,24 +87,23 @@ Things that deploy or exist independently:
 
 | Container | Today (prototype) | Goal |
 |---|---|---|
-| Engine | `motor.wasm` builds the sequence in code (`basica_datos.rs`) | Reads sequence YAML (RF-20) |
-| Executor + Steps | Same `.wasm`; `pasos_demo` linked in-process | Steps as gRPC services in any language |
+| Engine | Reads sequence YAML (RF-20) | — |
+| Executor + Steps | Executors in their own process, declared per sequence (WASM bridge, Python, C#) | More languages (LabVIEW, MATLAB…) |
 | Report | Frozen textual `println!` | Decoupled ResultSink (RF-21) |
 | UI | No UI (CLI) | Operator web UI post-MVP |
 | Test process | Implicit Sequential (one sequence) | Sequential process model + plug-ins |
 
-The **gRPC engine↔executor border already exists and is real**
-(engine-side isolation). The executor↔step border is in-process today; the
-goal is gRPC for steps in any language (ADR-0003).
+The **gRPC engine↔executor border is real** (engine-side isolation). The
+executor↔step border is in-process, inside each executor (ADR-0003).
 
-**M5-ext.1 (ADR-0013):** the embedded WASM executor stays as the **default**
-(zero-install, ADR-0011); the engine dispatches by **name→endpoint**
+**M5-ext.1 (ADR-0013):** the engine dispatches by **name→endpoint**
 (`executors:` in the YAML + the `--executor` override), with non-loopback
-IPs only if declared. Beside it, **language executors** (`executors/`,
-Apache-2.0) serve steps with their ecosystem's native gRPC.
+IPs only if declared. There is no default executor: a step that calls one
+names it (ADR-0041). The **language executors** (`executors/`, Apache-2.0)
+serve steps with their ecosystem's native gRPC.
 
 **M5-ext.2 (ADR-0014/0015):** the **`.wasm` module loader by path** (the
-`.vi` model of TestStand) is the **host's** job: for every `tipo: wasm` in
+`.vi` model of TestStand) is the **host's** job: for every `type: wasm` in
 the YAML it spawns the **bridge** `anvil-exec-wasm` (a file next to the
 `anvil` binary since ADR-0023 — no longer embedded), which loads the user's
 `.wasm` component (WIT interface `anvil:step`: a `run` function, no gRPC, no
@@ -122,12 +122,11 @@ legacy OSes is postponed to post-M5-ext. See
 
 ```
 Motor
- ├─ desde_programa(programa)     → connection table per executor (M5-ext.1)
- ├─ conecta(host, puerto)        → wasi-grpc client (legacy, embedded)
+ ├─ desde_programa(programa)     → one connection per declared grpc executor
  ├─ ejecuta_paso(def, programa)  → resolves the endpoint by def.ejecutor, encodes
- │                                 PeticionPaso, calls RUTA_INVOCA, decodes
+ │                                 StepRequest, calls ROUTE_INVOKE, decodes
  ├─ ejecuta_con_reintentos(def)  → retries while !paso() && intento<max
- └─ ejecuta_secuencia(def)       → Setup / Main(stops at 1st fail) / Cleanup(always)
+ └─ ejecuta_programa(programa)   → Setup / Main(stops at 1st fail) / Cleanup(always)
                                    + aggregates into ResultadoSecuencia
 ```
 
@@ -136,21 +135,22 @@ Motor
 - **Errors:** `Error::Red` (communication) / `Error::Protobuf` (unreadable
   response). A step that *fails* is **not** an engine error (RF-11).
 
-### Inside the executor (`crates/ejecutor_pasos/src/main.rs`)
+### Inside the WASM executor (`executors/wasm/src/main.rs`)
 
 ```
-Executor
- ├─ Servidor::escuchar(127.0.0.1:9100) → accept() one connection
- ├─ loop: siguiente_peticion()         → validates path == RUTA_INVOCA
- │   ├─ decodes PeticionPaso
- │   ├─ pasos_demo::despacha(nombre, intento)   ← the only name→function spot
- │   └─ responds(stream, ResultadoPasoProto)
- └─ Stateless across calls
+anvil-exec-wasm
+ ├─ serves every *.wasm next to its own binary, one module per file
+ ├─ invoke(StepRequest)
+ │   ├─ resolve("<module>/<step>")   → which component (unknown module → error)
+ │   ├─ component(module)            → compiled on first use
+ │   └─ run(step, attempt, inputs)   → the SDK's registry ties the name to a
+ │                                     function (unknown step → error, RF-12)
+ └─ Stateless across calls (a component keeps nothing between them)
 ```
 
-- **Dispatch by name:** `pasos_demo::despacha` is the **only** place where
-  the wire's name gets tied to a function. Unknown name → `error` (RF-12).
-- Each call spends a **new HTTP/2 stream** (handled by wasi-grpc).
+- **Dispatch by name:** the bridge picks the module, the component's
+  registry (`executors/rust/anvil-step/src/registry.rs`) picks the function.
+  An unknown name is an `error` result, never a panic (RF-12).
 
 ## Why WASM
 
@@ -174,8 +174,9 @@ next to the time of a real instrument (RNF-04). There is no reason for
 - **The definition** (what to run): data (`DefinicionSecuencia`), today
   built in code, tomorrow YAML. It is **inert**: it does not mutate while
   running.
-- **The executor**: stateless across calls. It stores nothing about the
-  sequence.
+- **The executor**: stores nothing about the sequence. A WASM component is
+  stateless across calls; an executor of its own process may hold bench
+  state behind a reference (ADR-0022).
 - **Sequence variables** (Locals/Parameters/FileGlobals, post-MVP): they
   will live in the engine, bound to the run's scope
   ([diseno/variables-y-alcances.md](diseno/variables-y-alcances.md)).
@@ -195,8 +196,8 @@ next to the time of a real instrument (RNF-04). There is no reason for
 AGPL-3.0-or-later                     Apache-2.0
 ─────────────────────                ─────────────────────
 anvil (the product):                  wasi-grpc   (lib, linkable)
-  motor, ejecutor_pasos,              wasi-visa   (lib, linkable, post-MVP)
-  modelo, pasos_demo                  WIT interfaces
+  motor, cargador, modelo,            wasi-visa   (lib, linkable, post-MVP)
+  expr, result_sink                   WIT interfaces, executors/
    (they are USED, not linked)
 ```
 
@@ -210,7 +211,7 @@ anvil (the product):                  wasi-grpc   (lib, linkable)
 
 - **Determinism:** for the same sequence and the same steps, the number of
   attempts and their order are reproducible because there is no implicit
-  concurrency in the MVP (RNF-03). Verified in CI with `pasos_demo`'s
-  simulated steps (e.g. `conectar` fails attempt 1 and passes 2).
+  concurrency in the MVP (RNF-03). Verified in CI with the demo bench's
+  simulated steps (e.g. `demo/connect` fails attempt 1 and passes 2).
 - **Performance:** the overhead of a local gRPC call is negligible next to
   the time of a real instrument (RNF-04). It is not the bottleneck.

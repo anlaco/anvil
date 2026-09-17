@@ -8,6 +8,8 @@ locals:
 
 main:
   - name: unit/read_serial
+    type: action
+    module: unit/read_serial
     executor: bench
     assign:
       serial: result.outputs.serial

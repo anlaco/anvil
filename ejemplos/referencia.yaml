@@ -33,6 +33,8 @@ setup:
   # Opens the session and mints the handle. This is the only step that mints
   # one: the ones below change the bench, not which bench.
   - name: instrument/open_bench
+    type: pass_fail
+    module: instrument/open_bench
     executor: python
     assign:
       bench: result.outputs.bench
@@ -43,6 +45,8 @@ main:
   # already there. It is written out because that is the shape a step that
   # *derives* a second object would have — and that one would mint a new handle.
   - name: instrument/configure_bench
+    type: pass_fail
+    module: instrument/configure_bench
     executor: python
     inputs:
       bench: '${locals.bench}'
@@ -53,14 +57,18 @@ main:
   # The measurement goes through the session opened in the setup. The threshold
   # is the engine's business, from the `limit` below (ADR-0008).
   - name: instrument/measure_bench
+    type: numeric_limit
+    module: instrument/measure_bench
     executor: python
     inputs:
       bench: '${locals.bench}'
-    limit: { type: range, min: 4.0, max: 5.0 }
+    limit: { comparison: GELE, low: 4.0, high: 5.0 }
 
 cleanup:
   # Cleanup always runs, which is what closes the bench even on a failed run.
   - name: instrument/close_bench
+    type: pass_fail
+    module: instrument/close_bench
     executor: python
     inputs:
       bench: '${locals.bench}'

@@ -173,6 +173,15 @@ so: `name: Measure 5V rail` and `name: Measure 12V rail`, both
 `inputs` and `assign` work on any step that has a `module`, as they do today on
 a `grpc` step.
 
+> **Overruled in part by [ADR-0041](0041-there-is-no-embedded-executor.md)
+> (2026-09-15):** `executor` is **required** on a step with a `module`; there is
+> no embedded executor to default to.
+>
+> **Completed by [ADR-0042](0042-what-adr-0040-left-unsaid.md) (2026-09-15):**
+> with a module, `condition` and `value` read `result`; `assign` runs before the
+> judgement; a step with a module may retry; and a sidecar limit on a step that
+> is not a `numeric_limit` is a load error.
+
 ### 2 — `type` is explicit and required
 
 There is no default type. A step without `type` is a load error. The error

@@ -1,7 +1,7 @@
 # Ejecutor de pasos en Python (ADR-0012)
 
 Módulo distribuido de Anvil: un **ejecutor de lenguaje** que habla el mismo
-contrato gRPC (`paso.proto`) que el ejecutor WASM embebido. El motor lo ve
+contrato gRPC (`paso.proto`) que el puente WASM `anvil-exec-wasm`. El motor lo ve
 como un endpoint más; no sabe que detrás hay Python. Es el primero de la
 familia `executors/` (LabVIEW, MATLAB, … futuros), licencia **Apache-2.0**
 (adoptable y extensible, [ADR-0012](../../docs/adr/0012-executores-de-lenguaje-como-modulos.md)).
@@ -107,14 +107,19 @@ And in the sequence:
 locals:
   bench: { type: reference, executor: python }
 setup:
-  - name: banco/open_bench
+  - name: Open the bench
+    type: action
+    module: banco/open_bench
     executor: python
     inputs: { address: '127.0.0.1:4000' }
     assign: { bench: result.outputs.bench }
 main:
-  - name: banco/measure_bench
+  - name: Bench measurement
+    type: numeric_limit
+    module: banco/measure_bench
     executor: python
     inputs: { bench: '${locals.bench}' }
+    limit: { comparison: GELE, low: 4.5, high: 5.5 }
 ```
 
 **The reference names a slot, not an object.** Changing the bench's state does
@@ -183,11 +188,20 @@ Un paso se dirige con los dos:
 
 ```yaml
 main:
-  - name: multimetro/medir_voltaje
+  - name: Tensión de raíl
+    type: numeric_limit
+    module: multimetro/medir_voltaje
     executor: instrumentos
-  - name: plc/medir_voltaje       # mismo nombre, otro instrumento
+    limit: { comparison: GELE, low: 4.5, high: 5.5, units: V }
+  - name: Tensión de raíl del PLC   # mismo módulo, otro instrumento
+    type: numeric_limit
+    module: plc/medir_voltaje
     executor: instrumentos
+    limit: { comparison: GELE, low: 23.0, high: 25.0, units: V }
 ```
+
+Lo que se despacha es el `module:`; el `name:` es sólo la etiqueta del informe
+([ADR-0040](../../docs/adr/0040-a-step-type-says-how-a-step-is-judged-not-what-it-calls.md)).
 
 El módulo **se deriva del fichero, nunca se declara**: escribes una función y
 nada más, y renombrar o mover un módulo no obliga a editar los pasos de dentro.
@@ -278,22 +292,31 @@ nunca una excepción (RF-12).
 ## Usarlo desde Anvil
 
 El motor despacha por **nombre→endpoint** (`executors:` en el YAML, o el flag
-`--executor nombre=host:puerto`). Ejemplo con el ejecutor embebido y éste en la
-misma secuencia:
+`--executor nombre=host:puerto`). Ejemplo con el banco de demo (un componente
+WASM que sirve `anvil-exec-wasm`) y éste en la misma secuencia; cada paso nombra
+su ejecutor, porque `anvil` no lleva uno propio
+([ADR-0041](../../docs/adr/0041-there-is-no-embedded-executor.md)):
 
 ```yaml
 name: demo_ejecutores
 executors:
-  - { name: embebido, type: embedded }
+  - { name: demo, type: wasm, path: departamento/dist/anvil-exec-wasm }
   - { name: python, type: grpc, host: 127.0.0.1, port: 9101 }
 main:
-  - name: verificar_led          # servido por el ejecutor WASM embebido
+  - name: demo/check_led         # servido por el banco de demo
+    type: pass_fail
+    module: demo/check_led
+    executor: demo
   # Los del ejecutor Python van con su módulo delante: viven en
   # `steps/instrument.py`, así que el módulo es `instrument`.
   - name: instrument/medir_simulador
+    type: numeric_limit
+    module: instrument/medir_simulador
     executor: python
-    limit: { type: range, min: 4.0, max: 5.0 }
+    limit: { comparison: GELE, low: 4.0, high: 5.0 }
   - name: instrument/conectar_equipo
+    type: action
+    module: instrument/conectar_equipo
     executor: python
 ```
 

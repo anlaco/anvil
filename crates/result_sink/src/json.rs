@@ -86,6 +86,9 @@ pub(crate) fn paso_a_json(p: &ResultadoStep) -> Value {
 pub(crate) fn paso_a_json_con(p: &ResultadoStep, anidar: bool) -> Value {
     let base = json!({
         "name": p.nombre,
+        // What the step called on its executor (ADR-0040 §1); null for a step
+        // that calls none.
+        "module": p.module,
         "status": p.estado,
         "phase": p.fase.como_texto(),
         "message": p.mensaje,
@@ -94,6 +97,10 @@ pub(crate) fn paso_a_json_con(p: &ResultadoStep, anidar: bool) -> Value {
         "limit_max": opt_num(p.limite_max),
         "expected_value": opt_num(p.valor_esperado),
         "operator": p.operador.map(|op| json!(op.simbolo())).unwrap_or(Value::Null),
+        // ADR-0040 §7: the limit's TestStand code and its units, null when no
+        // limit was applied.
+        "comparison": p.comparacion,
+        "units": p.unidades,
         // ADR-0020 + Regla 3 de ADR-0019: **la condición en la que se midió
         // queda escrita**. Hasta ahora dos corridas de la misma secuencia con
         // distinto canal producían informes idénticos, porque el canal iba
@@ -156,7 +163,7 @@ fn valor_a_json(v: &expr::Value) -> Value {
         expr::Value::Bool(b) => json!(b),
         expr::Value::Reference(r) => json!({
             "type": "reference",
-            "executor": modelo::nombre_visible_de_ejecutor(&r.executor),
+            "executor": r.executor,
             "lifetime": r.lifetime,
             "payload": r.payload,
         }),
@@ -194,6 +201,33 @@ mod tests {
             "led encendido",
         ));
         s
+    }
+
+    /// ADR-0040 §1: a step's module is written beside its name, and is null
+    /// for a step that called nothing.
+    #[test]
+    fn the_module_is_written_beside_the_name() {
+        let mut called = ResultadoStep::nuevo("Measure 5V rail", "pass", "ok");
+        called.module = Some("dmm/measure_voltage".into());
+        let v = paso_a_json_con(&called, true);
+        assert_eq!(v["name"], "Measure 5V rail");
+        assert_eq!(v["module"], "dmm/measure_voltage");
+
+        let statement = ResultadoStep::nuevo("set_x", "done", "statement ok");
+        assert!(paso_a_json_con(&statement, true)["module"].is_null());
+    }
+
+    #[test]
+    fn the_comparison_and_units_are_written() {
+        let mut r = ResultadoStep::medido_valor("rail", "pass", "ok", 5.0);
+        r.comparacion = Some("GELE".into());
+        r.unidades = Some("V".into());
+        let v = paso_a_json_con(&r, true);
+        assert_eq!(v["comparison"], "GELE");
+        assert_eq!(v["units"], "V");
+        assert!(
+            paso_a_json_con(&ResultadoStep::nuevo("x", "done", ""), true)["comparison"].is_null()
+        );
     }
 
     #[test]
@@ -439,16 +473,5 @@ mod tests {
         // El payload, tal cual: `serde_json` lo entrecomilla y no hay
         // separador nuestro que se pueda romper.
         assert_eq!(v["payload"], "rack;canal=2");
-    }
-
-    /// El nombre interno del ejecutor embebido es fontanería y no se enseña.
-    #[test]
-    fn el_ejecutor_embebido_sale_por_su_nombre_legible() {
-        let v = valor_a_json(&expr::Value::Reference(expr::Reference {
-            executor: modelo::EJECUTOR_EMBEBIDO.into(),
-            lifetime: String::new(),
-            payload: "s1".into(),
-        }));
-        assert_eq!(v["executor"], "embebido");
     }
 }

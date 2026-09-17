@@ -127,6 +127,10 @@ formato ya es código. Anvil es declarativo (ADR-0002).
 > as TestStand's Pass/Fail Test does; `condition` becomes optional when it does,
 > and `assign` works on it then. What does not change: without a module it is
 > this ADR's expression step, and a `limit` on it is still a load error.
+>
+> **Completed by [ADR-0042](0042-what-adr-0040-left-unsaid.md) (2026-09-15):**
+> with a module it also accepts `retries`, and its `condition` reads the
+> module's `result`. Without one, both refusals above stand.
 - **Sin severidades intermedias** al estilo `Inconclusive` de OpenTAP: los
   estados siguen siendo `paso`/`fallo`/`error`/`saltado` (RNF-08).
 - **El mensaje del reporte no reproduce la expresión** que falló («condición no

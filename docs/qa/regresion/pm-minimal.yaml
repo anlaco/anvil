@@ -1,0 +1,15 @@
+# A process model for the regression cases that exercise `--process-model`
+# (DEF-1, DIAG-4). Not shipped, and not a process model worth shipping: it only
+# wraps the operator's sequence, which is all those cases need.
+#
+# It replaces `process_models/sequential.yaml`, whose two plug-in steps were
+# served by the embedded executor (ADR-0041 §6). It calls no executor, so it
+# runs anywhere the operator's sequence does.
+name: regresion_pm
+locals:
+  estado_usuario: ""
+main:
+  - name: correr_secuencia_usuario
+    type: sequence_call
+    sequence: secuencia_usuario
+    assign: { estado_usuario: "${result.status}" }

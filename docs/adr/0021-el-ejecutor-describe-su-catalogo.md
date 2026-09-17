@@ -186,6 +186,11 @@ Esto obligó a tocar `va_a_ejecutar_pasos` en el host: con `--with-executors` s�
 hay que levantar el ejecutor embebido. Es la única excepción al issue #22, y es
 explícita.
 
+> **Overruled in part by [ADR-0041](0041-there-is-no-embedded-executor.md)
+> (2026-09-15):** there is no embedded executor to start. With
+> `--with-executors` the host starts the declared `wasm` executors, as it does
+> for a run.
+
 ### 7 — En el ejecutor Python, la firma **es** el catálogo
 
 Se decoran funciones y se dejan caer en una carpeta:

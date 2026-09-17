@@ -15,9 +15,5 @@ wasi-grpc.workspace = true
 getrandom.workspace = true
 
 [[bin]]
-name = "basica_datos"
-path = "src/bin/basica_datos.rs"
-
-[[bin]]
 name = "anvil-guest"
 path = "src/bin/anvil.rs"

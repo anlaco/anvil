@@ -20,12 +20,10 @@
 //!   which is the false green of ADR-0019.
 
 use modelo::proto::{Catalog, ParameterSpec, StepSpec, ValueType};
-use modelo::{
-    DefinicionPaso, DefinicionSecuencia, EntradaPaso, Programa, TipoPaso, ValorDefinicion,
-};
+use modelo::{DefinicionPaso, DefinicionSecuencia, EntradaPaso, Programa, ValorDefinicion};
 use std::collections::{BTreeMap, BTreeSet};
 
-use crate::{nombre_visible, Motor};
+use crate::Motor;
 
 /// What one executor answered when asked for its catalog.
 #[derive(Debug, Clone, PartialEq)]
@@ -50,7 +48,7 @@ impl Descripcion {
 }
 
 /// The catalogs of every connected executor, keyed by the same endpoint name
-/// the routing uses (`EMBEDIDO` for the embedded one).
+/// the routing uses: the executor's declared name.
 pub type Catalogos = BTreeMap<String, Descripcion>;
 
 /// Something the sequence says that its executor contradicts.
@@ -63,6 +61,10 @@ pub enum Hallazgo {
     /// The executor describes itself and this step is not in its catalog.
     PasoDesconocido {
         paso: String,
+        /// What the step asked for (ADR-0040 §1). Named apart from `paso`,
+        /// because two steps can ask for one module and only the name says
+        /// which of them is wrong.
+        modulo: String,
         ejecutor: String,
         conocidos: Vec<String>,
     },
@@ -104,8 +106,20 @@ impl std::fmt::Display for Hallazgo {
         match self {
             Hallazgo::PasoDesconocido {
                 paso,
+                modulo,
                 ejecutor,
                 conocidos,
+            } if paso != modulo => write!(
+                f,
+                "step '{paso}' calls '{modulo}': executor '{ejecutor}' does not serve it \
+                 (it serves: {})",
+                lista(conocidos)
+            ),
+            Hallazgo::PasoDesconocido {
+                paso,
+                ejecutor,
+                conocidos,
+                ..
             } => write!(
                 f,
                 "step '{paso}': executor '{ejecutor}' does not serve it (it serves: {})",
@@ -354,7 +368,7 @@ fn comprueba_paso(
     // Only steps that cross the wire. A `statement`, a `pass_fail` or a
     // `sequence_call` is the engine's own business and no executor describes
     // it (ADR-0009, ADR-0010, ADR-0018).
-    if def.tipo != TipoPaso::Grpc {
+    if !def.llama_a_un_ejecutor() {
         return;
     }
     // A disabled step is registered as `skipped` **without asking anyone**
@@ -373,7 +387,7 @@ fn comprueba_paso(
         // problem.
         Err(_) => return,
     };
-    let visible = nombre_visible(&endpoint).to_string();
+    let visible = endpoint.clone();
     let catalogo = match catalogos.get(&endpoint) {
         Some(Descripcion::Describe(c)) => c,
         Some(Descripcion::NoDescribe(motivo)) => {
@@ -394,11 +408,12 @@ fn comprueba_paso(
         }
     };
 
-    let spec = match catalogo.step(&def.nombre) {
+    let spec = match catalogo.step(def.modulo()) {
         Some(s) => s,
         None => {
             informe.hallazgos.push(Hallazgo::PasoDesconocido {
                 paso: def.nombre.clone(),
+                modulo: def.modulo().to_string(),
                 ejecutor: visible,
                 conocidos: catalogo.steps.iter().map(|s| s.name.clone()).collect(),
             });
@@ -482,8 +497,8 @@ fn comprueba_tipo(
 
 fn comprueba_salidas(def: &DefinicionPaso, spec: &StepSpec, ejecutor: &str, informe: &mut Informe) {
     let mut leidas = Vec::new();
-    for a in def.asigna.as_deref().unwrap_or(&[]) {
-        salidas_leidas(&a.expr, &mut leidas);
+    for e in def.lecturas_de_resultado() {
+        salidas_leidas(e, &mut leidas);
     }
     for salida in leidas {
         if !spec.outputs.iter().any(|o| o.name == salida) {
@@ -527,12 +542,12 @@ fn salidas_leidas(e: &expr::Expresion, fuera: &mut Vec<String>) {
 mod tests {
     use super::*;
     use modelo::proto::{OutputSpec, ParameterSpec};
-    use modelo::{Asignacion, DefinicionPaso, DefinicionSecuencia};
+    use modelo::{Asignacion, DefinicionPaso, DefinicionSecuencia, TipoPaso};
     use std::collections::HashMap;
 
     /// The catalog of an executor that serves `medir_voltaje(canal?, offset?)`
-    /// and returns `temperatura` — the same shape the embedded executor
-    /// publishes, written by hand so these tests need no network.
+    /// and returns `temperatura` — the shape of a measuring step, written by
+    /// hand so these tests need no network.
     fn catalogo_demo() -> Catalog {
         Catalog::descrito(vec![StepSpec {
             name: "medir_voltaje".into(),
@@ -545,9 +560,12 @@ mod tests {
         }])
     }
 
-    fn catalogos_del_embebido(c: Descripcion) -> Catalogos {
+    /// The one executor these tests' steps run on.
+    const BENCH: &str = "bench";
+
+    fn catalogos_del_banco(c: Descripcion) -> Catalogos {
         let mut m = BTreeMap::new();
-        m.insert(crate::EMBEDIDO.to_string(), c);
+        m.insert(BENCH.to_string(), c);
         m
     }
 
@@ -571,12 +589,22 @@ mod tests {
         Programa {
             raiz,
             archivos: HashMap::new(),
-            ejecutores: HashMap::new(),
+            ejecutores: HashMap::from([(
+                BENCH.to_string(),
+                modelo::DefinicionEjecutor {
+                    nombre: BENCH.into(),
+                    tipo: modelo::TipoEjecutor::Grpc {
+                        host: "127.0.0.1".into(),
+                        puerto: 9101,
+                    },
+                },
+            )]),
         }
     }
 
     fn paso(nombre: &str) -> DefinicionPaso {
         let mut d = DefinicionPaso::nuevo(nombre, 1);
+        d.ejecutor = Some(BENCH.into());
         d.entradas = Some(vec![(
             "etiqueta".to_string(),
             EntradaPaso::Literal(ValorDefinicion::Texto("banco-3".into())),
@@ -599,7 +627,7 @@ mod tests {
         ));
         let informe = comprueba_programa(
             &programa_con(vec![d]),
-            &catalogos_del_embebido(Descripcion::Describe(catalogo_demo())),
+            &catalogos_del_banco(Descripcion::Describe(catalogo_demo())),
         );
         assert_eq!(informe.hallazgos.len(), 1, "{:?}", informe.hallazgos);
         assert!(matches!(
@@ -624,7 +652,7 @@ mod tests {
         }]);
         let informe = comprueba_programa(
             &programa_con(vec![d]),
-            &catalogos_del_embebido(Descripcion::Describe(catalogo_demo())),
+            &catalogos_del_banco(Descripcion::Describe(catalogo_demo())),
         );
         assert!(matches!(
             &informe.hallazgos[..],
@@ -638,7 +666,7 @@ mod tests {
         d.entradas = None;
         let informe = comprueba_programa(
             &programa_con(vec![d]),
-            &catalogos_del_embebido(Descripcion::Describe(catalogo_demo())),
+            &catalogos_del_banco(Descripcion::Describe(catalogo_demo())),
         );
         assert!(matches!(
             &informe.hallazgos[..],
@@ -652,7 +680,7 @@ mod tests {
     fn una_entrada_opcional_que_falta_no_es_nada() {
         let informe = comprueba_programa(
             &programa_con(vec![paso("medir_voltaje")]),
-            &catalogos_del_embebido(Descripcion::Describe(catalogo_demo())),
+            &catalogos_del_banco(Descripcion::Describe(catalogo_demo())),
         );
         assert!(!informe.hay_hallazgos(), "{:?}", informe.hallazgos);
         assert_eq!(informe.comprobados, 1);
@@ -667,7 +695,7 @@ mod tests {
         )]);
         let informe = comprueba_programa(
             &programa_con(vec![d]),
-            &catalogos_del_embebido(Descripcion::Describe(catalogo_demo())),
+            &catalogos_del_banco(Descripcion::Describe(catalogo_demo())),
         );
         assert!(matches!(
             &informe.hallazgos[..],
@@ -696,7 +724,7 @@ mod tests {
         ));
         let informe = comprueba_programa(
             &programa_con(vec![d]),
-            &catalogos_del_embebido(Descripcion::Describe(catalogo_demo())),
+            &catalogos_del_banco(Descripcion::Describe(catalogo_demo())),
         );
         assert!(!informe.hay_hallazgos(), "{:?}", informe.hallazgos);
     }
@@ -708,7 +736,7 @@ mod tests {
     fn un_ejecutor_que_no_describe_deja_los_pasos_sin_comprobar() {
         let informe = comprueba_programa(
             &programa_con(vec![paso("medir_voltaje"), paso("verificar_led")]),
-            &catalogos_del_embebido(Descripcion::NoDescribe("no contesta Describe".into())),
+            &catalogos_del_banco(Descripcion::NoDescribe("no contesta Describe".into())),
         );
         assert!(!informe.hay_hallazgos(), "no describir no es contradecir");
         assert_eq!(informe.comprobados, 0);
@@ -716,7 +744,7 @@ mod tests {
         let resumen = informe.resumen_sin_comprobar();
         assert_eq!(resumen.len(), 1, "una línea por ejecutor y motivo");
         assert!(
-            resumen[0].contains("2 step(s) unchecked") && resumen[0].contains("embebido"),
+            resumen[0].contains("2 step(s) unchecked") && resumen[0].contains("bench"),
             "el aviso cuenta y nombra: {}",
             resumen[0]
         );
@@ -731,7 +759,7 @@ mod tests {
         let pasos = vec![paso("medir_voltaje")];
         let vacio = comprueba_programa(
             &programa_con(pasos.clone()),
-            &catalogos_del_embebido(Descripcion::Describe(Catalog::descrito(Vec::new()))),
+            &catalogos_del_banco(Descripcion::Describe(Catalog::descrito(Vec::new()))),
         );
         assert!(matches!(
             &vacio.hallazgos[..],
@@ -740,7 +768,7 @@ mod tests {
 
         let mudo = comprueba_programa(
             &programa_con(pasos),
-            &catalogos_del_embebido(Descripcion::NoDescribe("no describe".into())),
+            &catalogos_del_banco(Descripcion::NoDescribe("no describe".into())),
         );
         assert!(!mudo.hay_hallazgos());
     }
@@ -754,12 +782,40 @@ mod tests {
         d.tipo = TipoPaso::Statement;
         let informe = comprueba_programa(
             &programa_con(vec![d]),
-            &catalogos_del_embebido(Descripcion::Describe(catalogo_demo())),
+            &catalogos_del_banco(Descripcion::Describe(catalogo_demo())),
         );
         assert!(!informe.hay_hallazgos());
         assert!(
             informe.sin_comprobar.is_empty(),
             "ni siquiera sin comprobar"
+        );
+    }
+
+    /// The catalog is asked for the step's module, not its name (ADR-0040 §1),
+    /// and a module it does not serve is named as such.
+    #[test]
+    fn the_catalog_is_asked_for_the_module() {
+        let mut named = paso("Measure 5V rail");
+        named.module = Some("medir_voltaje".into());
+        let informe = comprueba_programa(
+            &programa_con(vec![named]),
+            &catalogos_del_banco(Descripcion::Describe(catalogo_demo())),
+        );
+        assert!(!informe.hay_hallazgos(), "{:?}", informe.hallazgos);
+        assert_eq!(informe.comprobados, 1);
+
+        let mut wrong = paso("Measure 5V rail");
+        wrong.module = Some("medir_voltaje_mal".into());
+        let informe = comprueba_programa(
+            &programa_con(vec![wrong]),
+            &catalogos_del_banco(Descripcion::Describe(catalogo_demo())),
+        );
+        assert!(
+            informe.hallazgos.iter().any(|h| h
+                .to_string()
+                .contains("'Measure 5V rail' calls 'medir_voltaje_mal'")),
+            "{:?}",
+            informe.hallazgos
         );
     }
 
@@ -777,12 +833,11 @@ mod tests {
         raiz.subsecuencias.insert("sub".to_string(), sub);
         let programa = Programa {
             raiz,
-            archivos: HashMap::new(),
-            ejecutores: HashMap::new(),
+            ..programa_con(Vec::new())
         };
         let informe = comprueba_programa(
             &programa,
-            &catalogos_del_embebido(Descripcion::Describe(catalogo_demo())),
+            &catalogos_del_banco(Descripcion::Describe(catalogo_demo())),
         );
         assert_eq!(informe.comprobados, 2, "setup y main");
         assert_eq!(
@@ -805,7 +860,7 @@ mod tests {
         d.disable = true;
         let informe = comprueba_programa(
             &programa_con(vec![d]),
-            &catalogos_del_embebido(Descripcion::Describe(catalogo_demo())),
+            &catalogos_del_banco(Descripcion::Describe(catalogo_demo())),
         );
         assert!(!informe.hay_hallazgos(), "{:?}", informe.hallazgos);
         assert_eq!(informe.comprobados, 0);

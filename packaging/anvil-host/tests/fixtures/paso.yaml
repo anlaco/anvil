@@ -7,7 +7,7 @@
 # no depende del ejecutor ni de la red y el veredicto es determinista.
 #
 #   === exit_paso: paso ===
-#   [paso] asignacion_trivial: statement ok
+#   [done] asignacion_trivial: statement ok
 
 name: exit_paso
 

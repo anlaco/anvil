@@ -1,4 +1,4 @@
 $ anvil sequences/serial.yseq 2>&1 | tail -n 3
+1 paso(s) comprobados contra el catálogo de su ejecutor
 la secuencia no casa con lo que ofrecen los ejecutores (1 problema(s)):
   - step 'unit/read_serial' (bench): 'assign' reads result.outputs.serial and the step does not return it (it returns: none)
-conexión cerrada; esperando otra

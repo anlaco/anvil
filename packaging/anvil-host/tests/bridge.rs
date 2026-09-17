@@ -11,7 +11,8 @@
 //!
 //! These are cheap: the bridge does not instantiate the engine, so unlike
 //! `exit_codes.rs` they do not need a release build to be quick. They do start
-//! the embedded executor, which is why they allow a few seconds to come up.
+//! the demo bench's executor `basica.yaml` declares, which is why they allow a
+//! few seconds to come up.
 
 use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};

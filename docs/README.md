@@ -55,7 +55,7 @@ docs/
 ├─ contrato-grpc.md           semantics of the step contract over paso.proto
 ├─ licencia.md                dual AGPL / Apache licensing strategy
 ├─ roadmap.md                 milestones M0 → M4+ with MVP vs. post-MVP
-├─ adr/                       decisions already made (immutable), 0001–0040
+├─ adr/                       decisions already made (immutable), 0001–0042
 │                             see "The ADRs, by area" below
 ├─ planes/                    milestone plans (m4-nucleo, m4b, m5-ext)
 ├─ qa/                        campaign reports + executable checks
@@ -104,8 +104,12 @@ Anvil does when it cannot judge) and
   `.yseq` extension).
 - **Step types** — [0040](adr/0040-a-step-type-says-how-a-step-is-judged-not-what-it-calls.md):
   a step's `type` says how it is judged (`action`, `pass_fail`,
-  `numeric_limit`, TestStand's), and what it calls is its `module`. Accepted,
-  not implemented.
+  `numeric_limit`, TestStand's), and what it calls is its `module`.
+  [0041](adr/0041-there-is-no-embedded-executor.md): `anvil` carries no step
+  executor, a step names its executor, and the demo is a WASM component.
+  [0042](adr/0042-what-adr-0040-left-unsaid.md): what 0040 left unsaid —
+  `result` in `condition`, the order of `assign`, retries. Accepted, not
+  implemented.
 - **Governance** — 0032: contributions and the reversion clause (a direction,
   not yet in force).
 

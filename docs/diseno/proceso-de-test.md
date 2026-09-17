@@ -43,11 +43,14 @@ rompe todas las secuencias existentes, investigación §2).
 
 ### Cómo se materializa en Anvil (ADR-0016)
 
-El PM es **una secuencia YAML envoltorio** (`process_models/sequential.yaml`)
-cuyo `main` lleva un `sequence_call` a la secuencia del usuario (nombre
-reservado `secuencia_usuario`, que el cargador reescribe al path de la
-secuencia pasada por `--process-model`), con `identificar_uut` en `setup`
-y `notificar_resultado` en `cleanup`. El motor **no se toca** (ADR-0005):
+El PM es **una secuencia YAML envoltorio** cuyo `main` lleva un
+`sequence_call` a la secuencia del usuario (nombre reservado
+`secuencia_usuario`, que el cargador reescribe al path de la secuencia
+pasada por `--process-model`). El PM canónico `process_models/sequential.yaml`
+(con `identificar_uut` en `setup` y `notificar_resultado` en `cleanup`) se
+retiró con [ADR-0041](../adr/0041-there-is-no-embedded-executor.md): sus
+plug-ins los servía el ejecutor embebido y hacían de un aviso al operador que
+aún no existe. El mecanismo sigue. El motor **no se toca** (ADR-0005):
 ve un `Programa` con raíz = PM y un archivo externo = secuencia del
 usuario, y lo orquesta como cualquier `sequence_call` (ADR-0010). El
 resultado del usuario queda anidado en `sub_pasos`. Sin `--process-model`,

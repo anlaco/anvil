@@ -27,6 +27,8 @@ contextBridge.exposeInMainWorld("anvil", {
   readTextFile: (path) => ipcRenderer.invoke("anvil:read-text", path),
   /** The text, or null if there is no such file. Other failures still throw. */
   readTextFileIfAny: (path) => ipcRenderer.invoke("anvil:read-text-if-any", path),
+  /** Whether a file is there. Answers nothing about what is in it. */
+  fileExists: (path) => ipcRenderer.invoke("anvil:file-exists", path),
   writeTextFile: (path, text) => ipcRenderer.invoke("anvil:write-text", path, text),
   /**
    * Starts `anvil <path> --bridge`; resolves to `{ url, engine }` — the

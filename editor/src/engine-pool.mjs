@@ -107,8 +107,8 @@ export class EnginePool {
   }
 
   /**
-   * The arguments the bridge says the engine needs — the ephemeral port of the
-   * embedded executor and an `--executor` for each declared one.
+   * The arguments the bridge says the engine needs — an `--executor` for each
+   * `type: wasm` executor the host started.
    *
    * They come from the bridge rather than being guessed here because it is the
    * bridge that reserved those ports, exactly as the native host does before

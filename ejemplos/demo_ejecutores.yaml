@@ -1,57 +1,59 @@
-# Demo del routing multi-endpoint (M5-ext.1, RF-36.3).
+# Demo of multi-endpoint routing (M5-ext.1, RF-36.3).
 #
-# Sin Docker, sin `.wasm`: el ejecutor embebido (WASM, built-in) atiende un
-# paso y un ejecutor Python en loopback atiende otros dos. El motor despacha
-# por nombre→endpoint (`ejecutor:` en el paso → `ejecutores:` en el YAML);
-# no sabe ni le importa qué hay detrás de cada endpoint (ADR-0013).
+# A WASM component (the demo bench, served by `anvil-exec-wasm`) serves one step
+# and a Python executor on loopback serves two others. The engine dispatches
+# by name→endpoint (`executor:` on the step → `executors:` in the YAML); it
+# neither knows nor cares what is behind each endpoint (ADR-0013).
 #
-# Arranque:
-#   # terminal 1: simulador TCP (stand-in del equipo del simulador)
+# Start-up:
+#   # terminal 1: TCP simulator (stand-in for the simulator's equipment)
 #   python3 executors/python/simulador_tcp.py
-#   # terminal 2: ejecutor Python en loopback (127.0.0.1:9101). Sus pasos
-#   # viven en executors/python/steps/, no dentro de server.py (ADR-0021).
+#   # terminal 2: Python executor on loopback (127.0.0.1:9101). Its steps
+#   # live in executors/python/steps/, not inside server.py (ADR-0021).
 #   cd executors/python && python3 server.py
-#   # terminal 3: Anvil (host embebido, ADR-0011)
+#   # terminal 3: Anvil, which starts the demo bench itself
 #   ./anvil ejemplos/demo_ejecutores.yaml --json /tmp/out.json
 #
-# (Alternativa sin host: wasmtime run anvil.wasm ... con el ejecutor embebido
-#  ya levantado en 9100 — ver guia-inicio-rapido.md.)
-#
-# Variante con override de ejecutor (R&D vs. fábrica, patrón --limits):
+# Variant with an executor override (R&D vs. factory, the --limits pattern):
 #   ./anvil ejemplos/demo_ejecutores.yaml --executor python=127.0.0.1:9200
-#   (con otro server.py en --port 9200; el YAML no se toca)
+#   (with another server.py on --port 9200; the YAML is not touched)
 #
-# Comprobar que la secuencia casa con lo que ofrecen los ejecutores, sin
-# ejecutar un solo paso (ADR-0021):
+# Check that the sequence matches what the executors offer, without running a
+# single step (ADR-0021):
 #   ./anvil ejemplos/demo_ejecutores.yaml --validate --with-executors
 
 name: demo_ejecutores
 executors:
-  - name: embebido
-    type: embedded
+  - { name: demo, type: wasm, path: departamento/dist/anvil-exec-wasm }
   - name: python
     type: grpc
     host: 127.0.0.1
     port: 9101
 main:
-  # Paso built-in: lo atiende el ejecutor WASM embebido (de serie). No
-  # declara `ejecutor` → embebido por defecto.
-  - name: verificar_led
+  # A step of the demo bench, a WASM component: the host spawns its executor.
+  - name: demo/check_led
+    type: pass_fail
+    module: demo/check_led
+    executor: demo
     retries: 1
 
-  # Paso en el ejecutor Python en loopback: el motor despacha por gRPC a
-  # 127.0.0.1:9101; el Python habla por TCP con el simulador y devuelve la
-  # medida. El límite lo evalúa el motor desde el YAML (ADR-0008).
+  # Step on the Python executor on loopback: the engine dispatches over gRPC
+  # to 127.0.0.1:9101; the Python one talks TCP to the simulator and returns
+  # the measurement. The engine evaluates the limit from the YAML (ADR-0008).
   - name: instrument/medir_simulador
+    type: numeric_limit
+    module: instrument/medir_simulador
     executor: python
     retries: 1
     limit:
-      type: range
-      min: 4.0
-      max: 5.0
+      comparison: GELE
+      low: 4.0
+      high: 5.0
 
-  # Conexión al equipo simulado: fallo transitorio en el intento 1, pasa
-  # desde el 2 (RF-09: el número de intento llega al paso).
+  # Connection to the simulated equipment: transient fail on attempt 1, passes
+  # from attempt 2 (RF-09: the attempt number reaches the step).
   - name: instrument/conectar_equipo
+    type: action
+    module: instrument/conectar_equipo
     executor: python
     retries: 3

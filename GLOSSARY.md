@@ -57,8 +57,14 @@ Sin cambio: `setup`, `main`, `cleanup`, `locals`, `parameters`,
 | `parametros` (`sequence_call`) | **`args`** |
 | `ejecutor` | `executor` |
 
-Sin cambio: `disable`, `pause_on_fail`, `statement`, y los valores de `type`
-(`grpc`, `statement`, `sequence_call`, `pass_fail`).
+Sin cambio: `disable`, `pause_on_fail`, `statement`.
+
+Los valores de `type` los fijó ADR-0040, y `type` pasó a ser **obligatorio**:
+`action`, `pass_fail`, `numeric_limit`, `statement`, `sequence_call`. El
+antiguo `grpc` desapareció — lo que un paso llama ya no es su tipo, sino su
+**`module`**, una clave nueva. También nacen en inglés `value` (el número que
+juzga un `numeric_limit`), y dentro de `limit`: `comparison`, `low`, `high`,
+`nominal`, `lower`, `upper`, `threshold` y `units`.
 
 **Por qué `parametros` se parte en dos.** Significaba dos cosas —los valores
 *by-value* que se envían a un paso (ADR-0020) y los argumentos
@@ -69,20 +75,26 @@ bloque de un sitio al otro deja de poder cambiar el significado en silencio.
 
 ### Límite
 
+La forma del límite la retiró ADR-0040: ya no hay `type: range|comparison` con
+`min`/`max`/`op`/`expected`, sino los **códigos de TestStand**, que se escriben
+tal cual y en mayúsculas.
+
 | Antes | Ahora |
 |---|---|
-| `tipo: rango` | `type: range` |
-| `tipo: comparacion` | `type: comparison` |
-| `esperado` | `expected` |
+| `tipo: rango` con `min`/`max` | `comparison: GELE` con `low`/`high` |
+| `tipo: comparacion` con `op: ge` / `esperado` | `comparison: GE` con `low` |
+| — | `comparison: EQT` con `nominal`, `lower`, `upper`, `threshold` |
+| — | `comparison: none` (no compara: registra el valor y da `done`) |
 
-Sin cambio: `min`, `max`, `op` y los operadores (`ge`, `le`, `gt`, `lt`, `eq`,
-`ne`).
+Los códigos son los de TestStand y no se traducen: `EQ`, `NE`, `GT`, `LT`,
+`GE`, `LE`; `GTLT`, `GELE`, `GELT`, `GTLE` (dentro); `LTGT`, `LEGE`, `LEGT`,
+`LTGE` (fuera); `EQT`; y `none`. `units` es texto para el informe.
 
 ### Ejecutores
 
 | Antes | Ahora |
 |---|---|
-| `tipo: embebido` | `type: embedded` |
+| `tipo: embebido` | `type: embedded` (retirado: ya no hay ejecutor embebido, ADR-0041) |
 | `puerto` | `port` |
 
 Sin cambio: `host`, `path`, `tipo: wasm|grpc`.
@@ -109,9 +121,11 @@ Sin cambio: los scopes `locals`, `parameters`, `file_globals`; los operadores
 | `error` | `error` |
 | `saltado` | `skipped` |
 | `inconcluso` | `inconclusive` |
+| — | `done` (nuevo, ADR-0040: terminó sin juzgar) |
 
-Son vocabulario **cerrado**: cualquier otra cadena que devuelva un ejecutor
-convierte el paso en `error` (ADR-0019, Regla 2). Viven a la vez en el WIT, en
+Son vocabulario **cerrado**: un ejecutor devuelve `pass`, `fail`, `error` o
+`skipped`, y cualquier otra cadena convierte el paso en `error` (ADR-0019,
+Regla 2). `done` e `inconclusive` los produce sólo el motor. Viven a la vez en el WIT, en
 `paso.proto`, en el JSON, en el CSV y en el reporte, así que se mueven juntos o
 el contrato miente.
 
@@ -184,7 +198,7 @@ Sin cambio: `setup`, `main`, `cleanup` como valores de `phase`.
 | `--solo-loopback` | `--loopback-only` |
 
 Sin cambio: `--json`, `--csv`, `--limits`, `--validate`, `--process-model`,
-`--port`, `--wasm`, `--quiet`.
+`--wasm`, `--quiet`. (`--port` se retiró con ADR-0041.)
 
 ## Lo que todavía está en castellano y acabará en inglés
 

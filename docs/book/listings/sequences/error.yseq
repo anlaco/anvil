@@ -5,6 +5,10 @@ executors:
 
 main:
   - name: board/read_temperature
+    type: pass_fail
+    module: board/read_temperature
     executor: bench
   - name: board/check_led
+    type: pass_fail
+    module: board/check_led
     executor: bench

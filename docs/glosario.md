@@ -19,9 +19,8 @@ término de TestStand no se replica igual en Anvil, se dice explícitamente.
 
 - **Secuencia.** Una lista ordenada de pasos agrupados en Setup, Main y
   Cleanup. En Anvil es **datos** (`DefinicionSecuencia`), no código: el
-  motor la recorre sin saber qué hace cada paso. Hoy se construye en código
-  (`crates/motor/src/bin/basica_datos.rs`); el objetivo es cargarla desde
-  YAML (ver [diseno/formato-de-secuencia.md](diseno/formato-de-secuencia.md)).
+  motor la recorre sin saber qué hace cada paso. Se carga desde YAML (ver
+  [diseno/formato-de-secuencia.md](diseno/formato-de-secuencia.md)).
 
 - **Paso.** La unidad de test. Se invoca **por gRPC por su nombre**; el
   motor nunca lo llama directamente. Definido por `DefinicionPaso{nombre,
@@ -35,12 +34,13 @@ término de TestStand no se replica igual en Anvil, se dice explícitamente.
     el primer fallo**.
   - **Cleanup**: libera recursos. Corre **siempre**, pase lo que pase antes
     — un equipo que se quedó encendido es peor que una secuencia que falló.
-  Semántica implementada en `crates/motor/src/lib.rs::ejecuta_secuencia`.
+  Semántica implementada en `crates/motor/src/lib.rs::ejecuta_programa`.
 
 - **Despacho por nombre.** El motor pide un paso por su `nombre` (string) al
   ejecutor por gRPC; el ejecutor lo ata a una función concreta. Es el único
-  punto donde el nombre del cable se ata a código (hoy en
-  `crates/pasos_demo/src/lib.rs::despacha`). Un nombre desconocido devuelve
+  punto donde el nombre del cable se ata a código (en el puente WASM,
+  `executors/wasm/src/main.rs::resolve` elige el módulo y el registro del SDK,
+  `executors/rust/anvil-step/src/registry.rs`, la función). Un nombre desconocido devuelve
   `error`, no pánico: una secuencia mal escrita no debe tumbar el ejecutor.
 
 - **Reintento.** Cada paso declara cuántos intentos admite (`reintentos`).
@@ -52,16 +52,20 @@ término de TestStand no se replica igual en Anvil, se dice explícitamente.
 - **Estado.** Uno de tres: `paso`, `fallo`, `error`. Se mantiene como
   **texto** (no enum) porque viaja así en `paso.proto` y porque el contrato
   admite pasos escritos en cualquier lenguaje.
-  - `paso`: el paso cumplió su criterio.
-  - `fallo`: el paso no cumplió un criterio de aceptación (p. ej. una medida
+  - `pass`: el paso cumplió su criterio.
+  - `fail`: el paso no cumplió un criterio de aceptación (p. ej. una medida
     fuera de rango). Es un resultado **válido**, no un error del motor.
-  - `error`: el paso no pudo ejecutarse (p. ej. nombre desconocido, o un
-    fallo de comunicación). Un `error` **manda sobre un `fallo`** en el
-    agregado de la secuencia.
+  - `error`: el paso no pudo ejecutarse o juzgarse (p. ej. módulo desconocido,
+    un fallo de comunicación, o un `numeric_limit` sin número). Un `error`
+    **manda sobre un `fail`** en el agregado de la secuencia.
+  - `skipped`: no se ejecutó (`disable` o precondición falsa). **Neutral**.
+  - `done`: terminó y **no juzgó nada** — un `action`, un `statement`, un
+    `numeric_limit` con `comparison: none` (ADR-0040 §6). También neutral, y
+    lo pone el motor: ningún ejecutor lo devuelve.
 
-- **Agregado de secuencia.** El estado global de una secuencia corrida:
-  `error` si algún paso dio `error`; si no, `fallo` si alguno dio `fallo`; si
-  no, `paso`. Implementado en `ResultadoSecuencia::estado`.
+- **Agregado de secuencia.** El estado global de una secuencia corrida: el
+  máximo en la escala `pass < inconclusive < fail < error`, con `skipped` y
+  `done` fuera de ella. Implementado en `ResultadoSecuencia::estado`.
 
 - **Medida.** Un resultado numérico con límites: `valor_medido` contra
   `limite_min`/`limite_max`. En el contrato viaja como **string** (ver
@@ -78,14 +82,15 @@ término de TestStand no se replica igual en Anvil, se dice explícitamente.
   paso: los pide por nombre al ejecutor. Crate `crates/motor`.
 
 - **Ejecutor de pasos.** El servidor gRPC que despacha pasos por nombre: el
-  adaptador entre el motor genérico y los pasos concretos. Hoy es
-  `crates/ejecutor_pasos` (binario que escucha en `127.0.0.1:9100`).
+  adaptador entre el motor genérico y los pasos concretos. Es un proceso aparte
+  que la secuencia declara en `executors:`; `anvil` no lleva ninguno
+  ([ADR-0041](adr/0041-there-is-no-embedded-executor.md)).
 
 - **Ejecutor de lenguaje.** Ejecutor de pasos distribuido como **módulo
   aparte** (`executors/`), uno por sistema (Python, LabVIEW, MATLAB, …),
   que habla el mismo `paso.proto` con gRPC nativo de su ecosistema. Son
-  **alternativas opt-in** al ejecutor WASM embebido; pueden mezclarse en la
-  misma secuencia. Licencia Apache-2.0. Ver
+  **alternativas** entre sí y al puente WASM (`anvil-exec-wasm`); pueden
+  mezclarse en la misma secuencia. Licencia Apache-2.0. Ver
   [diseno/executores-lenguaje.md](diseno/executores-lenguaje.md) y
   [ADR-0012](adr/0012-executores-de-lenguaje-como-modulos.md).
 
@@ -141,7 +146,8 @@ término de TestStand no se replica igual en Anvil, se dice explícitamente.
 
 - **Routing nombre→endpoint.** (M5-ext.1, implementado) El YAML declara
   `ejecutores:` y cada paso `grpc` su `ejecutor:`; el motor despacha por
-  nombre contra una tabla de conexiones (embebido por defecto). Override por
+  nombre contra una tabla de conexiones; no hay ejecutor por defecto
+  (ADR-0041). Override por
   CLI `--executor nombre=host:puerto`. Ver
   [ADR-0013](adr/0013-cargador-wasm-host-side-y-routing.md).
 
@@ -193,22 +199,33 @@ término de TestStand no se replica igual en Anvil, se dice explícitamente.
   prueba. Anvil hoy no modela el UUT explícitamente (post-MVP, ligado al
   process model).
 
-- **Step type.** Plantilla de paso con comportamiento encapsulado.
-  TestStand trae *built-in* (Pass/Fail, Numeric Limit, Action, Sequence Call,
-  Statement, Synchronization…) y *custom step types* con substeps. En Anvil
-  el MVP incluye los built-in básicos (**pass/fail**, **limit test**, action,
-  sequence call, statement); los custom son post-MVP. Ver
+- **Step type (`type`).** Cómo se **juzga** un paso, no qué llama (ADR-0040).
+  Es obligatorio, y son cinco: `action`, `pass_fail`, `numeric_limit`,
+  `statement`, `sequence_call`. TestStand trae además *custom step types* con
+  substeps; en Anvil son post-MVP. Ver
   [diseno/modelo-de-pasos.md](diseno/modelo-de-pasos.md).
 
-- **Pass/Fail test.** Step type que solo decide *pasa* o *falla* sin medir:
-  el paso hace algo y reporta un `estado`. Es el built-in más simple y entra
-  en el **MVP** (encaja con `ResultadoStep::nuevo`, sin medida). Ver
-  [diseno/modelo-de-pasos.md](diseno/modelo-de-pasos.md).
+- **Módulo (`module`).** Lo que el paso **llama** en su ejecutor: viaja como
+  `StepRequest.name` y se busca en el catálogo (ADR-0021). El `name` del paso
+  es sólo su etiqueta en el informe, así que dos pasos pueden llamar al mismo
+  módulo con entradas distintas y juzgarse de forma distinta. Es el
+  equivalente de la pestaña *Module* de TestStand, frente a las propiedades
+  del paso.
 
-- **Limit test.** Step type que compara una **medida** contra límites
-  high/low (o de comparación) y produce `paso`/`fallo`. Distinto del Pass/Fail
-  (este sí mide). En Anvil ya está soportado por `ResultadoStep::medido`. Ver
+- **Pass/Fail test.** Step type que decide *pasa* o *falla* sin medir: o lo
+  dice el módulo con su `estado`, o lo decide el motor evaluando una
+  `condition` sobre variables ya pobladas (el veredicto compuesto, ADR-0018).
+  Ver [diseno/modelo-de-pasos.md](diseno/modelo-de-pasos.md).
+
+- **Numeric limit test.** Step type que compara un **número** —la medida del
+  módulo, o el `value` del paso— contra un `limit` en los códigos de TestStand
+  y produce `pass`/`fail`. Distinto del Pass/Fail (este sí mide), y sin número
+  que juzgar es `error`. Ver
   [diseno/limites-y-estados.md](diseno/limites-y-estados.md).
+
+- **Action.** Step type que hace algo y **no juzga**: mover un fixture, abrir
+  un relé. El `pass` de su módulo se informa como `done`; su `fail` o su
+  `error` se mantienen.
 
 - **Variables y scopes.** Jerarquía de variables con alcance:
   **Locals** (locales a una secuencia), **Parameters** (entradas/salidas

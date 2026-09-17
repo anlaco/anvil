@@ -1,4 +1,4 @@
-//! The host's build script: copies the two already-compiled WASM guests into
+//! The host's build script: copies the already-compiled engine guest into
 //! `OUT_DIR` for `main.rs` to embed with `include_bytes!`, and places the
 //! compiled bridge binary **next to where cargo will leave the `anvil`
 //! binary** — the bridge is not embedded, it ships as a file (ADR-0023).
@@ -8,7 +8,7 @@
 //! lock). The build order is:
 //!
 //! ```sh
-//! cargo build --target wasm32-wasip2 -p motor -p ejecutor_pasos   # guests
+//! cargo build --target wasm32-wasip2 -p motor                        # guest
 //! cargo build --manifest-path executors/wasm/Cargo.toml              # bridge
 //! cargo build --manifest-path packaging/anvil-host/Cargo.toml        # host
 //! ```
@@ -18,7 +18,7 @@
 //! If the artifacts are missing, it fails with a clear message naming the
 //! command to run first. It looks **first in the profile the host is being
 //! compiled with** (`PROFILE`) and only falls back to the other one as a
-//! last resort, with a warning: a release `anvil` that embedded debug guests
+//! last resort, with a warning: a release `anvil` that embedded a debug guest
 //! would start tens of seconds slower (wasmtime compiles the guest
 //! unoptimized), which is a failure that is hard to attribute.
 
@@ -47,20 +47,14 @@ fn main() {
         "make build"
     };
 
-    // --- The two guests: copied into OUT_DIR, embedded by `main.rs`. They
-    // --- are core, not product (ADR-0011, ADR-0012).
-    let guests: Vec<(&str, &str, &str)> = vec![
-        (
-            "anvil-guest.wasm",
-            "target/wasm32-wasip2",
-            "cargo build --target wasm32-wasip2 -p motor -p ejecutor_pasos",
-        ),
-        (
-            "ejecutor_pasos.wasm",
-            "target/wasm32-wasip2",
-            "cargo build --target wasm32-wasip2 -p motor -p ejecutor_pasos",
-        ),
-    ];
+    // --- The engine guest: copied into OUT_DIR, embedded by `main.rs`. It is
+    // --- core, not product (ADR-0011); the binary carries no executor
+    // --- (ADR-0041).
+    let guests: Vec<(&str, &str, &str)> = vec![(
+        "anvil-guest.wasm",
+        "target/wasm32-wasip2",
+        "cargo build --target wasm32-wasip2 -p motor",
+    )];
     for (name, subdir, command) in &guests {
         let dst = out_dir.join(name);
         let path = |p: &str| repo_root.join(subdir).join(p).join(name);

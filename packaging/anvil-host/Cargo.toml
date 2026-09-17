@@ -3,7 +3,7 @@ name = "anvil-host"
 version = "0.6.3"
 edition = "2021"
 license = "AGPL-3.0-or-later"
-description = "Host nativo de Anvil: un binario que hospeda wasmtime y los dos guests WASM (motor + ejecutor)"
+description = "Anvil's native host: one binary that hosts wasmtime and the engine guest"
 
 [dependencies]
 wasmtime = "47"

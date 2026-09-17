@@ -45,33 +45,42 @@ executors:
 
 setup:
   - name: fixture/power_on
+    type: action
+    module: fixture/power_on
     executor: bench
 
 main:
   - name: fixture/measure_settling_rail
+    type: numeric_limit
+    module: fixture/measure_settling_rail
     executor: bench
     retries: 3
-    limit: { type: range, min: 4.75, max: 5.25 }
+    limit: { comparison: GELE, low: 4.75, high: 5.25 }
 
   - name: board/check_led
+    type: pass_fail
+    module: board/check_led
     executor: bench
 
 cleanup:
   - name: fixture/power_off
+    type: action
+    module: fixture/power_off
     executor: bench
 ```
 
 ```console
 $ anvil sequences/phases.yseq 2>/dev/null
 === phases: fail ===
-  [pass] fixture/power_on: 
+  [done] fixture/power_on: 
   [fail] fixture/measure_settling_rail: 4.1 fuera de rango [4.75, 5.25]
-  [pass] fixture/power_off: 
+  [done] fixture/power_off: 
 ```
 
-- **`setup`** runs first. If any setup step does not pass, `main` is skipped
-  entirely.
-- **`main`** runs next and stops at its first step that does not pass.
+- **`setup`** runs first. If any setup step fails or errors, `main` is skipped
+  entirely. `fixture/power_on` is an `action`: it does something and judges
+  nothing, so it reports `done`, and `done` lets the sequence go on.
+- **`main`** runs next and stops at its first step that fails or errors.
 - **`cleanup`** always runs, whatever happened before. `fixture/power_off`
   ran even though the measurement failed. Put everything that makes the bench
   safe here.
@@ -81,10 +90,10 @@ $ anvil sequences/phases.yseq 2>/dev/null
 That sequence has `retries: 3` on `fixture/measure_settling_rail`, and the step
 reads 4.97 V from its second attempt on. Yet the report shows 4.1 and `fail`.
 
-This is how 0.5.0 behaves
+This is how Anvil behaves today
 ([#76](https://github.com/anlaco/anvil/issues/76)): **`retries` repeats a step
-only while the step itself does not pass.** The limit is applied once, after the last attempt. A
-step that returns a measurement has passed as far as retries are concerned, so
+only while its module does not pass.** The limit is applied once, after the last attempt. A
+module that returns a measurement has passed as far as retries are concerned, so
 it is not called again, and the limit then fails the first value.
 
 Retries are for a step that fails or errors on its own — a link that times out
@@ -98,31 +107,40 @@ executors:
 
 setup:
   - name: fixture/power_on
+    type: action
+    module: fixture/power_on
     executor: bench
   - name: fixture/connect
+    type: action
+    module: fixture/connect
     executor: bench
     retries: 3
 
 main:
   - name: board/measure_rail
+    type: numeric_limit
+    module: board/measure_rail
     executor: bench
-    limit: { type: range, min: 4.75, max: 5.25 }
+    limit: { comparison: GELE, low: 4.75, high: 5.25 }
 
 cleanup:
   - name: fixture/power_off
+    type: action
+    module: fixture/power_off
     executor: bench
 ```
 
 ```console
 $ anvil sequences/retries.yseq 2>/dev/null
 === retries: pass ===
-  [pass] fixture/power_on: 
-  [pass] fixture/connect: connected on attempt 2
+  [done] fixture/power_on: 
+  [done] fixture/connect: connected on attempt 2
   [pass] board/measure_rail: 
-  [pass] fixture/power_off: 
+  [done] fixture/power_off: 
 ```
 
-`fixture/connect` errored on attempt 1 and passed on attempt 2. `retries` is
+`fixture/connect` errored on attempt 1 and succeeded on attempt 2 — an action,
+so it reports `done`. `retries` is
 the **total** number of attempts: the default is 1, meaning no retry, and 0 is
 refused when the file loads.
 
@@ -139,26 +157,34 @@ executors:
 
 setup:
   - name: fixture/power_on
+    type: action
+    module: fixture/power_on
     executor: bench
   - name: fixture/connect
+    type: action
+    module: fixture/connect
     executor: bench
 
 main:
   - name: board/measure_rail
+    type: numeric_limit
+    module: board/measure_rail
     executor: bench
-    limit: { type: range, min: 4.75, max: 5.25 }
+    limit: { comparison: GELE, low: 4.75, high: 5.25 }
 
 cleanup:
   - name: fixture/power_off
+    type: action
+    module: fixture/power_off
     executor: bench
 ```
 
 ```console
 $ anvil sequences/setup-fails.yseq 2>/dev/null
 === setup_fails: error ===
-  [pass] fixture/power_on: 
+  [done] fixture/power_on: 
   [error] fixture/connect: no answer from the board
-  [pass] fixture/power_off: 
+  [done] fixture/power_off: 
 ```
 
 The setup errored, `main` never ran, and `cleanup` still did.

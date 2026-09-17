@@ -606,7 +606,8 @@ button:focus-visible {
   color: var(--error);
 }
 
-.step-row[data-run="skipped"] .run-mark {
+.step-row[data-run="skipped"] .run-mark,
+.step-row[data-run="done"] .run-mark {
   color: var(--skipped);
 }
 

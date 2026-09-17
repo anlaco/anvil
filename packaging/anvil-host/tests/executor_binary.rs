@@ -36,9 +36,15 @@ fn raiz_repo() -> PathBuf {
 /// The example department: the bridge binary with its two modules beside it,
 /// as `make example` leaves it. Skips when it has not been built — a skip
 /// never claims a pass.
+///
+/// The binary is looked for **with this platform's suffix**, while the
+/// sequences name it without one: on Windows that is what exercises the
+/// `.exe` resolution, instead of skipping because `anvil-exec-wasm` is not
+/// there.
 fn departamento_demo() -> Option<PathBuf> {
-    let ruta = raiz_repo().join("ejemplos/departamento/dist/anvil-exec-wasm");
-    let modulo = raiz_repo().join("ejemplos/departamento/dist/multimetro.wasm");
+    let dist = raiz_repo().join("ejemplos/departamento/dist");
+    let ruta = dist.join(format!("anvil-exec-wasm{}", std::env::consts::EXE_SUFFIX));
+    let modulo = dist.join("multimetro.wasm");
     (ruta.exists() && modulo.exists()).then_some(ruta)
 }
 

@@ -36,9 +36,9 @@ Write-Host "== building $PkgName =="
 # the same "download and run" promise the Linux musl build makes.
 $env:RUSTFLAGS = "-C target-feature=+crt-static"
 
-# The guests carry the version `anvil --version` prints, so they are built
+# The guest carries the version `anvil --version` prints, so they are built
 # first and from the current manifest — not reused from a previous bump.
-cargo build --release --target $Wasm -p motor -p ejecutor_pasos
+cargo build --release --target $Wasm -p motor
 cargo build --release --target $Wasm --manifest-path ejemplos/hola-paso/Cargo.toml
 cargo build --release --target $Wasm --manifest-path ejemplos/departamento/Cargo.toml
 cargo build --release --target $Target --manifest-path executors/wasm/Cargo.toml

@@ -3,8 +3,10 @@
 name: validate_wasm_inexistente
 main:
   - name: medir_voltaje
+    type: numeric_limit
+    module: medir_voltaje
     executor: w
-    limit: { type: range, min: 0.0, max: 10.0 }
+    limit: { comparison: GELE, low: 0.0, high: 10.0 }
 executors:
   - name: w
     type: wasm

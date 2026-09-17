@@ -35,10 +35,10 @@ Prioridad: **MVP** (Must), **MVP-parcial** (Should), **post-MVP** (Could),
 
 | ID | Requisito | Prioridad | Trazabilidad |
 |---|---|---|---|
-| RF-10 | Cada resultado tiene un **estado**: `paso`, `fallo` o `error` (texto, no enum). | MVP | `modelo/src/lib.rs::ResultadoStep.estado` |
-| RF-11 | Un `fallo` (criterio de aceptación no cumplido) es un resultado **válido**, no un error del motor. | MVP | `motor/src/lib.rs::Error` (solo Red/Protobuf) |
-| RF-12 | Un nombre de paso desconocido produce `error`, no pánico. | MVP | `pasos_demo/src/lib.rs::despacha` |
-| RF-13 | Agregado de secuencia: `error` si alguno dio `error`; si no, `fallo` si alguno dio `fallo`; si no, `paso`. | MVP | `modelo/src/lib.rs::ResultadoSecuencia::estado` |
+| RF-10 | Cada resultado tiene un **estado** (texto, no enum). Un ejecutor devuelve `pass`, `fail`, `error` o `skipped`, y sólo esos; el motor añade `done` (terminó sin juzgar, ADR-0040) e `inconclusive` como agregado (ADR-0019). | MVP | `modelo/src/lib.rs::ESTADOS_DE_EJECUTOR`, `ResultadoStep.estado` |
+| RF-11 | Un `fail` (criterio de aceptación no cumplido) es un resultado **válido**, no un error del motor. | MVP | `motor/src/lib.rs::Error` (solo Red/Protobuf) |
+| RF-12 | Un nombre de paso desconocido produce `error`, no pánico. | MVP | `executors/wasm/src/main.rs::resolve` (módulo desconocido) y `executors/rust/anvil-step/src/registry.rs` (paso desconocido) |
+| RF-13 | Agregado de secuencia: el máximo en la escala `pass < inconclusive < fail < error`, con `skipped` y `done` fuera de ella (neutrales). | MVP | `modelo/src/lib.rs::Severidad`, `ResultadoSecuencia::estado` |
 
 ### Contrato del paso (gRPC)
 
@@ -70,9 +70,9 @@ Prioridad: **MVP** (Must), **MVP-parcial** (Should), **post-MVP** (Could),
 
 | ID | Requisito | Prioridad | Trazabilidad |
 |---|---|---|---|
-| RF-25 | Built-in **pass/fail** (sin medida, solo `paso`/`fallo`), por las dos vías: lo decide el **paso**, o lo decide el **motor** evaluando una expresión declarada (`tipo: pass_fail`, veredicto compuesto). | MVP | paso: `pasos_demo/src/lib.rs::verificar_led`; motor: `motor/src/lib.rs::evalua_pass_fail` (ADR-0018); [diseno/modelo-de-pasos.md](diseno/modelo-de-pasos.md) |
-| RF-26 | Built-in **limit test** (medida contra high/low o comparación). | MVP | `motor/src/lib.rs::aplicar_limite`; `modelo/src/lib.rs::Limite` (ADR-0008) |
-| RF-27 | Built-in **action**, **sequence call**, **statement**. | MVP-parcial | action: `pasos_demo/src/lib.rs::abrir_rele`; statement: `motor/src/lib.rs::ejecuta_statement_puro` (M4-núcleo); sequence call: `motor/src/lib.rs::ejecuta_sequence_call` (M4b, inline + path, by-reference; ADR-0010) |
+| RF-25 | Built-in **pass/fail** (sin medida, solo `pass`/`fail`), por las dos vías: lo decide el **módulo**, o lo decide el **motor** evaluando una expresión declarada (`type: pass_fail` con `condition`, veredicto compuesto). | MVP | paso: `ejemplos/departamento/demo/src/lib.rs::check_led`; motor: `motor/src/lib.rs::evalua_pass_fail` (ADR-0018); [diseno/modelo-de-pasos.md](diseno/modelo-de-pasos.md) |
+| RF-26 | Built-in **limit test**: `type: numeric_limit` con un `limit` en los códigos de TestStand (`EQ`…`LE`, `GELE`…, `LTGT`…, `EQT`, `none`). Sin número que juzgar, `error`. | MVP | `motor/src/lib.rs::juzga_limite_numerico` + `aplicar_limite`; `modelo/src/lib.rs::{Limite, Criterio}` (ADR-0008, ADR-0040 §5 y §7) |
+| RF-27 | Built-in **action**, **sequence call**, **statement**. El `type` del paso es obligatorio y dice cómo se juzga; `module` dice qué llama (ADR-0040). | MVP-parcial | action: `ejemplos/departamento/demo/src/lib.rs::open_relay`; statement: `motor/src/lib.rs::ejecuta_statement_puro` (M4-núcleo); sequence call: `motor/src/lib.rs::ejecuta_sequence_call` (M4b, inline + path, by-reference; ADR-0010) |
 | RF-28 | **Custom step types** con substeps encapsulados. | post-MVP | diseno/modelo-de-pasos.md |
 | RF-29 | Los límites son **datos first-class** (no aserciones ad-hoc). | MVP-parcial | `modelo/src/lib.rs::Limite`; `cargador/src/lib.rs::LimiteYaml`; [ADR-0008](adr/0008-limites-evaluados-por-el-motor.md) |
 | RF-30 | **Property loader**: límites desde un fichero externo. | MVP-parcial | `cargador/src/lib.rs::cargar_limites_de_archivo` + `aplicar_limites` |
@@ -86,10 +86,10 @@ Prioridad: **MVP** (Must), **MVP-parcial** (Should), **post-MVP** (Could),
 | RF-33 | **Precondición** por step (el paso se salta si no se cumple). | MVP-parcial | `motor::evalua_precondicion` (M4-núcleo); [diseno/motor-de-expresiones.md](diseno/motor-de-expresiones.md) |
 | RF-34 | Control de flujo: **pause-on-fail**, **step**, **disable** de pasos. | MVP-parcial | `disable` + `pause_on_fail` en `DefinicionPaso` (M4-núcleo); `step` post-MVP; [diseno/motor-de-ejecucion.md](diseno/motor-de-ejecucion.md) |
 | RF-35 | **Expression engine** (sintaxis **Julia**, **no** C-like). | MVP-parcial | `crates/expr` (M4-núcleo); [diseno/motor-de-expresiones.md](diseno/motor-de-expresiones.md) |
-| RF-36 | Integración de instrumentos por **adapter gRPC**. | MVP-parcial | `crates/pasos_scpi` (M5, SCPI/TCP + mock); [ADR-0017](adr/0017-adapter-grpc-de-instrumento-real-por-scpi-tcp.md); [diseno/integracion-instrumentos.md](diseno/integracion-instrumentos.md) |
+| RF-36 | Integración de instrumentos por **adapter gRPC**. | MVP-parcial | El adapter SCPI/TCP de M5 (`crates/pasos_scpi`, [ADR-0017](adr/0017-adapter-grpc-de-instrumento-real-por-scpi-tcp.md)) **se retiró** con el ejecutor embebido ([ADR-0041](adr/0041-there-is-no-embedded-executor.md) §7) y hoy no hay adapter de instrumento en el repo; un paso que hable con un instrumento se escribe con el SDK de Python o C#. [diseno/integracion-instrumentos.md](diseno/integracion-instrumentos.md) |
 | RF-36.1 | Un paso puede servirse por un **ejecutor gRPC remoto** en otro lenguaje o SO (executores de lenguaje distribuidos en `executors/`); el motor despacha por **nombre→endpoint**. | MVP extendido (M5-ext.1) ✅ | `Motor::desde_programa` + `ejecutores:`/`ejecutor:` (M5-ext.1, ADR-0013); [ADR-0013](adr/0013-cargador-wasm-host-side-y-routing.md); [diseno/executores-lenguaje.md](diseno/executores-lenguaje.md) |
-| RF-36.2 | Un paso **WASM propio** se carga por **path** en runtime (modelo `.vi`), sin recompilar; cada módulo corre aislado. Lo carga el **host** (no el ejecutor embebido: un guest WASM no puede instanciar wasmtime dentro de sí mismo). El `.wasm` es un **componente** que exporta `run` (WIT `anvil:paso`, ADR-0015); el host lo puentea a gRPC. | MVP extendido (M5-ext.2) ✅ | ADR-0015: puente `anvil-exec-wasm` + override `--executor` sintético (el motor nunca ejecuta `Wasm`); [diseno/executores-lenguaje.md](diseno/executores-lenguaje.md) |
-| RF-36.3 | El routing `ejecutores:` vive en el **YAML** de la secuencia con **override por flag** `--executor nombre=host:puerto` (patrón embebido-primero, como los límites). | MVP extendido (M5-ext.1) ✅ | `cargador::aplicar_override_ejecutores` (M5-ext.1, ADR-0013); [diseno/executores-lenguaje.md](diseno/executores-lenguaje.md) |
+| RF-36.2 | Un paso **WASM propio** se carga por **path** en runtime (modelo `.vi`), sin recompilar; cada módulo corre aislado. Lo carga el **host** (un guest WASM no puede instanciar wasmtime dentro de sí mismo). El `.wasm` es un **componente** que exporta `run` (WIT `anvil:paso`, ADR-0015); el host lo puentea a gRPC. | MVP extendido (M5-ext.2) ✅ | ADR-0015: puente `anvil-exec-wasm` + override `--executor` sintético (el motor nunca ejecuta `Wasm`); [diseno/executores-lenguaje.md](diseno/executores-lenguaje.md) |
+| RF-36.3 | El routing `ejecutores:` vive en el **YAML** de la secuencia con **override por flag** `--executor nombre=host:puerto` (el YAML primero y el flag encima, como los límites). No hay ejecutor por defecto: un paso que llama a uno lo nombra ([ADR-0041](adr/0041-there-is-no-embedded-executor.md)). | MVP extendido (M5-ext.1) ✅ | `cargador::aplicar_override_ejecutores` (M5-ext.1, ADR-0013); [diseno/executores-lenguaje.md](diseno/executores-lenguaje.md) |
 | RF-36.4 | **LID** (despliegue legacy): un ejecutor de lenguaje puede correr en un SO legacy (Win7/VM) con aislamiento declarado; Anvil lo ve como un endpoint gRPC más. | MVP extendido (**aplazado a post-M5-ext**; tecnología a definir) | ADR-0013; [diseno/executores-lenguaje.md](diseno/executores-lenguaje.md) |
 | RF-37 | PyVISA/SCPI nativo. | post-MVP | diseno/integracion-instrumentos.md |
 
@@ -97,9 +97,9 @@ Prioridad: **MVP** (Must), **MVP-parcial** (Should), **post-MVP** (Could),
 
 | ID | Requisito | Prioridad | Trazabilidad |
 |---|---|---|---|
-| RF-38 | **Process model Sequential** simple; separación secuencia vs. "cómo se corre en producción". | MVP-parcial | `process_models/sequential.yaml` + `cargador::cargar_programa_con_pm` (M5); [ADR-0016](adr/0016-process-model-sequential-como-secuencia-envoltorio.md); [diseno/proceso-de-test.md](diseno/proceso-de-test.md) |
+| RF-38 | **Process model Sequential** simple; separación secuencia vs. "cómo se corre en producción". | MVP-parcial | `cargador::cargar_programa_con_pm` (M5); el PM canónico `process_models/sequential.yaml` se retiró ([ADR-0041](adr/0041-there-is-no-embedded-executor.md) §6) y la regresión usa `docs/qa/regresion/pm-minimal.yaml`; [ADR-0016](adr/0016-process-model-sequential-como-secuencia-envoltorio.md); [diseno/proceso-de-test.md](diseno/proceso-de-test.md) |
 | RF-39 | Paralelismo (Parallel/Batch) con cancelación jerárquica. | post-MVP | diseno/proceso-de-test.md |
-| RF-40 | **Headless/CLI** primero. | MVP | `crates/motor/src/bin/anvil.rs` (M5: `--process-model`/`--validate`/`--port`/`--quiet`/`--help`/`--version`); [ADR-0011](adr/0011-distribucion-un-binario-hospeda-wasmtime.md); [diseno/ui-vs-headless.md](diseno/ui-vs-headless.md) |
+| RF-40 | **Headless/CLI** primero. | MVP | `crates/motor/src/bin/anvil.rs` (M5: `--process-model`/`--validate`/`--quiet`/`--help`/`--version`; `--port` se retiró con ADR-0041); [ADR-0011](adr/0011-distribucion-un-binario-hospeda-wasmtime.md); [diseno/ui-vs-headless.md](diseno/ui-vs-headless.md) |
 | RF-41 | Operator UI web + UIMsgs. | post-MVP | diseno/ui-vs-headless.md |
 
 ### Out-of-scope (v1)

@@ -85,6 +85,9 @@ Tres preguntas abiertas al arrancar M5-ext.2:
   necesita "el puerto donde escuchar" y el contrato `paso.proto` — nada
   más de Anvil.
 
+> **Overruled in part by [ADR-0041](0041-there-is-no-embedded-executor.md)
+> (2026-09-15):** the embedded executor this section aligned with is removed.
+
 ### 3. Un `Store` por path (deduplicación), preload al arrancar
 
 - Dos ejecutores con el **mismo path** comparten un único Store (un `.wasm`

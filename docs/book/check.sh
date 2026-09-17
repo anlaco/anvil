@@ -85,7 +85,6 @@ normalise() {
     -e 's/life [0-9a-f]{32}/life <life>/g' \
     -e 's/"lifetime": "[0-9a-f]{32}"/"lifetime": "<life>"/g' \
     -e 's/sha256:[0-9a-f]+/sha256:<sha256>/g' \
-    -e 's/escuchando en [0-9]+/escuchando en <port>/g' \
     -e 's/127\.0\.0\.1:[0-9]{5}/127.0.0.1:<port>/g'
 }
 

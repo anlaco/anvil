@@ -34,7 +34,8 @@ Stop the executor with Ctrl+C in its terminal and start it again with
 
 ## Limits
 
-`sequences/judging.yseq` uses each kind of judgement:
+A step's `type` says how it is judged. `sequences/judging.yseq` uses the two
+that judge something:
 
 ```yaml
 name: judging
@@ -44,14 +45,20 @@ executors:
 
 main:
   - name: board/measure_rail
+    type: numeric_limit
+    module: board/measure_rail
     executor: bench
-    limit: { type: range, min: 4.75, max: 5.25 }
+    limit: { comparison: GELE, low: 4.75, high: 5.25 }
 
   - name: board/measure_leakage
+    type: numeric_limit
+    module: board/measure_leakage
     executor: bench
-    limit: { type: comparison, op: le, expected: 0.001 }
+    limit: { comparison: LE, low: 0.001 }
 
   - name: board/check_led
+    type: pass_fail
+    module: board/check_led
     executor: bench
 ```
 
@@ -63,12 +70,29 @@ $ anvil sequences/judging.yseq 2>/dev/null
   [pass] board/check_led: 
 ```
 
-- `board/measure_rail` returns a number and has a **`range`** limit.
-- `board/measure_leakage` has a **`comparison`**: the measurement is compared
-  with `expected` using `op`, one of `eq`, `ne`, `lt`, `le`, `gt` or `ge`. Here,
-  "less than or equal to 1 mA".
-- `board/check_led` returns a `bool`, so the step itself decides pass or fail
-  and needs no limit.
+- `board/measure_rail` is a **`numeric_limit`**: it returns a number, and the
+  limit `GELE` judges it between `low` and `high`, both included.
+- `board/measure_leakage` is a `numeric_limit` with **`LE`**, one limit only:
+  "less than or equal to 1 mA". The one-limit codes are `EQ`, `NE`, `GT`, `LT`,
+  `GE` and `LE`, and they use `low`.
+- `board/check_led` is a **`pass_fail`**: it returns a `bool`, so the step
+  itself decides, and it needs no limit.
+
+The two-limit codes are TestStand's: `GTLT`, `GELE`, `GELT` and `GTLE` pass
+**inside** `low` and `high` — `GE`/`LE` include the limit, `GT`/`LT` do not —
+and `LTGT`, `LEGE`, `LEGT` and `LTGE` pass **outside** them. `EQT` passes
+within a tolerance of a `nominal` value, and `none` records the value and
+judges nothing. A limit can carry `units`, which the report shows and the
+comparison ignores.
+
+A numeric limit **needs a number**. A `numeric_limit` step whose module returns
+none is `error`, not a pass: a limit that was never checked must not read as a
+limit that was met.
+
+The third type, **`action`**, is a step that does something and judges nothing
+— switching a supply on, connecting to a fixture. When its module succeeds it
+reports **`done`**, not `pass`: the report never says a step passed a check it
+did not make. Chapter 6 uses them.
 
 Now the same rail against a limit it cannot meet, in
 `sequences/rail-tight.yseq`:
@@ -81,8 +105,10 @@ executors:
 
 main:
   - name: board/measure_rail
+    type: numeric_limit
+    module: board/measure_rail
     executor: bench
-    limit: { type: range, min: 5.0, max: 5.25 }
+    limit: { comparison: GELE, low: 5.0, high: 5.25 }
 ```
 
 ```console
@@ -94,7 +120,8 @@ $ echo $?
 ```
 
 The step still returned 4.98 and did not change; the verdict did. The message
-reads "4.98 out of range [5, 5.25]", and the exit code is `1`.
+reads "4.98 out of range [5, 5.25]" — the brackets say both ends are included,
+as `GELE` does — and the exit code is `1`.
 
 ## Fail is about the unit, error is about the bench
 
@@ -109,8 +136,12 @@ executors:
 
 main:
   - name: board/read_temperature
+    type: pass_fail
+    module: board/read_temperature
     executor: bench
   - name: board/check_led
+    type: pass_fail
+    module: board/check_led
     executor: bench
 ```
 
@@ -139,8 +170,8 @@ keeps running.
 
 Two more things the output shows:
 
-- **`main` stops at the first step that does not pass.** `board/check_led`
-  never ran.
+- **`main` stops at the first step that fails or errors.** `board/check_led`
+  never ran. A `done` step does not stop anything.
 - A sequence's verdict is the worst of its steps: any `error` makes it `error`;
   otherwise any `fail` makes it `fail`. Both exit with `1`; the report tells
-  them apart.
+  them apart. `done` and `skipped` move the verdict neither way.

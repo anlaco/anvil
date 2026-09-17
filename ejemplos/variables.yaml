@@ -1,73 +1,93 @@
-# M4-núcleo: variables, precondición, asigna, statement y control de flujo.
+# M4-core: variables, precondition, assign, statement and flow control.
 #
-# Ejercita los scopes (RF-31), la precondición (RF-33), el control de flujo
-# (RF-34: disable / pause_on_fail), el paso `statement` local (RF-27) y el
-# vuelcado de `resultado` a `Locals` con `asigna`. El cableo al paso por el
-# wire es post-MVP: las variables viven en el motor; el paso gRPC no las recibe.
+# Exercises the scopes (RF-31), the precondition (RF-33), flow control
+# (RF-34: disable / pause_on_fail), the local `statement` step (RF-27) and
+# dumping `result` into `Locals` with `assign`. The variables live in the
+# engine; a step only receives the `inputs` it is given (ADR-0020).
 #
-# Resultado esperado (medir_voltaje mide 4.2 contra el rango 4.5–5.5 → fallo
-# por límite, ADR-0008; Main corta ahí):
-#   === variables_demo: fallo ===
-#     [paso] init_log: statement ok
-#     [paso] medir_voltaje: 4.2 fuera de rango [4.5, 5.5]
-#     [saltado] paso_obsoleto: disable
-# Estado agregado: "fallo" (hay un fallo; saltado no cuenta). `verificar_led`
-# no se invoca: Main corta en el primer fallo (pause_on_fail refuerza).
+# Expected result (demo/measure_voltage reads 4.2 against the 4.5–5.5 range →
+# fail by limit, ADR-0008; Main stops there):
+#   === variables_demo: fail ===
+#     [done] demo/connect: instrument connected (attempt 2)
+#     [done] init_log: statement ok
+#     [fail] demo/measure_voltage: 4.2 fuera de rango [4.5, 5.5]
+#     [done] demo/disconnect: instrument disconnected
+# `paso_obsoleto` and `demo/check_led` are never reached: Main stops at the
+# first fail (pause_on_fail reinforces it).
 
 name: variables_demo
 
-# Globales del archivo: visibles en toda la ejecución. El motor las carga al
-# iniciar la secuencia. Inmutables durante un paso.
-file_globals:
-  lote: "A-2026-08"   # texto
-  umbral_min: 4.5      # número
+executors:
+  - { name: demo, type: wasm, path: departamento/dist/anvil-exec-wasm }
 
-# Parámetros vacíos: en M4-núcleo no hay sequence call (reservado para M4b).
+# File globals: visible to the whole execution. The engine loads them when the
+# sequence starts. Immutable during a step.
+file_globals:
+  lote: "A-2026-08"   # text
+  umbral_min: 4.5      # number
+
+# Empty parameters: this sequence is not called by another one.
 parameters: {}
 
-# Locales de la secuencia: mutables por `asigna` durante la ejecución.
+# The sequence's locals: mutable by `assign` during the execution.
 locals:
   voltaje_leido: 0.0
   ok: false
 
 setup:
-  - name: conectar_equipo
+  - name: demo/connect
+    type: action
+    module: demo/connect
+    executor: demo
     retries: 3
 
 main:
-  # Statement local (RF-27): ejecuta una asignación en el motor, sin gRPC.
+  # Local statement (RF-27): runs an assignment in the engine, with no executor.
   - name: init_log
     type: statement
     statement: 'locals.ok = false'
 
-  # Paso gRPC con precondición (RF-33): sólo mide si hay lote definido. Si la
-  # precondición fuera falsa, el paso se saltaría sin gastar intento.
-  - name: medir_voltaje
+  # A step with a precondition (RF-33): it only measures if a lot is defined.
+  # If the precondition were false, the step would be skipped without spending
+  # an attempt.
+  - name: demo/measure_voltage
+    type: numeric_limit
+    module: demo/measure_voltage
+    executor: demo
     retries: 1
     precondition: 'file_globals.lote != ""'
     limit:
-      type: range
-      min: 4.5
-      max: 5.5
-    # Asigna (RF-31): vuelca campos de `resultado` a Locals tras el paso.
+      comparison: GELE
+      low: 4.5
+      high: 5.5
+    # Assign (RF-31): dumps `result` fields into Locals. It runs before the
+    # limit judges the step (ADR-0042 §2), so it copies what was measured, not
+    # the verdict.
     assign:
       voltaje_leido: '${result.measured_value}'
-      ok: '${result.status == "paso"}'
 
-  # Paso deshabilitado (RF-34): se registra como "saltado", no se invoca.
+  # Disabled step (RF-34): recorded as "skipped", not invoked. It still names
+  # its executor: turning a step off does not make it stop being a step that
+  # calls one.
   - name: paso_obsoleto
+    type: pass_fail
+    module: paso_obsoleto
+    executor: demo
     disable: true
 
-  # pause_on_fail (RF-34): si este paso fallara, Main se detendría. Aquí no se
-  # llega: medir_voltaje falla antes y Main corta en el primer fallo.
-  #
-  # Se llamaba `verificar_frecuencia`, que no lo sirve ningún ejecutor. Nunca
-  # dio guerra porque Main corta antes de llegar — hasta que alguien tocase el
-  # límite de arriba. Es justo el fallo latente que ADR-0021 caza al arrancar.
-  - name: verificar_led
+  # pause_on_fail (RF-34): if this step failed, Main would stop. It is not
+  # reached here: demo/measure_voltage fails first and Main stops at the first
+  # fail.
+  - name: demo/check_led
+    type: pass_fail
+    module: demo/check_led
+    executor: demo
     retries: 1
     pause_on_fail: true
 
 cleanup:
-  - name: desconectar_equipo
+  - name: demo/disconnect
+    type: action
+    module: demo/disconnect
+    executor: demo
     retries: 1

@@ -10,8 +10,9 @@ El núcleo de Anvil: cómo se recorre una secuencia. Trazable a
 
 Una secuencia es `DefinicionSecuencia{nombre, pasos_setup, pasos_main,
 pasos_cleanup}` (`crates/modelo/src/lib.rs`); cada paso es
-`DefinicionPaso{nombre, reintentos}`. El motor la recorre en tres fases
-fijas.
+`DefinicionPaso{nombre, tipo, module, reintentos, …}`, donde `tipo` dice
+**cómo se juzga** el paso y `module` **qué llama** (ADR-0040). El motor la
+recorre en tres fases fijas.
 
 > **Process model (M5, ADR-0016):** el motor **no sabe** que vive en un PM.
 > Un PM es una `DefinicionSecuencia` envoltorio cuyo `main` lleva un
@@ -21,9 +22,9 @@ fijas.
 
 ## Semántica de ejecución (spec, no cambia)
 
-1. **Setup** — corren *todos* los pasos. Si alguno **no pasa**, se marca
-   `setup_ok = false`. No corta en el primero: el Setup prepara recursos y
-   conviene intentar todos (p. ej. abrir varios instrumentos).
+1. **Setup** — corren *todos* los pasos. Si alguno **mueve el veredicto**, se
+   marca `setup_ok = false`. No corta en el primero: el Setup prepara recursos
+   y conviene intentar todos (p. ej. abrir varios instrumentos).
 2. **Main** — solo corre **si el Setup fue bien**. Corta **en el primer
    fallo** (`break` tras registrar el resultado fallido). El resto del Main
    se salta.
@@ -31,6 +32,12 @@ fijas.
 
 > Principio rector: **un equipo que se quedó encendido es peor que una
 > secuencia que falló.** De ahí que el Cleanup sea incondicional.
+
+«Mueve el veredicto» es un estado **por encima del mínimo de la escala de
+severidad** (`motor::mueve_el_veredicto`), no una lista de estados: `pass`,
+`skipped` y `done` son neutrales y no cortan nada (ADR-0040 §6). Leerlo de la
+escala en vez de enumerarlo es lo que evita que un estado neutral nuevo corte
+el Setup por omisión.
 
 ## Reintentos por paso
 
@@ -47,9 +54,15 @@ while !resultado.paso() && intento < max:
     resultado = ejecuta_paso(nombre, intento)
 ```
 
+Lo que se reintenta es la **respuesta del módulo**, no el veredicto del paso:
+el tipo y el límite se juzgan después, en `corre_un_paso`, una sola vez
+(ADR-0040). Así un fallo de límite **no consume un reintento**
+([#76](https://github.com/anlaco/anvil/issues/76)) — repetir la medida no
+cambiaría el umbral.
+
 El `intento` (desde 1) viaja al paso en `PeticionPaso.intento`. Un paso lo
-usa para simular fallos transitorios (ver `pasos_demo::conectar`: falla el
-1, pasa el 2+).
+usa para simular fallos transitorios (ver `demo/connect` en
+`ejemplos/departamento/demo`: falla el 1, pasa el 2+).
 
 > **Decisión:** un paso que falla consume reintentos; un paso que da
 > `error` también se reintenta (el motor solo distingue `paso` del resto).
@@ -63,26 +76,32 @@ El resultado de la secuencia es `ResultadoSecuencia` con todos los
 `ResultadoStep`. El estado agregado:
 
 - `error` si algún paso dio `error`.
-- si no, `fallo` si alguno dio `fallo`.
-- si no, `paso`.
+- si no, `fail` si alguno dio `fail`.
+- si no, `pass`.
 
-Un `error` manda sobre un `fallo` aunque llegue antes (testeado en
+`skipped` y `done` quedan **fuera** de la escala: una secuencia entera de
+pasos `done` agrega a `pass`. Y hay un agregado que ningún paso devuelve,
+`inconclusive`, cuando la secuencia declara un `pass_fail` en `main` y ninguno
+llegó a evaluarse (ADR-0019).
+
+Un `error` manda sobre un `fail` aunque llegue antes (testeado en
 `modelo/src/lib.rs`). Ver [limites-y-estados.md](limites-y-estados.md).
 
 ## Errores del motor vs. fallos del paso
 
-- **Fallo del paso** (`estado = "fallo"`): resultado válido, no corta la
+- **Fallo del paso** (`estado = "fail"`): resultado válido, no corta la
   ejecución del motor (sí corta el Main).
 - **Error del motor** (`Error::Red` / `Error::Protobuf`): la comunicación
-  se rompió. La secuencia se interrumpe (`basica_datos.rs` sale con código
-  != 0). **No** se confunde con un paso que falla (RF-11).
+  se rompió. La secuencia se interrumpe (`anvil` sale con código != 0). **No** se confunde con un paso que falla (RF-11).
 
 ## Control de flujo (MVP-parcial)
 
 Estándar en todo ATE comercial. **Implementado en M4-núcleo**:
 
 - **disable:** marcar un paso como saltado (no se invoca) sin borrarlo de la
-  secuencia. Se registra con estado `"saltado"` (neutral en el agregado).
+  secuencia. Se registra con estado `"skipped"` (neutral en el agregado). Un
+  paso deshabilitado sigue declarando su `executor`: apagarlo no deja de
+  hacerlo un paso que llama a uno.
 - **pause-on-fail:** detener la ejecución al primer fallo para inspección
   interactiva. En headless (M4-núcleo) **corta la fase en curso** al fallar —
   en Setup corta el bucle (que por defecto corre todos); en Main refuerza el
@@ -115,18 +134,24 @@ cargador. Ver ADR-0010.
 Atributos de `DefinicionPaso` (campos YAML):
 
 ```yaml
-pasos_main:
+main:
   - name: medir_voltaje
+    type: numeric_limit   # obligatorio: action | pass_fail | numeric_limit
+                          #              | statement | sequence_call
+    module: dmm/measure_voltage   # qué llama; con él, `executor`
+    executor: bench
     retries: 1
-    disable: false        # si true, se salta (estado "saltado")
+    disable: false        # si true, se salta (estado "skipped")
     pause_on_fail: false  # si true y falla, detiene la fase
     precondition: 'locals.contador > 0'  # si falsa, se salta sin intento
-    type: grpc            # o "statement" (paso local, sin gRPC)
-                          # o "sequence_call" (invoca subsecuencia, M4b)
-    statement: 'locals.x = 1'   # sólo si tipo: statement
-    sequence: init           # sólo si tipo: sequence_call (nombre o path)
-    inputs: { p: locals.x } # sólo si sequence_call (by-reference)
-    assign:               # si tipo: grpc o sequence_call; vuelca resultado.* a Locals
+    limit: { comparison: GELE, low: 4.5, high: 5.5, units: V }  # numeric_limit
+    value: '${result.outputs.pico}'  # numeric_limit: qué número juzgar;
+                                     # por defecto, la medida del módulo
+    condition: 'locals.v > 4.9'  # sólo pass_fail
+    statement: 'locals.x = 1'    # sólo statement
+    sequence: init               # sólo sequence_call (nombre o path)
+    inputs: { p: locals.x } # by-value con `module`; by-reference en sequence_call
+    assign:               # vuelca result.* a Locals; corre ANTES del juicio
       voltaje: '${result.measured_value}'
 ```
 

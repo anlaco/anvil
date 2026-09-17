@@ -36,22 +36,28 @@ setuid (`sudo chown root:root …` y `sudo chmod 4755 …`). `npm run app` lo
 comprueba y dice el comando exacto si falta; para saltarlo en una sesión de
 desarrollo, `ANVIL_EDITOR_NO_SANDBOX=1 npm run app`.
 
-Compilar:
+Compilar (guest del motor, puente WASM, componentes de ejemplo y host, en
+ese orden):
 
 ```sh
-cargo build --target wasm32-wasip2 -p ejecutor_pasos -p motor
+make release
+./packaging/anvil-host/target/release/anvil ejemplos/basica.yaml
 ```
 
-Correr el ejemplo (dos terminales):
+`anvil` no lleva ejecutor de pasos propio
+([ADR-0041](docs/adr/0041-there-is-no-embedded-executor.md)): los ejemplos
+declaran el banco de demo, `ejemplos/departamento/dist/anvil-exec-wasm`, y el
+host lo arranca. Para correr el guest del motor suelto con wasmtime (dos
+terminales), se arranca ese ejecutor a mano y se le pasa al motor:
 
 ```sh
-# terminal 1 — ejecutor de pasos
-wasmtime -S cli -S tcp=y -S inherit-network=y \
-  target/wasm32-wasip2/debug/ejecutor_pasos.wasm
+# terminal 1 — el ejecutor del banco de demo
+ejemplos/departamento/dist/anvil-exec-wasm --port 9300
 
 # terminal 2 — motor con la secuencia "basica"
-wasmtime -S cli -S tcp=y -S inherit-network=y \
-  target/wasm32-wasip2/debug/basica_datos.wasm
+wasmtime -S cli -S tcp=y -S inherit-network=y --dir=. \
+  target/wasm32-wasip2/release/anvil-guest.wasm ejemplos/basica.yaml \
+  --executor demo=127.0.0.1:9300
 ```
 
 Los flags `-S tcp=y -S inherit-network=y` **no son opcionales**: sin ellos el
@@ -60,7 +66,8 @@ guest no toca la red.
 ## Tests
 
 ```sh
-cargo test              # tests unitarios (modelo, proto, pasos_demo)
+cargo test              # tests unitarios del core (modelo, cargador, expr, motor, sinks)
+make test               # todas las suites: core, puente, host, SDKs, editor
 ```
 
 Los tests cubren el contrato ida/vuelta, el agregado de estados y el

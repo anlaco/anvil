@@ -44,9 +44,14 @@ Lo mínimo para que una secuencia sea útil sin volver a meter código:
 - **Precondición** (por paso): `if precondicion → se ejecuta; si no, se
   salta` (RF-33). El motor evalúa **antes** de invocar el paso; si es falsa,
   no gasta un intento.
-- **Postcondición / límite:** evalúa el resultado contra un umbral
-  (alternativa al `limite` declarado — ver [limites-y-estados.md](limites-y-estados.md)).
-- **Asignación:** tras el paso, vuelca campos del resultado a variables.
+- **Límite:** un `numeric_limit` juzga un número contra su `limit`. El número
+  puede venir de una expresión, el `value` del paso, que en un paso con
+  `module` puede leer `result.*` (ADR-0042 §1) — ver
+  [limites-y-estados.md](limites-y-estados.md).
+- **Condición:** la expresión booleana de un `pass_fail` (ADR-0018), que con
+  `module` también puede leer `result.*`.
+- **Asignación:** tras el paso y **antes de juzgarlo** (ADR-0042 §2), vuelca
+  campos del resultado a variables.
 
 El motor **evalúa** las expresiones (es dato), pero **no** conoce el
 dominio del paso: solo manipula variables y el `resultado` genérico

@@ -1,64 +1,69 @@
-# Demo del cargador de `.wasm` por path host-side (M5-ext.2, ADR-0015).
+# Demo of the host-side `.wasm` loader by path (M5-ext.2, ADR-0015).
 #
-# Sin Docker, sin Python, sin clonar el repo: el `.wasm` es un **componente
-# WASM** que exporta la función `run` (interfaz `anvil:step`). El usuario
-# escribe el paso en Rust, lo compila a `.wasm`, lo referencia por path
-# (modelo `.vi` de TestStand) y Anvil lo ejecuta. No sabe de gRPC ni de
-# protobuf — el host lo puentea (ADR-0015).
+# No Docker, no Python, no cloning the repo: the `.wasm` is a **WASM
+# component** that exports the function `run` (interface `anvil:step`). The
+# user writes the step in Rust, compiles it to `.wasm`, references it by path
+# (TestStand's `.vi` model) and Anvil runs it. It knows nothing of gRPC or
+# protobuf — the host bridges it (ADR-0015).
 #
-# El `.wasm` de la demo es `ejemplos/hola-paso` (el "hola mundo" de la guía).
+# The demo's `.wasm` is `ejemplos/hola-paso` (the guide's "hello world").
 #
-# El componente se compila y se despliega en el departamento de ejemplo, junto
-# al binario del ejecutor (`make build` lo hace):
+# The component is built and deployed into the example department, next to
+# the executor's binary (`make build` does it):
 #   cargo build --target wasm32-wasip2 --manifest-path ejemplos/hola-paso/Cargo.toml
 #   cp ejemplos/hola-paso/target/wasm32-wasip2/debug/hola_paso.wasm \
 #      ejemplos/departamento/dist/
 #
-# Arranque (desde la raíz del repo):
-#   cargo build --target wasm32-wasip2 -p motor -p ejecutor_pasos
-#   cargo build --manifest-path executors/wasm/Cargo.toml
-#   cargo build --manifest-path packaging/anvil-host/Cargo.toml
-#   ./packaging/anvil-host/target/debug/anvil ejemplos/demo_wasm.yaml --json out.json
+# Start-up (from the repo root):
+#   make release
+#   ./packaging/anvil-host/target/release/anvil ejemplos/demo_wasm.yaml --json out.json
 #
-# (El `path:` es relativo al directorio del YAML (`ejemplos/`) y apunta **al
-# binario del ejecutor** (ADR-0027), no al `.wasm`: los módulos los encuentra
-# el ejecutor junto a sí mismo. El host lo spawnea y loguea
-# `nombre → 127.0.0.1:<puerto efímero>`.)
+# (The `path:` is relative to the YAML's directory (`ejemplos/`) and points
+# **at the executor's binary** (ADR-0027), not at the `.wasm`: the executor
+# finds the modules next to itself. The host spawns it and logs
+# `name → 127.0.0.1:<ephemeral port>`.)
 
 name: demo_wasm
 executors:
-  - name: embebido
-    type: embedded
   - name: mi_paso_wasm
     type: wasm
     path: departamento/dist/anvil-exec-wasm
 main:
-  # Paso built-in: lo atiende el ejecutor WASM embebido (de serie). No
-  # declara `ejecutor` → embebido por defecto.
-  - name: verificar_led
+  # A step of another module in the same department: one executor serves every
+  # module next to its binary (ADR-0025), so `demo` and `hola_paso` share it.
+  - name: demo/check_led
+    type: pass_fail
+    module: demo/check_led
+    executor: mi_paso_wasm
     retries: 1
 
-  # Paso en el `.wasm` cargado por path: el host spawnea el puente, que
-  # llama a `run` del componente. El componente devuelve valor_medido 4.2;
-  # el límite lo evalúa el motor desde el YAML (ADR-0008).
+  # Step in the `.wasm` loaded by path: the host spawns the bridge, which calls
+  # the component's `run`. The component returns measured value 4.2; the
+  # engine evaluates the limit from the YAML (ADR-0008).
   - name: hola_paso/medir_voltaje
+    type: numeric_limit
+    module: hola_paso/medir_voltaje
     executor: mi_paso_wasm
     retries: 1
     limit:
-      type: range
-      min: 4.0
-      max: 5.0
+      comparison: GELE
+      low: 4.0
+      high: 5.0
 
-  # Otro paso en el mismo `.wasm` (mismo path → el host comparte un único
-  # puente: 1 Store, N llamadas, patrón RTE de TestStand).
+  # Another step in the same `.wasm` (same path → the host shares a single
+  # bridge: 1 Store, N calls, TestStand's RTE pattern).
   - name: hola_paso/conectar_equipo
+    type: action
+    module: hola_paso/conectar_equipo
     executor: mi_paso_wasm
     retries: 3
 
-  # Un paso con parámetro. Desde `anvil:step@0.4.0` el componente **describe
-  # su catálogo**, así que `--validate --with-executors` comprueba que
-  # `a_quien` existe y es texto sin ejecutar nada (ADR-0021, ADR-0024).
+  # A step with a parameter. Since `anvil:step@0.4.0` the component
+  # **describes its catalog**, so `--validate --with-executors` checks that
+  # `a_quien` exists and is text without running anything (ADR-0021, ADR-0024).
   - name: hola_paso/hola
+    type: pass_fail
+    module: hola_paso/hola
     executor: mi_paso_wasm
     retries: 1
     inputs:

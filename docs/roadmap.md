@@ -20,7 +20,7 @@ Lo que ya existe en el repo:
 - Reintentos por paso con `intento` comunicado.
 - Estados `paso`/`fallo`/`error` + agregado `error > fallo`.
 - Reporte textual congelado (`ResultadoSecuencia::reporte`).
-- Pasos demo simulados (`pasos_demo`).
+- Pasos demo simulados (`pasos_demo`; retirados con el ejecutor embebido, [ADR-0041](adr/0041-there-is-no-embedded-executor.md)).
 - Dogfooding de `wasi-grpc`.
 
 > En M0 la secuencia se construye **en código** (`basica_datos.rs`) y el
@@ -129,6 +129,14 @@ Lo que ya existe en el repo:
   `./anvil secuencia.yaml`, sin instalar wasmtime. El guest motor sigue
   disponible como `.wasm` para depuración con el CLI de wasmtime.
 
+> **Retirado después ([ADR-0041](adr/0041-there-is-no-embedded-executor.md)):**
+> el binario ya no lleva ejecutor de pasos. `pasos_demo`, `pasos_scpi`, el
+> ejecutor embebido, `--port` y `process_models/sequential.yaml` no existen;
+> lo que queda de M5 es el mecanismo `--process-model`, el CLI y el binario
+> único con el guest motor. Los ejemplos corren contra el banco de demo, un
+> componente WASM (`ejemplos/departamento/demo`). Lo de arriba es el registro
+> de cuándo se hizo.
+
 ### M5-ext — Executores de lenguaje y cargador de `.wasm` · MVP extendido
 
 #### M5-ext.1 — Routing multi-endpoint y relajación acotada del loopback ✅ (hecho, ADR-0013)
@@ -142,7 +150,7 @@ Lo que ya existe en el repo:
 - **`TipoEjecutor::Wasm` definido y validado al cargar** (el path debe
   existir); la instanciación llegó con M5-ext.2 (ADR-0014).
 - Demo `ejemplos/demo_ejecutores.yaml`: embebido + ejecutor Python en
-  loopback (sin Docker).
+  loopback (sin Docker). Hoy es el banco de demo WASM + Python (ADR-0041).
 
 #### M5-ext.2 — Cargador de `.wasm` por path host-side ✅ (hecho, ADR-0014/0015)
 

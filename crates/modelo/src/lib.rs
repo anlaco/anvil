@@ -7,7 +7,7 @@ pub mod proto;
 pub mod result_sink;
 pub use result_sink::{IdentidadPaso, ResultSink, SinkCompuesto};
 
-/// Un operador de comparación para un `Limite::Comparacion`.
+/// A comparison operator, for a limit against one value (`Criterio::Uno`).
 ///
 /// Vive en el modelo (datos), no en `paso.proto`: el límite no viaja por el
 /// cable ([contrato-grpc.md](../../docs/contrato-grpc.md)). Lo declara la
@@ -33,6 +33,18 @@ impl Operador {
             Operador::Le => "<=",
             Operador::Gt => ">",
             Operador::Ge => ">=",
+        }
+    }
+
+    /// TestStand's code for the operator (`EQ`, `NE`, `LT`, `LE`, `GT`, `GE`).
+    pub fn codigo(&self) -> &'static str {
+        match self {
+            Operador::Eq => "EQ",
+            Operador::Ne => "NE",
+            Operador::Lt => "LT",
+            Operador::Le => "LE",
+            Operador::Gt => "GT",
+            Operador::Ge => "GE",
         }
     }
 
@@ -65,42 +77,273 @@ impl Operador {
     }
 }
 
-/// Un límite como **dato first-class** (RF-29): una regla de aceptación que la
-/// secuencia declara en YAML y el motor evalúa contra la medida que devuelve
-/// el paso. El paso **no conoce el umbral**; solo mide.
+/// A limit as **first-class data** (RF-29): an acceptance rule the sequence
+/// declares and the engine evaluates against a number. The step **does not know
+/// the threshold**; it only measures (ADR-0008).
 ///
-/// Esto es lo que separa el *qué es aceptable* (datos, cambia en producción)
-/// del *cómo se mide* (código del paso). Ver
-/// [limites-y-estados.md](../../docs/diseno/limites-y-estados.md) y
-/// ADR-0008.
+/// Its shape is TestStand's Numeric Limit Test (ADR-0040 §7): a comparison code
+/// and the fields that code uses, plus `units`, which is text for the report and
+/// never scales or affects the comparison. See
+/// [limites-y-estados.md](../../docs/diseno/limites-y-estados.md).
 #[derive(Debug, Clone, PartialEq)]
-pub enum Limite {
-    /// Rango inclusivo high/low: `min <= valor <= max` → `paso`; si no, `fallo`.
-    Rango { min: f64, max: f64 },
-    /// Comparación contra un valor esperado: `valor {op} esperado` →
-    /// `paso`; si no, `fallo`.
-    Comparacion { op: Operador, esperado: f64 },
+pub struct Limite {
+    pub criterio: Criterio,
+    pub unidades: Option<String>,
+}
+
+/// What a limit compares. The variants carry exactly the fields their codes use,
+/// so a limit with a field its comparison ignores cannot be built.
+#[derive(Debug, Clone, PartialEq)]
+pub enum Criterio {
+    /// `EQ`, `NE`, `GT`, `LT`, `GE`, `LE`: the value against one limit.
+    Uno { op: Operador, low: f64 },
+    /// `GTLT`, `GELE`, `GELT`, `GTLE`: inside two limits, each end inclusive or
+    /// not — `GE`/`LE` are, `GT`/`LT` are not.
+    Dentro {
+        low: f64,
+        high: f64,
+        low_incluido: bool,
+        high_incluido: bool,
+    },
+    /// `LTGT`, `LEGE`, `LEGT`, `LTGE`: outside two limits. `LE`/`GE` count the
+    /// limit itself as outside.
+    Fuera {
+        low: f64,
+        high: f64,
+        low_incluido: bool,
+        high_incluido: bool,
+    },
+    /// `EQT`: a nominal value, within `lower` below and `upper` above it, each
+    /// read as `umbral` says, both ends inclusive.
+    ///
+    /// **Not contrasted with NI's documentation**, which could not be read when
+    /// this was written: percent and ppm are taken of the nominal's magnitude,
+    /// delta as an absolute amount.
+    Eqt {
+        nominal: f64,
+        lower: f64,
+        upper: f64,
+        umbral: Umbral,
+    },
+    /// `none`: TestStand's No Comparison. The value is recorded and nothing is
+    /// judged — which Anvil reports as `done`, not `pass` (ADR-0040 §8).
+    Ninguno,
+}
+
+/// How an `EQT` threshold is read.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Umbral {
+    Porcentaje,
+    Ppm,
+    Delta,
+}
+
+impl Umbral {
+    pub fn como_texto(&self) -> &'static str {
+        match self {
+            Umbral::Porcentaje => "percent",
+            Umbral::Ppm => "ppm",
+            Umbral::Delta => "delta",
+        }
+    }
+}
+
+/// The outcome of evaluating a limit.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Veredicto {
+    Pasa,
+    Falla,
+    /// Nothing was compared (`none`).
+    SinComparar,
 }
 
 impl Limite {
-    /// Evalúa un valor contra el límite → `"pass"` o `"fail"`. Lógica pura,
-    /// sin gRPC ni IO: el motor la reutiliza, los tests la prueban directa.
-    pub fn evalua(&self, valor: f64) -> &'static str {
-        match self {
-            Limite::Rango { min, max } => {
-                if valor >= *min && valor <= *max {
-                    "pass"
-                } else {
-                    "fail"
-                }
+    /// A limit with no units.
+    pub fn con(criterio: Criterio) -> Self {
+        Limite {
+            criterio,
+            unidades: None,
+        }
+    }
+
+    /// `GELE`: `min <= value <= max`, the shape of the old `range`.
+    pub fn rango(min: f64, max: f64) -> Self {
+        Limite::con(Criterio::Dentro {
+            low: min,
+            high: max,
+            low_incluido: true,
+            high_incluido: true,
+        })
+    }
+
+    /// One comparison against one limit, the shape of the old `comparison`.
+    pub fn comparacion(op: Operador, low: f64) -> Self {
+        Limite::con(Criterio::Uno { op, low })
+    }
+
+    /// TestStand's code for the comparison: `GELE`, `LT`, `EQT`, `none`…
+    pub fn codigo(&self) -> String {
+        let par = |alto: bool, low_inc: bool, high_inc: bool| {
+            let bajo = match (alto, low_inc) {
+                (false, true) => "GE",
+                (false, false) => "GT",
+                (true, true) => "LE",
+                (true, false) => "LT",
+            };
+            let arriba = match (alto, high_inc) {
+                (false, true) => "LE",
+                (false, false) => "LT",
+                (true, true) => "GE",
+                (true, false) => "GT",
+            };
+            format!("{bajo}{arriba}")
+        };
+        match &self.criterio {
+            Criterio::Uno { op, .. } => op.codigo().to_string(),
+            Criterio::Dentro {
+                low_incluido,
+                high_incluido,
+                ..
+            } => par(false, *low_incluido, *high_incluido),
+            Criterio::Fuera {
+                low_incluido,
+                high_incluido,
+                ..
+            } => par(true, *low_incluido, *high_incluido),
+            Criterio::Eqt { .. } => "EQT".into(),
+            Criterio::Ninguno => "none".into(),
+        }
+    }
+
+    /// The lower and upper bounds, where the comparison has them: what the
+    /// report writes as `limit_min` and `limit_max`. For `EQT` they are the
+    /// bounds computed from the nominal.
+    pub fn cotas(&self) -> (Option<f64>, Option<f64>) {
+        match &self.criterio {
+            Criterio::Dentro { low, high, .. } | Criterio::Fuera { low, high, .. } => {
+                (Some(*low), Some(*high))
             }
-            Limite::Comparacion { op, esperado } => {
-                if op.aplica(valor, *esperado) {
-                    "pass"
-                } else {
-                    "fail"
-                }
+            Criterio::Eqt { .. } => {
+                let (a, b) = self.cotas_eqt().expect("EQT");
+                (Some(a), Some(b))
             }
+            Criterio::Uno { .. } | Criterio::Ninguno => (None, None),
+        }
+    }
+
+    fn cotas_eqt(&self) -> Option<(f64, f64)> {
+        let Criterio::Eqt {
+            nominal,
+            lower,
+            upper,
+            umbral,
+        } = &self.criterio
+        else {
+            return None;
+        };
+        let escala = |t: f64| match umbral {
+            Umbral::Delta => t,
+            Umbral::Porcentaje => nominal.abs() * t / 100.0,
+            Umbral::Ppm => nominal.abs() * t / 1_000_000.0,
+        };
+        Some((nominal - escala(*lower), nominal + escala(*upper)))
+    }
+
+    /// Evaluates a value against the limit. Pure logic, no IO.
+    pub fn evalua(&self, valor: f64) -> Veredicto {
+        let cumple = match &self.criterio {
+            Criterio::Uno { op, low } => op.aplica(valor, *low),
+            Criterio::Dentro {
+                low,
+                high,
+                low_incluido,
+                high_incluido,
+            } => {
+                let sobre = if *low_incluido {
+                    valor >= *low
+                } else {
+                    valor > *low
+                };
+                let bajo = if *high_incluido {
+                    valor <= *high
+                } else {
+                    valor < *high
+                };
+                sobre && bajo
+            }
+            Criterio::Fuera {
+                low,
+                high,
+                low_incluido,
+                high_incluido,
+            } => {
+                let debajo = if *low_incluido {
+                    valor <= *low
+                } else {
+                    valor < *low
+                };
+                let encima = if *high_incluido {
+                    valor >= *high
+                } else {
+                    valor > *high
+                };
+                debajo || encima
+            }
+            Criterio::Eqt { .. } => {
+                let (a, b) = self.cotas_eqt().expect("EQT");
+                valor >= a && valor <= b
+            }
+            Criterio::Ninguno => return Veredicto::SinComparar,
+        };
+        if cumple {
+            Veredicto::Pasa
+        } else {
+            Veredicto::Falla
+        }
+    }
+
+    /// Why `valor` failed the limit, for the report.
+    pub fn mensaje_de_fallo(&self, valor: f64) -> String {
+        let u = self
+            .unidades
+            .as_deref()
+            .map(|u| format!(" {u}"))
+            .unwrap_or_default();
+        match &self.criterio {
+            Criterio::Uno { op, low } => format!("{valor}{u} {} {low} no cumplido", op.simbolo()),
+            Criterio::Dentro {
+                low,
+                high,
+                low_incluido,
+                high_incluido,
+            } => format!(
+                "{valor}{u} fuera de rango {}{low}, {high}{}",
+                if *low_incluido { "[" } else { "(" },
+                if *high_incluido { "]" } else { ")" }
+            ),
+            Criterio::Fuera {
+                low,
+                high,
+                low_incluido,
+                high_incluido,
+            } => format!(
+                "{valor}{u} dentro de {}{low}, {high}{}, y tenía que quedar fuera",
+                if *low_incluido { "(" } else { "[" },
+                if *high_incluido { ")" } else { "]" }
+            ),
+            Criterio::Eqt {
+                nominal,
+                lower,
+                upper,
+                umbral,
+            } => {
+                let (a, b) = self.cotas_eqt().expect("EQT");
+                format!(
+                    "{valor}{u} fuera de {nominal} -{lower}/+{upper} {} [{a}, {b}]",
+                    umbral.como_texto()
+                )
+            }
+            Criterio::Ninguno => String::new(),
         }
     }
 }
@@ -131,7 +374,9 @@ pub const CAMPOS_RESULTADO: [&str; 3] = ["status", "message", "measured_value"];
 ///
 /// `saltado` **no está en la escala**: es neutral (RF-33/34) y por eso mapea a
 /// `Paso`, que es el mínimo. No significa que un paso saltado haya pasado —
-/// significa que no mueve el veredicto.
+/// significa que no mueve el veredicto. `done` —a step that completed and
+/// judged nothing (ADR-0040 §6)— is neutral in the same way and for the same
+/// reason.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Default)]
 pub enum Severidad {
     #[default]
@@ -165,8 +410,8 @@ impl Severidad {
             "error" => Severidad::Error,
             "fail" => Severidad::Fallo,
             "inconclusive" => Severidad::Inconcluso,
-            // Neutrales: `paso` afirma, `saltado` no mueve el veredicto.
-            "pass" | "skipped" => Severidad::Paso,
+            // Neutrales: `paso` afirma; `saltado` y `done` no mueven el veredicto.
+            "pass" | "skipped" | "done" => Severidad::Paso,
             // Lo que no se reconoce no se juzga (Regla 2).
             _ => Severidad::Error,
         }
@@ -263,6 +508,15 @@ pub struct ResultadoStep {
     /// Vienen del cable (tag 7). No participan en el veredicto: `asigna` los
     /// lee como `resultado.salidas.<nombre>` y los sinks los escriben.
     pub salidas: Vec<(String, expr::Value)>,
+    /// What the step called on its executor (ADR-0040 §1), stamped by the
+    /// engine. `None` for a step that calls nothing. It is not the step's
+    /// `nombre`: two steps can call one module and be told apart by name.
+    pub module: Option<String>,
+    /// The comparison code of the limit the engine applied (`GELE`, `EQT`,
+    /// `none`…, ADR-0040 §7). `None` if no limit was applied.
+    pub comparacion: Option<String>,
+    /// The limit's `units`: text for the report, never part of the comparison.
+    pub unidades: Option<String>,
 }
 
 impl ResultadoStep {
@@ -281,6 +535,9 @@ impl ResultadoStep {
             fase: Fase::Main,
             parametros: Vec::new(),
             salidas: Vec::new(),
+            module: None,
+            comparacion: None,
+            unidades: None,
         }
     }
 
@@ -463,45 +720,38 @@ impl ResultadoSecuencia {
     }
 }
 
-/// El tipo de un paso. Por defecto es gRPC (el flujo de M3); `Statement`
-/// es un paso **local** (RF-27) que el motor ejecuta evaluando una sentencia
-/// del lenguaje de expresiones, **sin** ir por el cable. `SequenceCall`
-/// (M4b, RF-27) invoca otra secuencia como un paso — también motor-side, sin
-/// gRPC — anidando su `ResultadoSecuencia` en el resultado del paso.
-/// `PassFail` (ADR-0018) evalúa una expresión booleana y produce el veredicto.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+/// What kind of step it is: **how it is judged** (ADR-0040). What it calls on an
+/// executor is a separate part of the step, its `module`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TipoPaso {
-    /// El motor invoca el paso por gRPC contra el ejecutor, por nombre (M3).
-    #[default]
-    Grpc,
+    /// Calls a module to do something, and judges nothing (ADR-0040 §3): the
+    /// executor's `pass` becomes `done`.
+    Action,
+    /// Passes or fails (RF-25): on its module's answer, on `condicion`, or on
+    /// `condicion` reading the module's answer (ADR-0018, ADR-0040 §4,
+    /// ADR-0042). TestStand's Pass/Fail Test.
+    PassFail,
+    /// Judges one number against `limite` (ADR-0040 §5): the module's
+    /// measurement, or `valor`. Without a number to judge it is `error`.
+    /// TestStand's Numeric Limit Test.
+    NumericLimit,
     /// Paso local (RF-27): el motor evalúa `statement` contra su entorno, sin
-    /// gRPC. Útil para inicializar variables o cablear datos entre pasos.
+    /// gRPC. `done` on success (ADR-0040 §9).
     Statement,
     /// Invoca otra secuencia como un paso (M4b, RF-27). El motor orquesta la
     /// subsecuencia contra su propio entorno, sin gRPC; `paso.proto` no
     /// cambia (ADR-0010). El resultado se anida en `ResultadoStep.sub_pasos`.
     SequenceCall,
-    /// Veredicto por expresión (RF-25, ADR-0018): el motor evalúa `condicion`
-    /// contra su entorno y produce `paso`/`fallo` — el criterio de aceptación
-    /// **compuesto** sobre medidas ya volcadas a variables. Local, sin gRPC.
-    /// Es el análogo del step type `Pass/Fail Test` de TestStand, cuyo data
-    /// source es una expresión booleana.
-    PassFail,
 }
 
-/// Cómo se invoca un ejecutor de pasos (M5-ext.1, RF-36.3). El motor
-/// despacha por el nombre de ejecutor declarado en `DefinicionPaso.ejecutor`;
-/// sin declaración, va al embebido (default). El motor no sabe qué hay
-/// detrás de cada endpoint: WASM embebido, `.wasm` cargado por el host
-/// (M5-ext.2, ADR-0013) o un gRPC remoto (ADR-0013).
+/// How a step executor is reached (M5-ext.1, RF-36.3). The engine dispatches by
+/// the executor name a step declares in `DefinicionPaso.ejecutor`, which is
+/// required on every step that calls one: there is no default executor
+/// (ADR-0041). The engine does not know what is behind each endpoint.
 #[derive(Debug, Clone, PartialEq)]
 pub enum TipoEjecutor {
-    /// El ejecutor WASM de serie, compilado dentro del host (ADR-0011).
-    /// Endpoint fijo `127.0.0.1:9100`. Default si el paso no declara
-    /// `ejecutor`.
-    Embebido,
     /// Módulo `.wasm` propio que el **host** carga por path en runtime
-    /// (RF-36.2, M5-ext.2; el ejecutor embebido no puede, ADR-0013). Es una
+    /// (RF-36.2, M5-ext.2, ADR-0013). Es una
     /// **directiva de carga para el host** (ADR-0014): el cargador la valida
     /// al cargar (el path debe existir), el host la instancia y la expone
     /// como `grpc` (override `--executor`); el motor **nunca la ejecuta**
@@ -519,8 +769,7 @@ pub enum TipoEjecutor {
 #[derive(Debug, Clone, PartialEq)]
 pub struct DefinicionEjecutor {
     /// Nombre declarado en el YAML; los pasos lo referencian con
-    /// `ejecutor: <nombre>`. El nombre interno `__anvil_embebido__` está
-    /// reservado (lo usa el motor; el cargador lo rechaza).
+    /// `ejecutor: <nombre>`.
     pub nombre: String,
     pub tipo: TipoEjecutor,
 }
@@ -571,26 +820,6 @@ pub struct Argumento {
 pub enum EntradaPaso {
     Literal(ValorDefinicion),
     Expresion(expr::Expresion),
-}
-
-/// The engine's internal key for the connection to the built-in WASM executor
-/// (ADR-0011).
-///
-/// It cannot be declared in a YAML — the loader rejects an executor with this
-/// name — and it lives here, in the lowest crate, because three of them need
-/// the same string and must not disagree: the loader (to reject it and to
-/// resolve routing), the engine (to key its connections) and the report sinks
-/// (to render a reference's executor without printing plumbing).
-pub const EJECUTOR_EMBEBIDO: &str = "__anvil_embebido__";
-
-/// How an executor's routing key is written for a human: the reserved key of
-/// the built-in one is plumbing and is shown by the name the docs use.
-pub fn nombre_visible_de_ejecutor(clave: &str) -> &str {
-    if clave == EJECUTOR_EMBEBIDO {
-        "embebido"
-    } else {
-        clave
-    }
 }
 
 /// El valor literal de una variable declarada en el YAML (scopes
@@ -714,14 +943,24 @@ pub struct DefinicionPaso {
     /// Ordenado por nombre al cargar: el orden del cable tiene que ser
     /// determinista para que dos corridas iguales produzcan bytes iguales.
     pub entradas: Option<Vec<(String, EntradaPaso)>>,
-    /// M5-ext.1 (RF-36.3): nombre del ejecutor que atiende este paso. Si es
-    /// `None`, el motor usa el ejecutor **embebido** (default,
-    /// `127.0.0.1:9100`) — compat con M4b. El cargador valida que el nombre
-    /// exista en `Programa.ejecutores` (fail-fast al cargar).
+    /// The executor that serves this step (M5-ext.1, RF-36.3). The loader
+    /// requires it on every `grpc` step of a program and checks the name exists
+    /// in `Programa.ejecutores` (ADR-0041); it is `None` only on steps that call
+    /// no executor, or in a sequence loaded on its own, outside a program.
     pub ejecutor: Option<String>,
+    /// What the step calls on its executor (ADR-0040 §1): the name that travels
+    /// as `StepRequest.name` and that the executor's catalog lists. `nombre` is
+    /// then only the step's own name, for the report, the editor and the
+    /// events. `None` means the step's name is also what it calls.
+    pub module: Option<String>,
+    /// The number a `numeric_limit` judges, TestStand's numeric data source
+    /// (ADR-0040 §5). `None` means the module's `measured_value`.
+    pub valor: Option<expr::Expresion>,
 }
 
 impl DefinicionPaso {
+    /// A `pass_fail` step that calls the module of its own name: judged on what
+    /// its executor answers.
     pub fn nuevo(nombre: &str, reintentos: u32) -> Self {
         DefinicionPaso {
             nombre: nombre.to_string(),
@@ -731,21 +970,55 @@ impl DefinicionPaso {
             pause_on_fail: false,
             precondicion: None,
             asigna: None,
-            tipo: TipoPaso::Grpc,
+            tipo: TipoPaso::PassFail,
             statement: None,
             condicion: None,
             secuencia: None,
             parametros: None,
             entradas: None,
             ejecutor: None,
+            module: Some(nombre.to_string()),
+            valor: None,
         }
     }
 
-    /// Como `nuevo` pero fijando un límite. Lo usa el cargador al traducir el
-    /// YAML (límite embebido) y el property loader (sidecar).
+    /// Whether running this step calls an executor: an `action` always does, a
+    /// `pass_fail` or `numeric_limit` when it has a `module` (ADR-0040 §1), and a
+    /// `statement` or `sequence_call` never.
+    pub fn llama_a_un_ejecutor(&self) -> bool {
+        match self.tipo {
+            TipoPaso::Action => true,
+            TipoPaso::PassFail | TipoPaso::NumericLimit => self.module.is_some(),
+            TipoPaso::Statement | TipoPaso::SequenceCall => false,
+        }
+    }
+
+    /// The expressions that may read this step's own `result`: its `assign`,
+    /// and — when it calls an executor — its `condicion` and `valor`
+    /// (ADR-0042 §1).
+    pub fn lecturas_de_resultado(&self) -> Vec<&expr::Expresion> {
+        let mut fuera: Vec<&expr::Expresion> =
+            self.asigna.iter().flatten().map(|a| &a.expr).collect();
+        if self.llama_a_un_ejecutor() {
+            fuera.extend(self.condicion.iter());
+            fuera.extend(self.valor.iter());
+        }
+        fuera
+    }
+
+    /// What the step calls on its executor. The loader requires a `module` on
+    /// every step that calls one, so the name is only a fallback for a step
+    /// built by hand.
+    pub fn modulo(&self) -> &str {
+        self.module.as_deref().unwrap_or(&self.nombre)
+    }
+
+    /// A `numeric_limit` step with the given limit, calling the module of its
+    /// own name.
     pub fn con_limite(nombre: &str, reintentos: u32, limite: Limite) -> Self {
         DefinicionPaso {
             limite: Some(limite),
+            tipo: TipoPaso::NumericLimit,
             ..DefinicionPaso::nuevo(nombre, reintentos)
         }
     }
@@ -794,8 +1067,8 @@ pub struct Programa {
     pub archivos: HashMap<String, DefinicionSecuencia>,
     /// M5-ext.1 (RF-36.3): ejecutores declarados en `ejecutores:` del YAML
     /// de la secuencia raíz, keyed por nombre. El motor los consulta para
-    /// despachar por `DefinicionPaso.ejecutor`. Sin entradas, todo va al
-    /// ejecutor embebido (compat con M4b, ADR-0011).
+    /// despachar por `DefinicionPaso.ejecutor`. There is no default executor
+    /// (ADR-0041): a program with executor steps and no entries does not load.
     pub ejecutores: HashMap<String, DefinicionEjecutor>,
 }
 
@@ -872,6 +1145,20 @@ mod tests {
             "led encendido",
         ));
         assert_eq!(s.estado(), "error");
+    }
+
+    /// `done` completed and judged nothing (ADR-0040 §6): neutral, like
+    /// `skipped` — a sequence of them fails nothing — and never a pass an
+    /// executor could claim, because it is not in `ESTADOS_DE_EJECUTOR`.
+    #[test]
+    fn done_is_neutral_and_engine_only() {
+        assert_eq!(Severidad::de("done"), Severidad::Paso);
+        assert!(!ESTADOS_DE_EJECUTOR.contains(&"done"));
+
+        let mut s = ResultadoSecuencia::nueva("s");
+        s.registra(ResultadoStep::nuevo("set_x", "done", "statement ok"));
+        s.registra(ResultadoStep::nuevo("measure", "fail", "out of range"));
+        assert_eq!(s.estado(), "fail", "done does not hide a fail");
     }
 
     /// Los dos vocabularios cerrados de la Regla 2, fijados: cada estado que un
@@ -1016,85 +1303,131 @@ mod tests {
         assert_eq!(String::from_utf8(out).unwrap(), esperado);
     }
 
+    /// ADR-0040 §7: every TestStand code, at and around its limits.
+    #[test]
+    fn every_comparison_code_at_its_limits() {
+        let dentro = |li, hi| {
+            Limite::con(Criterio::Dentro {
+                low: 1.0,
+                high: 2.0,
+                low_incluido: li,
+                high_incluido: hi,
+            })
+        };
+        let fuera = |li, hi| {
+            Limite::con(Criterio::Fuera {
+                low: 1.0,
+                high: 2.0,
+                low_incluido: li,
+                high_incluido: hi,
+            })
+        };
+        use Veredicto::{Falla as F, Pasa as P};
+        // (limit, code, verdicts at 0.5, 1.0, 1.5, 2.0, 2.5)
+        let casos = [
+            (dentro(false, false), "GTLT", [F, F, P, F, F]),
+            (dentro(true, true), "GELE", [F, P, P, P, F]),
+            (dentro(true, false), "GELT", [F, P, P, F, F]),
+            (dentro(false, true), "GTLE", [F, F, P, P, F]),
+            (fuera(false, false), "LTGT", [P, F, F, F, P]),
+            (fuera(true, true), "LEGE", [P, P, F, P, P]),
+            (fuera(true, false), "LEGT", [P, P, F, F, P]),
+            (fuera(false, true), "LTGE", [P, F, F, P, P]),
+        ];
+        for (lim, codigo, esperados) in casos {
+            assert_eq!(lim.codigo(), codigo);
+            for (x, esperado) in [0.5, 1.0, 1.5, 2.0, 2.5].into_iter().zip(esperados) {
+                assert_eq!(lim.evalua(x), esperado, "{codigo} at {x}");
+            }
+        }
+        for (op, codigo) in [
+            (Operador::Eq, "EQ"),
+            (Operador::Ne, "NE"),
+            (Operador::Gt, "GT"),
+            (Operador::Lt, "LT"),
+            (Operador::Ge, "GE"),
+            (Operador::Le, "LE"),
+        ] {
+            assert_eq!(Limite::comparacion(op, 1.0).codigo(), codigo);
+        }
+    }
+
+    /// `EQT` bounds from the nominal, by threshold kind — not contrasted with
+    /// NI's documentation (see `Criterio::Eqt`).
+    #[test]
+    fn eqt_bounds_by_threshold_and_none_compares_nothing() {
+        let eqt = |umbral| {
+            Limite::con(Criterio::Eqt {
+                nominal: -5.0,
+                lower: 2.0,
+                upper: 10.0,
+                umbral,
+            })
+        };
+        assert_eq!(eqt(Umbral::Delta).cotas(), (Some(-7.0), Some(5.0)));
+        assert_eq!(eqt(Umbral::Porcentaje).cotas(), (Some(-5.1), Some(-4.5)));
+        let (a, b) = eqt(Umbral::Ppm).cotas();
+        assert!((a.unwrap() + 5.00001).abs() < 1e-12 && (b.unwrap() + 4.99995).abs() < 1e-12);
+        assert_eq!(
+            eqt(Umbral::Porcentaje).evalua(-5.1),
+            Veredicto::Pasa,
+            "inclusive"
+        );
+        assert_eq!(eqt(Umbral::Porcentaje).evalua(-4.4), Veredicto::Falla);
+        assert_eq!(eqt(Umbral::Delta).codigo(), "EQT");
+
+        let none = Limite::con(Criterio::Ninguno);
+        assert_eq!(none.evalua(123.0), Veredicto::SinComparar);
+        assert_eq!(none.codigo(), "none");
+    }
+
     #[test]
     fn limite_rango_dentro_fuera_y_fronteras() {
-        let r = Limite::Rango { min: 4.5, max: 5.5 };
-        assert_eq!(r.evalua(5.0), "pass", "dentro del rango");
-        assert_eq!(r.evalua(4.2), "fail", "por debajo");
-        assert_eq!(r.evalua(6.0), "fail", "por encima");
+        let r = Limite::rango(4.5, 5.5);
+        assert_eq!(r.evalua(5.0), Veredicto::Pasa, "dentro del rango");
+        assert_eq!(r.evalua(4.2), Veredicto::Falla, "por debajo");
+        assert_eq!(r.evalua(6.0), Veredicto::Falla, "por encima");
         // Fronteras inclusivas.
-        assert_eq!(r.evalua(4.5), "pass", "min incluido");
-        assert_eq!(r.evalua(5.5), "pass", "max incluido");
+        assert_eq!(r.evalua(4.5), Veredicto::Pasa, "min incluido");
+        assert_eq!(r.evalua(5.5), Veredicto::Pasa, "max incluido");
     }
 
     #[test]
     fn limite_comparacion_cubre_seis_operadores() {
         use Operador::*;
         assert_eq!(
-            Limite::Comparacion {
-                op: Eq,
-                esperado: 1000.0
-            }
-            .evalua(1000.0),
-            "pass"
+            Limite::comparacion(Eq, 1000.0).evalua(1000.0),
+            Veredicto::Pasa
         );
         assert_eq!(
-            Limite::Comparacion {
-                op: Eq,
-                esperado: 1000.0
-            }
-            .evalua(999.0),
-            "fail"
+            Limite::comparacion(Eq, 1000.0).evalua(999.0),
+            Veredicto::Falla
         );
         assert_eq!(
-            Limite::Comparacion {
-                op: Ne,
-                esperado: 1000.0
-            }
-            .evalua(999.0),
-            "pass"
+            Limite::comparacion(Ne, 1000.0).evalua(999.0),
+            Veredicto::Pasa
         );
         assert_eq!(
-            Limite::Comparacion {
-                op: Lt,
-                esperado: 1000.0
-            }
-            .evalua(999.0),
-            "pass"
+            Limite::comparacion(Lt, 1000.0).evalua(999.0),
+            Veredicto::Pasa
         );
         assert_eq!(
-            Limite::Comparacion {
-                op: Lt,
-                esperado: 1000.0
-            }
-            .evalua(1000.0),
-            "fail",
+            Limite::comparacion(Lt, 1000.0).evalua(1000.0),
+            Veredicto::Falla,
             "lt excluye el igual"
         );
         assert_eq!(
-            Limite::Comparacion {
-                op: Le,
-                esperado: 1000.0
-            }
-            .evalua(1000.0),
-            "pass",
+            Limite::comparacion(Le, 1000.0).evalua(1000.0),
+            Veredicto::Pasa,
             "le incluye el igual"
         );
         assert_eq!(
-            Limite::Comparacion {
-                op: Gt,
-                esperado: 1000.0
-            }
-            .evalua(1001.0),
-            "pass"
+            Limite::comparacion(Gt, 1000.0).evalua(1001.0),
+            Veredicto::Pasa
         );
         assert_eq!(
-            Limite::Comparacion {
-                op: Ge,
-                esperado: 1000.0
-            }
-            .evalua(1000.0),
-            "pass"
+            Limite::comparacion(Ge, 1000.0).evalua(1000.0),
+            Veredicto::Pasa
         );
     }
 
@@ -1131,9 +1464,8 @@ mod tests {
 
     #[test]
     fn definicion_paso_con_limite_lo_guarda() {
-        let p =
-            DefinicionPaso::con_limite("medir_voltaje", 1, Limite::Rango { min: 4.5, max: 5.5 });
-        assert_eq!(p.limite, Some(Limite::Rango { min: 4.5, max: 5.5 }));
+        let p = DefinicionPaso::con_limite("medir_voltaje", 1, Limite::rango(4.5, 5.5));
+        assert_eq!(p.limite, Some(Limite::rango(4.5, 5.5)));
         // Sin límite por defecto: el paso decide (pass/fail, action).
         assert_eq!(DefinicionPaso::nuevo("verificar_led", 1).limite, None);
     }
@@ -1220,8 +1552,8 @@ mod tests {
         assert_eq!(s.estado(), "pass");
     }
 
-    /// Los defaults de `DefinicionPaso::nuevo` preservan el comportamiento de
-    /// M3 (disable=false, pause_on_fail=false, sin precondición/asigna, Grpc).
+    /// `DefinicionPaso::nuevo` is a step judged on what its executor answers: a
+    /// `pass_fail` calling the module of its own name.
     #[test]
     fn definicion_paso_nuevo_tiene_defaults_de_m4() {
         let p = DefinicionPaso::nuevo("verificar_led", 1);
@@ -1229,7 +1561,8 @@ mod tests {
         assert!(!p.pause_on_fail);
         assert_eq!(p.precondicion, None);
         assert_eq!(p.asigna, None);
-        assert_eq!(p.tipo, TipoPaso::Grpc);
+        assert_eq!(p.tipo, TipoPaso::PassFail);
+        assert_eq!(p.module.as_deref(), Some("verificar_led"));
         assert_eq!(p.statement, None);
         // M4b: los campos de sequence call también parten de None.
         assert_eq!(p.secuencia, None);
@@ -1307,22 +1640,21 @@ mod tests {
         assert!(p.ejecutores.is_empty());
     }
 
-    /// M5-ext.1: un paso nuevo no declara ejecutor → embebido (compat M4b),
+    /// M5-ext.1: a new step declares no executor until the loader requires one,
     /// y el `Programa` vacío no trae ejecutores.
     #[test]
     fn paso_nuevo_sin_ejecutor_y_programa_sin_ejecutores() {
         let p = DefinicionPaso::nuevo("verificar_led", 1);
         assert_eq!(p.ejecutor, None);
         assert_eq!(
-            DefinicionPaso::con_limite("m", 1, Limite::Rango { min: 1.0, max: 2.0 }).ejecutor,
+            DefinicionPaso::con_limite("m", 1, Limite::rango(1.0, 2.0)).ejecutor,
             None
         );
     }
 
-    /// M5-ext.1: los tres variantes de `TipoEjecutor` se construyen.
+    /// M5-ext.1: both variants of `TipoEjecutor` are built.
     #[test]
-    fn tipo_ejecutor_tres_variantes() {
-        assert_eq!(TipoEjecutor::Embebido, TipoEjecutor::Embebido);
+    fn tipo_ejecutor_dos_variantes() {
         assert_eq!(
             TipoEjecutor::Wasm {
                 path: "./p.wasm".into()

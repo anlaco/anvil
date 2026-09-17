@@ -28,9 +28,9 @@ NAME="anvil-v$VERSION-x86_64-linux-musl"
 OUT="dist"
 
 echo "== building $NAME =="
-# The guests carry the version `anvil --version` prints, so they are built
+# The guest carries the version `anvil --version` prints, so they are built
 # first and from the current manifest — not reused from a previous bump.
-cargo build --release --target $WASM -p motor -p ejecutor_pasos
+cargo build --release --target $WASM -p motor
 cargo build --release --target $WASM --manifest-path ejemplos/hola-paso/Cargo.toml
 cargo build --release --target $WASM --manifest-path ejemplos/departamento/Cargo.toml
 cargo build --release --target $TARGET --manifest-path executors/wasm/Cargo.toml

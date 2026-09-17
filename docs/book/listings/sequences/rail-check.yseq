@@ -9,6 +9,8 @@ locals:
 
 main:
   - name: dmm/measure_voltage
+    type: action
+    module: dmm/measure_voltage
     executor: bench
     inputs: { channel: '${parameters.channel}' }
     assign:

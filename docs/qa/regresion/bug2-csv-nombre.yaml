@@ -1,27 +1,38 @@
-# BUG-2 — la columna `nombre_secuencia` del CSV contiene el ESTADO, no el nombre
+# BUG-2 — the CSV's `nombre_secuencia` column holds the STATUS, not the name
 #
-# Reproducción:
+# Reproduction:
 #   ./anvil regresion/bug2-csv-nombre.yaml --csv salida.csv
 #
-# Cabecera emitida:
+# Header written (at the time):
 #   nombre_secuencia,estado,nombre_paso,estado_paso,mensaje,valor_medido,...
-# Fila emitida:
+# Row written:
 #   paso,paso,verificar_led,paso,led encendido,,,,,
-#   ^^^^ deberia ser "regresion_csv_nombre"
+#   ^^^^ should be "regresion_csv_nombre"
 #
-# El nombre de la secuencia no aparece en NINGUNA columna del CSV, asi que un
-# CSV agregado de varias secuencias no permite saber de que secuencia es cada
-# fila. El JSON si lo emite correctamente (campo "secuencia").
+# The sequence's name appeared in NO column of the CSV, so a CSV aggregating
+# several sequences could not tell which sequence each row belonged to. The
+# JSON did write it correctly (field "secuencia").
 #
-# Criterio de aceptacion: la primera columna debe contener
-# "regresion_csv_nombre" en las tres filas.
+# Acceptance criterion: the first column must hold "regresion_csv_nombre" in
+# all three rows.
 
 name: regresion_csv_nombre
+executors:
+  - { name: demo, type: wasm, path: ../../../ejemplos/departamento/dist/anvil-exec-wasm }
 main:
-  - name: verificar_led
+  - name: demo/check_led
+    type: pass_fail
+    module: demo/check_led
+    executor: demo
     retries: 1
-  - name: abrir_rele
+  - name: demo/open_relay
+    type: pass_fail
+    module: demo/open_relay
+    executor: demo
     retries: 1
-  - name: medir_voltaje
+  - name: demo/measure_voltage
+    type: numeric_limit
+    module: demo/measure_voltage
+    executor: demo
     retries: 1
-    limit: { type: comparison, op: ge, expected: 4.0 }
+    limit: { comparison: GE, low: 4.0 }

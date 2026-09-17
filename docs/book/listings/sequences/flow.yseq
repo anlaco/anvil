@@ -15,15 +15,21 @@ main:
     statement: 'locals.channel = locals.channel + 2'
 
   - name: dmm/measure_voltage
+    type: numeric_limit
+    module: dmm/measure_voltage
     executor: bench
     inputs: { channel: '${locals.channel}' }
-    limit: { type: range, min: 3.0, max: 3.6 }
+    limit: { comparison: GELE, low: 3.0, high: 3.6 }
 
   - name: board/measure_leakage
+    type: numeric_limit
+    module: board/measure_leakage
     executor: bench
     precondition: 'file_globals.station == "bench-1"'
-    limit: { type: comparison, op: le, expected: 0.001 }
+    limit: { comparison: LE, low: 0.001 }
 
   - name: board/read_temperature
+    type: action
+    module: board/read_temperature
     executor: bench
     disable: true

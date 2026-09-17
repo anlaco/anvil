@@ -78,8 +78,8 @@ def measure_simulator(ctx: Context, canal: float = 1) -> Result:
 def connect_instrument(ctx: Context) -> Result:
     """Connects to the simulated instrument; fails once, then passes.
 
-    The same shape as `pasos_demo::conectar` in the embedded executor: a
-    transient failure on attempt 1 that passes from attempt 2 (RF-09 — the
+    The same shape as `demo/connect` on the demo bench: a transient failure
+    on attempt 1 that passes from attempt 2 (RF-09 — the
     attempt number reaches the step, through `ctx`).
     """
     if ctx.attempt == 1:

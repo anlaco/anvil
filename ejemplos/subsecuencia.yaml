@@ -1,22 +1,27 @@
-# Secuencia con subsecuencias (M4b). Demuestra las DOS rutas de sequence call:
+# A sequence with subsequences (M4b). Shows BOTH routes of a sequence call:
 #
-# 1. **Inline** (`init_comun`): declarada bajo `subsecuencias:`, invocada por
-#    nombre (`secuencia: init_comun`). Privada de este archivo. Sólo la usa
-#    esta secuencia, así que se queda dentro.
-# 2. **Externa** (`./medir_fuentes.yaml`): en archivo aparte, invocada por
-#    path. Reutilizable por otras secuencias.
+# 1. **Inline** (`init_comun`): declared under `subsequences:`, called by
+#    name (`sequence: init_comun`). Private to this file. Only this sequence
+#    uses it, so it stays inside.
+# 2. **External** (`./medir_fuentes.yaml`): in a separate file, called by
+#    path. Reusable by other sequences.
 #
-# Ambas pasan `parametros` by-reference: cada argumento es `locals.X` del
-# padre ↔ `parameters.P` de la subsecuencia (entrada al iniciar, salida al
-# volver). El `asigna` del segundo call vuelca el estado agregado del call
-# (`result.status`) a `locals.estado_fuentes`.
+# Both pass `args` by reference: each argument is the parent's `locals.X` ↔ the
+# subsequence's `parameters.P` (input when it starts, output on return). The
+# second call's `assign` dumps the call's aggregate status (`result.status`)
+# into `locals.estado_fuentes`.
+#
+# `executors:` is declared here, in the root: the external subsequence's steps
+# use `demo` too, and a subsequence file declares no executors of its own.
 name: basica
+executors:
+  - { name: demo, type: wasm, path: departamento/dist/anvil-exec-wasm }
 locals:
   canal_in: 0.5
   ok_init: false
   estado_fuentes: ""
 subsequences:
-  init_comun:                       # inline, por nombre; toma el nombre de la clave
+  init_comun:                       # inline, by name; takes the key as its name
     parameters:
       canal: 0.0
       listo: false
@@ -27,12 +32,12 @@ subsequences:
 main:
   - name: preparar
     type: sequence_call
-    sequence: init_comun              # nombre → inline
+    sequence: init_comun              # name → inline
     args: { canal: locals.canal_in, listo: locals.ok_init }
-    # al volver: locals.ok_init = parameters.listo (final, true)
+    # on return: locals.ok_init = parameters.listo (final, true)
   - name: test_fuentes
     type: sequence_call
-    sequence: ./medir_fuentes.yaml    # path → archivo externo
+    sequence: ./medir_fuentes.yaml    # path → external file
     args: { canal: locals.canal_in }
     assign: { estado_fuentes: "${result.status}" }
-    # al volver: locals.canal_in = parameters.canal (final, mutado a 1.5)
+    # on return: locals.canal_in = parameters.canal (final, mutated to 1.5)

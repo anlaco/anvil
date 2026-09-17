@@ -12,8 +12,8 @@ La escala de severidad y el estado `inconcluso` los fija
 
 ## Los estados
 
-Cada paso devuelve un `estado` (texto, no enum — RF-10), y son **cuatro,
-cerrados**: `paso`, `fallo`, `error`, `saltado`. Que el tipo sea texto es por el
+Un ejecutor devuelve un `estado` (texto, no enum — RF-10), y son **cuatro,
+cerrados**: `pass`, `fail`, `error`, `skipped`. Que el tipo sea texto es por el
 contrato (`paso.proto` viaja así, y un paso puede estar escrito en cualquier
 lenguaje); el vocabulario no por eso es abierto. Cualquier otra cadena —`"Paso"`
 con mayúscula, `"PASS"`, `"ok"`— **la convierte el motor en `error`**, con un
@@ -22,7 +22,7 @@ mensaje que nombra el valor recibido y enumera los válidos
 
 ```
 [error] verificar_led: el ejecutor devolvió el estado 'Paso', que no es ninguno
-de 'paso', 'fallo', 'error', 'saltado': Anvil no juzga la unidad con un estado
+de 'pass', 'fail', 'error', 'skipped': Anvil no juzga la unidad con un estado
 que no entiende (el paso decía: 'led encendido')
 ```
 
@@ -33,16 +33,19 @@ severidad pasó a `paso` mudo, que dejaba pasar unidades sin medir.
 
 | Estado | Significado | Corta el Main | Cuenta para el agregado |
 |---|---|---|---|
-| `paso` | El paso cumplió su criterio. | No | Es el mínimo de la escala |
-| `fallo` | No cumplió un **criterio de aceptación** (p. ej. medida fuera de rango). Resultado **válido**. | Sí | Sí |
-| `error` | No pudo ejecutarse (comunicación, nombre desconocido, excepción). | Sí | Sí (manda sobre fallo) |
-| `saltado` | No se ejecutó (`disable` o precondición falsa, RF-33/34). | No | No: es **neutral** |
+| `pass` | El paso cumplió su criterio. | No | Es el mínimo de la escala |
+| `fail` | No cumplió un **criterio de aceptación** (p. ej. medida fuera de rango). Resultado **válido**. | Sí | Sí |
+| `error` | No pudo ejecutarse o juzgarse (comunicación, módulo desconocido, excepción, un `numeric_limit` sin número). | Sí | Sí (manda sobre fail) |
+| `skipped` | No se ejecutó (`disable` o precondición falsa, RF-33/34). | No | No: es **neutral** |
 
-Y un quinto que **ningún paso devuelve**:
+Y dos que **ningún ejecutor devuelve** — los produce el motor, y sólo él; un
+ejecutor que devolviera esas cadenas cae en `error` como cualquier estado no
+reconocido:
 
 | Estado | Significado |
 |---|---|
-| `inconcluso` | Anvil no pudo juzgar. Sólo existe como **agregado de una secuencia**: lo produce el motor, y sólo él (ADR-0019). Un ejecutor que devolviera la cadena `"inconcluso"` no lo estaría declarando — sería un estado no reconocido más. |
+| `done` | El paso terminó y **no juzgó nada** (ADR-0040 §6): un `action` cuyo módulo pasó, un `statement` que terminó bien, un `numeric_limit` con `comparison: none`. **Neutral**, como `skipped`: no corta `setup` ni `main`, no hace fallar la secuencia y no cuenta como `pass`. Una secuencia sólo de pasos `done` agrega a `pass` (ADR-0040 §6, anotado en ADR-0042). |
+| `inconclusive` | Anvil no pudo juzgar. Sólo existe como **agregado de una secuencia** (ADR-0019). |
 
 ### Agregado por severidad (ADR-0019, Regla 1)
 
@@ -50,10 +53,10 @@ Y un quinto que **ningún paso devuelve**:
 escala:
 
 ```
-paso  <  inconcluso  <  fallo  <  error
+pass  <  inconclusive  <  fail  <  error
 ```
 
-con `saltado` fuera de ella. En el código, el orden de declaración del enum
+con `skipped` y `done` fuera de ella (mapean al mínimo). En el código, el orden de declaración del enum
 `Severidad` **es** la escala, y agregar es un `max()` — el mismo modelo que el
 `Verdict` de OpenTAP, donde la severidad tampoco es una convención de la
 documentación sino el valor entero del enum.
@@ -75,12 +78,13 @@ llegaba a evaluar no había fallado, luego «pasaba», y salía con código 0.
 ### Cuándo sale `inconcluso`
 
 Un solo caso, de momento: **la secuencia declara al menos un paso
-`tipo: pass_fail` en `main` y ninguno llegó a evaluarse** — se saltó por
-precondición, está `disable`, o el Main cortó antes de llegar. El paso se sigue
-reportando `[saltado]` (es lo que ocurrió); lo que cambia es el agregado.
+`type: pass_fail` en `main` —con o sin `module`— y ninguno llegó a evaluarse**
+— se saltó por precondición, está `disable`, o el Main cortó antes de llegar. El
+paso se sigue reportando `[skipped]` (es lo que ocurrió); lo que cambia es el
+agregado.
 
-Una secuencia cuyo criterio son los `limite` de sus pasos **no cambia de
-comportamiento**: ahí el veredicto sí se evaluó, paso a paso.
+Los `numeric_limit` **no cuentan** para esto: una secuencia cuyo criterio son
+sus límites no cambia de comportamiento.
 
 Un `pass_fail` con `disable: true` cuenta como declarado y no evaluado: la
 unidad tampoco se ha medido, y eximirlo convertiría el flag en una puerta
@@ -91,51 +95,42 @@ La propagación anidada es **nivel a nivel**: el `ResultadoStep` de un
 `sequence_call` lleva el agregado de su subsecuencia, así que la severidad de un
 descendiente profundo llega a la raíz por el mismo camino que un `fallo`.
 
-## Límites como medida (MVP, ya en el contrato)
+## Límites como medida (en el contrato)
 
-Un `ResultadoStep` puede llevar medida:
+`paso.proto` sigue llevando `measured_value`, `limit_min` y `limit_max` como
+**string** (vacío si no hay). Un ejecutor devuelve la medida; el umbral lo pone
+la secuencia (abajo).
 
-```rust
-ResultadoStep::medido(nombre, estado, mensaje, valor, min, max)
-// → valor_medido, limite_min, limite_max (Option<f64>)
-```
+Ejemplo del repo (`demo/measure_voltage` en `ejemplos/basica.yaml`): mide 4.2
+contra `GELE` 4.5–5.5 → `fail`.
 
-Viajan en `paso.proto` como **string** (vacío si no hay; enteros sin
-decimales). El paso **decide** `paso`/`fallo` comparando `valor` contra
-`[min, max]` — la comparación vive en el lado del paso (ADR-0005: el motor
-no conoce el dominio).
+## Límites como datos first-class
 
-Ejemplo del repo (`pasos_demo::medir_voltaje`): mide 4.2 contra rango
-4.5–5.5 → `fallo` ("voltaje fuera de rango").
-
-## Límites como datos first-class (MVP-parcial, implementado en M3)
-
-El límite deja de estar *embebido* en el código del paso y pasa a ser **datos**
-en la secuencia, no aserciones ad-hoc en código:
+El límite no está en el código del paso: es **datos** en la secuencia, en un
+paso `type: numeric_limit`, con la forma de TestStand (ADR-0040 §7):
 
 ```yaml
-pasos_main:
-  - name: medir_voltaje
-    retries: 1
-    limit:
-      type: range          # rango | comparacion
-      min: 4.5
-      max: 5.5
+main:
+  - name: demo/measure_voltage
+    type: numeric_limit
+    module: demo/measure_voltage
+    executor: demo
+    limit: { comparison: GELE, low: 4.5, high: 5.5, units: V }
 ```
 
-o, para una comparación:
+o, contra un solo límite:
 
 ```yaml
-  - name: verificar_frecuencia
-    limit:
-      type: comparison
-      op: ge               # eq | ne | lt | le | gt | ge
-      expected: 1000.0
+  - name: frequency
+    type: numeric_limit
+    module: dmm/measure_frequency
+    executor: bench
+    limit: { comparison: GE, low: 1000.0, units: Hz }
 ```
 
-Consecuencia: el paso mide y reporta que la medición fue bien (`paso`); el
-**motor** evalúa el límite contra `valor_medido` y produce `paso`/`fallo`
-**sin que el paso conozca el umbral**. Separa el *qué es aceptable* (datos,
+Consecuencia: el módulo mide y reporta que la medición fue bien (`pass`); el
+**motor** evalúa el límite contra `valor_medido` —o contra el `value` del paso—
+y produce `pass`/`fail` **sin que el paso conozca el umbral**. Separa el *qué es aceptable* (datos,
 cambia en producción) del *cómo se mide* (código del paso).
 
 > **Decisión de diseño (ADR-0008):** los límites viven en la **definición
@@ -146,33 +141,52 @@ cambia en producción) del *cómo se mide* (código del paso).
 >
 > Regla fina: el límite solo **empeora** `paso` → `fallo`. Si el paso ya
 > emitió `fallo`/`error` por sí mismo, se respeta (el paso es autoridad sobre
-> su ejecución). El motor no convierte un fallo/error en paso. Si no hay
-> `valor_medido` (pass/fail, action), el límite no aplica.
+> su ejecución). El motor no convierte un fallo/error en paso.
+>
+> **Estrechado por ADR-0040 §5:** un `numeric_limit` sin número que juzgar —el
+> módulo no devolvió medida, o `value` no evaluó a número— es `error`, no un
+> límite que no aplica en silencio.
 >
 > Es compatible con ADR-0005: una regla high/low/comparación **declarada como
 > dato** es semántica genérica, no conocimiento del dominio. El motor sigue
 > sin saber qué mide un voltaje; solo aplica una comparación que la secuencia
 > le entrega.
 
-Implementación: `modelo::Limite` (`Rango`/`Comparacion`) con `evalua` pura,
-`DefinicionPaso.limite`, y `motor::aplicar_limite` (rellena los campos de
-límite del `ResultadoStep` para el reporte y, si procede, convierte
-`paso`→`fallo` reescribiendo el mensaje). `ResultadoStep` gana `valor_esperado`
-y `operador` — **no** van en `paso.proto`: los rellena el motor; el
-`ResultadoStep` enriquecido solo va a los sinks.
+Implementación: `modelo::Limite` (un `Criterio` y `unidades`) con `evalua`
+pura, `DefinicionPaso.limite`, `motor::juzga_limite_numerico` (elige el número:
+`value` o `valor_medido`) y `motor::aplicar_limite` (rellena los campos de
+límite del `ResultadoStep` para el reporte —`limite_min`/`limite_max`,
+`valor_esperado`/`operador` para un código de un límite, `comparacion`,
+`unidades`— y, si procede, convierte `pass`→`fail` o, con `none`, `pass`→`done`).
+Nada de eso va en `paso.proto`: lo rellena el motor para los sinks.
 
-## Tipos de límite (MVP-parcial, implementado)
+## Códigos de comparación (ADR-0040 §7)
 
-- **Rango** (high/low): `min ≤ valor ≤ max` → `paso`; si no, `fallo`.
-- **Comparación**: `valor {op} esperado` con `op` ∈ `eq`/`ne`/`lt`/`le`/`gt`/
-  `ge` → `paso`/`fallo`.
-- **Sin límite** (Pass/Fail, Action): el paso decide sin medida
-  ([modelo-de-pasos.md](modelo-de-pasos.md)).
+Los de TestStand. Un campo que el código no usa es error de carga, y un código
+en minúsculas se señala con su forma en mayúsculas.
+
+| Código | Campos | Pasa si |
+|---|---|---|
+| `EQ`, `NE`, `GT`, `LT`, `GE`, `LE` | `low` | `valor {=, ≠, >, <, ≥, ≤} low` |
+| `GELE`, `GELT`, `GTLE`, `GTLT` | `low`, `high` | dentro: `GE`/`LE` incluyen el límite, `GT`/`LT` no |
+| `LEGE`, `LEGT`, `LTGE`, `LTGT` | `low`, `high` | fuera: `LE`/`GE` cuentan el límite como fuera |
+| `EQT` | `nominal`, `lower`, `upper`, `threshold` (`percent`/`ppm`/`delta`) | `nominal − lower ≤ valor ≤ nominal + upper`, con `lower`/`upper` en porcentaje o ppm de `|nominal|`, o absolutos con `delta`. **No contrastado** con la documentación de NI: la fórmula no se pudo leer al implementarlo. |
+| `none` | — | no compara: registra el valor y da `done` (ADR-0040 §8) |
+
+`units` es texto para el informe: no escala ni afecta a la comparación. En
+consola, un fallo se lee `4.2 V fuera de rango [4.5, 5.5]` (`(`/`)` marcan un
+extremo excluido), `4.2 >= 5 no cumplido` para un código de un límite,
+`… dentro de [a, b], y tenía que quedar fuera` fuera de dos, y
+`… fuera de 5 -1/+1 percent [4.95, 5.05]` para `EQT`.
+
+Sin límite (`action`, `pass_fail`): el paso decide sin medida
+([modelo-de-pasos.md](modelo-de-pasos.md)).
 
 ## Property loader (MVP-parcial, implementado en M3)
 
-Cargar límites desde un **fichero sidecar** (YAML), separando los datos de
-test del flujo. El cargador los inyecta en `limite` antes de ejecutar
+Cargar límites desde un **fichero sidecar** (YAML, con la misma forma de límite
+por nombre de paso), separando los datos de test del flujo. El cargador los
+inyecta en `limite` antes de ejecutar
 (`cargador::cargar_limites_de_archivo` + `cargador::aplicar_limites_programa`),
 asociando cada límite al paso por `nombre`. El sidecar **manda** sobre el
 límite embebido en la secuencia: es el mecanismo para cambiar umbrales por
@@ -186,10 +200,12 @@ era DEF-1 del informe de beta: bajo `--process-model` la raíz es el process
 model y la secuencia del operador queda como subsecuencia, así que el sidecar
 no afectaba a nada —y sin decirlo— justo en el modo para el que existe. Un
 nombre que no casa en **ninguna** secuencia se avisa por stderr
-(`cargador::limites_sin_aplicar_programa`, DIAG-1).
+(`cargador::limites_sin_aplicar_programa`, DIAG-1), y un límite que cae en un
+paso que no es `numeric_limit` detiene la corrida nombrando el paso
+(`cargador::limites_mal_colocados_programa`, ADR-0042 §4).
 
 ## Out-of-scope
 
 - Límites estadísticos / dinámicos (golden sample, CPK en runtime) →
   post-MVP, ligado a monitoring.
-- Límites con unidades físicas (V, A, Ω) y conversión → post-MVP.
+- Conversión de unidades físicas (V, A, Ω): `units` es sólo texto → post-MVP.

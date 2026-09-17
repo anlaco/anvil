@@ -15,6 +15,7 @@ import { fileURLToPath } from "node:url";
 
 import { SequenceDocument, STEP_TYPES } from "../src/document.mjs";
 import { runEngine as run } from "../src/engine.mjs";
+import { exampleFiles } from "./ejemplos.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO = resolve(HERE, "..", "..");
@@ -24,9 +25,9 @@ const fixture = (name) => readFile(join(REPO, "ejemplos", name), "utf8");
 /**
  * Runs the loader over a document's current text and returns its verdict.
  *
- * `alongside` mounts the other files the sequence needs. `subsecuencia.yaml`
- * calls `./medir_fuentes.yaml`, and a subsequence the loader cannot read is a
- * load error — so the fixture has to arrive with its neighbour.
+ * `alongside` mounts the other files the sequence needs: the demo bench's
+ * binary, and for `subsecuencia.yaml` the `./medir_fuentes.yaml` it calls — a
+ * file the loader cannot read is a load error.
  */
 async function validate(doc, alongside = {}) {
   return run({
@@ -43,10 +44,7 @@ for (const type of STEP_TYPES) {
     // the least forgiving — `basica.yaml` declares no variables at all.
     const file = type === "sequence_call" ? "subsecuencia.yaml" : "basica.yaml";
     const doc = new SequenceDocument(await fixture(file));
-    const alongside =
-      file === "subsecuencia.yaml"
-        ? { "medir_fuentes.yaml": await fixture("medir_fuentes.yaml") }
-        : {};
+    const { [file]: _self, ...alongside } = await exampleFiles(file);
 
     const before = await validate(doc, alongside);
     assert.equal(before.exitCode, 0, `fixture ${file} should start valid:\n${before.stderr}`);
@@ -88,9 +86,23 @@ test("an inserted step is readable by the step view straight away", async () => 
 
 test("inserted names do not collide", async () => {
   const doc = new SequenceDocument(await fixture("basica.yaml"));
-  doc.addStep("main", "grpc");
-  doc.addStep("main", "grpc");
+  doc.addStep("main", "action");
+  doc.addStep("main", "action");
 
   const names = doc.steps("main").map((s) => s.name);
   assert.equal(new Set(names).size, names.length, `names collided: ${names.join(", ")}`);
+});
+
+test("a step that calls an executor names the first declared one, and needs one to exist", async () => {
+  // There is no executor built into anvil to fall back on (ADR-0041): a step
+  // that calls one with no `executor` does not load, so the palette must fill it
+  // in, and must refuse when there is nothing to fill it in with.
+  const doc = new SequenceDocument(await fixture("basica.yaml"));
+  const index = doc.addStep("main", "action");
+  assert.equal(doc.steps("main")[index].executor, "demo");
+
+  const bare = new SequenceDocument("name: bare\nmain:\n  - name: s\n    type: statement\n    statement: 'locals.x = 1'\nlocals: { x: 0.0 }\n");
+  assert.match(bare.cannotAdd("action") ?? "", /no executors/);
+  assert.match(bare.cannotAdd("numeric_limit") ?? "", /no executors/);
+  assert.throws(() => bare.addStep("main", "action"), /no executors/);
 });

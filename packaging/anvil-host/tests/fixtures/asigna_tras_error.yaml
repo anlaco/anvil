@@ -1,32 +1,38 @@
-# Fixture de `tests/exit_codes.rs`: el issue #27, caso 2 — `asigna` no escribe
-# cuando el paso dio `error` (ADR-0019, Regla 2).
+# Fixture for `tests/exit_codes.rs`: issue #27, case 2 — `assign` does not write
+# when the step gave `error` (ADR-0019, Rule 2).
 #
-# `medir_voltaje_scpi` sí existe en el ejecutor, pero no hay instrumento
-# escuchando en el puerto SCPI, así que devuelve `error`. Antes, la `asigna`
-# corría igual: `result.*` valía `nothing` y ese `nothing` machacaba
-# `locals.valor`, que el `cleanup` lee justo después para decidir. En un banco
-# de verdad esa variable es la que dice si hay que apagar una fuente.
+# `demo/instrument_offline` is the demo bench's instrument that is not there:
+# it always returns `error`. Before, the `assign` ran
+# anyway: `result.*` was `nothing` and that `nothing` clobbered `locals.valor`,
+# which `cleanup` reads right after to decide. On a real bench that variable is
+# the one that says whether a supply has to be switched off.
 #
 #   === exit_asigna_tras_error: error ===
-#     [error] medir_voltaje_scpi: SCPI connect … falló
+#     [error] demo/instrument_offline: the instrument did not answer
 #     [pass] check_valor: condición cumplida
 #
-# El veredicto es `error` (exit 1) por el paso que no pudo medir; lo que este
-# fixture vigila es la línea del `cleanup`.
+# The verdict is `error` (exit 1) because of the step that could not measure;
+# what this fixture watches is the `cleanup` line.
 #
-# **Por qué es un paso real y no uno inventado**, que es lo que era hasta
-# ADR-0021: desde el catálogo, un paso que el ejecutor no sirve detiene la
-# corrida **antes del primer paso**, así que un nombre inexistente ya no llega
-# a ejecutarse y no puede ejercitar la `asigna`. Hace falta un paso que exista
-# y falle midiendo, que además es el caso realista.
+# **Why it is a real step and not a made-up one**, which it was until
+# ADR-0021: since the catalog, a step the executor does not serve stops the run
+# **before the first step**, so a non-existent name never gets executed and
+# cannot exercise the `assign`. It needs a step that exists and fails to
+# measure, which is also the realistic case.
 
 name: exit_asigna_tras_error
+
+executors:
+  - { name: demo, type: wasm, path: ../../../../ejemplos/departamento/dist/anvil-exec-wasm }
 
 locals:
   valor: 99.0
 
 main:
-  - name: medir_voltaje_scpi
+  - name: demo/instrument_offline
+    type: pass_fail
+    module: demo/instrument_offline
+    executor: demo
     assign:
       valor: '${result.measured_value}'
 

@@ -24,7 +24,7 @@ binario único que hospeda wasmtime, ADR-0011) soporta:
 
 ```
 anvil <secuencia.yaml> [--process-model <pm.yaml>] [--json <ruta>] \
-  [--csv <ruta>] [--limits <ruta>] [--port <n>] [--validate] [--quiet] \
+  [--csv <ruta>] [--limits <ruta>] [--executor n=host:puerto] [--validate] [--quiet] \
   [--help] [--version]
 ```
 
@@ -32,12 +32,13 @@ anvil <secuencia.yaml> [--process-model <pm.yaml>] [--json <ruta>] \
   (RF-38, ADR-0016). Sin él, la secuencia corre tal cual.
 - `--validate` carga y valida el programa (schema, lvalues, firmas,
   ciclos) sin ejecutar ni conectar al ejecutor — útil en CI sin hardware.
-- `--port <n>` fija el puerto del ejecutor embebido: el que bindea el ejecutor
-  y el que busca el motor, que reintenta la conexión si no está listo (5 s
-  máx). En el binario único el host ya espera al ejecutor. **Sin el flag**, el
-  host reserva un puerto efímero por proceso, para que varios `anvil` puedan
-  correr en paralelo (#15); el guest ejecutor suelto sigue usando 9100 por
-  defecto, que es lo que asume el flujo de dos terminales.
+- `--executor <nombre>=<host>:<puerto>` re-apunta un ejecutor declarado. El
+  motor se conecta sólo a los ejecutores `grpc` que declara la secuencia y
+  reintenta la conexión si no están listos (5 s máx); los `type: wasm` los
+  arranca el host en un puerto efímero por proceso y se los pasa así, de modo
+  que varios `anvil` pueden correr en paralelo (#15). `--port` ya no existe:
+  fijaba el puerto del ejecutor embebido, retirado con
+  [ADR-0041](../adr/0041-there-is-no-embedded-executor.md).
 - `--quiet` silencia el reporte de consola y los logs informativos de
   stderr; los errores y los exit codes se preservan (RNF-08: el formato
   congelado se omite, no se cambia). JSON/CSV siguen emitiéndose.
@@ -49,19 +50,21 @@ El contrato del binario es **binario**:
 
 | Código | Significa |
 |---|---|
-| `0` | la secuencia corrió y el veredicto agregado es `paso` |
-| `1` | cualquier otra cosa: veredicto `fallo`, `error` o `inconcluso`, error de carga, error de uso, ejecución interrumpida |
+| `0` | la secuencia corrió y el veredicto agregado es `pass` |
+| `1` | cualquier otra cosa: veredicto `fail`, `error` o `inconclusive`, error de carga, error de uso, ejecución interrumpida |
 
 El veredicto sale de `ResultadoSecuencia::estado()`, que agrega **al paso más
-severo** en la escala `paso < inconcluso < fallo < error` (ADR-0019, Regla 1).
-`saltado` queda fuera de la escala y es neutral (RF-33/34: un paso saltado por
-`disable` o por precondición falsa no es un fallo). `--quiet` no lo altera:
+severo** en la escala `pass < inconclusive < fail < error` (ADR-0019, Regla 1).
+`skipped` y `done` quedan fuera de la escala y son neutrales (RF-33/34: un paso
+saltado por `disable` o por precondición falsa no es un fallo; y un `action` o
+un `statement` no juzgaron nada, ADR-0040 §6). Una secuencia entera de pasos
+`done` agrega a `pass` y **sale 0**: nada dijo que la unidad estuviera mal. `--quiet` no lo altera:
 silencia el reporte, no el veredicto.
 
 `inconcluso` es el estado que produce el motor cuando la secuencia declara un
-veredicto (`tipo: pass_fail` en `main`) y ninguno llega a evaluarse — issue #31,
+veredicto (`type: pass_fail` en `main`) y ninguno llega a evaluarse — issue #31,
 donde una unidad salía aprobada sin que nadie la midiera. **Sale 1**, como todo
-lo que no es `paso`. El `if` que lo decide niega `"paso"` en vez de enumerar los
+lo que no es `pass`. El `if` que lo decide niega `"pass"` en vez de enumerar los
 estados malos, precisamente para que un estado nuevo no se cuele como éxito: por
 eso este cambio de semántica no tocó una línea del cálculo del exit code.
 
@@ -83,7 +86,7 @@ contra el motor nativo pasaría en verde sin probar nada de esto.
 
 Parseo manual, sin `clap`/`getopts`: el flag set es pequeño y se evita
 peso en el `.wasm` (ADR-0001). Si el flag set crece > ~10 o aparecen
-subcomandos, se reconsidera con un ADR (post-MVP). El host embebido
+subcomandos, se reconsidera con un ADR (post-MVP). El host
 hereda los args al guest motor, así los flags fluyen al binario único.
 
 ## Desacoplo motor ↔ UI: UIMsgs (post-MVP)

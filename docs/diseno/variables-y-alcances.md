@@ -69,12 +69,15 @@ main:
   crea una `Local` nueva en silencio en vez de fallar: el resto de la
   secuencia sigue leyendo la variable original, sin tocar, y el veredicto es
   el que no se pidió. Ver [informe-beta-2026-08.md](../qa/informe-beta-2026-08.md#def-3).
-- **`resultado.*` sólo es visible dentro del `asigna` del propio paso.** No
-  está disponible en `precondicion`, ni en la `condicion` de un `pass_fail`,
-  ni en un `statement`. La razón es de secuencia temporal: `resultado` es lo
-  que el paso **acaba de devolver**, y una precondición se evalúa *antes* de
-  invocarlo — no hay nada que leer todavía. El motor lo liga justo antes del
-  `asigna` y lo suelta justo después.
+- **`resultado.*` sólo es visible una vez el paso ha respondido.** Está en el
+  `asigna` del propio paso y, desde ADR-0042 §1, en la `condition` y el `value`
+  de un paso **que tiene `module`** — ahí ya hay respuesta que leer, y es la
+  forma de juzgar una salida con nombre (`result.outputs.pico`) en vez de la
+  medida. No está disponible en la `precondicion`, ni en un `statement`, ni en
+  un `pass_fail`/`numeric_limit` sin `module`. La razón es de secuencia
+  temporal: `resultado` es lo que el paso **acaba de devolver**, y una
+  precondición se evalúa *antes* de invocarlo — no hay nada que leer todavía.
+  El motor lo liga justo antes de usarlo y lo suelta justo después.
 
   Si necesitas una medida más allá de ese punto, vuélcala a un local y léela
   desde ahí:
@@ -82,14 +85,20 @@ main:
   ```yaml
   main:
     - name: medir_voltaje
+      type: numeric_limit
+      module: dmm/measure_voltage
+      executor: bench
+      limit: { comparison: GELE, low: 4.5, high: 5.5 }
       assign: { v: '${result.measured_value}' }   # aquí sí
     - name: verificar
-      precondition: 'locals.v > 4.5'               # y aquí se lee el local
+      type: pass_fail
+      condition: 'locals.v > 4.5'                  # y aquí se lee el local
   ```
 
-  Usarlo fuera de `asigna` es **error de carga** desde #12. Antes no fallaba:
+  Usarlo donde no hay respuesta que leer es **error de carga** desde #12.
+  Antes no fallaba:
   valía `nothing`, así que `precondicion: 'resultado.valor_medido != nothing'`
-  era un `false` constante, el paso se saltaba, y como `saltado` no degrada el
+  era un `false` constante, el paso se saltaba, y como `skipped` no degrada el
   agregado la secuencia **terminaba en verde**. En la primera campaña de beta
   ese patrón se propagó a 19 secuencias y 51 precondiciones. Ver
   [§5 del informe](../qa/informe-beta-2026-08.md#leccion).
@@ -111,15 +120,24 @@ main:
   `nothing` la variable con valor bueno que el `cleanup` iba a leer para decidir
   si apagaba una fuente, no.
 
-  Con `fallo` sí corre: ahí hay medida —la que incumplió el criterio—, y es
+  Con `fail` sí corre: ahí hay medida —la que incumplió el criterio—, y es
   justo la que interesa volcar. La distinción es la de la Regla 2 entera:
-  `fallo` es del DUT, `error` es de Anvil.
+  `fail` es del DUT, `error` es de Anvil.
+
+  Y corre **antes de que el paso se juzgue** (ADR-0042 §2): lo que se vuelca es
+  lo que el módulo midió, no el veredicto. Por eso un `assign` de un
+  `numeric_limit` guarda la medida aunque el límite la vaya a declarar `fail`,
+  y una `condition` del mismo paso ve el local recién escrito.
 
   ```yaml
   locals:
     valor: 99.0
   main:
     - name: medir            # si este paso da `error`…
+      type: numeric_limit
+      module: dmm/measure_voltage
+      executor: bench
+      limit: { comparison: GELE, low: 4.5, high: 5.5 }
       assign: { valor: '${result.measured_value}' }
   cleanup:
     - name: comprobar        # …aquí `locals.valor` sigue siendo 99.0
@@ -127,9 +145,10 @@ main:
       condition: 'locals.valor == 99.0'
   ```
 
-- **`asigna` sólo tiene sentido en un paso `grpc` o `sequence_call`.** En un
-  `statement` o un `pass_fail` es **error de carga**: ninguno de los dos produce
-  `resultado.*` que volcar, así que la `asigna` sería un no-op silencioso. Un
+- **`asigna` sólo tiene sentido si hay `resultado.*` que volcar**: un paso con
+  `module` o un `sequence_call`. En un `statement`, o en un
+  `pass_fail`/`numeric_limit` **sin `module`**, es **error de carga**: no
+  llaman a nadie, así que la `asigna` sería un no-op silencioso. Un
   `statement` asigna dentro de su propia sentencia (`locals.x = …`).
 
 ## Reference variables (ADR-0022)

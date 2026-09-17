@@ -224,6 +224,32 @@ fn valida(secuencia: &str) -> Output {
         .expect("lanzar anvil")
 }
 
+/// Every example sequence loads. Examples are what a reader copies, and a
+/// loader change can break one nobody runs: removing the embedded executor
+/// left `variables.yaml` refusing to load for a disabled step with no
+/// `executor:`, and no test noticed.
+///
+/// Not sequences on their own, and so left out: a limits sidecar, and a file
+/// that is only ever called as a subsequence.
+#[test]
+fn every_example_sequence_validates() {
+    const NOT_A_ROOT: [&str; 2] = ["limites.limits.yaml", "medir_fuentes.yaml"];
+    let mut checked = 0;
+    for entry in std::fs::read_dir(raiz_repo().join("ejemplos")).expect("read ejemplos/") {
+        let path = entry.expect("dir entry").path();
+        let name = path.file_name().unwrap().to_string_lossy().into_owned();
+        let is_sequence = name.ends_with(".yaml") || name.ends_with(".yseq");
+        if !is_sequence || NOT_A_ROOT.contains(&name.as_str()) {
+            continue;
+        }
+        let s = valida(&format!("ejemplos/{name}"));
+        let err = String::from_utf8_lossy(&s.stderr);
+        assert_eq!(codigo(&s), 0, "ejemplos/{name} does not load:\n{err}");
+        checked += 1;
+    }
+    assert!(checked >= 10, "only {checked} examples were checked");
+}
+
 #[test]
 fn validate_de_una_secuencia_correcta_sale_con_cero() {
     // La línea base que faltaba: sin ella, cualquier test de abajo pasaría en
@@ -249,7 +275,9 @@ fn validate_rechaza_valor_medido_en_un_sequence_call() {
     let s = valida("packaging/anvil-host/tests/fixtures/validate_valor_medido_en_call.yaml");
     let err = String::from_utf8_lossy(&s.stderr);
     assert_eq!(codigo(&s), 1, "stderr:\n{err}");
-    assert!(err.contains("valor_medido"), "stderr:\n{err}");
+    // Not "valor_medido": that is in the fixture's own path, which every load
+    // error prints, so it matched whatever the refusal was about.
+    assert!(err.contains("una subsecuencia no mide"), "stderr:\n{err}");
 }
 
 #[test]
@@ -289,60 +317,6 @@ fn validate_no_levanta_el_puente_wasm() {
     assert_eq!(codigo(&s), 0, "stderr:\n{err}");
 }
 
-// --- El ejecutor embebido y el pre-escaneo del host (issue #52) -----------
-
-/// Issue #52, el test del arreglo.
-///
-/// El host pre-escanea el YAML por su cuenta (M5-ext.1) para recolectar los
-/// `ejecutores:` declarados. Cuando ese parseo fallaba por esquema, el host
-/// **además** daba por hecho que el guest tampoco iba a poder cargar la
-/// secuencia y se saltaba el ejecutor de pasos embebido —sin decir nada.
-///
-/// La deducción sólo vale mientras host y guest compartan cargador. En cuanto
-/// dejan de compartirlo (basta un build a medias: el host es un workspace
-/// aparte y los guests van embebidos), el guest carga la secuencia, no hay
-/// ejecutor escuchando, y el motor cae al `9100` por defecto —el host tampoco
-/// le pasa `--port` en esa rama— y muere con un `connection-refused` que no
-/// nombra ni la causa ni a nadie. Cuarenta segundos para no decir nada.
-///
-/// Lo que se fija aquí es que **el host no predice el veredicto del guest**:
-/// si los argumentos dicen que se van a correr pasos, el ejecutor arranca,
-/// aunque el pre-escaneo del host haya rechazado el fichero.
-///
-/// Al reintroducir el `&& !yaml_invalido` en `va_a_ejecutar` este test se pone
-/// rojo: la línea del ejecutor desaparece de stderr.
-#[test]
-fn el_ejecutor_embebido_arranca_aunque_el_host_no_sepa_leer_el_yaml() {
-    let s = corre_con_reporte("packaging/anvil-host/tests/fixtures/esquema_invalido.yaml");
-    let err = String::from_utf8_lossy(&s.stderr);
-    assert!(
-        err.contains("ejecutor de pasos escuchando en"),
-        "el ejecutor embebido tiene que arrancar igual: que el host no sepa \
-         parsear el YAML no dice nada de si el guest podrá. stderr:\n{err}"
-    );
-    // Blinda la intención: el fixture tiene que ser rechazado por **esquema**.
-    // Si degenerara en un fichero que carga bien, el test seguiría verde sin
-    // haber ejercitado la rama que importa.
-    assert_eq!(codigo(&s), 1, "stderr:\n{err}");
-    assert!(
-        err.contains("no se pudo cargar la secuencia"),
-        "el fixture debe fallar al cargar, no al ejecutar. stderr:\n{err}"
-    );
-}
-
-/// El contrapunto del anterior: el guard por argumentos sigue en pie. Un
-/// `--validate` no levanta nada, y eso no lo puede aflojar el arreglo de #52
-/// (issue #22 lo compró caro).
-#[test]
-fn validate_sigue_sin_levantar_el_ejecutor_embebido() {
-    let s = valida("packaging/anvil-host/tests/fixtures/esquema_invalido.yaml");
-    let err = String::from_utf8_lossy(&s.stderr);
-    assert!(
-        !err.contains("ejecutor de pasos escuchando en"),
-        "--validate no levanta el ejecutor, pase lo que pase con el YAML. stderr:\n{err}"
-    );
-}
-
 /// El contrapunto: no instanciar no es quedarse ciego. Que el `.wasm` exista
 /// es una comprobación de fichero, la hace el cargador, y sigue corriendo.
 #[test]
@@ -359,7 +333,7 @@ fn validate_sigue_comprobando_que_el_wasm_existe() {
 /// Sin `--quiet` porque el exit 1 a secas no distingue esto de un error de
 /// carga: lo que se comprueba es que los dos nombres aparezcan nombrados. Y
 /// tiene que llegar a preguntar, así que este es el único caso en que
-/// `--validate` levanta el ejecutor embebido (excepción explícita al #22).
+/// `--validate` levanta los ejecutores declarados (excepción explícita al #22).
 ///
 /// Visto en rojo escribiendo los dos nombres bien: sale 0 y sin hallazgos.
 #[test]
@@ -380,15 +354,15 @@ fn validate_con_ejecutores_caza_los_nombres_mal_escritos() {
         "una firma que no casa no puede salir 0. stderr:\n{stderr}"
     );
     assert!(
-        stderr.contains("canall"),
+        stderr.contains("channell"),
         "nombra el parámetro mal escrito. stderr:\n{stderr}"
     );
     assert!(
-        stderr.contains("canal, offset"),
+        stderr.contains("channel, offset"),
         "y los que el paso sí toma, que es la respuesta. stderr:\n{stderr}"
     );
     assert!(
-        stderr.contains("temperaturaa"),
+        stderr.contains("temperaturee"),
         "y la salida mal escrita, que es la excepción que ADR-0020 §3 dejó \
          abierta. stderr:\n{stderr}"
     );

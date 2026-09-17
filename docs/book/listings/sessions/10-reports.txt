@@ -1,10 +1,6 @@
 $ anvil sequences/judging.yseq --quiet --csv judging.csv
-ejecutor de pasos escuchando en 46037
-motor conectado
-catálogo pedido
-conexión cerrada; esperando otra
 $ cat judging.csv
-sequence_name,status,step_name,step_status,message,measured_value,limit_min,limit_max,expected_value,operator,phase,inputs,outputs
-judging,pass,board/measure_rail,pass,,4.98,4.75,5.25,,,main,,
-judging,pass,board/measure_leakage,pass,,0.0004,,,0.001,<=,main,,
-judging,pass,board/check_led,pass,,,,,,,main,,
+sequence_name,status,step_name,step_status,message,measured_value,limit_min,limit_max,expected_value,operator,phase,inputs,outputs,module,comparison,units
+judging,pass,board/measure_rail,pass,,4.98,4.75,5.25,,,main,,,board/measure_rail,GELE,
+judging,pass,board/measure_leakage,pass,,0.0004,,,0.001,<=,main,,,board/measure_leakage,LE,
+judging,pass,board/check_led,pass,,,,,,,main,,,board/check_led,,

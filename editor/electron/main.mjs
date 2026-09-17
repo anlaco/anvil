@@ -7,7 +7,7 @@
 // just launches the same `anvil --bridge` a person would otherwise have to
 // start themselves in a second terminal.
 import { spawn } from "node:child_process";
-import { existsSync } from "node:fs";
+import { existsSync, statSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { createInterface } from "node:readline";
 import path from "node:path";
@@ -295,6 +295,9 @@ function wireIpc() {
     existsSync(file) ? readFile(file, "utf8") : null,
   );
   ipcMain.handle("anvil:write-text", (_event, file, text) => writeFile(file, text, "utf8"));
+  // What the loader asks of an executor's binary before any run: is it there
+  // (editor/src/neighbours.mjs). A file, not a directory, as the host requires.
+  ipcMain.handle("anvil:file-exists", (_event, file) => existsSync(file) && statSync(file).isFile());
   // An engine that is not installed, or not where it was, is an expected
   // answer here, not a fault: it comes back as `{ error }` for the page to
   // show, rather than as a rejection Electron logs with a stack trace on every

@@ -18,8 +18,8 @@ mod entorno;
 
 use modelo::proto::{StepRequest, StepResult, Value as ProtoValue, CONTRACT, ROUTE_INVOKE};
 use modelo::{
-    Asignacion, DefinicionPaso, DefinicionSecuencia, EntradaPaso, Fase, IdentidadPaso, Limite,
-    Programa, ResultSink, ResultadoSecuencia, ResultadoStep, TipoEjecutor, TipoPaso,
+    Asignacion, DefinicionPaso, DefinicionSecuencia, EntradaPaso, Fase, IdentidadPaso, Programa,
+    ResultSink, ResultadoSecuencia, ResultadoStep, TipoEjecutor, TipoPaso,
 };
 use prost::Message;
 use wasi_grpc::grpc::Cliente;
@@ -33,19 +33,14 @@ pub use entorno::EntornoMotor;
 use expr::{eval, eval_sentencias, Entorno, Expresion, Scope, Sentencia, Value};
 use std::collections::HashMap;
 
-/// Clave interna de la conexión al ejecutor embebido en `Motor.conexiones`.
-/// No es declarable en el YAML: el cargador rechaza un ejecutor con este
-/// nombre (ver `cargador::NOMBRE_EMBEDIDO_RESERVADO`).
-pub const EMBEDIDO: &str = modelo::EJECUTOR_EMBEBIDO;
-
 /// El motor: un cliente gRPC contra los ejecutores de pasos. M5-ext.1
 /// (RF-36.3): despacha cada paso al endpoint del ejecutor que declara su
-/// `DefinicionPaso.ejecutor`; sin declaración, va al embebido (`EMBEDIDO`).
+/// `DefinicionPaso.ejecutor`. There is no default executor (ADR-0041).
 /// La tabla `conexiones` se abre en `desde_programa` y cada `Grpc`
 /// declarado tiene su `Cliente` propio.
 pub struct Motor {
-    /// Conexiones abiertas, keyed por nombre de ejecutor (o `EMBEDIDO`
-    /// para el embebido). Un `TipoEjecutor::Wasm` **no** abre conexión: el
+    /// Conexiones abiertas, keyed por nombre de ejecutor. Un
+    /// `TipoEjecutor::Wasm` **no** abre conexión: el
     /// motor nunca lo ejecuta (ADR-0014) — el host lo traduce a `grpc`
     /// (override `--executor`) antes de que llegue aquí; si llega sin
     /// traducir, `Error::EjecutorWasmSinHost`.
@@ -74,8 +69,19 @@ pub enum Error {
     /// defense in depth.
     EjecutorNoDeclarado(String),
     /// El ejecutor del paso no tiene conexión abierta (debería abrirse en
-    /// `desde_programa` para los `grpc`; el embebido siempre la tiene).
+    /// `desde_programa` para los `grpc`).
     EjecutorNoConectado(String),
+    /// A step that calls an executor names none. The loader refuses that in a
+    /// program (ADR-0041); this is defence in depth for a sequence that
+    /// reaches the engine some other way.
+    PasoSinEjecutor(String),
+    /// A declared executor did not accept the connection. Named with its
+    /// declared name and address, so the message says which one (#78).
+    NoSeConecto {
+        ejecutor: String,
+        destino: String,
+        causa: net::Error,
+    },
     /// El paso declara `ejecutor: <nombre>` con `tipo: wasm` y llegó al motor
     /// **sin traducir**. Eso sólo pasa si se corre el guest motor suelto
     /// (`wasmtime run anvil.wasm`) sin el host: el cargador de `.wasm` por
@@ -96,6 +102,14 @@ impl std::fmt::Display for Error {
             Error::EjecutorNoConectado(n) => {
                 write!(f, "el ejecutor '{n}' no tiene conexión abierta")
             }
+            Error::PasoSinEjecutor(paso) => {
+                write!(f, "step '{paso}' calls an executor and names none")
+            }
+            Error::NoSeConecto {
+                ejecutor,
+                destino,
+                causa,
+            } => write!(f, "executor '{ejecutor}' at {destino}: {causa}"),
             Error::EjecutorWasmSinHost(n) => write!(
                 f,
                 "el ejecutor '{n}' es 'wasm': el cargador de `.wasm` por path vive en \
@@ -121,43 +135,32 @@ impl From<prost::DecodeError> for Error {
 }
 
 impl Motor {
-    /// Conecta al ejecutor embebido (`127.0.0.1:9100`) — compat con M4b
-    /// (una secuencia sin `ejecutores:` se corre entera contra él). Es lo
-    /// que usa `ejecuta_secuencia` (legacy).
-    pub fn conecta(host: &str, puerto: u16) -> Result<Self, Error> {
+    /// Abre una conexión por cada ejecutor `grpc` declarado en
+    /// `Programa.ejecutores` (M5-ext.1, RF-36.3), and to nothing else: a
+    /// sequence that calls no executor opens no connection (ADR-0041). Un
+    /// ejecutor `wasm` **no** abre conexión aquí: the host has already turned it
+    /// into `grpc` with an `--executor` override.
+    pub fn desde_programa(programa: &Programa) -> Result<Self, Error> {
         let mut conexiones = HashMap::new();
-        conexiones.insert(EMBEDIDO.into(), Cliente::conectar(host, puerto)?);
+        for (nombre, def) in &programa.ejecutores {
+            if let TipoEjecutor::Grpc { host, puerto } = &def.tipo {
+                let cliente =
+                    Cliente::conectar(host, *puerto).map_err(|causa| Error::NoSeConecto {
+                        ejecutor: nombre.clone(),
+                        destino: format!("{host}:{puerto}"),
+                        causa,
+                    })?;
+                conexiones.insert(nombre.clone(), cliente);
+            }
+        }
         Ok(Motor {
             conexiones,
             vidas: HashMap::new(),
         })
     }
 
-    /// Conecta al embebido y abre una conexión por cada ejecutor `grpc`
-    /// declarado en `Programa.ejecutores` (M5-ext.1, RF-36.3). Un ejecutor
-    /// `wasm` **no** abre conexión aquí (M5-ext.1 no lo instancia); un
-    /// `embebido` declarado explícitamente usa la conexión `EMBEDIDO`.
-    pub fn desde_programa(programa: &Programa) -> Result<Self, Error> {
-        Self::desde_programa_en(programa, "127.0.0.1", 9100)
-    }
-
-    /// Igual que `desde_programa`, con el endpoint del **embebido** explícito:
-    /// lo necesita el CLI para honrar `--port` (RF-40) y reintentar la
-    /// conexión mientras el ejecutor arranca.
-    pub fn desde_programa_en(programa: &Programa, host: &str, puerto: u16) -> Result<Self, Error> {
-        let mut motor = Self::conecta(host, puerto)?;
-        for (nombre, def) in &programa.ejecutores {
-            if let TipoEjecutor::Grpc { host, puerto } = &def.tipo {
-                motor
-                    .conexiones
-                    .insert(nombre.clone(), Cliente::conectar(host, *puerto)?);
-            }
-        }
-        Ok(motor)
-    }
-
     /// Resuelve el endpoint de un paso (M5-ext.1, RF-36.3): sin `ejecutor`
-    /// declarado → embebido; `Embebido` declarado → embebido; `Grpc` →
+    /// declarado → error (ADR-0041); `Grpc` →
     /// su nombre (clave de `conexiones`); `Wasm` → error (M5-ext.2: el motor
     /// no ejecuta `Wasm`; el host lo traduce a `grpc` antes de llegar aquí).
     ///
@@ -171,7 +174,7 @@ impl Motor {
         programa: &'a Programa,
     ) -> Result<&'a str, Error> {
         match cargador::resolver_endpoint(def.ejecutor.as_deref(), &programa.ejecutores) {
-            cargador::Endpoint::Embebido => Ok(EMBEDIDO),
+            cargador::Endpoint::SinEjecutor => Err(Error::PasoSinEjecutor(def.nombre.clone())),
             cargador::Endpoint::Grpc(n) => Ok(n),
             cargador::Endpoint::Wasm(n) => Err(Error::EjecutorWasmSinHost(n.to_string())),
             cargador::Endpoint::NoDeclarado(n) => Err(Error::EjecutorNoDeclarado(n.to_string())),
@@ -196,15 +199,7 @@ impl Motor {
             return Ok(r);
         }
         let endpoint = endpoint.as_str();
-        let peticion = StepRequest {
-            name: def.nombre.clone(),
-            attempt: intento,
-            inputs: parametros
-                .iter()
-                .filter_map(|(n, v)| ProtoValue::desde_value(n, v))
-                .collect(),
-            contract: CONTRACT,
-        };
+        let peticion = peticion_de(def, intento, parametros);
         let cliente = self
             .conexiones
             .get_mut(endpoint)
@@ -234,7 +229,7 @@ impl Motor {
                 return Ok(ResultadoStep::nuevo(
                     &def.nombre,
                     "error",
-                    format!("el ejecutor '{}' devolvió {e}", nombre_visible(endpoint)),
+                    format!("el ejecutor '{}' devolvió {e}", endpoint),
                 ))
             }
         };
@@ -277,8 +272,7 @@ impl Motor {
                              '{}', y su catálogo dice que está en la '{vida}'. Una referencia \
                              que no es de la vida de quien la acuña no la va a poder resolver \
                              nadie (ADR-0022 §6)",
-                            nombre_visible(endpoint),
-                            referencia.lifetime
+                            endpoint, referencia.lifetime
                         ),
                     ));
                 }
@@ -338,8 +332,8 @@ impl Motor {
                         "el parámetro '{nombre}' lleva una referencia del ejecutor '{}' y este \
                          paso se despacha a '{}'. Una referencia sólo significa algo dentro del \
                          ejecutor que la acuñó (ADR-0022 §3)",
-                        nombre_visible(&r.executor),
-                        nombre_visible(endpoint)
+                        r.executor.as_str(),
+                        endpoint
                     ),
                 ));
             }
@@ -377,15 +371,21 @@ impl Motor {
             intento += 1;
             resultado = self.ejecuta_paso(def, programa, intento as i32, parametros)?;
         }
-        // El límite (si la secuencia lo declara) se evalúa tras la invocación:
-        // el paso devuelve la medida, el motor produce el estado final
-        // (ADR-0008). El contrato `paso.proto` no cambia — el límite vive en
-        // la definición, no en el cable.
-        Ok(aplicar_limite(def, resultado))
+        // The limit is not applied here but in `corre_un_paso`, where every
+        // step type is judged (ADR-0040): here it would only reach the network
+        // path, and each type judges a limit at a different moment. A limit
+        // failure still does not consume a retry (#76).
+        Ok(resultado)
     }
 
-    /// Corre una secuencia completa y vierte el resultado a `sink` a medida
-    /// que avanza. La semántica es la de la spec y no cambia:
+    /// Ejecuta un **programa** (M4b, RF-27): la secuencia raíz, con sus
+    /// `sequence_call` resueltos a subsecuencias inline (por nombre) o a
+    /// archivos externos (por path, ya cargados en `programa.archivos`).
+    /// El motor **no** abre ficheros: todo vino resuelto del cargador
+    /// (ADR-0005). El render lo hacen los sinks de formato en
+    /// `on_fin_secuencia`, que aquí sí se dispara (es la raíz).
+    ///
+    /// La semántica es la de la spec y no cambia:
     ///
     /// - **Setup**: corren todos; si alguno no pasa, el Main se salta entero.
     /// - **Main**: solo si el Setup fue bien, y **corta en el primer fallo**.
@@ -407,30 +407,6 @@ impl Motor {
     /// secuencia se interrumpe y **no** se dispara `on_fin_paso` ni
     /// `on_fin_secuencia` del paso en curso: el lifecycle completo solo se
     /// garantiza si la secuencia no se interrumpe por error de red.
-    pub fn ejecuta_secuencia(
-        &mut self,
-        definicion: &DefinicionSecuencia,
-        sink: &mut impl ResultSink,
-    ) -> Result<ResultadoSecuencia, Error> {
-        // API legacy (M1–M4): una secuencia sin subsecuencias. Construye un
-        // `Programa` trivial y delega en `ejecuta_secuencia_interna`.
-        let programa = Programa {
-            raiz: definicion.clone(),
-            archivos: HashMap::new(),
-            ejecutores: HashMap::new(),
-        };
-        let entorno = EntornoMotor::desde_definicion(&programa.raiz);
-        let (secuencia, _) =
-            ejecuta_secuencia_interna(self, &programa.raiz, entorno, sink, &programa, RAIZ)?;
-        Ok(secuencia)
-    }
-
-    /// Ejecuta un **programa** (M4b, RF-27): la secuencia raíz, con sus
-    /// `sequence_call` resueltos a subsecuencias inline (por nombre) o a
-    /// archivos externos (por path, ya cargados en `programa.archivos`).
-    /// El motor **no** abre ficheros: todo vino resuelto del cargador
-    /// (ADR-0005). El render lo hacen los sinks de formato en
-    /// `on_fin_secuencia`, que aquí sí se dispara (es la raíz).
     pub fn ejecuta_programa(
         &mut self,
         programa: &Programa,
@@ -469,6 +445,21 @@ impl InvocaPasos for Motor {
         parametros: &[(String, Value)],
     ) -> Result<ResultadoStep, Error> {
         self.ejecuta_con_reintentos(def, programa, parametros)
+    }
+}
+
+/// The request for one invocation. It carries the step's **module** — what the
+/// executor serves — and not its name, which is the sequence's own label for it
+/// (ADR-0040 §1).
+fn peticion_de(def: &DefinicionPaso, intento: i32, parametros: &[(String, Value)]) -> StepRequest {
+    StepRequest {
+        name: def.modulo().to_string(),
+        attempt: intento,
+        inputs: parametros
+            .iter()
+            .filter_map(|(n, v)| ProtoValue::desde_value(n, v))
+            .collect(),
+        contract: CONTRACT,
     }
 }
 
@@ -527,13 +518,6 @@ fn evalua_entradas(
     Ok(fuera)
 }
 
-/// Cómo se nombra un endpoint en un mensaje para el usuario. `EMBEDIDO` es
-/// una clave interna que no se puede declarar en el YAML, así que enseñarla
-/// tal cual sería enseñar un detalle de implementación.
-pub(crate) fn nombre_visible(endpoint: &str) -> &str {
-    modelo::nombre_visible_de_ejecutor(endpoint)
-}
-
 /// The liveness verdict, separated from the network so it can be tested
 /// (ADR-0022 §6).
 ///
@@ -563,7 +547,7 @@ fn veredicto_de_vida(
                      ({motivo}). El paso lleva una referencia suya y no se invoca: medir \
                      contra un ejecutor que ya no se sabe si es el mismo sería medir contra \
                      otro banco (ADR-0022 §6)",
-                    nombre_visible(endpoint)
+                    endpoint
                 ),
             ))
         }
@@ -580,8 +564,7 @@ fn veredicto_de_vida(
                  '{nombre}' lleva una referencia de la vida '{}' y el ejecutor dice estar \
                  ahora en la '{ahora}'. Esa referencia ya no apunta a nada, así que el paso \
                  no se invoca y no mide (ADR-0022 §6)",
-                nombre_visible(endpoint),
-                r.lifetime
+                endpoint, r.lifetime
             ),
         ));
     }
@@ -625,7 +608,7 @@ pub(crate) fn veredicto_del_eco(
             "el ejecutor '{}' entiende el contrato {cual} y este paso necesita el {CONTRACT}: \
              sus 'parametros' se habrían perdido sin aviso y habría medido otra cosa. \
              Recompila o actualiza ese ejecutor.",
-            nombre_visible(endpoint),
+            endpoint,
         ),
     ))
 }
@@ -640,9 +623,7 @@ fn necesita_contrato_2(def: &DefinicionPaso) -> bool {
     if def.entradas.is_some() {
         return true;
     }
-    def.asigna
-        .as_deref()
-        .is_some_and(|asigs| asigs.iter().any(|a| lee_salidas(&a.expr)))
+    def.lecturas_de_resultado().into_iter().any(lee_salidas)
 }
 
 /// `true` si el AST lee en algún sitio una `result.outputs.<nombre>`.
@@ -751,7 +732,7 @@ fn ejecuta_secuencia_interna<I: InvocaPasos>(
     let mut setup_ok = true;
     for (indice, p) in def.pasos_setup.iter().enumerate() {
         let r = corre_un_paso(inv, p, &mut entorno, sink, &ctx(Fase::Setup, indice))?;
-        let fallo = !r.paso() && r.estado != "skipped";
+        let fallo = mueve_el_veredicto(&r);
         secuencia.registra(r.clone());
         if fallo {
             setup_ok = false;
@@ -769,7 +750,7 @@ fn ejecuta_secuencia_interna<I: InvocaPasos>(
     if setup_ok {
         for (indice, p) in def.pasos_main.iter().enumerate() {
             let r = corre_un_paso(inv, p, &mut entorno, sink, &ctx(Fase::Main, indice))?;
-            let fallo = !r.paso() && r.estado != "skipped";
+            let fallo = mueve_el_veredicto(&r);
             if p.tipo == TipoPaso::PassFail && r.estado != "skipped" {
                 veredicto_evaluado = true;
             }
@@ -808,6 +789,14 @@ fn ejecuta_secuencia_interna<I: InvocaPasos>(
         sink.on_fin_secuencia(&secuencia);
     }
     Ok((secuencia, entorno))
+}
+
+/// Whether a step's status is one that cuts a phase: anything above the neutral
+/// statuses of the severity scale. `pass`, `skipped` and `done` do not
+/// (ADR-0040 §6); reading it off the scale rather than listing them is what
+/// keeps a new neutral status from cutting `setup` by omission.
+fn mueve_el_veredicto(r: &ResultadoStep) -> bool {
+    modelo::Severidad::de(&r.estado) > modelo::Severidad::Paso
 }
 
 /// Lo que un paso necesita saber de la corrida que lo envuelve: la secuencia
@@ -896,21 +885,34 @@ fn corre_un_paso<I: InvocaPasos>(
     // ejecutor.
     let mut r = match p.tipo {
         TipoPaso::Statement => ejecuta_statement_puro(p.statement.as_deref(), &p.nombre, ent),
-        TipoPaso::PassFail => evalua_pass_fail(p.condicion.as_ref(), &p.nombre, ent),
+        TipoPaso::SequenceCall => {
+            ejecuta_sequence_call(inv, p, ent, sink, ctx, &step_run_id, &ruta)?
+        }
+        // Judged by the engine alone, on the variables: ADR-0018's `pass_fail`
+        // and a `numeric_limit` on a value already acquired (ADR-0040 §5).
+        _ if !p.llama_a_un_ejecutor() => match p.tipo {
+            TipoPaso::NumericLimit => {
+                ent.limpia_resultado();
+                juzga_limite_numerico(p, ResultadoStep::nuevo(&p.nombre, "pass", ""), ent)
+            }
+            _ => evalua_pass_fail(p.condicion.as_ref(), &p.nombre, ent),
+        },
         // ADR-0020: los parámetros se evalúan **aquí**, donde está el entorno,
         // y antes de invocar. Una expresión que falla convierte el paso en
         // `error` y **no se llama al ejecutor**: medir con un parámetro
         // inventado da un número que parece bueno y no lo es.
-        TipoPaso::Grpc => match evalua_entradas(p, ent) {
+        _ => match evalua_entradas(p, ent) {
             Ok(parametros) => {
-                let r = inv.ejecuta_paso_grpc(p, ctx.programa, &parametros)?;
-                normaliza_estado_de_ejecutor(r)
+                let mut r = inv.ejecuta_paso_grpc(p, ctx.programa, &parametros)?;
+                // The report names the step as the sequence does. What the
+                // executor echoes back is the module it served, and two steps
+                // calling one module would otherwise read as the same step.
+                r.nombre = p.nombre.clone();
+                r.module = Some(p.modulo().to_string());
+                juzga_respuesta_del_modulo(p, normaliza_estado_de_ejecutor(r), ent)
             }
             Err(r) => *r,
         },
-        TipoPaso::SequenceCall => {
-            ejecuta_sequence_call(inv, p, ent, sink, ctx, &step_run_id, &ruta)?
-        }
     };
 
     // (d) asigna (RF-31): tras un paso Grpc o SequenceCall, vuelca campos
@@ -924,7 +926,7 @@ fn corre_un_paso<I: InvocaPasos>(
     // `nothing` de un `resultado.*` vacío encima de una variable con valor
     // bueno. Que la variable la lea después un `cleanup` para decidir si apaga
     // una fuente es todo el argumento: el destino no se toca.
-    if matches!(p.tipo, TipoPaso::Grpc | TipoPaso::SequenceCall) && r.estado != "error" {
+    if p.tipo == TipoPaso::SequenceCall && r.estado != "error" {
         if let Some(asignaciones) = &p.asigna {
             r = aplica_asigna(asignaciones, r, ent);
         }
@@ -936,6 +938,110 @@ fn corre_un_paso<I: InvocaPasos>(
     sink.on_resultado(&r, &id);
     sink.on_fin_paso(p, &id);
     Ok(r)
+}
+
+/// Judges what a module answered, by the step's type (ADR-0040 §3–5).
+///
+/// For the types ADR-0040 adds, `assign` runs **before** the judgement, so a
+/// `condition` or `value` reading a local sees what the module just returned
+/// (ADR-0042 §2); and a module that returned `error` is neither copied out nor
+/// judged — a broken bench is not judged (ADR-0019, Rule 2).
+fn juzga_respuesta_del_modulo(
+    p: &DefinicionPaso,
+    r: ResultadoStep,
+    ent: &mut EntornoMotor,
+) -> ResultadoStep {
+    if r.estado == "error" {
+        return r;
+    }
+    let mut r = match &p.asigna {
+        Some(asignaciones) => aplica_asigna(asignaciones, r, ent),
+        None => r,
+    };
+    if r.estado == "error" {
+        return r;
+    }
+    match p.tipo {
+        // §3: an action judges nothing. Its `pass` is `done`; a `fail` or a
+        // `skipped` the module set stands, as TestStand's does.
+        TipoPaso::Action => {
+            if r.paso() {
+                r.estado = "done".into();
+            }
+            r
+        }
+        // §4: the module's status is the verdict, unless a condition decides.
+        TipoPaso::PassFail => match &p.condicion {
+            None => r,
+            Some(cond) => {
+                ent.set_resultado(r.clone());
+                let juicio = evalua_condicion(cond, &p.nombre, ent);
+                ent.limpia_resultado();
+                r.estado = juicio.estado;
+                r.mensaje = juicio.mensaje;
+                r
+            }
+        },
+        TipoPaso::NumericLimit => juzga_limite_numerico(p, r, ent),
+        _ => r,
+    }
+}
+
+/// A `numeric_limit` (ADR-0040 §5): the number is `valor`, or the module's
+/// measurement, and a step with no number to judge is `error`, not a limit that
+/// silently does not apply. A `fail` or `error` already on `r` stands: a limit
+/// only ever turns a `pass` into a `fail` (ADR-0008).
+///
+/// With a module, `ent` must not hold a stale result: it is given `r` here.
+fn juzga_limite_numerico(
+    p: &DefinicionPaso,
+    mut r: ResultadoStep,
+    ent: &mut EntornoMotor,
+) -> ResultadoStep {
+    if !r.paso() {
+        return r;
+    }
+    let numero = match &p.valor {
+        Some(expr) => {
+            if p.llama_a_un_ejecutor() {
+                ent.set_resultado(r.clone());
+            }
+            let evaluado = eval(expr, ent);
+            ent.limpia_resultado();
+            // On error the step keeps what the module returned — its inputs,
+            // outputs and measurement stay in the report.
+            let motivo = match evaluado {
+                Ok(Value::Numero(x)) => Ok(x),
+                Ok(Value::Nulo) => {
+                    Err("'value' evaluated to nothing: there is no number to judge".to_string())
+                }
+                Ok(otro) => Err(format!("'value' is {}, not a number", otro.tipo())),
+                Err(e) => Err(format!("'value': {e}")),
+            };
+            match motivo {
+                Ok(x) => x,
+                Err(m) => {
+                    r.estado = "error".into();
+                    r.mensaje = m;
+                    return r;
+                }
+            }
+        }
+        None => match r.valor_medido {
+            Some(x) => x,
+            None => {
+                r.estado = "error".into();
+                r.mensaje = format!(
+                    "no measurement: a numeric_limit judges the module's measured value, and \
+                     it returned none (it said: '{}')",
+                    r.mensaje
+                );
+                return r;
+            }
+        },
+    };
+    r.valor_medido = Some(numero);
+    aplicar_limite(p, r)
 }
 
 /// Ejecuta un paso `sequence_call` (M4b, RF-27): invoca otra secuencia
@@ -1132,7 +1238,9 @@ fn ejecuta_statement_puro(
         return ResultadoStep::nuevo(nombre, "error", "statement sin sentencia");
     };
     match eval_sentencias(stmts, ent) {
-        Ok(()) => ResultadoStep::nuevo(nombre, "pass", "statement ok"),
+        // `done`, not `pass`: a statement did something and checked nothing
+        // (ADR-0040 §9), and the report must not say it passed.
+        Ok(()) => ResultadoStep::nuevo(nombre, "done", "statement ok"),
         Err(e) => ResultadoStep::nuevo(nombre, "error", format!("statement: {e}")),
     }
 }
@@ -1160,6 +1268,12 @@ fn evalua_pass_fail(
     };
     // Un `pass_fail` no tiene `resultado.*` propio: lee variables de scopes.
     ent.limpia_resultado();
+    evalua_condicion(cond, nombre, ent)
+}
+
+/// Evaluates a verdict condition against `ent` as it is: `true` passes, `false`
+/// fails, anything else is `error`.
+fn evalua_condicion(cond: &Expresion, nombre: &str, ent: &mut EntornoMotor) -> ResultadoStep {
     match eval(cond, ent) {
         Ok(Value::Bool(true)) => ResultadoStep::nuevo(nombre, "pass", "condición cumplida"),
         Ok(Value::Bool(false)) => ResultadoStep::nuevo(nombre, "fail", "condición no cumplida"),
@@ -1257,28 +1371,30 @@ pub(crate) fn aplicar_limite(def: &DefinicionPaso, mut r: ResultadoStep) -> Resu
         return r;
     };
 
-    // Rellenar los campos de límite para el reporte, según el tipo.
-    match lim {
-        Limite::Rango { min, max } => {
-            r.limite_min = Some(*min);
-            r.limite_max = Some(*max);
-        }
-        Limite::Comparacion { op, esperado } => {
-            r.operador = Some(*op);
-            r.valor_esperado = Some(*esperado);
-        }
+    // The limit's fields in the report, whatever the verdict: a reader must be
+    // able to see what the value was compared with (ADR-0019, Rule 3).
+    let (min, max) = lim.cotas();
+    r.limite_min = min;
+    r.limite_max = max;
+    if let modelo::Criterio::Uno { op, low } = &lim.criterio {
+        r.operador = Some(*op);
+        r.valor_esperado = Some(*low);
     }
+    r.comparacion = Some(lim.codigo());
+    r.unidades = lim.unidades.clone();
 
     // El límite solo puede empeorar un `paso` a `fallo`: nunca toca un
     // `fallo`/`error` que el paso haya emitido por sí mismo.
-    if r.estado == "pass" && lim.evalua(valor) == "fail" {
-        r.estado = "fail".into();
-        r.mensaje = match lim {
-            Limite::Rango { min, max } => format!("{valor} fuera de rango [{min}, {max}]"),
-            Limite::Comparacion { op, esperado } => {
-                format!("{valor} {} {esperado} no cumplido", op.simbolo())
+    if r.estado == "pass" {
+        match lim.evalua(valor) {
+            modelo::Veredicto::Pasa => {}
+            modelo::Veredicto::Falla => {
+                r.estado = "fail".into();
+                r.mensaje = lim.mensaje_de_fallo(valor);
             }
-        };
+            // `none` compares nothing, and says so (ADR-0040 §8).
+            modelo::Veredicto::SinComparar => r.estado = "done".into(),
+        }
     }
     r
 }
@@ -1300,7 +1416,7 @@ mod tests {
 
     #[test]
     fn rango_dentro_deja_paso_y_rellena_campos() {
-        let def = DefinicionPaso::con_limite("m", 1, Limite::Rango { min: 4.5, max: 5.5 });
+        let def = DefinicionPaso::con_limite("m", 1, Limite::rango(4.5, 5.5));
         let r = aplicar_limite(&def, paso_medido(5.0, "pass"));
         assert_eq!(r.estado, "pass");
         assert_eq!(r.limite_min, Some(4.5));
@@ -1313,7 +1429,7 @@ mod tests {
 
     #[test]
     fn rango_fuera_convierte_paso_a_fallo_y_reescribe_mensaje() {
-        let def = DefinicionPaso::con_limite("m", 1, Limite::Rango { min: 4.5, max: 5.5 });
+        let def = DefinicionPaso::con_limite("m", 1, Limite::rango(4.5, 5.5));
         let r = aplicar_limite(&def, paso_medido(4.2, "pass"));
         assert_eq!(r.estado, "fail");
         assert_eq!(r.limite_min, Some(4.5));
@@ -1323,14 +1439,7 @@ mod tests {
 
     #[test]
     fn comparacion_no_cumplida_convierte_a_fallo() {
-        let def = DefinicionPaso::con_limite(
-            "m",
-            1,
-            Limite::Comparacion {
-                op: Operador::Ge,
-                esperado: 1000.0,
-            },
-        );
+        let def = DefinicionPaso::con_limite("m", 1, Limite::comparacion(Operador::Ge, 1000.0));
         let r = aplicar_limite(&def, paso_medido(999.0, "pass"));
         assert_eq!(r.estado, "fail");
         assert_eq!(r.operador, Some(Operador::Ge));
@@ -1341,7 +1450,7 @@ mod tests {
     #[test]
     fn el_paso_que_ya_fallo_no_se_mejora_solo_se_rellena_el_limite() {
         // El paso sabe algo que el límite no: su fallo se respeta.
-        let def = DefinicionPaso::con_limite("m", 1, Limite::Rango { min: 4.5, max: 5.5 });
+        let def = DefinicionPaso::con_limite("m", 1, Limite::rango(4.5, 5.5));
         let r = aplicar_limite(&def, paso_medido(5.0, "fail"));
         assert_eq!(r.estado, "fail", "el paso ya falló: el límite no lo mejora");
         assert_eq!(
@@ -1353,7 +1462,7 @@ mod tests {
 
     #[test]
     fn el_paso_con_error_no_se_toca() {
-        let def = DefinicionPaso::con_limite("m", 1, Limite::Rango { min: 4.5, max: 5.5 });
+        let def = DefinicionPaso::con_limite("m", 1, Limite::rango(4.5, 5.5));
         let r = aplicar_limite(&def, paso_medido(5.0, "error"));
         assert_eq!(r.estado, "error");
         assert_eq!(r.limite_min, Some(4.5));
@@ -1371,7 +1480,7 @@ mod tests {
     fn paso_con_limite_pero_sin_medida_no_se_evalua() {
         // Un pass/fail con un límite declarado (mal uso) no debe pánico: sin
         // valor_medido el límite no aplica, todo se queda igual.
-        let def = DefinicionPaso::con_limite("m", 1, Limite::Rango { min: 4.5, max: 5.5 });
+        let def = DefinicionPaso::con_limite("m", 1, Limite::rango(4.5, 5.5));
         let r = aplicar_limite(&def, ResultadoStep::nuevo("m", "pass", "sin medida"));
         assert_eq!(r.estado, "pass");
         assert_eq!(r.limite_min, None, "sin medida no se rellena el límite");
@@ -1468,7 +1577,7 @@ mod tests {
         let mut env = entorno_con_locals(&[("ok", ValorDefinicion::Bool(true))]);
         let stmts = expr::parse_sentencias("locals.ok = false").unwrap();
         let r = ejecuta_statement_puro(Some(&stmts), "init", &mut env);
-        assert_eq!(r.estado, "pass");
+        assert_eq!(r.estado, "done", "a statement checks nothing (ADR-0040 §9)");
         assert_eq!(env.locals().get("ok"), Some(&expr::Value::Bool(false)));
     }
 
@@ -1581,6 +1690,11 @@ mod tests {
         assert_eq!(
             r.estado, "error",
             "un ejecutor no puede declararse a sí mismo no concluyente"
+        );
+        let r = normaliza_estado_de_ejecutor(ResultadoStep::nuevo("p", "done", "m"));
+        assert_eq!(
+            r.estado, "error",
+            "done is the engine's to give (ADR-0040 §6); an executor cannot claim it"
         );
     }
 
@@ -2173,36 +2287,34 @@ mod tests {
             _programa: &Programa,
             _parametros: &[(String, Value)],
         ) -> Result<ResultadoStep, Error> {
-            let mensaje = match def.ejecutor.as_deref() {
-                None => "embebido",
-                Some(n) => n,
-            };
+            let mensaje = def.ejecutor.as_deref().unwrap_or("none");
             Ok(ResultadoStep::nuevo(&def.nombre, "pass", mensaje))
         }
     }
 
-    /// Un `Programa` con raíz + un ejecutor `grpc` (python) y un `embebido`.
+    /// Un `Programa` con raíz, dos ejecutores `grpc` (python, bench) y un `wasm`.
     fn programa_ruteado() -> Programa {
         let mut raiz = DefinicionSecuencia {
             nombre: "s".into(),
             ..Default::default()
         };
         let mut p1 = DefinicionPaso::nuevo("a", 1);
-        p1.ejecutor = None; // embebido por defecto
+        p1.ejecutor = Some("bench".into());
         let mut p2 = DefinicionPaso::nuevo("b", 1);
         p2.ejecutor = Some("python".into());
-        let mut p3 = DefinicionPaso::nuevo("c", 1);
-        p3.ejecutor = Some("embebido".into());
-        raiz.pasos_main = vec![p1, p2, p3];
+        raiz.pasos_main = vec![p1, p2];
         Programa {
             raiz,
             archivos: HashMap::new(),
             ejecutores: HashMap::from([
                 (
-                    "embebido".to_string(),
+                    "bench".to_string(),
                     DefinicionEjecutor {
-                        nombre: "embebido".into(),
-                        tipo: TipoEjecutor::Embebido,
+                        nombre: "bench".into(),
+                        tipo: TipoEjecutor::Grpc {
+                            host: "127.0.0.1".into(),
+                            puerto: 9102,
+                        },
                     },
                 ),
                 (
@@ -2229,13 +2341,14 @@ mod tests {
     }
 
     #[test]
-    fn resolver_endpoint_embebido_por_defecto_y_por_nombre() {
+    fn resolver_endpoint_sin_ejecutor_es_error_y_por_nombre_rutea() {
         let programa = programa_ruteado();
         let p = DefinicionPaso::nuevo("a", 1);
-        assert_eq!(Motor::resolver_endpoint(&p, &programa).unwrap(), EMBEDIDO);
-        let mut p = DefinicionPaso::nuevo("b", 1);
-        p.ejecutor = Some("embebido".into());
-        assert_eq!(Motor::resolver_endpoint(&p, &programa).unwrap(), EMBEDIDO);
+        let err = Motor::resolver_endpoint(&p, &programa).unwrap_err();
+        assert!(
+            matches!(err, Error::PasoSinEjecutor(ref n) if n == "a"),
+            "no executor is not a default executor (ADR-0041): {err}"
+        );
         let mut p = DefinicionPaso::nuevo("b", 1);
         p.ejecutor = Some("python".into());
         assert_eq!(Motor::resolver_endpoint(&p, &programa).unwrap(), "python");
@@ -2278,12 +2391,8 @@ mod tests {
             RAIZ,
         )
         .unwrap();
-        assert_eq!(sec.pasos[0].mensaje, "embebido", "sin ejecutor → embebido");
+        assert_eq!(sec.pasos[0].mensaje, "bench", "ejecutor: bench → bench");
         assert_eq!(sec.pasos[1].mensaje, "python", "ejecutor: python → python");
-        assert_eq!(
-            sec.pasos[2].mensaje, "embebido",
-            "ejecutor: embebido explícito → embebido"
-        );
     }
 
     /// El caso de DIAG-2 end-to-end: un veredicto compuesto falso **corta**
@@ -2299,6 +2408,7 @@ mod tests {
 
         let mut verificar = DefinicionPaso::nuevo("verificar_dut", 1);
         verificar.tipo = TipoPaso::PassFail;
+        verificar.module = None;
         verificar.condicion = Some(expr::parse_expresion("locals.v > 4.9").unwrap());
 
         let mut posterior = DefinicionPaso::nuevo("no_deberia_correr", 1);
@@ -2346,6 +2456,7 @@ mod tests {
 
         let mut verificar = DefinicionPaso::nuevo("verificar_dut", 1);
         verificar.tipo = TipoPaso::PassFail;
+        verificar.module = None;
         verificar.condicion = Some(expr::parse_expresion("locals.v > 4.9").unwrap());
 
         let mut posterior = DefinicionPaso::nuevo("siguiente", 1);
@@ -2398,6 +2509,7 @@ mod tests {
 
         let mut verdict = DefinicionPaso::nuevo("verdict", 1);
         verdict.tipo = TipoPaso::PassFail;
+        verdict.module = None;
         verdict.precondicion = Some(expr::parse_expresion("locals.flag").unwrap());
         verdict.condicion = Some(expr::parse_expresion("locals.flag == true").unwrap());
 
@@ -2444,6 +2556,7 @@ mod tests {
         };
         let mut verdict = DefinicionPaso::nuevo("verdict", 1);
         verdict.tipo = TipoPaso::PassFail;
+        verdict.module = None;
         verdict.disable = true;
         verdict.condicion = Some(expr::parse_expresion("true").unwrap());
         def.pasos_main = vec![verdict];
@@ -2527,11 +2640,13 @@ mod tests {
         };
         let mut setup = DefinicionPaso::nuevo("comprobar_banco", 1);
         setup.tipo = TipoPaso::PassFail;
+        setup.module = None;
         setup.condicion = Some(expr::parse_expresion("false").unwrap());
         def.pasos_setup = vec![setup];
 
         let mut verdict = DefinicionPaso::nuevo("verdict", 1);
         verdict.tipo = TipoPaso::PassFail;
+        verdict.module = None;
         verdict.condicion = Some(expr::parse_expresion("true").unwrap());
         def.pasos_main = vec![verdict];
 
@@ -2581,6 +2696,270 @@ mod tests {
         p.tipo = TipoPaso::Statement;
         p.statement = Some(expr::parse_sentencias("locals.v = 1.0").unwrap());
         p
+    }
+
+    /// ADR-0040 §7–8: the report carries the comparison code and units, and a
+    /// `none` comparison is `done`, never `pass`.
+    #[test]
+    fn a_limit_stamps_its_code_and_units_and_none_is_done() {
+        let mut lim = Limite::rango(4.5, 5.5);
+        lim.unidades = Some("V".into());
+        let def = DefinicionPaso::con_limite("m", 1, lim);
+        let r = aplicar_limite(&def, ResultadoStep::medido_valor("m", "pass", "ok", 4.2));
+        assert_eq!(r.estado, "fail");
+        assert_eq!(r.comparacion.as_deref(), Some("GELE"));
+        assert_eq!(r.unidades.as_deref(), Some("V"));
+        assert_eq!(r.mensaje, "4.2 V fuera de rango [4.5, 5.5]");
+
+        let none = DefinicionPaso::con_limite("m", 1, Limite::con(modelo::Criterio::Ninguno));
+        let r = aplicar_limite(&none, ResultadoStep::medido_valor("m", "pass", "ok", 4.2));
+        assert_eq!(r.estado, "done");
+        assert_eq!(r.valor_medido, Some(4.2), "the value is still recorded");
+    }
+
+    // --- ADR-0040 E3: the step types, judged -----------------------------
+
+    /// An executor that answers every call with a copy of one result.
+    struct Responde(ResultadoStep);
+    impl InvocaPasos for Responde {
+        fn ejecuta_paso_grpc(
+            &mut self,
+            _: &DefinicionPaso,
+            _: &Programa,
+            _: &[(String, Value)],
+        ) -> Result<ResultadoStep, Error> {
+            Ok(self.0.clone())
+        }
+    }
+
+    fn con_modulo(nombre: &str, tipo: TipoPaso) -> DefinicionPaso {
+        let mut p = DefinicionPaso::nuevo(nombre, 1);
+        p.tipo = tipo;
+        p.module = Some("bench/step".into());
+        p.ejecutor = Some("bench".into());
+        p
+    }
+
+    fn medida(valor: f64) -> ResultadoStep {
+        ResultadoStep::medido_valor("bench/step", "pass", "measured", valor)
+    }
+
+    /// Runs one step in `main` against `respuesta`, with `locals` declared.
+    fn corre_uno(
+        p: DefinicionPaso,
+        respuesta: ResultadoStep,
+        locals: &[(&str, ValorDefinicion)],
+    ) -> (ResultadoStep, EntornoMotor) {
+        let mut def = DefinicionSecuencia {
+            nombre: "s".into(),
+            pasos_main: vec![p],
+            ..Default::default()
+        };
+        for (k, v) in locals {
+            def.locals.insert((*k).to_string(), v.clone());
+        }
+        let (sec, ent) = corre_con(&mut Responde(respuesta), &def);
+        (sec.pasos[0].clone(), ent)
+    }
+
+    #[test]
+    fn an_action_that_passes_is_done_and_its_fail_stands() {
+        let (r, _) = corre_uno(
+            con_modulo("power on", TipoPaso::Action),
+            ResultadoStep::nuevo("bench/step", "pass", "on"),
+            &[],
+        );
+        assert_eq!(r.estado, "done");
+        let (r, _) = corre_uno(
+            con_modulo("power on", TipoPaso::Action),
+            ResultadoStep::nuevo("bench/step", "fail", "no"),
+            &[],
+        );
+        assert_eq!(r.estado, "fail");
+    }
+
+    #[test]
+    fn a_pass_fail_with_a_module_is_judged_on_its_answer() {
+        let (r, _) = corre_uno(
+            con_modulo("led", TipoPaso::PassFail),
+            ResultadoStep::nuevo("bench/step", "fail", "off"),
+            &[],
+        );
+        assert_eq!(r.estado, "fail");
+    }
+
+    /// ADR-0042 §1–2: the condition reads the module's `result`, and a local
+    /// `assign` just wrote.
+    #[test]
+    fn a_pass_fail_condition_reads_result_and_what_assign_just_wrote() {
+        let mut p = con_modulo("rail", TipoPaso::PassFail);
+        p.asigna = Some(vec![modelo::Asignacion {
+            var: "v".into(),
+            expr: expr::parse_expresion("result.measured_value").unwrap(),
+        }]);
+        p.condicion =
+            Some(expr::parse_expresion("locals.v > 4.0 && result.measured_value < 5.0").unwrap());
+        let (r, ent) = corre_uno(
+            p.clone(),
+            medida(4.5),
+            &[("v", ValorDefinicion::Numero(0.0))],
+        );
+        assert_eq!(r.estado, "pass", "{}", r.mensaje);
+        assert_eq!(ent.locals().get("v"), Some(&Value::Numero(4.5)));
+        assert_eq!(
+            r.valor_medido,
+            Some(4.5),
+            "the measurement stays in the report"
+        );
+
+        let (r, _) = corre_uno(p, medida(5.5), &[("v", ValorDefinicion::Numero(0.0))]);
+        assert_eq!(r.estado, "fail");
+    }
+
+    /// A broken bench is not judged, and nothing it returned is copied out.
+    #[test]
+    fn a_module_error_skips_assign_and_the_condition() {
+        let mut p = con_modulo("rail", TipoPaso::PassFail);
+        p.asigna = Some(vec![modelo::Asignacion {
+            var: "v".into(),
+            expr: expr::parse_expresion("1.0").unwrap(),
+        }]);
+        p.condicion = Some(expr::parse_expresion("true").unwrap());
+        let (r, ent) = corre_uno(
+            p,
+            ResultadoStep::nuevo("bench/step", "error", "no answer"),
+            &[("v", ValorDefinicion::Numero(9.0))],
+        );
+        assert_eq!(r.estado, "error");
+        assert_eq!(ent.locals().get("v"), Some(&Value::Numero(9.0)));
+    }
+
+    #[test]
+    fn a_numeric_limit_judges_the_measurement_and_errors_without_one() {
+        let mut p = con_modulo("rail", TipoPaso::NumericLimit);
+        p.limite = Some(Limite::rango(4.5, 5.5));
+        let (r, _) = corre_uno(p.clone(), medida(5.0), &[]);
+        assert_eq!(r.estado, "pass");
+        let (r, _) = corre_uno(p.clone(), medida(4.2), &[]);
+        assert_eq!(r.estado, "fail");
+        let (r, _) = corre_uno(p, ResultadoStep::nuevo("bench/step", "pass", "ok"), &[]);
+        assert_eq!(
+            r.estado, "error",
+            "a declared limit that was never checked is not a pass (ADR-0040 §5)"
+        );
+    }
+
+    #[test]
+    fn a_numeric_limit_value_reads_the_result_or_locals() {
+        let mut p = con_modulo("temp", TipoPaso::NumericLimit);
+        p.limite = Some(Limite::rango(15.0, 30.0));
+        p.valor = Some(expr::parse_expresion("result.outputs.temperature").unwrap());
+        let mut respuesta = ResultadoStep::nuevo("bench/step", "pass", "ok");
+        respuesta.salidas = vec![("temperature".into(), Value::Numero(21.5))];
+        let (r, _) = corre_uno(p, respuesta, &[]);
+        assert_eq!(r.estado, "pass", "{}", r.mensaje);
+        assert_eq!(r.valor_medido, Some(21.5), "the judged number is reported");
+
+        let mut local = DefinicionPaso::nuevo("already acquired", 1);
+        local.tipo = TipoPaso::NumericLimit;
+        local.limite = Some(Limite::rango(0.0, 1.0));
+        local.valor = Some(expr::parse_expresion("locals.x").unwrap());
+        let (r, _) = corre_uno(
+            local.clone(),
+            medida(0.0),
+            &[("x", ValorDefinicion::Numero(3.0))],
+        );
+        assert_eq!(
+            r.estado, "fail",
+            "no module: nothing is called, locals.x is judged"
+        );
+
+        local.valor = Some(expr::parse_expresion("locals.nada").unwrap());
+        let (r, _) = corre_uno(
+            local,
+            medida(0.0),
+            &[("nada", ValorDefinicion::Texto("t".into()))],
+        );
+        assert_eq!(r.estado, "error", "a value that is not a number is error");
+    }
+
+    /// ADR-0040 §1: what travels is the module, and a step without one still
+    /// asks for its own name.
+    #[test]
+    fn the_request_carries_the_module_not_the_name() {
+        let mut def = DefinicionPaso::nuevo("Measure 5V rail", 1);
+        def.module = Some("dmm/measure_voltage".into());
+        assert_eq!(peticion_de(&def, 2, &[]).name, "dmm/measure_voltage");
+        assert_eq!(peticion_de(&def, 2, &[]).attempt, 2);
+
+        let plain = DefinicionPaso::nuevo("demo/check_led", 1);
+        assert_eq!(peticion_de(&plain, 1, &[]).name, "demo/check_led");
+    }
+
+    /// Two steps calling one module are two steps in the report: the name is
+    /// the sequence's, whatever the executor echoes, and the module is stamped
+    /// beside it.
+    #[test]
+    fn the_report_names_the_step_and_stamps_its_module() {
+        struct EchoesModule;
+        impl InvocaPasos for EchoesModule {
+            fn ejecuta_paso_grpc(
+                &mut self,
+                def: &DefinicionPaso,
+                _: &Programa,
+                _: &[(String, Value)],
+            ) -> Result<ResultadoStep, Error> {
+                Ok(ResultadoStep::nuevo(def.modulo(), "pass", "ok"))
+            }
+        }
+        let mut five = DefinicionPaso::nuevo("Measure 5V rail", 1);
+        five.module = Some("dmm/measure_voltage".into());
+        let mut twelve = DefinicionPaso::nuevo("Measure 12V rail", 1);
+        twelve.module = Some("dmm/measure_voltage".into());
+        let def = DefinicionSecuencia {
+            nombre: "s".into(),
+            pasos_main: vec![five, twelve],
+            ..Default::default()
+        };
+        let (sec, _) = corre_con(&mut EchoesModule, &def);
+
+        let seen: Vec<(&str, Option<&str>)> = sec
+            .pasos
+            .iter()
+            .map(|p| (p.nombre.as_str(), p.module.as_deref()))
+            .collect();
+        assert_eq!(
+            seen,
+            vec![
+                ("Measure 5V rail", Some("dmm/measure_voltage")),
+                ("Measure 12V rail", Some("dmm/measure_voltage")),
+            ]
+        );
+    }
+
+    /// A `done` step does not cut its phase (ADR-0040 §6): a `statement` in
+    /// `setup` lets `main` run, and one in `main` lets the next step run.
+    #[test]
+    fn done_does_not_cut_setup_or_main() {
+        let mut def = DefinicionSecuencia {
+            nombre: "s".into(),
+            ..Default::default()
+        };
+        def.locals.insert("v".into(), ValorDefinicion::Numero(0.0));
+        def.pasos_setup = vec![stmt("prepare")];
+        def.pasos_main = vec![stmt("first"), stmt("second")];
+        let (sec, _) = corre_con(&mut InvocadorMock, &def);
+
+        let seen: Vec<(&str, &str)> = sec
+            .pasos
+            .iter()
+            .map(|p| (p.nombre.as_str(), p.estado.as_str()))
+            .collect();
+        assert_eq!(
+            seen,
+            vec![("prepare", "done"), ("first", "done"), ("second", "done")]
+        );
+        assert_eq!(sec.estado(), "pass", "done fails nothing");
     }
 
     #[test]
@@ -2891,11 +3270,11 @@ mod tests_adr0020 {
     /// test de eco que sólo recorre el camino feliz no protege de nada.
     #[test]
     fn un_ejecutor_de_contrato_1_con_parametros_es_error() {
-        let r = veredicto_del_eco(&paso_con_parametros(), EMBEDIDO, 0)
+        let r = veredicto_del_eco(&paso_con_parametros(), "bench", 0)
             .expect("el eco insuficiente tiene que producir un veredicto");
         assert_eq!(r.estado, "error", "nunca 'fallo': no es culpa de la unidad");
         assert!(
-            r.mensaje.contains("embebido"),
+            r.mensaje.contains("bench"),
             "nombra el endpoint: {}",
             r.mensaje
         );
@@ -2929,7 +3308,7 @@ mod tests_adr0020 {
     #[test]
     fn un_paso_sin_parametros_sigue_valiendo_con_contrato_1() {
         let viejo = DefinicionPaso::nuevo("verificar_led", 1);
-        assert!(veredicto_del_eco(&viejo, EMBEDIDO, 0).is_none());
+        assert!(veredicto_del_eco(&viejo, "bench", 0).is_none());
     }
 
     /// El caso que estrena el contrato 3: un ejecutor que entiende el 2 —el
@@ -2940,7 +3319,7 @@ mod tests_adr0020 {
     /// Visto en rojo devolviendo `CONTRACT` como eco.
     #[test]
     fn un_ejecutor_del_contrato_anterior_tampoco_vale() {
-        let r = veredicto_del_eco(&paso_con_parametros(), EMBEDIDO, CONTRACT - 1)
+        let r = veredicto_del_eco(&paso_con_parametros(), "bench", CONTRACT - 1)
             .expect("el contrato anterior ya no basta");
         assert_eq!(r.estado, "error");
         assert!(
@@ -2952,7 +3331,7 @@ mod tests_adr0020 {
 
     #[test]
     fn con_el_eco_correcto_no_hay_veredicto() {
-        assert!(veredicto_del_eco(&paso_con_parametros(), EMBEDIDO, CONTRACT).is_none());
+        assert!(veredicto_del_eco(&paso_con_parametros(), "bench", CONTRACT).is_none());
     }
 
     /// `lee_salidas` recorre el AST entero: la lectura puede estar dentro de

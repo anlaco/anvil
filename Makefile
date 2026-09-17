@@ -1,9 +1,9 @@
 # Anvil — build orchestration.
 #
-# `anvil` is a binary that embeds two WASM guests and the `.wasm` bridge
-# (ADR-0011, ADR-0015), so three things must be built in order: the guests and
-# the bridge first, the host last (its `build.rs` copies them, it does not
-# build them). This exists so that order does not have to be remembered.
+# `anvil` is a binary that embeds the engine's WASM guest and ships the `.wasm`
+# bridge next to it (ADR-0011, ADR-0023), so three things must be built in
+# order: the guest and the bridge first, the host last (its `build.rs` copies
+# them, it does not build them). This exists so that order does not have to be remembered.
 #
 #   make build     everything in debug
 #   make release   everything in release  ← the binary that gets distributed
@@ -29,7 +29,7 @@ EXAMPLE := ejemplos/hola-paso/Cargo.toml
 # The two-module department (`ejemplos/departamento`), what
 # `demo_departamento.yaml` loads (ADR-0025).
 DEPT    := ejemplos/departamento/Cargo.toml
-GUESTS  := -p motor -p ejecutor_pasos
+GUESTS  := -p motor
 TARGET  := wasm32-wasip2
 
 # Windows names every executable with `.exe`; `OS` is `Windows_NT` there,
@@ -41,7 +41,7 @@ ANVIL_DEBUG   := packaging/anvil-host/target/debug/anvil$(EXE)
 ANVIL_RELEASE := packaging/anvil-host/target/release/anvil$(EXE)
 
 .PHONY: all build release test test-core test-bridge test-host test-executors \
-        test-executors-rust test-executors-csharp example dept check fmt run clean help
+        test-executors-rust test-executors-csharp example example-release dept check fmt run clean help
 
 all: build
 
@@ -62,25 +62,33 @@ example:
 	cargo build --target $(TARGET) --manifest-path $(EXAMPLE)
 	cargo build --target $(TARGET) --manifest-path $(DEPT)
 
+## Same components, optimized. `release` assembles the department from these:
+## wasmtime compiles every module on each run, and a debug module is ~40 times
+## the size (5 MB against 126 KB for `demo`), which cost ~0.3 s per run.
+example-release:
+	cargo build --release --target $(TARGET) --manifest-path $(EXAMPLE)
+	cargo build --release --target $(TARGET) --manifest-path $(DEPT)
+
 ## Assembles the example **department** (ADR-0027): the executor's binary with
 ## its modules beside it, which is what `path:` points at. It needs the bridge
 ## already built, so `build`/`release` call it last and not as a dependency of
 ## `example`.
 DIST := ejemplos/departamento/dist
+WASM_PROFILE ?= debug
 dept:
 	@mkdir -p $(DIST)
 	@cp $(BRIDGE_BIN) $(DIST)/
-	@cp ejemplos/departamento/target/$(TARGET)/debug/*.wasm $(DIST)/
-	@cp ejemplos/hola-paso/target/$(TARGET)/debug/*.wasm $(DIST)/
+	@cp ejemplos/departamento/target/$(TARGET)/$(WASM_PROFILE)/*.wasm $(DIST)/
+	@cp ejemplos/hola-paso/target/$(TARGET)/$(WASM_PROFILE)/*.wasm $(DIST)/
 	@echo "department ready → $(DIST)"
 
 ## Same, in release. The release binary starts in ~1 s; the debug one takes
 ## tens of seconds because wasmtime compiles the guests unoptimized.
-release: example
+release: example-release
 	cargo build --release --target $(TARGET) $(GUESTS)
 	cargo build --release --manifest-path $(BRIDGE)
 	cargo build --release --manifest-path $(HOST)
-	@$(MAKE) --no-print-directory dept BRIDGE_BIN=executors/wasm/target/release/anvil-exec-wasm$(EXE)
+	@$(MAKE) --no-print-directory dept WASM_PROFILE=release BRIDGE_BIN=executors/wasm/target/release/anvil-exec-wasm$(EXE)
 	@echo "ready → $(ANVIL_RELEASE)"
 
 test: test-core test-bridge test-host test-executors test-executors-rust \
@@ -102,9 +110,12 @@ test-host: build
 
 ## Tests of the Rust step-authoring SDK (`anvil-step`). Native: what they test
 ## is the surface you write a step with, so none of them needs WASM — the same
-## thing that lets a step's own unit tests call it directly.
+## thing that lets a step's own unit tests call it directly. The department's
+## modules are tested the same way: the `demo` bench is what every example and
+## CI job measures against (ADR-0041), so its behaviour is asserted, not assumed.
 test-executors-rust:
 	cargo test --manifest-path $(RUSTSDK)
+	cargo test --manifest-path $(DEPT)
 
 ## Tests of the Python step-executor SDK (`anvil_step`). stdlib only: they
 ## need neither `grpcio` nor the generated stubs, because what they test is
