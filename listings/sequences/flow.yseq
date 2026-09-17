@@ -1,0 +1,35 @@
+name: flow
+
+executors:
+  - { name: bench, type: grpc, host: 127.0.0.1, port: 9201 }
+
+file_globals:
+  station: "bench-3"
+
+locals:
+  channel: 1
+
+main:
+  - name: pick_channel
+    type: statement
+    statement: 'locals.channel = locals.channel + 2'
+
+  - name: dmm/measure_voltage
+    type: numeric_limit
+    module: dmm/measure_voltage
+    executor: bench
+    inputs: { channel: '${locals.channel}' }
+    limit: { comparison: GELE, low: 3.0, high: 3.6 }
+
+  - name: board/measure_leakage
+    type: numeric_limit
+    module: board/measure_leakage
+    executor: bench
+    precondition: 'file_globals.station == "bench-1"'
+    limit: { comparison: LE, low: 0.001 }
+
+  - name: board/read_temperature
+    type: action
+    module: board/read_temperature
+    executor: bench
+    disable: true

@@ -1,0 +1,11 @@
+name: rail_tight
+
+executors:
+  - { name: bench, type: grpc, host: 127.0.0.1, port: 9201 }
+
+main:
+  - name: board/measure_rail
+    type: numeric_limit
+    module: board/measure_rail
+    executor: bench
+    limit: { comparison: GELE, low: 5.0, high: 5.25 }

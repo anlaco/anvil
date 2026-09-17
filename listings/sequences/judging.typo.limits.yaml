@@ -1,0 +1,4 @@
+board/measure_rial:
+  comparison: GELE
+  low: 5.0
+  high: 5.1

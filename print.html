@@ -1,0 +1,1848 @@
+<!DOCTYPE HTML>
+<html lang="en" class="light sidebar-visible" dir="ltr">
+    <head>
+        <!-- Book generated using mdBook -->
+        <meta charset="UTF-8">
+        <title>The Anvil Book</title>
+        <meta name="robots" content="noindex">
+
+
+        <!-- Custom HTML head -->
+
+        <meta name="description" content="">
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <meta name="theme-color" content="#ffffff">
+
+        <link rel="icon" href="favicon-de23e50b.svg">
+        <link rel="shortcut icon" href="favicon-8114d1fc.png">
+        <link rel="stylesheet" href="css/variables-8adf115d.css">
+        <link rel="stylesheet" href="css/general-e96d0476.css">
+        <link rel="stylesheet" href="css/chrome-d279d366.css">
+        <link rel="stylesheet" href="css/print-9e4910d8.css" media="print">
+
+        <!-- Fonts -->
+        <link rel="stylesheet" href="fonts/fonts-9644e21d.css">
+
+        <!-- Highlight.js Stylesheets -->
+        <link rel="stylesheet" id="mdbook-highlight-css" href="highlight-493f70e1.css">
+        <link rel="stylesheet" id="mdbook-tomorrow-night-css" href="tomorrow-night-4c0ae647.css">
+        <link rel="stylesheet" id="mdbook-ayu-highlight-css" href="ayu-highlight-3fdfc3ac.css">
+
+        <!-- Custom theme stylesheets -->
+
+
+        <!-- Provide site root and default themes to javascript -->
+        <script>
+            const path_to_root = "";
+            const default_light_theme = "light";
+            const default_dark_theme = "navy";
+            window.path_to_searchindex_js = "searchindex-0b0f0918.js";
+        </script>
+        <!-- Start loading toc.js asap -->
+        <script src="toc-1628e11b.js"></script>
+    </head>
+    <body>
+    <div id="mdbook-help-container">
+        <div id="mdbook-help-popup">
+            <h2 class="mdbook-help-title">Keyboard shortcuts</h2>
+            <div>
+                <p>Press <kbd>←</kbd> or <kbd>→</kbd> to navigate between chapters</p>
+                <p>Press <kbd>S</kbd> or <kbd>/</kbd> to search in the book</p>
+                <p>Press <kbd>?</kbd> to show this help</p>
+                <p>Press <kbd>Esc</kbd> to hide this help</p>
+            </div>
+        </div>
+    </div>
+    <div id="mdbook-body-container">
+        <!-- Work around some values being stored in localStorage wrapped in quotes -->
+        <script>
+            try {
+                let theme = localStorage.getItem('mdbook-theme');
+                let sidebar = localStorage.getItem('mdbook-sidebar');
+
+                if (theme.startsWith('"') && theme.endsWith('"')) {
+                    localStorage.setItem('mdbook-theme', theme.slice(1, theme.length - 1));
+                }
+
+                if (sidebar.startsWith('"') && sidebar.endsWith('"')) {
+                    localStorage.setItem('mdbook-sidebar', sidebar.slice(1, sidebar.length - 1));
+                }
+            } catch (e) { }
+        </script>
+
+        <!-- Set the theme before any content is loaded, prevents flash -->
+        <script>
+            const default_theme = window.matchMedia("(prefers-color-scheme: dark)").matches ? default_dark_theme : default_light_theme;
+            let theme;
+            try { theme = localStorage.getItem('mdbook-theme'); } catch(e) { }
+            if (theme === null || theme === undefined) { theme = default_theme; }
+            const html = document.documentElement;
+            html.classList.remove('light')
+            html.classList.add(theme);
+            html.classList.add("js");
+        </script>
+
+        <input type="checkbox" id="mdbook-sidebar-toggle-anchor" class="hidden">
+
+        <!-- Hide / unhide sidebar before it is displayed -->
+        <script>
+            let sidebar = null;
+            const sidebar_toggle = document.getElementById("mdbook-sidebar-toggle-anchor");
+            if (document.body.clientWidth >= 1080) {
+                try { sidebar = localStorage.getItem('mdbook-sidebar'); } catch(e) { }
+                sidebar = sidebar || 'visible';
+            } else {
+                sidebar = 'hidden';
+                sidebar_toggle.checked = false;
+            }
+            if (sidebar === 'visible') {
+                sidebar_toggle.checked = true;
+            } else {
+                html.classList.remove('sidebar-visible');
+            }
+        </script>
+
+        <nav id="mdbook-sidebar" class="sidebar" aria-label="Table of contents">
+            <!-- populated by js -->
+            <mdbook-sidebar-scrollbox class="sidebar-scrollbox"></mdbook-sidebar-scrollbox>
+            <noscript>
+                <iframe class="sidebar-iframe-outer" src="toc.html"></iframe>
+            </noscript>
+            <div id="mdbook-sidebar-resize-handle" class="sidebar-resize-handle">
+                <div class="sidebar-resize-indicator"></div>
+            </div>
+        </nav>
+
+        <div id="mdbook-page-wrapper" class="page-wrapper">
+
+            <div class="page">
+                <div id="mdbook-menu-bar-hover-placeholder"></div>
+                <div id="mdbook-menu-bar" class="menu-bar sticky">
+                    <div class="left-buttons">
+                        <label id="mdbook-sidebar-toggle" class="icon-button" for="mdbook-sidebar-toggle-anchor" title="Toggle Table of Contents" aria-label="Toggle Table of Contents" aria-controls="mdbook-sidebar">
+                            <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M0 96C0 78.3 14.3 64 32 64H416c17.7 0 32 14.3 32 32s-14.3 32-32 32H32C14.3 128 0 113.7 0 96zM0 256c0-17.7 14.3-32 32-32H416c17.7 0 32 14.3 32 32s-14.3 32-32 32H32c-17.7 0-32-14.3-32-32zM448 416c0 17.7-14.3 32-32 32H32c-17.7 0-32-14.3-32-32s14.3-32 32-32H416c17.7 0 32 14.3 32 32z"/></svg></span>
+                        </label>
+                        <button id="mdbook-theme-toggle" class="icon-button" type="button" title="Change theme" aria-label="Change theme" aria-haspopup="true" aria-expanded="false" aria-controls="mdbook-theme-list">
+                            <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 576 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M371.3 367.1c27.3-3.9 51.9-19.4 67.2-42.9L600.2 74.1c12.6-19.5 9.4-45.3-7.6-61.2S549.7-4.4 531.1 9.6L294.4 187.2c-24 18-38.2 46.1-38.4 76.1L371.3 367.1zm-19.6 25.4l-116-104.4C175.9 290.3 128 339.6 128 400c0 3.9 .2 7.8 .6 11.6c1.8 17.5-10.2 36.4-27.8 36.4H96c-17.7 0-32 14.3-32 32s14.3 32 32 32H240c61.9 0 112-50.1 112-112c0-2.5-.1-5-.2-7.5z"/></svg></span>
+                        </button>
+                        <ul id="mdbook-theme-list" class="theme-popup" aria-label="Themes" role="menu">
+                            <li role="none"><button role="menuitem" class="theme" id="mdbook-theme-default_theme">Auto</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="mdbook-theme-light">Light</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="mdbook-theme-rust">Rust</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="mdbook-theme-coal">Coal</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="mdbook-theme-navy">Navy</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="mdbook-theme-ayu">Ayu</button></li>
+                        </ul>
+                        <button id="mdbook-search-toggle" class="icon-button" type="button" title="Search (`/`)" aria-label="Toggle Searchbar" aria-expanded="false" aria-keyshortcuts="/ s" aria-controls="mdbook-searchbar">
+                            <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M416 208c0 45.9-14.9 88.3-40 122.7L502.6 457.4c12.5 12.5 12.5 32.8 0 45.3s-32.8 12.5-45.3 0L330.7 376c-34.4 25.2-76.8 40-122.7 40C93.1 416 0 322.9 0 208S93.1 0 208 0S416 93.1 416 208zM208 352c79.5 0 144-64.5 144-144s-64.5-144-144-144S64 128.5 64 208s64.5 144 144 144z"/></svg></span>
+                        </button>
+                    </div>
+
+                    <h1 class="menu-title">The Anvil Book</h1>
+
+                    <div class="right-buttons">
+                        <a href="print.html" title="Print this book" aria-label="Print this book">
+                            <span class=fa-svg id="print-button"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M128 0C92.7 0 64 28.7 64 64v96h64V64H354.7L384 93.3V160h64V93.3c0-17-6.7-33.3-18.7-45.3L400 18.7C388 6.7 371.7 0 354.7 0H128zM384 352v32 64H128V384 368 352H384zm64 32h32c17.7 0 32-14.3 32-32V256c0-35.3-28.7-64-64-64H64c-35.3 0-64 28.7-64 64v96c0 17.7 14.3 32 32 32H64v64c0 35.3 28.7 64 64 64H384c35.3 0 64-28.7 64-64V384zm-16-88c-13.3 0-24-10.7-24-24s10.7-24 24-24s24 10.7 24 24s-10.7 24-24 24z"/></svg></span>
+                        </a>
+                        <a href="https://github.com/anlaco/anvil" title="Git repository" aria-label="Git repository">
+                            <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 496 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M165.9 397.4c0 2-2.3 3.6-5.2 3.6-3.3.3-5.6-1.3-5.6-3.6 0-2 2.3-3.6 5.2-3.6 3-.3 5.6 1.3 5.6 3.6zm-31.1-4.5c-.7 2 1.3 4.3 4.3 4.9 2.6 1 5.6 0 6.2-2s-1.3-4.3-4.3-5.2c-2.6-.7-5.5.3-6.2 2.3zm44.2-1.7c-2.9.7-4.9 2.6-4.6 4.9.3 2 2.9 3.3 5.9 2.6 2.9-.7 4.9-2.6 4.6-4.6-.3-1.9-3-3.2-5.9-2.9zM244.8 8C106.1 8 0 113.3 0 252c0 110.9 69.8 205.8 169.5 239.2 12.8 2.3 17.3-5.6 17.3-12.1 0-6.2-.3-40.4-.3-61.4 0 0-70 15-84.7-29.8 0 0-11.4-29.1-27.8-36.6 0 0-22.9-15.7 1.6-15.4 0 0 24.9 2 38.6 25.8 21.9 38.6 58.6 27.5 72.9 20.9 2.3-16 8.8-27.1 16-33.7-55.9-6.2-112.3-14.3-112.3-110.5 0-27.5 7.6-41.3 23.6-58.9-2.6-6.5-11.1-33.3 2.6-67.9 20.9-6.5 69 27 69 27 20-5.6 41.5-8.5 62.8-8.5s42.8 2.9 62.8 8.5c0 0 48.1-33.6 69-27 13.7 34.7 5.2 61.4 2.6 67.9 16 17.7 25.8 31.5 25.8 58.9 0 96.5-58.9 104.2-114.8 110.5 9.2 7.9 17 22.9 17 46.4 0 33.7-.3 75.4-.3 83.6 0 6.5 4.6 14.4 17.3 12.1C428.2 457.8 496 362.9 496 252 496 113.3 383.5 8 244.8 8zM97.2 352.9c-1.3 1-1 3.3.7 5.2 1.6 1.6 3.9 2.3 5.2 1 1.3-1 1-3.3-.7-5.2-1.6-1.6-3.9-2.3-5.2-1zm-10.8-8.1c-.7 1.3.3 2.9 2.3 3.9 1.6 1 3.6.7 4.3-.7.7-1.3-.3-2.9-2.3-3.9-2-.6-3.6-.3-4.3.7zm32.4 35.6c-1.6 1.3-1 4.3 1.3 6.2 2.3 2.3 5.2 2.6 6.5 1 1.3-1.3.7-4.3-1.3-6.2-2.2-2.3-5.2-2.6-6.5-1zm-11.4-14.7c-1.6 1-1.6 3.6 0 5.9 1.6 2.3 4.3 3.3 5.6 2.3 1.6-1.3 1.6-3.9 0-6.2-1.4-2.3-4-3.3-5.6-2z"/></svg></span>
+                        </a>
+
+                    </div>
+                </div>
+
+                <div id="mdbook-search-wrapper" class="hidden">
+                    <form id="mdbook-searchbar-outer" class="searchbar-outer">
+                        <div class="search-wrapper">
+                            <input type="search" id="mdbook-searchbar" name="searchbar" placeholder="Search this book ..." aria-controls="mdbook-searchresults-outer" aria-describedby="searchresults-header">
+                            <div class="spinner-wrapper">
+                                <span class=fa-svg id="fa-spin"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M304 48c0-26.5-21.5-48-48-48s-48 21.5-48 48s21.5 48 48 48s48-21.5 48-48zm0 416c0-26.5-21.5-48-48-48s-48 21.5-48 48s21.5 48 48 48s48-21.5 48-48zM48 304c26.5 0 48-21.5 48-48s-21.5-48-48-48s-48 21.5-48 48s21.5 48 48 48zm464-48c0-26.5-21.5-48-48-48s-48 21.5-48 48s21.5 48 48 48s48-21.5 48-48zM142.9 437c18.7-18.7 18.7-49.1 0-67.9s-49.1-18.7-67.9 0s-18.7 49.1 0 67.9s49.1 18.7 67.9 0zm0-294.2c18.7-18.7 18.7-49.1 0-67.9S93.7 56.2 75 75s-18.7 49.1 0 67.9s49.1 18.7 67.9 0zM369.1 437c18.7 18.7 49.1 18.7 67.9 0s18.7-49.1 0-67.9s-49.1-18.7-67.9 0s-18.7 49.1 0 67.9z"/></svg></span>
+                            </div>
+                        </div>
+                    </form>
+                    <div id="mdbook-searchresults-outer" class="searchresults-outer hidden">
+                        <div id="mdbook-searchresults-header" class="searchresults-header"></div>
+                        <ul id="mdbook-searchresults">
+                        </ul>
+                    </div>
+                </div>
+
+                <!-- Apply ARIA attributes after the sidebar and the sidebar toggle button are added to the DOM -->
+                <script>
+                    document.getElementById('mdbook-sidebar-toggle').setAttribute('aria-expanded', sidebar === 'visible');
+                    document.getElementById('mdbook-sidebar').setAttribute('aria-hidden', sidebar !== 'visible');
+                    Array.from(document.querySelectorAll('#mdbook-sidebar a')).forEach(function(link) {
+                        link.setAttribute('tabIndex', sidebar === 'visible' ? 0 : -1);
+                    });
+                </script>
+
+                <div id="mdbook-content" class="content">
+                    <main>
+                        <h1 id="the-anvil-book"><a class="header" href="#the-anvil-book">The Anvil Book</a></h1>
+<p>Learn to use Anvil from nothing: install it, write test steps, put them in
+sequences, run them, and read what Anvil says back.</p>
+<blockquote>
+<p><strong>Alpha.</strong> This edition is written and checked against <strong>Anvil 0.5.0 on
+Linux x86-64</strong>; installing on Windows is covered and checked too. Anvil is young, and some of what you will do here — cloning
+the repository to get the step SDK, above all — will get shorter. Where 0.5.0
+has a rough edge or a known defect, the book says so where you meet it,
+rather than pretending it is not there.</p>
+</blockquote>
+<h2 id="contents"><a class="header" href="#contents">Contents</a></h2>
+<ol>
+<li><a href="#1-introduction">Introduction</a> — what Anvil is, the words it uses, and
+what you need.</li>
+<li><a href="#2-installing">Installing</a> — the engine, the step SDK, your working
+folder.</li>
+<li><a href="#3-your-first-step">Your first step</a> — a C# method the engine can call.</li>
+<li><a href="#4-your-first-sequence">Your first sequence</a> — the file that says what to
+run, and how to run it.</li>
+<li><a href="#5-measuring-and-judging">Measuring and judging</a> — limits, pass, fail and error.</li>
+<li><a href="#6-setup-main-cleanup-and-retries">Setup, main, cleanup and retries</a></li>
+<li><a href="#7-inputs-variables-and-flow">Inputs, variables and flow</a></li>
+<li><a href="#8-instruments-that-stay-open">Instruments that stay open</a> — references to objects
+that live in the executor.</li>
+<li><a href="#9-subsequences">Subsequences</a></li>
+<li><a href="#10-reports-and-running-unattended">Reports and running unattended</a></li>
+<li>The Sequence Editor — <em>not written yet</em>. In 0.5.0 the packaged editor
+opens, but it cannot run a sequence
+(<a href="https://github.com/anlaco/anvil/issues/80">#80</a>).</li>
+<li><a href="#12-steps-in-python-and-rust">Steps in Python and Rust</a></li>
+<li><a href="#13-when-something-goes-wrong">When something goes wrong</a></li>
+</ol>
+<p>Read chapters 1 to 4 in order. After that each chapter stands mostly on its
+own, although each one adds a file or two to the same C# project.</p>
+<h2 id="conventions"><a class="header" href="#conventions">Conventions</a></h2>
+<p>Everything happens in one folder, <code>~/anvil-book</code>. Commands start with <code>$</code> and
+are run from that folder, unless the text says otherwise. The lines after a
+command are what it printed — pasted from a real run, not retyped.</p>
+<p>Anvil’s own diagnostic messages are still partly in Spanish in 0.5.0
+(<a href="https://github.com/anlaco/anvil/issues/59">#59</a>). The book shows them as
+they are printed and explains what they say.</p>
+<h2 id="how-this-book-stays-true"><a class="header" href="#how-this-book-stays-true">How this book stays true</a></h2>
+<p>Every command in these chapters has been run against the release named above,
+and none of the output was written by hand. The files you are asked to write
+live in <a href="https://github.com/anlaco/anvil/tree/main/docs/book/listings"><code>listings/</code></a>, the terminal sessions in
+<a href="https://github.com/anlaco/anvil/tree/main/docs/book/listings/sessions"><code>listings/sessions/</code></a>, and <a href="https://github.com/anlaco/anvil/blob/main/docs/book/check.sh"><code>check.sh</code></a> runs
+every session again and checks that each file still appears word for word in
+a chapter:</p>
+<pre><code class="language-console">$ docs/book/check.sh path/to/anvil-v0.7.0-x86_64-linux-musl
+</code></pre>
+<p>What could not be run is marked <strong>not verified</strong>, with those words.</p>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="1-introduction"><a class="header" href="#1-introduction">1. Introduction</a></h1>
+<p>Anvil is a test sequencer: it runs a list of test steps against a unit on a
+bench, judges what they measure and writes down what happened. If you have
+used NI TestStand or OpenTAP, the job is the same one.</p>
+<p>What makes Anvil different is where things live.</p>
+<ul>
+<li><strong>A sequence is a text file</strong>, not a program. It lists the steps, the limits
+each measurement must fall within, and what to do before and after. You can
+read it in a diff, and changing a limit does not mean recompiling anything.</li>
+<li><strong>A step is ordinary code in your language</strong> — C#, Python or Rust — served by
+an <em>executor</em>: a small process (or, for Rust, a module) that publishes the
+steps it knows how to run. Anvil calls each step by name.</li>
+<li><strong>The step measures; Anvil judges.</strong> A step returns a number. Whether that
+number is acceptable is written in the sequence, and Anvil decides. The same
+step can serve two products with different tolerances without being touched.</li>
+</ul>
+<h2 id="the-words"><a class="header" href="#the-words">The words</a></h2>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Word</th><th>What it means here</th></tr>
+</thead>
+<tbody>
+<tr><td><strong>sequence</strong></td><td>A <code>.yseq</code> (or <code>.yaml</code>) file: the steps to run and how to judge them.</td></tr>
+<tr><td><strong>step</strong></td><td>One action or measurement, called by a name like <code>board/measure_rail</code>.</td></tr>
+<tr><td><strong>executor</strong></td><td>The program that runs steps. A sequence says where each one is.</td></tr>
+<tr><td><strong>module</strong></td><td>The first half of a step’s name. In C# it comes from the class.</td></tr>
+<tr><td><strong>limit</strong></td><td>The acceptance criterion for a measurement, written in the sequence.</td></tr>
+<tr><td><strong>verdict</strong></td><td>What a step or a sequence ended as: <code>pass</code>, <code>fail</code>, <code>error</code> or <code>skipped</code>.</td></tr>
+</tbody>
+</table>
+</div>
+<p>The difference between <code>fail</code> and <code>error</code> matters more than anything else in
+this book, and chapter 5 is about it: <strong><code>fail</code> says something about the unit,
+<code>error</code> says something about the bench.</strong> A unit that measures out of range
+fails. An instrument that does not answer is an error — Anvil could not judge
+the unit, so it does not pretend to.</p>
+<h2 id="what-this-book-covers"><a class="header" href="#what-this-book-covers">What this book covers</a></h2>
+<p>Writing steps in C#, writing sequences, running them from the command line and
+reading the results. One chapter shows what changes when the step is written in
+Python or Rust instead.</p>
+<p>It does not cover talking to real instruments — every step here pretends to
+measure — nor how Anvil is built inside. For that, see the
+<a href="https://github.com/anlaco/anvil/blob/main/docs/README.md">documentation index</a>.</p>
+<h2 id="what-you-need"><a class="header" href="#what-you-need">What you need</a></h2>
+<ul>
+<li><strong>Linux or Windows, on x86-64.</strong> Everything in the book was run on Linux.
+Chapter 2 also covers installing on Windows, and says what of the rest was
+run there.</li>
+<li><strong>The .NET 10 SDK</strong> (<code>dotnet --version</code> should print <code>10.</code> something).</li>
+<li><strong>git</strong>, to get the step SDK.</li>
+<li>For chapter 12 only: Python 3.10 or newer, and a Rust toolchain.</li>
+</ul>
+<p>No instrument, no licence and no network connection to a bench.</p>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="2-installing"><a class="header" href="#2-installing">2. Installing</a></h1>
+<p>You will end this chapter with one folder holding three things: the Anvil
+engine, a copy of the Anvil repository (for the C# step SDK), and an empty C#
+project where your steps will go.</p>
+<pre><code class="language-console">$ mkdir ~/anvil-book
+$ cd ~/anvil-book
+</code></pre>
+<h2 id="the-engine"><a class="header" href="#the-engine">The engine</a></h2>
+<p>Anvil is one statically linked binary; there is nothing to install system-wide.
+Download it from the <a href="https://github.com/anlaco/anvil/releases/tag/v0.7.0">release page</a>,
+check it, and unpack it:</p>
+<pre><code class="language-console">$ curl -sSLO https://github.com/anlaco/anvil/releases/download/v0.7.0/anvil-v0.7.0-x86_64-linux-musl.tar.gz
+$ curl -sSLO https://github.com/anlaco/anvil/releases/download/v0.7.0/SHA256SUMS
+$ sha256sum --check --ignore-missing SHA256SUMS
+anvil-v0.7.0-x86_64-linux-musl.tar.gz: OK
+$ tar xzf anvil-v0.7.0-x86_64-linux-musl.tar.gz
+</code></pre>
+<p>(<code>sha256sum</code> prints <code>OK</code> in your system’s language.)</p>
+<p>The folder it creates holds <code>anvil</code>, the engine, and <code>anvil-exec-wasm</code>, which
+chapter 12 uses. Put it on your <code>PATH</code> — in every new terminal you open for
+this book:</p>
+<pre><code class="language-console">$ export PATH="$PWD/anvil-v0.7.0-x86_64-linux-musl:$PATH"
+</code></pre>
+<p>and check:</p>
+<pre><code class="language-console">$ anvil --version
+anvil 0.7.0
+</code></pre>
+<p><code>anvil --version</code> writes to the error stream, not to standard output, so
+<code>anvil --version | something</code> reads nothing
+(<a href="https://github.com/anlaco/anvil/issues/75">#75</a>).</p>
+<p>On Windows, follow <a href="#on-windows">the Windows section</a> at the end of this
+chapter instead.</p>
+<h2 id="the-step-sdk"><a class="header" href="#the-step-sdk">The step SDK</a></h2>
+<p>Your steps will use a small library, <code>Anvil.Step</code>. In 0.7.0 it is not yet
+published on NuGet, so you take it from the repository, at the tag that matches
+your engine:</p>
+<pre><code class="language-console">$ git clone --depth 1 --branch v0.7.0 https://github.com/anlaco/anvil.git anvil
+</code></pre>
+<p>git will print a note about a “detached HEAD”: that is what checking out a tag
+looks like, and it is fine. You will not build Anvil from this copy — you only point
+your project at the SDK inside it. When the package reaches NuGet, this step
+goes away.</p>
+<h2 id="the-project"><a class="header" href="#the-project">The project</a></h2>
+<pre><code class="language-console">$ dotnet --version
+$ dotnet new console --output Bench
+</code></pre>
+<p>The first command must print a version starting with <code>10.</code>. The second creates
+<code>Bench/</code>, the executor you will fill with steps from chapter 3 on.</p>
+<p>Your folder now looks like this:</p>
+<pre><code>~/anvil-book/
+├── anvil/                               the repository, for the SDK
+├── anvil-v0.7.0-x86_64-linux-musl/      the engine
+└── Bench/                               your steps
+</code></pre>
+<h2 id="the-sequence-editor"><a class="header" href="#the-sequence-editor">The Sequence Editor</a></h2>
+<p>The release also carries the Sequence Editor, a graphical editor for the same
+files, as <code>anvil-editor-v0.7.0-x86_64-linux.AppImage</code>, a <code>.deb</code> and a Windows
+installer. This book does not use it yet (see the <a href="README.html">contents</a>).</p>
+<p>If you try the AppImage and it stops at <code>dlopen(): error loading libfuse.so.2</code>,
+your system lacks FUSE 2, which recent Ubuntu releases no longer install. The
+AppImage runs without it once extracted:</p>
+<pre><code class="language-console">$ chmod +x anvil-editor-v0.7.0-x86_64-linux.AppImage
+$ ./anvil-editor-v0.7.0-x86_64-linux.AppImage --appimage-extract
+$ ./squashfs-root/AppRun
+</code></pre>
+<h2 id="on-windows"><a class="header" href="#on-windows">On Windows</a></h2>
+<p>Everything above has a Windows equivalent, in <strong>Windows PowerShell</strong> — the one
+Windows already has; open it from the Start menu. This section was run on a
+GitHub Actions Windows machine (Windows Server 2025, build 26100, Windows
+PowerShell 5.1), with the downloads marked as coming from the Internet as a
+browser marks them. It has <strong>not</strong> been run on a Windows desktop: what
+Windows’ own security prompts do there is <strong>not verified</strong>.</p>
+<h3 id="download"><a class="header" href="#download">Download</a></h3>
+<p>On the <a href="https://github.com/anlaco/anvil/releases/tag/v0.7.0">release page</a>,
+under <strong>Assets</strong>, download two files. Your browser saves them in <code>Downloads</code>:</p>
+<ul>
+<li><code>anvil-v0.7.0-x86_64-windows.zip</code> — the engine;</li>
+<li><code>SHA256SUMS</code> — the checksums, to confirm the download is intact.</li>
+</ul>
+<h3 id="check-and-unpack"><a class="header" href="#check-and-unpack">Check and unpack</a></h3>
+<pre><code class="language-console">PS&gt; mkdir $HOME\anvil-book
+PS&gt; cd $HOME\anvil-book
+PS&gt; Move-Item "$HOME\Downloads\anvil-v0.7.0-x86_64-windows.zip", "$HOME\Downloads\SHA256SUMS" .
+PS&gt; (Get-FileHash .\anvil-v0.7.0-x86_64-windows.zip -Algorithm SHA256).Hash
+2F2AA5AF9044B2BBBA42E66434361EBC220EF1849E73F927FFC50121307EC96A
+PS&gt; Select-String anvil-v0.7.0-x86_64-windows.zip .\SHA256SUMS
+C:\Users\you\anvil-book\SHA256SUMS:5:2f2aa5af9044b2bbba42e66434361ebc220ef1849e73f927ffc50121307ec96a  anvil-v0.7.0-x86_64-windows.zip
+</code></pre>
+<p>The two hashes must be the same digits; PowerShell prints them in capitals and
+the file in lower case. Then unpack:</p>
+<pre><code class="language-console">PS&gt; Expand-Archive .\anvil-v0.7.0-x86_64-windows.zip -DestinationPath .
+</code></pre>
+<p>It creates <code>anvil-v0.7.0-x86_64-windows\</code>, with <code>anvil.exe</code> and
+<code>anvil-exec-wasm.exe</code>. They are built not to need the Visual C++ runtime; the
+test machine had it installed anyway, so a machine without it is <strong>not
+verified</strong>.</p>
+<p>If you unpack with the Explorer instead (right click → <em>Extract All</em>), the files
+inside may keep the “downloaded from the Internet” mark. On the test machine
+<code>anvil.exe</code> ran from PowerShell with the mark on; if your Windows refuses to run
+it, remove the mark from the whole folder:</p>
+<pre><code class="language-console">PS&gt; Get-ChildItem -Recurse .\anvil-v0.7.0-x86_64-windows | Unblock-File
+</code></pre>
+<p>Neither <code>anvil.exe</code> nor the editor installer is digitally signed in 0.5.0, so
+Windows may warn before running them. That warning was not reproduced here.</p>
+<h3 id="put-it-on-the-path"><a class="header" href="#put-it-on-the-path">Put it on the path</a></h3>
+<p>In every PowerShell window you open for this book:</p>
+<pre><code class="language-console">PS&gt; $env:Path = "$PWD\anvil-v0.7.0-x86_64-windows;$env:Path"
+PS&gt; anvil --version
+anvil 0.7.0
+</code></pre>
+<h3 id="the-sdk-and-the-project"><a class="header" href="#the-sdk-and-the-project">The SDK and the project</a></h3>
+<p>The same commands as on Linux, and git and the .NET 10 SDK must be installed
+first:</p>
+<pre><code class="language-console">PS&gt; git clone --depth 1 --branch v0.7.0 https://github.com/anlaco/anvil.git anvil
+PS&gt; dotnet --version
+PS&gt; dotnet new console --output Bench
+</code></pre>
+<pre><code>C:\Users\you\anvil-book\
+├── anvil\                               the repository, for the SDK
+├── anvil-v0.7.0-x86_64-windows\         the engine
+└── Bench\                               your steps
+</code></pre>
+<h3 id="the-rest-of-the-book-on-windows"><a class="header" href="#the-rest-of-the-book-on-windows">The rest of the book on Windows</a></h3>
+<p>The chapters are written for a Linux shell. Chapters 3 and 4 were also run on
+the Windows machine, up to running <code>sequences/first.yseq</code> and reading its JSON
+report: the C# project, <code>dotnet run</code> and <code>anvil</code> behave the same and print the
+same output. Paths work with either <code>/</code> or <code>\</code>. Where a command in the book is
+shell syntax, use:</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>in the book</th><th>in Windows PowerShell</th></tr>
+</thead>
+<tbody>
+<tr><td><code>~/anvil-book</code></td><td><code>$HOME\anvil-book</code></td></tr>
+<tr><td><code>export PATH="$PWD/anvil-v0.7.0-x86_64-linux-musl:$PATH"</code></td><td><code>$env:Path = "$PWD\anvil-v0.7.0-x86_64-windows;$env:Path"</code></td></tr>
+<tr><td><code>2&gt;/dev/null</code></td><td><code>2&gt;$null</code></td></tr>
+<tr><td><code>echo $?</code></td><td><code>$LASTEXITCODE</code></td></tr>
+<tr><td><code>cat data.json</code></td><td><code>Get-Content data.json</code></td></tr>
+<tr><td><code>ss -ltn | grep 9201</code></td><td><code>Get-NetTCPConnection -LocalPort 9201 -State Listen</code></td></tr>
+</tbody>
+</table>
+</div>
+<p>A few sessions pipe into <code>tail</code> or <code>grep</code> only to shorten what they show; on
+Windows, run the command without them. Chapters 5 to 13 and the Python and Rust
+steps of chapter 12 have <strong>not</strong> been run on Windows.</p>
+<h3 id="the-sequence-editor-on-windows"><a class="header" href="#the-sequence-editor-on-windows">The Sequence Editor on Windows</a></h3>
+<p>Download <code>anvil-editor-v0.7.0-x86_64-windows-setup.exe</code> from the same page and
+run it. On the test machine it installed for the current user, into
+<code>%LOCALAPPDATA%\Programs\@anvileditor\</code>, and added <strong>Anvil Sequence Editor</strong> to
+the Start menu. That was checked with a silent install (<code>setup.exe /S</code>); the
+installer’s own window, and whether it asks for administrator rights, were not.
+Remember that in 0.5.0 the packaged editor cannot run a sequence
+(<a href="https://github.com/anlaco/anvil/issues/80">#80</a>).</p>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="3-your-first-step"><a class="header" href="#3-your-first-step">3. Your first step</a></h1>
+<p>A step is a C# method with an attribute on it. In this chapter you write one
+that pretends to measure a supply rail, and you turn <code>Bench/</code> into an executor
+that serves it.</p>
+<h2 id="point-the-project-at-the-sdk"><a class="header" href="#point-the-project-at-the-sdk">Point the project at the SDK</a></h2>
+<p>Replace the contents of <code>Bench/Bench.csproj</code> with:</p>
+<pre><code class="language-xml">&lt;Project Sdk="Microsoft.NET.Sdk"&gt;
+
+  &lt;PropertyGroup&gt;
+    &lt;OutputType&gt;Exe&lt;/OutputType&gt;
+    &lt;TargetFramework&gt;net10.0&lt;/TargetFramework&gt;
+    &lt;ImplicitUsings&gt;enable&lt;/ImplicitUsings&gt;
+    &lt;Nullable&gt;enable&lt;/Nullable&gt;
+  &lt;/PropertyGroup&gt;
+
+  &lt;ItemGroup&gt;
+    &lt;ProjectReference Include="../anvil/executors/csharp/src/Anvil.Step/Anvil.Step.csproj" /&gt;
+    &lt;ProjectReference Include="../anvil/executors/csharp/src/Anvil.Step.Generator/Anvil.Step.Generator.csproj"
+                      OutputItemType="Analyzer"
+                      ReferenceOutputAssembly="false" /&gt;
+  &lt;/ItemGroup&gt;
+
+&lt;/Project&gt;
+</code></pre>
+<p>The two references are the SDK and its <em>generator</em>: at compile time, the
+generator reads your methods and writes the list of steps your executor
+publishes, so there is no registration file to keep up to date. The paths are
+relative to <code>Bench/</code>, which is why the repository had to be cloned as
+<code>anvil</code> next to it. When <code>Anvil.Step</code> is on NuGet, both lines become a single
+<code>PackageReference</code>.</p>
+<h2 id="the-entry-point"><a class="header" href="#the-entry-point">The entry point</a></h2>
+<p>Replace <code>Bench/Program.cs</code> with this one line:</p>
+<pre><code class="language-csharp">return await Anvil.Step.StepHost.RunAsync(args, Anvil.Step.Generated.AnvilSteps.Register);
+</code></pre>
+<p><code>AnvilSteps.Register</code> is the code the generator wrote. <code>StepHost.RunAsync</code>
+reads the command line, starts a server and waits for Anvil to call.</p>
+<h2 id="the-step"><a class="header" href="#the-step">The step</a></h2>
+<p>Create <code>Bench/Board.cs</code>:</p>
+<pre><code class="language-csharp">using Anvil.Step;
+
+/// &lt;summary&gt;Checks on the board under test.&lt;/summary&gt;
+public static partial class Board
+{
+    /// &lt;summary&gt;Measures the supply rail, in volts.&lt;/summary&gt;
+    [Step]
+    public static double MeasureRail() =&gt; 4.98;
+}
+</code></pre>
+<p>That is a complete step. What each part does:</p>
+<ul>
+<li><strong><code>[Step]</code></strong> publishes the method.</li>
+<li><strong>The name</strong> comes from the code, in <code>snake_case</code>: the class <code>Board</code> is the
+<em>module</em> <code>board</code>, the method <code>MeasureRail</code> is the step <code>measure_rail</code>, and
+sequences call it <code>board/measure_rail</code>.</li>
+<li><strong>The <code>&lt;summary&gt;</code></strong> is the step’s description. Anvil shows it, so you write it
+once, next to the code it describes.</li>
+<li><strong>Returning a <code>double</code></strong> means “this is a measurement”. Notice what is not
+here: nothing says whether 4.98 V is good. That belongs to the sequence.</li>
+</ul>
+<p>The class is <code>partial</code> only so that later chapters can add steps to the same
+module in files of their own.</p>
+<p>A step can return:</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>returns</th><th>means</th></tr>
+</thead>
+<tbody>
+<tr><td><code>double</code></td><td>a measurement, for the sequence’s limit to judge</td></tr>
+<tr><td><code>bool</code></td><td><code>true</code> is <code>pass</code>, <code>false</code> is <code>fail</code> — the step judges, nothing is measured</td></tr>
+<tr><td><code>void</code></td><td><code>pass</code>, when the step is an action</td></tr>
+<tr><td><code>Outcome</code></td><td>anything else: <code>Outcome.Measured(...)</code>, <code>Passed</code>, <code>Failed</code>, <code>Errored</code>, with a message</td></tr>
+</tbody>
+</table>
+</div>
+<h2 id="ask-the-executor-what-it-serves"><a class="header" href="#ask-the-executor-what-it-serves">Ask the executor what it serves</a></h2>
+<pre><code class="language-console">$ dotnet run --project Bench -- --list
+life 275f5aeae20e4fc5acad7e3f418a6717, contract 4
+  board/measure_rail()  — Measures the supply rail, in volts.
+</code></pre>
+<p><code>--list</code> prints the catalog and exits, without starting anything. The <code>life</code>
+line identifies this run of the executor and changes every time; <code>contract 4</code>
+is the version of the protocol Anvil and the executor speak. The first run also
+compiles the project, which takes a little while.</p>
+<h2 id="serve-it"><a class="header" href="#serve-it">Serve it</a></h2>
+<p>Now start it for real, and <strong>leave this terminal open</strong>:</p>
+<pre><code class="language-console">$ dotnet run --project Bench -- --port 9201
+anvil C# executor: 1 step(s) on 127.0.0.1:9201, life bfd160da9cfc4688bd98c5eaa03a6736
+</code></pre>
+<p>The executor is listening on port 9201, only on your own machine
+(<code>127.0.0.1</code>). Anvil does <strong>not</strong> start a C# executor for you: the process is
+yours, so you bring it up, and you stop it with Ctrl+C.</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>flag</th><th></th></tr>
+</thead>
+<tbody>
+<tr><td><code>--port</code></td><td>where to listen; 9201 by default</td></tr>
+<tr><td><code>--bind</code></td><td>which interface; <code>127.0.0.1</code> by default</td></tr>
+<tr><td><code>--list</code></td><td>print the catalog and exit</td></tr>
+</tbody>
+</table>
+</div>
+<p><strong>Every time you change a step, stop the executor and start it again.</strong> The
+running process serves the code it was built from; <code>dotnet run</code> rebuilds it.</p>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="4-your-first-sequence"><a class="header" href="#4-your-first-sequence">4. Your first sequence</a></h1>
+<p>Open a second terminal — the first one is busy serving your step — and set it
+up:</p>
+<pre><code class="language-console">$ cd ~/anvil-book
+$ export PATH="$PWD/anvil-v0.7.0-x86_64-linux-musl:$PATH"
+$ mkdir sequences
+</code></pre>
+<h2 id="the-file"><a class="header" href="#the-file">The file</a></h2>
+<p>Create <code>sequences/first.yseq</code>:</p>
+<pre><code class="language-yaml">name: first
+
+executors:
+  - { name: bench, type: grpc, host: 127.0.0.1, port: 9201 }
+
+main:
+  - name: board/measure_rail
+    type: numeric_limit
+    module: board/measure_rail
+    executor: bench
+    limit: { comparison: GELE, low: 4.75, high: 5.25 }
+</code></pre>
+<p>It is YAML. Line by line:</p>
+<ul>
+<li><strong><code>name</code></strong> names the sequence in reports.</li>
+<li><strong><code>executors</code></strong> is the list of executors this sequence talks to. Each has a
+<code>name</code> you choose, a <code>type</code> — <code>grpc</code> for a process listening on a port, as
+your C# executor is — and where to find it.</li>
+<li><strong><code>main</code></strong> is the list of steps to run. Chapter 6 adds <code>setup</code> and <code>cleanup</code>.</li>
+<li>Each step has a <strong><code>name</code></strong>, which is how the report shows it, and a
+<strong><code>type</code></strong>, which says how it is judged. <code>numeric_limit</code> judges a number
+against a limit; chapter 5 shows the others. They are TestStand’s step types.</li>
+<li><strong><code>module</code></strong> is what the step calls — the name the executor publishes — and
+<strong><code>executor</code></strong> is who serves it, by the name you gave it above. Here the
+step is named after its module; two steps calling one module with different
+inputs would each get a name of their own.</li>
+<li><strong><code>limit</code></strong> is the acceptance criterion, in TestStand’s terms: <code>GELE</code> passes
+when the measurement is greater than or equal to <code>low</code> and less than or equal
+to <code>high</code>.</li>
+</ul>
+<p><strong>Every step that calls an executor names it with <code>executor:</code>.</strong> Anvil has no
+executor of its own to fall back on, so a step without one is refused when the
+sequence loads, with a message that says what to add.</p>
+<p>The extension can be <code>.yseq</code> or <code>.yaml</code>; Anvil reads both the same way.</p>
+<h2 id="run-it"><a class="header" href="#run-it">Run it</a></h2>
+<pre><code class="language-console">$ anvil sequences/first.yseq
+secuencia 'first' cargada (1 pasos en main, 0 subsecuencia(s) externa(s), 1 ejecutor(es))
+connected to the step executors (bench)
+1 paso(s) comprobados contra el catálogo de su ejecutor
+=== first: pass ===
+  [pass] board/measure_rail: 
+$ echo $?
+0
+</code></pre>
+<p>Two kinds of lines are mixed there.</p>
+<p>The <strong>report</strong> is the part between <code>=== first: pass ===</code> and the step lines
+under it: the sequence passed, and so did its one step. It goes to standard
+output.</p>
+<p>Everything else is <strong>diagnostics</strong> on the error stream: loading the file,
+connecting to <code>bench</code>, and — the line that matters — <code>1 paso(s) comprobados contra el catálogo de su ejecutor</code>,
+“1 step checked against its executor’s catalog”. Before running anything,
+Anvil asked <code>bench</code> what it serves and checked that the sequence only asks for
+steps that exist. These messages are still in Spanish in 0.5.0
+(<a href="https://github.com/anlaco/anvil/issues/59">#59</a>).</p>
+<p>The <strong>exit code</strong> is <code>0</code> because the sequence passed. Anything else — a fail,
+an error, a file that does not load — exits with <code>1</code>.</p>
+<p>To see only the report, send the diagnostics away:</p>
+<pre><code class="language-console">$ anvil sequences/first.yseq 2&gt;/dev/null
+=== first: pass ===
+  [pass] board/measure_rail: 
+</code></pre>
+<p>The rest of the book does that, unless the diagnostics are the point.</p>
+<p>The console report does not show the measured value — 4.98 appears nowhere.
+The reports in chapter 10 carry it.</p>
+<h2 id="when-a-name-is-wrong"><a class="header" href="#when-a-name-is-wrong">When a name is wrong</a></h2>
+<p>Make a typo on purpose. <code>sequences/unknown.yseq</code> asks for <code>measure_rial</code>:</p>
+<pre><code class="language-yaml">name: unknown
+
+executors:
+  - { name: bench, type: grpc, host: 127.0.0.1, port: 9201 }
+
+main:
+  - name: board/measure_rial
+    type: pass_fail
+    module: board/measure_rial
+    executor: bench
+</code></pre>
+<pre><code class="language-console">$ anvil sequences/unknown.yseq 2&gt;&amp;1 | tail -n 3
+connected to the step executors (bench)
+la secuencia no casa con lo que ofrecen los ejecutores (1 problema(s)):
+  - step 'board/measure_rial': executor 'bench' does not serve it (it serves: board/measure_rail)
+</code></pre>
+<p>“The sequence does not match what the executors offer”: <code>bench</code> does not serve
+<code>board/measure_rial</code>, and the message lists what it does serve. Nothing ran.
+This check happens on every run, before the first step, so a misspelt step
+never gets as far as the bench.</p>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="5-measuring-and-judging"><a class="header" href="#5-measuring-and-judging">5. Measuring and judging</a></h1>
+<p>A step reports what it saw. The sequence says what is acceptable. Anvil
+compares the two. Keeping the criterion out of the step is what lets you
+tighten a tolerance by editing a text file that anyone can review, without
+rebuilding the executor.</p>
+<h2 id="three-more-steps"><a class="header" href="#three-more-steps">Three more steps</a></h2>
+<p>Create <code>Bench/Board.Judging.cs</code>, which adds three steps to the <code>board</code> module:</p>
+<pre><code class="language-csharp">using Anvil.Step;
+
+public static partial class Board
+{
+    /// &lt;summary&gt;Measures the leakage current with the board idle, in amps.&lt;/summary&gt;
+    [Step]
+    public static double MeasureLeakage() =&gt; 0.0004;
+
+    /// &lt;summary&gt;Checks that the power LED is lit.&lt;/summary&gt;
+    [Step]
+    public static bool CheckLed() =&gt; true;
+
+    /// &lt;summary&gt;Reads the on-board temperature sensor.&lt;/summary&gt;
+    [Step]
+    public static Outcome ReadTemperature() =&gt;
+        Outcome.Errored("the temperature sensor did not answer");
+}
+</code></pre>
+<p>Stop the executor with Ctrl+C in its terminal and start it again with
+<code>dotnet run --project Bench -- --port 9201</code>, so it serves the new steps.</p>
+<h2 id="limits"><a class="header" href="#limits">Limits</a></h2>
+<p>A step’s <code>type</code> says how it is judged. <code>sequences/judging.yseq</code> uses the two
+that judge something:</p>
+<pre><code class="language-yaml">name: judging
+
+executors:
+  - { name: bench, type: grpc, host: 127.0.0.1, port: 9201 }
+
+main:
+  - name: board/measure_rail
+    type: numeric_limit
+    module: board/measure_rail
+    executor: bench
+    limit: { comparison: GELE, low: 4.75, high: 5.25 }
+
+  - name: board/measure_leakage
+    type: numeric_limit
+    module: board/measure_leakage
+    executor: bench
+    limit: { comparison: LE, low: 0.001 }
+
+  - name: board/check_led
+    type: pass_fail
+    module: board/check_led
+    executor: bench
+</code></pre>
+<pre><code class="language-console">$ anvil sequences/judging.yseq 2&gt;/dev/null
+=== judging: pass ===
+  [pass] board/measure_rail: 
+  [pass] board/measure_leakage: 
+  [pass] board/check_led: 
+</code></pre>
+<ul>
+<li><code>board/measure_rail</code> is a <strong><code>numeric_limit</code></strong>: it returns a number, and the
+limit <code>GELE</code> judges it between <code>low</code> and <code>high</code>, both included.</li>
+<li><code>board/measure_leakage</code> is a <code>numeric_limit</code> with <strong><code>LE</code></strong>, one limit only:
+“less than or equal to 1 mA”. The one-limit codes are <code>EQ</code>, <code>NE</code>, <code>GT</code>, <code>LT</code>,
+<code>GE</code> and <code>LE</code>, and they use <code>low</code>.</li>
+<li><code>board/check_led</code> is a <strong><code>pass_fail</code></strong>: it returns a <code>bool</code>, so the step
+itself decides, and it needs no limit.</li>
+</ul>
+<p>The two-limit codes are TestStand’s: <code>GTLT</code>, <code>GELE</code>, <code>GELT</code> and <code>GTLE</code> pass
+<strong>inside</strong> <code>low</code> and <code>high</code> — <code>GE</code>/<code>LE</code> include the limit, <code>GT</code>/<code>LT</code> do not —
+and <code>LTGT</code>, <code>LEGE</code>, <code>LEGT</code> and <code>LTGE</code> pass <strong>outside</strong> them. <code>EQT</code> passes
+within a tolerance of a <code>nominal</code> value, and <code>none</code> records the value and
+judges nothing. A limit can carry <code>units</code>, which the report shows and the
+comparison ignores.</p>
+<p>A numeric limit <strong>needs a number</strong>. A <code>numeric_limit</code> step whose module returns
+none is <code>error</code>, not a pass: a limit that was never checked must not read as a
+limit that was met.</p>
+<p>The third type, <strong><code>action</code></strong>, is a step that does something and judges nothing
+— switching a supply on, connecting to a fixture. When its module succeeds it
+reports <strong><code>done</code></strong>, not <code>pass</code>: the report never says a step passed a check it
+did not make. Chapter 6 uses them.</p>
+<p>Now the same rail against a limit it cannot meet, in
+<code>sequences/rail-tight.yseq</code>:</p>
+<pre><code class="language-yaml">name: rail_tight
+
+executors:
+  - { name: bench, type: grpc, host: 127.0.0.1, port: 9201 }
+
+main:
+  - name: board/measure_rail
+    type: numeric_limit
+    module: board/measure_rail
+    executor: bench
+    limit: { comparison: GELE, low: 5.0, high: 5.25 }
+</code></pre>
+<pre><code class="language-console">$ anvil sequences/rail-tight.yseq 2&gt;/dev/null
+=== rail_tight: fail ===
+  [fail] board/measure_rail: 4.98 fuera de rango [5, 5.25]
+$ echo $?
+1
+</code></pre>
+<p>The step still returned 4.98 and did not change; the verdict did. The message
+reads “4.98 out of range [5, 5.25]” — the brackets say both ends are included,
+as <code>GELE</code> does — and the exit code is <code>1</code>.</p>
+<h2 id="fail-is-about-the-unit-error-is-about-the-bench"><a class="header" href="#fail-is-about-the-unit-error-is-about-the-bench">Fail is about the unit, error is about the bench</a></h2>
+<p><code>board/read_temperature</code> does not measure anything: it answers
+<code>Outcome.Errored</code>, as a real step would when a sensor does not reply.</p>
+<pre><code class="language-yaml">name: error
+
+executors:
+  - { name: bench, type: grpc, host: 127.0.0.1, port: 9201 }
+
+main:
+  - name: board/read_temperature
+    type: pass_fail
+    module: board/read_temperature
+    executor: bench
+  - name: board/check_led
+    type: pass_fail
+    module: board/check_led
+    executor: bench
+</code></pre>
+<pre><code class="language-console">$ anvil sequences/error.yseq 2&gt;/dev/null
+=== error: error ===
+  [error] board/read_temperature: the temperature sensor did not answer
+$ echo $?
+1
+</code></pre>
+<p>The verdict is <code>error</code>, not <code>fail</code>, and the difference is deliberate. A <code>fail</code>
+is a statement about the unit — it is out of spec, reject it. An <code>error</code> says
+Anvil could not judge the unit at all: the bench is broken, the unit may be
+perfectly good, and treating it as rejected would scrap a good board.</p>
+<p>So when you write a step:</p>
+<ul>
+<li>If you measured, return the measurement and let the limit judge.</li>
+<li>If the step itself can decide, return <code>bool</code> or <code>Outcome.Failed</code>.</li>
+<li>If you <strong>could not</strong> measure or decide, return <code>Outcome.Errored</code> with a
+message saying why. Never return a fail to mean “something went wrong”.</li>
+</ul>
+<p>An exception that escapes your method also becomes <code>error</code>, and the executor
+keeps running.</p>
+<p>Two more things the output shows:</p>
+<ul>
+<li><strong><code>main</code> stops at the first step that fails or errors.</strong> <code>board/check_led</code>
+never ran. A <code>done</code> step does not stop anything.</li>
+<li>A sequence’s verdict is the worst of its steps: any <code>error</code> makes it <code>error</code>;
+otherwise any <code>fail</code> makes it <code>fail</code>. Both exit with <code>1</code>; the report tells
+them apart. <code>done</code> and <code>skipped</code> move the verdict neither way.</li>
+</ul>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="6-setup-main-cleanup-and-retries"><a class="header" href="#6-setup-main-cleanup-and-retries">6. Setup, main, cleanup and retries</a></h1>
+<p>Real tests power a unit before measuring it and must power it off afterwards,
+whatever happened in between. Sequences have three phases for that.</p>
+<p>Create <code>Bench/Fixture.cs</code> and restart the executor:</p>
+<pre><code class="language-csharp">using Anvil.Step;
+
+/// &lt;summary&gt;The test fixture the board sits in.&lt;/summary&gt;
+public static class Fixture
+{
+    /// &lt;summary&gt;Clamps the board and powers it.&lt;/summary&gt;
+    [Step]
+    public static void PowerOn() { }
+
+    /// &lt;summary&gt;Cuts power and releases the board.&lt;/summary&gt;
+    [Step]
+    public static void PowerOff() { }
+
+    /// &lt;summary&gt;Opens the link to the board; the first attempt always times out.&lt;/summary&gt;
+    [Step]
+    public static Outcome Connect(Ctx ctx) =&gt;
+        ctx.Attempt == 1
+            ? Outcome.Errored("no answer from the board")
+            : Outcome.Passed("connected on attempt " + ctx.Attempt);
+
+    /// &lt;summary&gt;Measures the rail while it settles: low on the first attempt.&lt;/summary&gt;
+    [Step]
+    public static double MeasureSettlingRail(Ctx ctx) =&gt; ctx.Attempt == 1 ? 4.1 : 4.97;
+}
+</code></pre>
+<p><code>Ctx</code> is optional: declare it as a parameter and the SDK hands you the attempt
+number, among other things. It is not an input the sequence sends.</p>
+<h2 id="three-phases"><a class="header" href="#three-phases">Three phases</a></h2>
+<pre><code class="language-yaml">name: phases
+
+executors:
+  - { name: bench, type: grpc, host: 127.0.0.1, port: 9201 }
+
+setup:
+  - name: fixture/power_on
+    type: action
+    module: fixture/power_on
+    executor: bench
+
+main:
+  - name: fixture/measure_settling_rail
+    type: numeric_limit
+    module: fixture/measure_settling_rail
+    executor: bench
+    retries: 3
+    limit: { comparison: GELE, low: 4.75, high: 5.25 }
+
+  - name: board/check_led
+    type: pass_fail
+    module: board/check_led
+    executor: bench
+
+cleanup:
+  - name: fixture/power_off
+    type: action
+    module: fixture/power_off
+    executor: bench
+</code></pre>
+<pre><code class="language-console">$ anvil sequences/phases.yseq 2&gt;/dev/null
+=== phases: fail ===
+  [done] fixture/power_on: 
+  [fail] fixture/measure_settling_rail: 4.1 fuera de rango [4.75, 5.25]
+  [done] fixture/power_off: 
+</code></pre>
+<ul>
+<li><strong><code>setup</code></strong> runs first. If any setup step fails or errors, <code>main</code> is skipped
+entirely. <code>fixture/power_on</code> is an <code>action</code>: it does something and judges
+nothing, so it reports <code>done</code>, and <code>done</code> lets the sequence go on.</li>
+<li><strong><code>main</code></strong> runs next and stops at its first step that fails or errors.</li>
+<li><strong><code>cleanup</code></strong> always runs, whatever happened before. <code>fixture/power_off</code>
+ran even though the measurement failed. Put everything that makes the bench
+safe here.</li>
+</ul>
+<h2 id="retries-do-not-re-measure-a-failed-limit"><a class="header" href="#retries-do-not-re-measure-a-failed-limit">Retries do not re-measure a failed limit</a></h2>
+<p>That sequence has <code>retries: 3</code> on <code>fixture/measure_settling_rail</code>, and the step
+reads 4.97 V from its second attempt on. Yet the report shows 4.1 and <code>fail</code>.</p>
+<p>This is how Anvil behaves today
+(<a href="https://github.com/anlaco/anvil/issues/76">#76</a>): <strong><code>retries</code> repeats a step
+only while its module does not pass.</strong> The limit is applied once, after the last attempt. A
+module that returns a measurement has passed as far as retries are concerned, so
+it is not called again, and the limit then fails the first value.</p>
+<p>Retries are for a step that fails or errors on its own — a link that times out
+once, for example:</p>
+<pre><code class="language-yaml">name: retries
+
+executors:
+  - { name: bench, type: grpc, host: 127.0.0.1, port: 9201 }
+
+setup:
+  - name: fixture/power_on
+    type: action
+    module: fixture/power_on
+    executor: bench
+  - name: fixture/connect
+    type: action
+    module: fixture/connect
+    executor: bench
+    retries: 3
+
+main:
+  - name: board/measure_rail
+    type: numeric_limit
+    module: board/measure_rail
+    executor: bench
+    limit: { comparison: GELE, low: 4.75, high: 5.25 }
+
+cleanup:
+  - name: fixture/power_off
+    type: action
+    module: fixture/power_off
+    executor: bench
+</code></pre>
+<pre><code class="language-console">$ anvil sequences/retries.yseq 2&gt;/dev/null
+=== retries: pass ===
+  [done] fixture/power_on: 
+  [done] fixture/connect: connected on attempt 2
+  [pass] board/measure_rail: 
+  [done] fixture/power_off: 
+</code></pre>
+<p><code>fixture/connect</code> errored on attempt 1 and succeeded on attempt 2 — an action,
+so it reports <code>done</code>. <code>retries</code> is
+the <strong>total</strong> number of attempts: the default is 1, meaning no retry, and 0 is
+refused when the file loads.</p>
+<p>The report keeps only the last attempt. The “on attempt 2” in the message is
+there because the step wrote it; Anvil does not record the earlier attempt.</p>
+<p>Without the retries, the same link does not come up, and the setup rule shows:</p>
+<pre><code class="language-yaml">name: setup_fails
+
+executors:
+  - { name: bench, type: grpc, host: 127.0.0.1, port: 9201 }
+
+setup:
+  - name: fixture/power_on
+    type: action
+    module: fixture/power_on
+    executor: bench
+  - name: fixture/connect
+    type: action
+    module: fixture/connect
+    executor: bench
+
+main:
+  - name: board/measure_rail
+    type: numeric_limit
+    module: board/measure_rail
+    executor: bench
+    limit: { comparison: GELE, low: 4.75, high: 5.25 }
+
+cleanup:
+  - name: fixture/power_off
+    type: action
+    module: fixture/power_off
+    executor: bench
+</code></pre>
+<pre><code class="language-console">$ anvil sequences/setup-fails.yseq 2&gt;/dev/null
+=== setup_fails: error ===
+  [done] fixture/power_on: 
+  [error] fixture/connect: no answer from the board
+  [done] fixture/power_off: 
+</code></pre>
+<p>The setup errored, <code>main</code> never ran, and <code>cleanup</code> still did.</p>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="7-inputs-variables-and-flow"><a class="header" href="#7-inputs-variables-and-flow">7. Inputs, variables and flow</a></h1>
+<p>So far every step has taken nothing and returned a fixed value. Real steps take
+parameters — which channel, which range — and later steps depend on earlier
+results.</p>
+<p>Create <code>Bench/Dmm.cs</code> and <code>Bench/Unit.cs</code>, then restart the executor:</p>
+<pre><code class="language-csharp">using Anvil.Step;
+
+/// &lt;summary&gt;A multimeter with four input channels.&lt;/summary&gt;
+public static class Dmm
+{
+    /// &lt;summary&gt;Measures the voltage on a channel.&lt;/summary&gt;
+    /// &lt;param name="channel"&gt;The input channel, 1 to 4.&lt;/param&gt;
+    /// &lt;param name="range"&gt;The measurement range.&lt;/param&gt;
+    [Step]
+    public static Outcome MeasureVoltage(double channel, string range = "auto") =&gt;
+        channel switch
+        {
+            1 =&gt; Outcome.Measured(1.1, "range " + range),
+            2 =&gt; Outcome.Measured(1.8, "range " + range),
+            3 =&gt; Outcome.Measured(3.3, "range " + range),
+            4 =&gt; Outcome.Measured(5.0, "range " + range),
+            _ =&gt; Outcome.Errored("the multimeter has no such channel"),
+        };
+}
+</code></pre>
+<pre><code class="language-csharp">using Anvil.Step;
+
+/// &lt;summary&gt;The unit's own identity.&lt;/summary&gt;
+public static class Unit
+{
+    /// &lt;summary&gt;Reads the serial number from the unit's memory.&lt;/summary&gt;
+    [Step]
+    public static Outcome ReadSerial() =&gt;
+        Outcome.Passed("serial read").Output("serial", "SN-0042");
+}
+</code></pre>
+<h2 id="inputs"><a class="header" href="#inputs">Inputs</a></h2>
+<p>A method’s parameters are the step’s inputs, named in <code>snake_case</code> like the
+step. <code>channel</code> has no default, so it is required; <code>range</code> has one, so it is
+optional. A parameter can be a <code>double</code>, a <code>string</code>, a <code>bool</code>, or a reference
+(chapter 8); anything else does not compile.</p>
+<p><code>--list</code> shows that signature — <code>dmm/measure_voltage(channel: number, range?: text)</code> —
+and Anvil checks every sequence against it.</p>
+<h2 id="variables-and-results"><a class="header" href="#variables-and-results">Variables and results</a></h2>
+<pre><code class="language-yaml">name: data
+
+executors:
+  - { name: bench, type: grpc, host: 127.0.0.1, port: 9201 }
+
+locals:
+  channel: 2
+  rail: 0.0
+  led_ok: false
+
+main:
+  - name: unit/read_serial
+    type: action
+    module: unit/read_serial
+    executor: bench
+
+  - name: dmm/measure_voltage
+    type: numeric_limit
+    module: dmm/measure_voltage
+    executor: bench
+    inputs:
+      channel: '${locals.channel}'
+      range: "10V"
+    limit: { comparison: GELE, low: 1.7, high: 1.9 }
+    assign:
+      rail: result.measured_value
+
+  - name: board/check_led
+    type: pass_fail
+    module: board/check_led
+    executor: bench
+    assign:
+      led_ok: 'result.status == "pass"'
+
+  - name: rail_in_spec
+    type: pass_fail
+    condition: 'locals.rail &gt; 1.75 &amp;&amp; locals.led_ok'
+</code></pre>
+<pre><code class="language-console">$ anvil sequences/data.yseq --json data.json 2&gt;/dev/null
+=== data: pass ===
+  [done] unit/read_serial: serial read
+  [pass] dmm/measure_voltage: range 10V
+  [pass] board/check_led: 
+  [pass] rail_in_spec: condición cumplida
+$ cat data.json
+{
+  "sequence": "data",
+  "status": "pass",
+  "skipped_steps": 0,
+  "total_steps": 4,
+  "steps": [
+    {
+      "name": "unit/read_serial",
+      "module": "unit/read_serial",
+      "status": "done",
+      "phase": "main",
+      "message": "serial read",
+      "measured_value": null,
+      "limit_min": null,
+      "limit_max": null,
+      "expected_value": null,
+      "operator": null,
+      "comparison": null,
+      "units": null,
+      "inputs": {},
+      "outputs": {
+        "serial": "SN-0042"
+      }
+    },
+    {
+      "name": "dmm/measure_voltage",
+      "module": "dmm/measure_voltage",
+      "status": "pass",
+      "phase": "main",
+      "message": "range 10V",
+      "measured_value": 1.8,
+      "limit_min": 1.7,
+      "limit_max": 1.9,
+      "expected_value": null,
+      "operator": null,
+      "comparison": "GELE",
+      "units": null,
+      "inputs": {
+        "channel": 2.0,
+        "range": "10V"
+      },
+      "outputs": {}
+    },
+    {
+      "name": "board/check_led",
+      "module": "board/check_led",
+      "status": "pass",
+      "phase": "main",
+      "message": "",
+      "measured_value": null,
+      "limit_min": null,
+      "limit_max": null,
+      "expected_value": null,
+      "operator": null,
+      "comparison": null,
+      "units": null,
+      "inputs": {},
+      "outputs": {}
+    },
+    {
+      "name": "rail_in_spec",
+      "module": null,
+      "status": "pass",
+      "phase": "main",
+      "message": "condición cumplida",
+      "measured_value": null,
+      "limit_min": null,
+      "limit_max": null,
+      "expected_value": null,
+      "operator": null,
+      "comparison": null,
+      "units": null,
+      "inputs": {},
+      "outputs": {}
+    }
+  ]
+}
+</code></pre>
+<p>What happens there:</p>
+<ul>
+<li><strong><code>locals</code></strong> declares the sequence’s variables with their initial values. The
+type comes from the value: <code>2</code> and <code>0.0</code> are numbers, <code>false</code> is a boolean,
+<code>""</code> would be text.</li>
+<li><strong><code>inputs</code></strong> gives a step its parameters. A plain value is sent as it is
+(<code>"10V"</code>); a value in <code>${...}</code> is an expression, evaluated before the step
+runs (<code>${locals.channel}</code> sends <code>2</code>).</li>
+<li><strong><code>assign</code></strong> stores something from the step’s <code>result</code> in a local after its
+module answers: <code>result.measured_value</code>, or an expression such as
+<code>result.status == "pass"</code>. It runs <strong>before</strong> the step is judged, so it sees
+the module’s own status, not the limit’s verdict.</li>
+<li>A <strong><code>pass_fail</code></strong> step with a <code>condition</code> and no <code>module</code> calls no executor.
+Anvil evaluates its <code>condition</code> and the step passes or fails on it — the place
+for a verdict that combines several measurements. With a <code>module</code> as well, the
+condition can read the module’s <code>result</code> too.</li>
+</ul>
+<p>The JSON report (chapter 10) records what each step was given in <code>inputs</code> and
+what it returned in <code>outputs</code>. That is what makes a result reconstructible
+later: two runs on different channels produce different reports.</p>
+<h3 id="outputs-from-a-c-step-cannot-be-assigned-yet"><a class="header" href="#outputs-from-a-c-step-cannot-be-assigned-yet">Outputs from a C# step cannot be assigned yet</a></h3>
+<p><code>unit/read_serial</code> returns a named output, <code>serial</code>, and the report above shows
+it. But reading it into a variable does not work in 0.5.0:</p>
+<pre><code class="language-yaml">name: serial
+
+executors:
+  - { name: bench, type: grpc, host: 127.0.0.1, port: 9201 }
+
+locals:
+  serial: ""
+
+main:
+  - name: unit/read_serial
+    type: action
+    module: unit/read_serial
+    executor: bench
+    assign:
+      serial: result.outputs.serial
+</code></pre>
+<pre><code class="language-console">$ anvil sequences/serial.yseq 2&gt;&amp;1 | tail -n 3
+1 paso(s) comprobados contra el catálogo de su ejecutor
+la secuencia no casa con lo que ofrecen los ejecutores (1 problema(s)):
+  - step 'unit/read_serial' (bench): 'assign' reads result.outputs.serial and the step does not return it (it returns: none)
+</code></pre>
+<p>Anvil checks <code>assign</code> against the outputs a step declares in its catalog, and
+the C# SDK has no way yet to declare them — only the <code>open</code> step of chapter 8
+declares one (<a href="https://github.com/anlaco/anvil/issues/77">#77</a>). So the check refuses the sequence before it runs. Until that is
+fixed, use named outputs from C# for the report only, and pass values between
+steps through <code>result.measured_value</code> or <code>result.status</code>.</p>
+<h2 id="flow"><a class="header" href="#flow">Flow</a></h2>
+<pre><code class="language-yaml">name: flow
+
+executors:
+  - { name: bench, type: grpc, host: 127.0.0.1, port: 9201 }
+
+file_globals:
+  station: "bench-3"
+
+locals:
+  channel: 1
+
+main:
+  - name: pick_channel
+    type: statement
+    statement: 'locals.channel = locals.channel + 2'
+
+  - name: dmm/measure_voltage
+    type: numeric_limit
+    module: dmm/measure_voltage
+    executor: bench
+    inputs: { channel: '${locals.channel}' }
+    limit: { comparison: GELE, low: 3.0, high: 3.6 }
+
+  - name: board/measure_leakage
+    type: numeric_limit
+    module: board/measure_leakage
+    executor: bench
+    precondition: 'file_globals.station == "bench-1"'
+    limit: { comparison: LE, low: 0.001 }
+
+  - name: board/read_temperature
+    type: action
+    module: board/read_temperature
+    executor: bench
+    disable: true
+</code></pre>
+<pre><code class="language-console">$ anvil sequences/flow.yseq 2&gt;/dev/null
+=== flow: pass ===
+  [done] pick_channel: statement ok
+  [pass] dmm/measure_voltage: range auto
+  [skipped] board/measure_leakage: precondición falsa
+  [skipped] board/read_temperature: disable
+  (2 de 4 pasos saltados)
+</code></pre>
+<ul>
+<li><strong><code>type: statement</code></strong> runs an assignment inside the engine, without calling
+any executor: <code>locals.channel</code> becomes 3 before the measurement uses it.</li>
+<li><strong><code>file_globals</code></strong> are variables visible to every sequence in the file.
+Steps read them; writing to one is refused when the file loads.</li>
+<li><strong><code>precondition</code></strong> is an expression; when it is false the step is <code>skipped</code>
+without being called. Here the station is not <code>bench-1</code>.</li>
+<li><strong><code>disable: true</code></strong> skips a step without evaluating anything.</li>
+</ul>
+<p>Look at the verdict: the sequence <strong>passed with two steps skipped</strong>. A skipped
+step is neither a pass nor a fail, and it does not fail the sequence. If a
+measurement must always happen, do not put a precondition on it.</p>
+<h2 id="checking-a-sequence-without-running-it"><a class="header" href="#checking-a-sequence-without-running-it">Checking a sequence without running it</a></h2>
+<p>A typo in an input name, in <code>sequences/typo.yseq</code>:</p>
+<pre><code class="language-yaml">name: typo
+
+executors:
+  - { name: bench, type: grpc, host: 127.0.0.1, port: 9201 }
+
+main:
+  - name: dmm/measure_voltage
+    type: pass_fail
+    module: dmm/measure_voltage
+    executor: bench
+    inputs: { chanel: 2 }
+</code></pre>
+<pre><code class="language-console">$ anvil sequences/typo.yseq --validate
+secuencia 'typo' cargada (1 pasos en main, 0 subsecuencia(s) externa(s), 1 ejecutor(es))
+'typo' válida (1 paso(s) en main, 0 subsecuencia(s) externa(s))
+$ anvil sequences/typo.yseq --validate --with-executors
+secuencia 'typo' cargada (1 pasos en main, 0 subsecuencia(s) externa(s), 1 ejecutor(es))
+'typo' válida (1 paso(s) en main, 0 subsecuencia(s) externa(s))
+1 paso(s) comprobados contra el catálogo de su ejecutor
+la secuencia no casa con lo que ofrecen los ejecutores (2 problema(s)):
+  - step 'dmm/measure_voltage' (bench): it takes no input called 'chanel' (it takes: channel, range)
+  - step 'dmm/measure_voltage' (bench): the input 'channel' is required and the sequence does not send it
+</code></pre>
+<p><code>--validate</code> loads the file and checks it — the schema, the expressions, the
+subsequences — without starting or connecting to anything, so it runs in CI
+with no bench. It cannot know what inputs a step takes, so it says the file is
+valid.</p>
+<p><code>--validate --with-executors</code> also asks each executor for its catalog, and
+catches both problems: there is no input <code>chanel</code>, and the required <code>channel</code>
+is missing. A real run makes the same check before its first step.</p>
+<p>Do not treat a green <code>--with-executors</code> as a guarantee in 0.5.0: when an
+executor fails while describing itself, it still passes
+(<a href="https://github.com/anlaco/anvil/issues/70">#70</a>).</p>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="8-instruments-that-stay-open"><a class="header" href="#8-instruments-that-stay-open">8. Instruments that stay open</a></h1>
+<p>A session with a power supply holds a socket or a vendor driver handle. It
+cannot be sent to Anvil and back, and it should not be reopened for every step.
+So it stays inside the executor, and the sequence holds a <strong>reference</strong> to it:
+a handle that means something only to the executor that issued it.</p>
+<p>In C# you write the class you would write anyway. Create
+<code>Bench/PowerSupply.cs</code> and restart the executor:</p>
+<pre><code class="language-csharp">using Anvil.Step;
+
+/// &lt;summary&gt;A bench power supply, kept open across several steps.&lt;/summary&gt;
+[StepModule("psu")]
+public sealed class PowerSupply
+{
+    private double _volts;
+
+    /// &lt;summary&gt;Opens the session with the supply.&lt;/summary&gt;
+    /// &lt;param name="resource"&gt;Where the supply is.&lt;/param&gt;
+    [StepConstructor]
+    public PowerSupply(string resource) =&gt; Resource = resource;
+
+    /// &lt;summary&gt;Where this supply is.&lt;/summary&gt;
+    public string Resource { get; }
+
+    /// &lt;summary&gt;Sets the output voltage, in volts.&lt;/summary&gt;
+    /// &lt;param name="volts"&gt;What to set the output to.&lt;/param&gt;
+    [Step]
+    public void SetVoltage(double volts) =&gt; _volts = volts;
+
+    /// &lt;summary&gt;Measures the current the load draws, in amps.&lt;/summary&gt;
+    [Step]
+    public double MeasureCurrent() =&gt; _volts * 0.0625;
+
+    /// &lt;summary&gt;Cuts the output.&lt;/summary&gt;
+    [Step]
+    public void OutputOff() =&gt; _volts = 0;
+}
+</code></pre>
+<ul>
+<li><strong><code>[StepConstructor]</code></strong> on the constructor publishes a step named <code>open</code> —
+<code>psu/open</code> — that creates the object, keeps it in the executor, and returns
+a reference to it as an output named after the module, <code>psu</code>.</li>
+<li><strong><code>[StepModule("psu")]</code></strong> names the module. Without it the module would be
+<code>power_supply</code>, from the class name.</li>
+<li><strong>Instance steps</strong> — <code>SetVoltage</code>, <code>MeasureCurrent</code>, <code>OutputOff</code> — take an
+extra input, <code>psu</code>, of type reference. The SDK finds the object it points to
+and calls the method on it; your method never sees the handle.</li>
+</ul>
+<p><code>--list</code> shows it: <code>psu/set_voltage(psu: reference, volts: number)</code>.</p>
+<h2 id="using-it-from-a-sequence"><a class="header" href="#using-it-from-a-sequence">Using it from a sequence</a></h2>
+<pre><code class="language-yaml">name: supply
+
+executors:
+  - { name: bench, type: grpc, host: 127.0.0.1, port: 9201 }
+
+locals:
+  psu: { type: reference, executor: bench }
+
+setup:
+  - name: psu/open
+    type: action
+    module: psu/open
+    executor: bench
+    inputs: { resource: "TCPIP::192.168.0.50::5025::SOCKET" }
+    assign:
+      psu: result.outputs.psu
+
+main:
+  - name: psu/set_voltage
+    type: action
+    module: psu/set_voltage
+    executor: bench
+    inputs: { psu: '${locals.psu}', volts: 12.0 }
+
+  - name: psu/measure_current
+    type: numeric_limit
+    module: psu/measure_current
+    executor: bench
+    inputs: { psu: '${locals.psu}' }
+    limit: { comparison: GELE, low: 0.5, high: 0.8 }
+
+cleanup:
+  - name: psu/output_off
+    type: action
+    module: psu/output_off
+    executor: bench
+    inputs: { psu: '${locals.psu}' }
+</code></pre>
+<pre><code class="language-console">$ anvil sequences/supply.yseq --json supply.json 2&gt;/dev/null
+=== supply: pass ===
+  [done] psu/open: 
+  [done] psu/set_voltage: 
+  [pass] psu/measure_current: 
+  [done] psu/output_off: 
+$ grep -A 6 "\"outputs\": {$" supply.json | head -n 8
+      "outputs": {
+        "psu": {
+          "type": "reference",
+          "executor": "bench",
+          "lifetime": "3e4305842bd0441184334be2d7bc897c",
+          "payload": "s1"
+        }
+</code></pre>
+<ul>
+<li><strong><code>locals</code></strong> declares <code>psu</code> as a reference that comes from <code>bench</code>. It is the
+one kind of variable with no initial value: you cannot write a reference by
+hand, only receive it from a step.</li>
+<li><strong><code>setup</code></strong> opens the supply and stores the reference with <code>assign</code>. This is
+the one output a C# step can have assigned in 0.5.0 (see chapter 7).</li>
+<li><strong><code>main</code></strong> passes <code>${locals.psu}</code> to each step that needs the supply.</li>
+<li><strong><code>cleanup</code></strong> turns the output off, which runs whatever happens in <code>main</code>.</li>
+</ul>
+<p>The report records the reference like any other input or output, so you can
+tell afterwards which session each step used. <code>lifetime</code> identifies the run of
+the executor that issued it — the same value as the <code>life</code> it prints when it
+starts — and <code>payload</code> is the executor’s own name for the object.</p>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="9-subsequences"><a class="header" href="#9-subsequences">9. Subsequences</a></h1>
+<p>When the same few steps appear in several places, move them into a
+subsequence and call it. A subsequence can live in the same file, or in a file
+of its own that several sequences share.</p>
+<p>This chapter needs no new steps.</p>
+<h2 id="a-file-to-share"><a class="header" href="#a-file-to-share">A file to share</a></h2>
+<p><code>sequences/rail-check.yseq</code> measures one channel and hands the value back to
+whoever called it:</p>
+<pre><code class="language-yaml">name: rail_check
+
+parameters:
+  channel: 1
+  volts: 0.0
+
+locals:
+  measured: 0.0
+
+main:
+  - name: dmm/measure_voltage
+    type: action
+    module: dmm/measure_voltage
+    executor: bench
+    inputs: { channel: '${parameters.channel}' }
+    assign:
+      measured: result.measured_value
+
+  - name: return_volts
+    type: statement
+    statement: 'parameters.volts = locals.measured'
+</code></pre>
+<ul>
+<li><strong><code>parameters</code></strong> are what the caller passes in, with default values.</li>
+<li>It has <strong>no <code>executors:</code> section</strong>. The executors are declared once, in the
+sequence you run, and subsequences refer to them by name. Anvil refuses a
+subsequence that declares its own. It also means this file cannot be run on
+its own.</li>
+<li><strong>Returning a value takes two steps.</strong> <code>assign</code> always writes to a local, so
+the measurement goes to <code>locals.measured</code>, and a <code>statement</code> copies it to the
+parameter the caller will read. Assigning directly to a parameter is refused
+when the file loads.</li>
+</ul>
+<h2 id="calling-it"><a class="header" href="#calling-it">Calling it</a></h2>
+<pre><code class="language-yaml">name: board
+
+executors:
+  - { name: bench, type: grpc, host: 127.0.0.1, port: 9201 }
+
+locals:
+  ch_3v3: 3
+  v_3v3: 0.0
+  ch_1v1: 1
+  v_1v1: 0.0
+
+subsequences:
+  power_up:
+    setup:
+      - name: fixture/power_on
+        type: action
+        module: fixture/power_on
+        executor: bench
+    main:
+      - name: board/check_led
+        type: pass_fail
+        module: board/check_led
+        executor: bench
+
+main:
+  - name: power_up
+    type: sequence_call
+    sequence: power_up
+
+  - name: measure_3v3
+    type: sequence_call
+    sequence: ./rail-check.yseq
+    args: { channel: locals.ch_3v3, volts: locals.v_3v3 }
+
+  - name: measure_1v1
+    type: sequence_call
+    sequence: ./rail-check.yseq
+    args: { channel: locals.ch_1v1, volts: locals.v_1v1 }
+
+  - name: rails_in_spec
+    type: pass_fail
+    condition: 'locals.v_3v3 &gt; 3.2 &amp;&amp; locals.v_3v3 &lt; 3.4 &amp;&amp; locals.v_1v1 &gt; 1.0 &amp;&amp; locals.v_1v1 &lt; 1.2'
+
+cleanup:
+  - name: fixture/power_off
+    type: action
+    module: fixture/power_off
+    executor: bench
+</code></pre>
+<pre><code class="language-console">$ anvil sequences/board.yseq 2&gt;/dev/null
+=== board: pass ===
+  [pass] power_up: sequence call 'power_up' → pass
+    [done] fixture/power_on: 
+    [pass] board/check_led: 
+  [pass] measure_3v3: sequence call 'sequences/rail-check.yseq' → pass
+    [done] dmm/measure_voltage: range auto
+    [done] return_volts: statement ok
+  [pass] measure_1v1: sequence call 'sequences/rail-check.yseq' → pass
+    [done] dmm/measure_voltage: range auto
+    [done] return_volts: statement ok
+  [pass] rails_in_spec: condición cumplida
+  [done] fixture/power_off: 
+</code></pre>
+<ul>
+<li><strong><code>subsequences</code></strong> holds <code>power_up</code>, a subsequence that lives in this file. It
+has its own <code>setup</code> and <code>main</code>.</li>
+<li>A step with <strong><code>type: sequence_call</code></strong> calls one. <code>sequence</code> is either the name
+of a subsequence in the same file (<code>power_up</code>) or a path to a file, relative
+to the file doing the calling (<code>./rail-check.yseq</code>).</li>
+<li><strong><code>args</code></strong> connects each parameter to one of the caller’s locals —
+<code>channel: locals.ch_3v3</code>. It is written without <code>${...}</code> because it is not a
+value: it names the variable, and when the subsequence writes the parameter,
+the caller’s local changes. That is how <code>locals.v_3v3</code> gets its value.</li>
+</ul>
+<p>The report nests each subsequence’s steps under the call — indented on the
+console, under <code>sub_steps</code> in the JSON report — and the call takes the verdict
+of the subsequence: if a step inside errors, the call is an <code>error</code> too, and
+the calling sequence stops as it would for any other step.</p>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="10-reports-and-running-unattended"><a class="header" href="#10-reports-and-running-unattended">10. Reports and running unattended</a></h1>
+<p>On a production line nobody reads the console. This chapter is about the
+files Anvil leaves behind and the options for running without a person in
+front of it.</p>
+<h2 id="reports"><a class="header" href="#reports">Reports</a></h2>
+<p><code>--json &lt;file&gt;</code> and <code>--csv &lt;file&gt;</code> write the report to a file, in addition to
+the console. <code>--quiet</code> removes the console report:</p>
+<pre><code class="language-console">$ anvil sequences/judging.yseq --quiet --csv judging.csv
+$ cat judging.csv
+sequence_name,status,step_name,step_status,message,measured_value,limit_min,limit_max,expected_value,operator,phase,inputs,outputs,module,comparison,units
+judging,pass,board/measure_rail,pass,,4.98,4.75,5.25,,,main,,,board/measure_rail,GELE,
+judging,pass,board/measure_leakage,pass,,0.0004,,,0.001,&lt;=,main,,,board/measure_leakage,LE,
+judging,pass,board/check_led,pass,,,,,,,main,,,board/check_led,,
+</code></pre>
+<p>One row per step. Unlike the console, the files carry the measurement and the
+limit it was judged against: <code>comparison</code> holds the TestStand code, with
+<code>limit_min</code> and <code>limit_max</code> for a two-limit code and <code>expected_value</code> and
+<code>operator</code> for a one-limit code, and <code>units</code> when the limit has them. They also
+carry the step’s <code>module</code>, its <code>inputs</code> and <code>outputs</code>, and a subsequence’s steps
+are prefixed with the name of their call. The JSON report has the same information, nested
+(chapter 7 showed one).</p>
+<p>Notice that <code>--quiet</code> did not silence the diagnostics on the error stream
+(<a href="https://github.com/anlaco/anvil/issues/35">#35</a>). If a script needs silence,
+redirect it.</p>
+<h2 id="changing-limits-without-touching-the-sequence"><a class="header" href="#changing-limits-without-touching-the-sequence">Changing limits without touching the sequence</a></h2>
+<p>A tolerance often depends on the product variant or the production lot, not on
+the test. <code>--limits</code> loads a <em>limits file</em> that replaces the limits written in
+the sequence, by step name. <code>sequences/judging.limits.yaml</code>:</p>
+<pre><code class="language-yaml">board/measure_rail:
+  comparison: GELE
+  low: 5.0
+  high: 5.1
+</code></pre>
+<pre><code class="language-console">$ anvil sequences/judging.yseq --limits sequences/judging.limits.yaml 2&gt;/dev/null
+=== judging: fail ===
+  [fail] board/measure_rail: 4.98 fuera de rango [5, 5.1]
+</code></pre>
+<p>The same sequence, a tighter tolerance, a different verdict. The limits file
+applies to every step with that name, in subsequences too, and uses the same
+shape as a limit in the sequence. It can only give a limit to a
+<code>numeric_limit</code>: a name that matches a step of another type stops the run.</p>
+<p>A name that matches no step would leave the sequence’s own limit in force
+without anyone noticing, so Anvil warns — even under <code>--quiet</code>. With
+<code>sequences/judging.typo.limits.yaml</code>:</p>
+<pre><code class="language-yaml">board/measure_rial:
+  comparison: GELE
+  low: 5.0
+  high: 5.1
+</code></pre>
+<pre><code class="language-console">$ anvil sequences/judging.yseq --limits sequences/judging.typo.limits.yaml
+secuencia 'judging' cargada (3 pasos en main, 0 subsecuencia(s) externa(s), 1 ejecutor(es))
+sidecar de límites 'sequences/judging.typo.limits.yaml' aplicado (0 paso(s) afectado(s))
+aviso: 1 límite(s) del sidecar 'sequences/judging.typo.limits.yaml' no afectan a ningún paso: board/measure_rial
+aviso: el sidecar no afectó a ningún paso. Comprueba que los nombres coincidan con los de los pasos de la secuencia
+connected to the step executors (bench)
+3 paso(s) comprobados contra el catálogo de su ejecutor
+=== judging: pass ===
+  [pass] board/measure_rail: 
+  [pass] board/measure_leakage: 
+  [pass] board/check_led: 
+</code></pre>
+<p>The <code>aviso</code> lines say that one limit in the file affects no step,
+<code>board/measure_rial</code>, and that the file changed nothing: check the names. The
+sequence passed against its own limit.</p>
+<h2 id="moving-an-executor-without-editing-the-sequence"><a class="header" href="#moving-an-executor-without-editing-the-sequence">Moving an executor without editing the sequence</a></h2>
+<p><code>--executor name=host:port</code> points a declared executor somewhere else for this
+run — the same sequence against the executor on your desk or on the line’s PC:</p>
+<pre><code class="language-console">$ anvil sequences/first.yseq --executor bench=127.0.0.1:9201
+</code></pre>
+<p>The name must be one the sequence declares; any other is an error when the
+file loads. It can be repeated, once per executor.</p>
+<h2 id="checking-in-ci"><a class="header" href="#checking-in-ci">Checking in CI</a></h2>
+<pre><code class="language-console">$ anvil sequences/board.yseq --validate
+secuencia 'board' cargada (4 pasos en main, 1 subsecuencia(s) externa(s), 1 ejecutor(es))
+'board' válida (4 paso(s) en main, 1 subsecuencia(s) externa(s))
+$ echo $?
+0
+</code></pre>
+<p><code>--validate</code> needs no executor and no bench, and exits with <code>0</code> when the file
+is valid, so it can guard every change to a sequence in CI. Remember from
+chapter 7 what it cannot see: whether steps and their inputs exist. For that,
+<code>--validate --with-executors</code> with the executors running — and, in 0.5.0, with
+<a href="https://github.com/anlaco/anvil/issues/70">#70</a> in mind.</p>
+<h2 id="exit-codes"><a class="header" href="#exit-codes">Exit codes</a></h2>
+<p><code>0</code> when the sequence passes. <code>1</code> for everything else: a <code>fail</code>, an <code>error</code>, a
+file that does not load, a sequence that does not match its executors, an
+executor that cannot be reached. A script can stop on the exit code, and read
+the report to know which of those it was.</p>
+<h2 id="following-a-run-as-it-happens"><a class="header" href="#following-a-run-as-it-happens">Following a run as it happens</a></h2>
+<p><code>--events</code> writes one JSON line per event — a step starting, a step’s result —
+to the error stream while the sequence runs. It is what the Sequence Editor
+reads to light up the running step. <code>--quiet</code> does not silence it, and it
+carries the same data as <code>--json</code>, instrument addresses included.</p>
+<h2 id="not-covered-here"><a class="header" href="#not-covered-here">Not covered here</a></h2>
+<p><code>--process-model</code> wraps a sequence in a process model that identifies the unit
+and reports on it. Anvil does not ship one: the process model it had stood in
+for an operator prompt that does not exist yet, and was removed, so this book
+leaves it out.</p>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="12-steps-in-python-and-rust"><a class="header" href="#12-steps-in-python-and-rust">12. Steps in Python and Rust</a></h1>
+<p>Everything from chapter 4 on is about the sequence, and the sequence does not
+know what language a step is written in. It names the step and the executor.
+To show that, this chapter writes <code>board/measure_rail</code> twice more — in Python
+and in Rust — and runs it with a sequence that differs from
+<code>sequences/first.yseq</code> only in its <code>executors:</code> line.</p>
+<p>Writing the step is much the same in all three languages: the function’s
+signature is the catalog, a returned number is a measurement, and the limit
+lives in the sequence. What differs is <strong>how the executor is started</strong>, and
+that is what this chapter is about.</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th></th><th>C#</th><th>Python</th><th>Rust</th></tr>
+</thead>
+<tbody>
+<tr><td>the executor is</td><td>your own program</td><td>a server from the repository, pointed at a folder</td><td><code>anvil-exec-wasm</code>, next to your compiled modules</td></tr>
+<tr><td>who starts it</td><td>you</td><td>you</td><td>Anvil, when a sequence uses it</td></tr>
+<tr><td>executor <code>type</code></td><td><code>grpc</code></td><td><code>grpc</code></td><td><code>wasm</code></td></tr>
+<tr><td>a step is</td><td>a method with <code>[Step]</code></td><td>a function with <code>@step</code></td><td>a function with <code>#[step]</code></td></tr>
+</tbody>
+</table>
+</div>
+<h2 id="python"><a class="header" href="#python">Python</a></h2>
+<p>The Python executor is not in the release archive: it is in the repository you
+cloned in chapter 2. It needs <code>grpcio</code>, and the gRPC code it imports has to be
+generated once after cloning. From <code>~/anvil-book</code>:</p>
+<pre><code class="language-console">$ python3 -m venv .venv
+$ .venv/bin/pip install grpcio grpcio-tools
+$ cd anvil/executors/python
+$ ../../../.venv/bin/python -m grpc_tools.protoc -I ../../crates/modelo --python_out=. --grpc_python_out=. ../../crates/modelo/paso.proto
+$ cd ~/anvil-book
+</code></pre>
+<p>If <code>python3 -m venv</code> fails, your distribution may ship it as a separate
+package — <code>python3-venv</code> on Debian and Ubuntu. That case is <strong>not verified</strong>
+in this book.</p>
+<p>A step is a decorated function. Create <code>python_steps/board.py</code>:</p>
+<pre><code class="language-python">from anvil_step import step
+
+
+@step
+def measure_rail() -&gt; float:
+    """Measures the supply rail, in volts."""
+    return 4.98
+</code></pre>
+<p>The file name is the module, so this is <code>board/measure_rail</code> again. Returning a
+<code>float</code> is a measurement, a <code>bool</code> is pass or fail, and <code>Result.error(...)</code>
+reports what could not be judged, as in C#. An exception becomes <code>error</code>.</p>
+<p>Start the executor in its own terminal and leave it running:</p>
+<pre><code class="language-console">$ .venv/bin/python anvil/executors/python/anvil-exec-python --steps python_steps
+module 'board' (/home/you/anvil-book/python_steps/board.py) sha256:831270a42ae7bb6a050f189a2dcf434cf8cc44ca68122871a74e84f3808009e6
+python executor listening on 127.0.0.1:9101 — 1 step(s) from 1 module(s): board/measure_rail
+</code></pre>
+<p>It serves every module in the folder given to <code>--steps</code>, on port 9101 by
+default. You never edit the server; to add steps, add files to the folder and
+restart it.</p>
+<pre><code class="language-yaml">name: python
+
+executors:
+  - { name: py, type: grpc, host: 127.0.0.1, port: 9101 }
+
+main:
+  - name: board/measure_rail
+    type: numeric_limit
+    module: board/measure_rail
+    executor: py
+    limit: { comparison: GELE, low: 4.75, high: 5.25 }
+</code></pre>
+<pre><code class="language-console">$ anvil sequences/python.yseq 2&gt;/dev/null
+=== python: pass ===
+  [pass] board/measure_rail: 
+</code></pre>
+<p>The Python executor’s own README, <a href="https://github.com/anlaco/anvil/blob/main/executors/python/README.md"><code>executors/python/README.md</code></a>,
+covers the rest: named outputs, references and options. It is still in Spanish.</p>
+<h2 id="rust"><a class="header" href="#rust">Rust</a></h2>
+<p>Rust steps are compiled to WebAssembly modules, and the executor is a program
+that ships in the release archive, <code>anvil-exec-wasm</code>. It serves every <code>.wasm</code>
+file in the folder it sits in. You need a Rust toolchain and one extra target:</p>
+<pre><code class="language-console">$ rustup target add wasm32-wasip2
+</code></pre>
+<p>Create <code>board-wasm/Cargo.toml</code> — the package name is the module name:</p>
+<pre><code class="language-toml">[package]
+name = "board"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+anvil-step = { path = "../anvil/executors/rust/anvil-step" }
+
+[lib]
+crate-type = ["cdylib"]
+</code></pre>
+<p>and <code>board-wasm/src/lib.rs</code>:</p>
+<pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>use anvil_step::{step, Outcome};
+
+/// Measures the supply rail, in volts.
+#[step]
+fn measure_rail() -&gt; Outcome {
+    Outcome::measured(4.98)
+}
+
+anvil_step::export!();
+<span class="boring">}</span></code></pre>
+<p>Build it, and put the module next to a copy of the executor. That folder is the
+executor, and you can copy it to another machine as it is:</p>
+<pre><code class="language-console">$ cargo build --target wasm32-wasip2 --manifest-path board-wasm/Cargo.toml
+$ mkdir wasm-dept
+$ cp anvil-v0.7.0-x86_64-linux-musl/anvil-exec-wasm board-wasm/target/wasm32-wasip2/debug/board.wasm wasm-dept/
+</code></pre>
+<p>The first build takes about a minute. Then:</p>
+<pre><code class="language-yaml">name: wasm
+
+executors:
+  - { name: rs, type: wasm, path: ../wasm-dept/anvil-exec-wasm }
+
+main:
+  - name: board/measure_rail
+    type: numeric_limit
+    module: board/measure_rail
+    executor: rs
+    limit: { comparison: GELE, low: 4.75, high: 5.25 }
+</code></pre>
+<pre><code class="language-console">$ anvil sequences/wasm.yseq 2&gt;/dev/null
+=== wasm: pass ===
+  [pass] board/measure_rail: 
+$ ./wasm-dept/anvil-exec-wasm --list
+board  sha256:2087caa515293f3a0cda2b14c78a09d6d9b2bfb98a5e2c63916c872cb1d807d5
+    /home/you/anvil-book/wasm-dept/board.wasm
+    board/measure_rail()
+        Measures the supply rail, in volts.
+</code></pre>
+<p>There was no executor to start: with <code>type: wasm</code>, Anvil starts
+<code>anvil-exec-wasm</code> itself from <code>path</code>. That path is <strong>relative to the sequence
+file</strong>, not to the folder you run <code>anvil</code> from — hence the <code>../</code>.
+<code>anvil-exec-wasm --list</code> shows each module with the SHA-256 of the file that
+serves it.</p>
+<p>The step-by-step <a href="https://anlaco.github.io/quickstart.html">Rust quick start</a>
+goes further, with two modules and optional inputs, and
+<a href="https://github.com/anlaco/anvil/blob/main/executors/rust/README.md"><code>executors/rust/README.md</code></a> covers the SDK.</p>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="13-when-something-goes-wrong"><a class="header" href="#13-when-something-goes-wrong">13. When something goes wrong</a></h1>
+<h2 id="the-executor-is-not-running"><a class="header" href="#the-executor-is-not-running">The executor is not running</a></h2>
+<p>The most common mistake: you run a sequence and forgot to start the executor
+in the other terminal. Anvil retries the connection for a few seconds, in case
+the executor is still starting, and then ends with:</p>
+<pre><code class="language-console">$ anvil sequences/first.yseq 2&gt;&amp;1 | tail -n 2
+waiting for the step executors (executor 'bench' at 127.0.0.1:9201: WASI socket error: ErrorCode { code: 14, name: "connection-refused", message: "The TCP connection was forcefully rejected" })…
+could not connect to the step executors: executor 'bench' at 127.0.0.1:9201: WASI socket error: ErrorCode { code: 14, name: "connection-refused", message: "The TCP connection was forcefully rejected" }
+</code></pre>
+<p>The message names the executor that refused and where it was looked for:
+<code>bench</code>, on 9201. When you see <code>connection-refused</code>, check first that every
+<code>grpc</code> executor in the sequence is running:</p>
+<pre><code class="language-console">$ ss -ltn | grep 9201
+</code></pre>
+<p>prints a line when something is listening on that port, and nothing when not.</p>
+<h2 id="an-old-executor-is-still-running"><a class="header" href="#an-old-executor-is-still-running">An old executor is still running</a></h2>
+<p>The opposite problem is worse, because nothing fails. If an executor from an
+earlier session is still listening on the port — started in a terminal you
+closed, or left behind by a crash — Anvil talks to it, and it answers with
+whatever code it was built from. You change a step, run the sequence, and see
+the old behaviour.</p>
+<p>Before chasing a result that makes no sense, see who owns the port:</p>
+<pre><code class="language-console">$ ss -ltnp | grep 9201
+</code></pre>
+<p>The process name and number are at the end of the line; stop it and start your
+executor again.</p>
+<p>If you start a C# executor while another one holds the port, it prints its
+usual <code>anvil C# executor: … on 127.0.0.1:9201</code> line and then stops with
+<code>Unhandled exception. System.IO.IOException: Failed to bind to address http://127.0.0.1:9201: address already in use.</code> and a stack trace. Believe the
+exception, not the first line
+(<a href="https://github.com/anlaco/anvil/issues/79">#79</a>).</p>
+<h2 id="i-changed-a-step-and-nothing-changed"><a class="header" href="#i-changed-a-step-and-nothing-changed">I changed a step and nothing changed</a></h2>
+<p>The executor serves the code it was started with. Stop it and start it again;
+<code>dotnet run</code> rebuilds. The same goes for the Python executor. Rust modules are
+read when Anvil starts the executor, so rebuild and copy the <code>.wasm</code> again.</p>
+<h2 id="the-sequence-does-not-match-the-executors"><a class="header" href="#the-sequence-does-not-match-the-executors">The sequence does not match the executors</a></h2>
+<p><code>la secuencia no casa con lo que ofrecen los ejecutores</code> is Anvil refusing to
+run because the sequence asks for something an executor does not offer. The
+lines below it are in English and say exactly what: a step the executor does
+not serve (chapter 4), an input it does not take or a required one missing
+(chapter 7), an output it does not return (chapter 7). Nothing ran.</p>
+<h2 id="messages-that-name-spanish-keys"><a class="header" href="#messages-that-name-spanish-keys">Messages that name Spanish keys</a></h2>
+<p>Some load errors in 0.5.0 still name the Spanish spelling of a key — for
+instance, a subsequence with its own <code>executors:</code> section is told to refer to
+executors “by name with <code>ejecutor:</code>”. The key is <code>executor:</code>. The sequence
+format itself is English only (<a href="https://github.com/anlaco/anvil/issues/59">#59</a>).</p>
+<h2 id="the-appimage-does-not-start"><a class="header" href="#the-appimage-does-not-start">The AppImage does not start</a></h2>
+<p><code>dlopen(): error loading libfuse.so.2</code> means FUSE 2 is not installed; see the
+end of chapter 2.</p>
+
+                    </main>
+
+                    <nav class="nav-wrapper" aria-label="Page navigation">
+                        <!-- Mobile navigation buttons -->
+
+
+                        <div style="clear: both"></div>
+                    </nav>
+                </div>
+            </div>
+
+            <nav class="nav-wide-wrapper" aria-label="Page navigation">
+
+            </nav>
+
+        </div>
+
+        <template id=fa-eye><span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 576 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M288 32c-80.8 0-145.5 36.8-192.6 80.6C48.6 156 17.3 208 2.5 243.7c-3.3 7.9-3.3 16.7 0 24.6C17.3 304 48.6 356 95.4 399.4C142.5 443.2 207.2 480 288 480s145.5-36.8 192.6-80.6c46.8-43.5 78.1-95.4 93-131.1c3.3-7.9 3.3-16.7 0-24.6c-14.9-35.7-46.2-87.7-93-131.1C433.5 68.8 368.8 32 288 32zM432 256c0 79.5-64.5 144-144 144s-144-64.5-144-144s64.5-144 144-144s144 64.5 144 144zM288 192c0 35.3-28.7 64-64 64c-11.5 0-22.3-3-31.6-8.4c-.2 2.8-.4 5.5-.4 8.4c0 53 43 96 96 96s96-43 96-96s-43-96-96-96c-2.8 0-5.6 .1-8.4 .4c5.3 9.3 8.4 20.1 8.4 31.6z"/></svg></span></template>
+        <template id=fa-eye-slash><span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M38.8 5.1C28.4-3.1 13.3-1.2 5.1 9.2S-1.2 34.7 9.2 42.9l592 464c10.4 8.2 25.5 6.3 33.7-4.1s6.3-25.5-4.1-33.7L525.6 386.7c39.6-40.6 66.4-86.1 79.9-118.4c3.3-7.9 3.3-16.7 0-24.6c-14.9-35.7-46.2-87.7-93-131.1C465.5 68.8 400.8 32 320 32c-68.2 0-125 26.3-169.3 60.8L38.8 5.1zM223.1 149.5C248.6 126.2 282.7 112 320 112c79.5 0 144 64.5 144 144c0 24.9-6.3 48.3-17.4 68.7L408 294.5c5.2-11.8 8-24.8 8-38.5c0-53-43-96-96-96c-2.8 0-5.6 .1-8.4 .4c5.3 9.3 8.4 20.1 8.4 31.6c0 10.2-2.4 19.8-6.6 28.3l-90.3-70.8zm223.1 298L373 389.9c-16.4 6.5-34.3 10.1-53 10.1c-79.5 0-144-64.5-144-144c0-6.9 .5-13.6 1.4-20.2L83.1 161.5C60.3 191.2 44 220.8 34.5 243.7c-3.3 7.9-3.3 16.7 0 24.6c14.9 35.7 46.2 87.7 93 131.1C174.5 443.2 239.2 480 320 480c47.8 0 89.9-12.9 126.2-32.5z"/></svg></span></template>
+        <template id=fa-copy><span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M502.6 70.63l-61.25-61.25C435.4 3.371 427.2 0 418.7 0H255.1c-35.35 0-64 28.66-64 64l.0195 256C192 355.4 220.7 384 256 384h192c35.2 0 64-28.8 64-64V93.25C512 84.77 508.6 76.63 502.6 70.63zM464 320c0 8.836-7.164 16-16 16H255.1c-8.838 0-16-7.164-16-16L239.1 64.13c0-8.836 7.164-16 16-16h128L384 96c0 17.67 14.33 32 32 32h47.1V320zM272 448c0 8.836-7.164 16-16 16H63.1c-8.838 0-16-7.164-16-16L47.98 192.1c0-8.836 7.164-16 16-16H160V128H63.99c-35.35 0-64 28.65-64 64l.0098 256C.002 483.3 28.66 512 64 512h192c35.2 0 64-28.8 64-64v-32h-47.1L272 448z"/></svg></span></template>
+        <template id=fa-play><span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 384 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M73 39c-14.8-9.1-33.4-9.4-48.5-.9S0 62.6 0 80V432c0 17.4 9.4 33.4 24.5 41.9s33.7 8.1 48.5-.9L361 297c14.3-8.7 23-24.2 23-41s-8.7-32.2-23-41L73 39z"/></svg></span></template>
+        <template id=fa-clock-rotate-left><span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M75 75L41 41C25.9 25.9 0 36.6 0 57.9V168c0 13.3 10.7 24 24 24H134.1c21.4 0 32.1-25.9 17-41l-30.8-30.8C155 85.5 203 64 256 64c106 0 192 86 192 192s-86 192-192 192c-40.8 0-78.6-12.7-109.7-34.4c-14.5-10.1-34.4-6.6-44.6 7.9s-6.6 34.4 7.9 44.6C151.2 495 201.7 512 256 512c141.4 0 256-114.6 256-256S397.4 0 256 0C185.3 0 121.3 28.7 75 75zm181 53c-13.3 0-24 10.7-24 24V256c0 6.4 2.5 12.5 7 17l72 72c9.4 9.4 24.6 9.4 33.9 0s9.4-24.6 0-33.9l-65-65V152c0-13.3-10.7-24-24-24z"/></svg></span></template>
+
+
+
+        <script>
+            window.playground_copyable = true;
+        </script>
+
+
+        <script src="elasticlunr-ef4e11c1.min.js"></script>
+        <script src="mark-09e88c2c.min.js"></script>
+        <script src="searcher-09f2665d.js"></script>
+
+        <script src="clipboard-1626706a.min.js"></script>
+        <script src="highlight-abc7f01d.js"></script>
+        <script src="book-609e4cb8.js"></script>
+
+        <!-- Custom JS scripts -->
+
+        <script>
+        window.addEventListener('load', function() {
+            window.setTimeout(window.print, 100);
+        });
+        </script>
+
+
+    </div>
+    </body>
+</html>

@@ -1,0 +1,4 @@
+board/measure_rail:
+  comparison: GELE
+  low: 5.0
+  high: 5.1

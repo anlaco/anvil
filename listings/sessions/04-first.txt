@@ -1,0 +1,8 @@
+$ anvil sequences/first.yseq
+secuencia 'first' cargada (1 pasos en main, 0 subsecuencia(s) externa(s), 1 ejecutor(es))
+connected to the step executors (bench)
+1 paso(s) comprobados contra el catálogo de su ejecutor
+=== first: pass ===
+  [pass] board/measure_rail: 
+$ echo $?
+0

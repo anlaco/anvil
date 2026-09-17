@@ -1,0 +1,5 @@
+$ anvil sequences/setup-fails.yseq 2>/dev/null
+=== setup_fails: error ===
+  [done] fixture/power_on: 
+  [error] fixture/connect: no answer from the board
+  [done] fixture/power_off: 

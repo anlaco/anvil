@@ -1,0 +1,11 @@
+name: typo
+
+executors:
+  - { name: bench, type: grpc, host: 127.0.0.1, port: 9201 }
+
+main:
+  - name: dmm/measure_voltage
+    type: pass_fail
+    module: dmm/measure_voltage
+    executor: bench
+    inputs: { chanel: 2 }

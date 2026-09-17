@@ -1,0 +1,3 @@
+$ anvil sequences/first.yseq 2>&1 | tail -n 2
+waiting for the step executors (executor 'bench' at 127.0.0.1:9201: WASI socket error: ErrorCode { code: 14, name: "connection-refused", message: "The TCP connection was forcefully rejected" })…
+could not connect to the step executors: executor 'bench' at 127.0.0.1:9201: WASI socket error: ErrorCode { code: 14, name: "connection-refused", message: "The TCP connection was forcefully rejected" }

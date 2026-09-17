@@ -1,0 +1,6 @@
+$ anvil sequences/retries.yseq 2>/dev/null
+=== retries: pass ===
+  [done] fixture/power_on: 
+  [done] fixture/connect: connected on attempt 2
+  [pass] board/measure_rail: 
+  [done] fixture/power_off: 

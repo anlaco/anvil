@@ -1,0 +1,22 @@
+# The Anvil Book, rendered with mdBook — the tool the Rust book uses.
+#
+#   mdbook build docs/book      # → target/book/
+#   mdbook serve docs/book      # the same, on http://localhost:3000
+#
+# The chapters stay plain Markdown in this folder, readable on GitHub as they
+# are; check.sh checks them, and this file only decides how they are rendered.
+
+[book]
+title = "The Anvil Book"
+authors = ["ANLACO"]
+language = "en"
+src = "."
+
+[build]
+build-dir = "../../target/book"
+create-missing = false
+
+[output.html]
+site-url = "/anvil/"
+git-repository-url = "https://github.com/anlaco/anvil"
+edit-url-template = "https://github.com/anlaco/anvil/edit/main/docs/book/{path}"
