@@ -77,7 +77,9 @@ Reglas:
 - Campos opcionales por paso: `limit` (ver
   [limites-y-estados.md](limites-y-estados.md) — en la forma de TestStand,
   `comparison` con `low`/`high`, o `nominal`/`lower`/`upper`/`threshold` para
-  `EQT`, y `units`), `disable` y `pause_on_fail`
+  `EQT`, y `units`), `comment` (texto libre sobre el paso, para quien lea la
+  secuencia — el *Comment* de la página General de TestStand; el motor no lo lee
+  y ningún veredicto depende de él), `disable` y `pause_on_fail`
   (M4, RF-34, ver [motor-de-ejecucion.md](motor-de-ejecucion.md)),
   `precondicion` (M4, RF-33, ver [motor-de-expresiones.md](motor-de-expresiones.md)),
   `asigna` (M4, RF-31, vuelca `resultado.*` a `Locals` tras el paso — **no**

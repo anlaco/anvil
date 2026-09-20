@@ -319,6 +319,12 @@ struct PasoYaml {
     /// The number a `numeric_limit` judges (ADR-0040 §5).
     #[serde(default)]
     value: Option<String>,
+    /// Free text about the step, for whoever reads the sequence — TestStand's
+    /// *Comment* on the General page of a step's properties. The engine never
+    /// reads it: it is carried so the editor can show and write it, and so it
+    /// survives a round trip through the loader.
+    #[serde(default)]
+    comment: Option<String>,
 }
 
 fn reintentos_por_defecto() -> u32 {
@@ -757,7 +763,7 @@ impl From<noyalib::Error> for ErrorCarga {
 /// errata. Es una ayuda de diagnóstico, no una fuente de verdad: el schema lo
 /// imponen los `struct` con `deny_unknown_fields`, y si esta lista se queda
 /// corta lo único que se pierde es una sugerencia.
-const CAMPOS_DEL_SCHEMA: [&str; 38] = [
+const CAMPOS_DEL_SCHEMA: [&str; 39] = [
     // SecuenciaYaml
     "name",
     "setup",
@@ -784,6 +790,7 @@ const CAMPOS_DEL_SCHEMA: [&str; 38] = [
     "executor",
     "module",
     "value",
+    "comment",
     // EjecutorYaml
     "path",
     "host",
@@ -2832,6 +2839,7 @@ impl PasoYaml {
             ejecutor: self.executor,
             module: self.module,
             valor,
+            comment: self.comment,
         })
     }
 }
@@ -3027,6 +3035,36 @@ main:
 ";
         let s = cargar_de_texto(yaml).unwrap();
         assert_eq!(s.pasos_main[0].reintentos, 1);
+    }
+
+    /// TestStand's *Comment*, on the General page of a step's properties: free
+    /// text that reaches the step and that nothing judges. It has to survive
+    /// the load, because the editor writes it and reads it back.
+    #[test]
+    fn comment_llega_al_paso_y_es_opcional() {
+        let yaml = "\
+name: s
+main:
+  - name: con_comentario
+    type: pass_fail
+    module: un_paso
+    comment: |
+      Mide el raíl de 5 V en TP3,
+      tras 200 ms de settling.
+  - name: sin_comentario
+    type: pass_fail
+    module: otro_paso
+";
+        let s = cargar_de_texto(yaml).unwrap();
+        assert_eq!(
+            s.pasos_main[0].comment.as_deref(),
+            Some("Mide el raíl de 5 V en TP3,\ntras 200 ms de settling.\n"),
+            "el comentario llega entero, saltos de línea incluidos"
+        );
+        assert_eq!(
+            s.pasos_main[1].comment, None,
+            "un paso sin comentario no se inventa uno"
+        );
     }
 
     #[test]

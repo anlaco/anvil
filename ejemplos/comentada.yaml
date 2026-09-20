@@ -1,0 +1,52 @@
+# The same bench as `basica.yaml`, with each step saying why it is there.
+#
+# `comment` is TestStand's *Comment*, on the General page of a step's
+# properties: free text for whoever reads the sequence. The engine never reads
+# it and no verdict depends on it — it is there so that a sequence someone else
+# wrote can be understood without asking them.
+#
+#   ./anvil ejemplos/comentada.yaml
+
+name: comentada
+executors:
+  - { name: demo, type: wasm, path: departamento/dist/anvil-exec-wasm }
+setup:
+  - name: Connect to the bench
+    type: action
+    module: demo/connect
+    executor: demo
+    retries: 3
+    comment: |
+      The bench answers on the second attempt from cold, so this gets three.
+      Fewer than that and the first run of the morning fails on the operator.
+main:
+  - name: Measure the 5V rail
+    type: numeric_limit
+    module: demo/measure_voltage
+    executor: demo
+    retries: 1
+    comment: |
+      Measured at TP3, after the supply has settled. The 4.5-5.5 V window is
+      the one on the drawing; the bench reads 4.2 V, so this fails on purpose.
+    limit:
+      comparison: GELE
+      low: 4.5
+      high: 5.5
+      units: V
+  - name: Check the front panel LED
+    type: pass_fail
+    module: demo/check_led
+    executor: demo
+    retries: 1
+    comment: |
+      The module decides this one: it looks at the LED and answers pass or
+      fail. There is no condition here, so its answer is the verdict.
+cleanup:
+  - name: Disconnect from the bench
+    type: action
+    module: demo/disconnect
+    executor: demo
+    retries: 1
+    comment: |
+      Runs whatever happened in main, so the next sequence finds the bench
+      free.

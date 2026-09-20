@@ -956,6 +956,11 @@ pub struct DefinicionPaso {
     /// The number a `numeric_limit` judges, TestStand's numeric data source
     /// (ADR-0040 §5). `None` means the module's `measured_value`.
     pub valor: Option<expr::Expresion>,
+    /// Free text about the step — TestStand's *Comment* on the General page of
+    /// a step's properties. The engine never reads it and no verdict depends on
+    /// it; it exists so that whoever opens the sequence, in the editor or in
+    /// the file, can read why the step is there.
+    pub comment: Option<String>,
 }
 
 impl DefinicionPaso {
@@ -979,6 +984,7 @@ impl DefinicionPaso {
             ejecutor: None,
             module: Some(nombre.to_string()),
             valor: None,
+            comment: None,
         }
     }
 

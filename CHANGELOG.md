@@ -26,6 +26,31 @@ applies from 0.6.0 on; by it, 0.6.0 itself would have been 0.5.1.
 
 ## [Unreleased]
 
+### Added
+
+- **A step may carry a `comment`.** Free text about the step, for whoever reads
+  the sequence — TestStand's *Comment*, on the General page of a step's
+  properties. The engine never reads it and no verdict depends on it. It is a
+  new field in the YAML, so it moves the minor.
+
+- **The step settings are laid out as TestStand lays them out.** Two tabs,
+  *Properties* and *Module*, and inside Properties the page list down the left:
+  General, Data Source, Limits, Run Options, Looping, Post Actions, Switching,
+  Synchronization, Expressions, Preconditions, Requirements, Additional Results
+  and Property Browser.
+
+  The list is TestStand's and it is complete on purpose. A page Anvil has not
+  built yet is greyed out rather than left off, with a tooltip saying what
+  TestStand does there — so the editor carries the inventory of what is missing,
+  in the place where it will appear, instead of a document that goes stale.
+  General is whole: Name, Type, Executor (TestStand's Adapter, `<None>` for a
+  step that calls nothing), Icon (not implemented), a read-only Description
+  written from the step, and Comment.
+
+- **The Module tab shows the parameter table.** Read-only for now: the engine
+  already sends a step's `inputs` (ADR-0020), and until the editor can write
+  them the table shows what the step declares rather than nothing.
+
 ## [0.7.0] — 2026-09-18
 
 **Sequences written for 0.6 do not load.** A step now says how it is judged, in

@@ -66,6 +66,53 @@ test("a step moves to any position in any phase, which is a real edit", async ()
   assert.equal(out.exitCode, 0, `moving a step across phases broke the file:\n${out.stderr}`);
 });
 
+// ------------------------------------------------------------------- types
+
+test("changing a step's type takes the old type's fields with it", async () => {
+  const doc = new SequenceDocument(await fixture("basica.yaml"));
+  const { "basica.yaml": _self, ...alongside } = await exampleFiles("basica.yaml");
+
+  // main[0] is a numeric_limit with a limit. An action judges nothing, so a
+  // limit left on one is a load error (ADR-0040 §3) — which is what setting
+  // `type` on its own used to produce, one click from the type menu.
+  assert.ok(doc.steps("main")[0].limit, "the step starts with a limit");
+
+  doc.setStepType("main", 0, "action");
+
+  const asAction = doc.steps("main")[0];
+  assert.equal(asAction.type, "action");
+  assert.equal(asAction.limit, null, "the limit went with the type");
+  assert.equal(asAction.module, "demo/measure_voltage", "what it calls stayed");
+
+  let out = await validate(doc, alongside);
+  assert.equal(out.exitCode, 0, `numeric_limit → action broke the file:\n${out.stderr}`);
+
+  // And the other way: a statement calls nothing, so the module has to go, and
+  // the statement it cannot be without has to arrive.
+  doc.setStepType("main", 0, "statement");
+
+  const asStatement = doc.steps("main")[0];
+  assert.equal(asStatement.module, null, "a statement calls no module");
+  assert.equal(asStatement.executor, null, "and so names no executor");
+  assert.ok(asStatement.statement, "and cannot be without a statement");
+
+  out = await validate(doc, alongside);
+  assert.equal(out.exitCode, 0, `action → statement broke the file:\n${out.stderr}`);
+});
+
+test("every type a step can become leaves a sequence the engine loads", async () => {
+  const { "basica.yaml": _self, ...alongside } = await exampleFiles("basica.yaml");
+
+  // Every type but sequence_call, which needs a subsequence basica has not got
+  // — `cannotAdd` says so, and the palette greys it out for the same reason.
+  for (const type of ["action", "pass_fail", "numeric_limit", "statement"]) {
+    const doc = new SequenceDocument(await fixture("basica.yaml"));
+    doc.setStepType("main", 0, type);
+    const out = await validate(doc, alongside);
+    assert.equal(out.exitCode, 0, `main[0] as '${type}' does not load:\n${out.stderr}`);
+  }
+});
+
 // ---------------------------------------------------------------- variables
 
 test("a variable can be declared, renamed and removed", async () => {

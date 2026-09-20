@@ -75,6 +75,11 @@ const state = {
   filename: null,
   dirty: false,
   selected: null, // { phase, index }
+  // Which tab and which Properties page the step settings are showing.
+  // Remembered across re-renders, because every edit re-renders the pane and
+  // being thrown back to General after typing a threshold is unusable.
+  stepTab: "properties",
+  stepPage: "General",
   view: "steps",
   text: null, // CodeMirror view
   validateTimer: null,
@@ -377,19 +382,29 @@ function renderPalette() {
   ui.palette.append(note);
 }
 
+/**
+ * One labelled field of a step's settings.
+ *
+ * `hint` becomes the field's tooltip, not a line of prose under it. TestStand
+ * explains nothing in the panel itself — a step's settings are a dense grid of
+ * labelled boxes — and a paragraph under every field made this panel twice as
+ * tall as the thing it is copying. The words are kept, out of the way.
+ */
 function field(parent, label, input, hint) {
   const l = document.createElement("label");
   l.textContent = label;
   const id = `f-${label.toLowerCase().replace(/\W+/g, "-")}`;
   l.htmlFor = id;
   input.id = id;
-  parent.append(l, input);
   if (hint) {
-    const p = document.createElement("p");
-    p.className = "hint";
-    p.textContent = hint;
-    parent.append(p);
+    l.title = hint;
+    // A wrapper (the Type row) explains itself through the control inside it.
+    const target = input.matches("input, select, textarea")
+      ? input
+      : input.querySelector("input, select, textarea, button");
+    if (target) target.title = hint;
   }
+  parent.append(l, input);
 }
 
 function group(parent, title) {
@@ -451,83 +466,552 @@ function select(options, value, onChange) {
   return s;
 }
 
-function renderStep() {
-  ui.stepEditor.replaceChildren();
-  const sel = state.selected;
-  const doc = state.doc;
+// ---------------------------------------------------------------------------
+// A step's settings, laid out the way TestStand lays them out: two tabs,
+// Properties and Module, and inside Properties the list of pages down the left.
+//
+// The list is TestStand's, in TestStand's order, and it is deliberately
+// complete. A page Anvil has not built yet is greyed out rather than left off,
+// so that what is missing is visible in the place where it will appear, with a
+// tooltip saying what TestStand does there. The parity inventory lives in the
+// editor, where it cannot go stale, instead of in a document nobody reopens.
+//
+// `render` is what Anvil puts on the page; `todo` marks a page it has nothing
+// for yet, and a page never has both. `types` limits a page to the step types
+// that have it, as TestStand's own page list changes with the step type.
+// ---------------------------------------------------------------------------
 
-  if (!doc || !sel) {
-    ui.stepTitle.textContent = "Step";
-    const p = document.createElement("p");
-    p.className = "empty";
-    p.textContent = doc ? "Select a step." : "Open a sequence to begin.";
-    ui.stepEditor.append(p);
-    return;
+/** The step types that can call an executor (ADR-0040 §1). */
+const CALLS_AN_EXECUTOR = ["action", "pass_fail", "numeric_limit"];
+
+// ---------------------------------------------------------------------------
+// The step type menu, as TestStand's: a read-only box with a button beside it
+// that drops a menu of every type TestStand offers, grouped and in TestStand's
+// order, with submenus opening to the right.
+//
+// The menu is complete on purpose, like the page list: a type Anvil does not
+// have is greyed out where TestStand puts it, rather than left off. That is
+// what makes this the inventory — you can see what is coming and what is not.
+// ---------------------------------------------------------------------------
+
+/** What each of Anvil's types is called in TestStand's menu. */
+const TYPE_LABELS = {
+  action: "Action",
+  pass_fail: "Pass/Fail Test",
+  numeric_limit: "Numeric Limit Test",
+  statement: "Statement",
+  sequence_call: "Sequence Call",
+};
+
+const NOT_YET = "TestStand has this step type. Anvil does not, yet.";
+
+/** TestStand's Insert Step menu, separators and all (2019 screenshots). */
+const TYPE_MENU = [
+  {
+    label: "Tests",
+    items: [
+      { label: "Pass/Fail Test", type: "pass_fail" },
+      { label: "Numeric Limit Test", type: "numeric_limit" },
+      { label: "Multiple Numeric Limit Test" },
+      { label: "String Value Test" },
+    ],
+  },
+  { label: "Action", type: "action" },
+  { sep: true },
+  { label: "FTP Files" },
+  { label: "Additional Results" },
+  { label: "Sequence Call", type: "sequence_call" },
+  { label: "Statement", type: "statement" },
+  { label: "Property Loader" },
+  { label: "Label" },
+  { label: "Message Popup" },
+  { label: "Call Executable" },
+  { sep: true },
+  {
+    label: "Flow Control",
+    items: [
+      { label: "If" },
+      { label: "Else" },
+      { label: "Else If" },
+      { sep: true },
+      { label: "For" },
+      { label: "For Each" },
+      { label: "While" },
+      { label: "Do While" },
+      { label: "Sweep Loop" },
+      { sep: true },
+      { label: "Break" },
+      { label: "Continue" },
+      { sep: true },
+      { label: "Select" },
+      { label: "Case" },
+      { sep: true },
+      { label: "Goto" },
+      { sep: true },
+      { label: "End" },
+    ],
+  },
+  { sep: true },
+  { label: "Synchronization", items: [] },
+  { label: "Database", items: [] },
+  { label: "Data Streams", items: [] },
+  { label: "LabVIEW Utility", items: [] },
+  { label: "DataLogger" },
+];
+
+/**
+ * Whether an entry can be used at all.
+ *
+ * A **leaf** is usable when it is a type Anvil has. A **group** opens whenever
+ * it has something to show, even when not one type inside it exists here: the
+ * submenu's job is to show what TestStand offers under that heading, and a
+ * heading that will not open says nothing. So Flow Control opens onto its
+ * fourteen greyed-out entries rather than being a dead word.
+ *
+ * A group whose contents are not written down yet — Synchronization, Database,
+ * Data Streams, LabVIEW Utility — has nothing to open, and stays greyed until
+ * someone reads them off TestStand.
+ */
+function entryEnabled(entry) {
+  if (entry.sep) return false;
+  if (entry.items) return entry.items.length > 0;
+  return Boolean(entry.type);
+}
+
+/** Whether anything inside a group is a type Anvil can actually make. */
+function groupHasAType(entry) {
+  return (entry.items ?? []).some((e) => (e.items ? groupHasAType(e) : Boolean(e.type)));
+}
+
+/** Every menu currently on screen, outermost first, so they close together. */
+let openMenus = [];
+
+function closeTypeMenu() {
+  for (const m of openMenus) m.remove();
+  openMenus = [];
+  document.removeEventListener("mousedown", onMenuOutside, true);
+  document.removeEventListener("keydown", onMenuKey, true);
+}
+
+function onMenuOutside(event) {
+  if (!openMenus.some((m) => m.contains(event.target))) closeTypeMenu();
+}
+
+function onMenuKey(event) {
+  if (event.key === "Escape") {
+    event.stopPropagation();
+    closeTypeMenu();
+  }
+}
+
+/**
+ * Builds one menu panel. `depth` is how many are already open to its left, so
+ * that opening a submenu closes any deeper one still showing.
+ */
+function buildTypeMenu(entries, choose, depth) {
+  const menu = document.createElement("div");
+  menu.className = "ts-menu";
+  menu.setAttribute("role", "menu");
+
+  for (const entry of entries) {
+    if (entry.sep) {
+      const hr = document.createElement("div");
+      hr.className = "ts-sep";
+      menu.append(hr);
+      continue;
+    }
+
+    const item = document.createElement("button");
+    item.type = "button";
+    item.className = "ts-item";
+    item.setAttribute("role", "menuitem");
+    item.disabled = !entryEnabled(entry);
+
+    const text = document.createElement("span");
+    text.className = "ts-label";
+    text.textContent = entry.label;
+    item.append(text);
+
+    if (entry.items) {
+      item.classList.add("ts-submenu");
+      const arrow = document.createElement("span");
+      arrow.className = "ts-arrow";
+      arrow.textContent = "▸";
+      item.append(arrow);
+      // A group that opens onto nothing Anvil has says so, but still opens.
+      const empty = !groupHasAType(entry);
+      if (empty) item.classList.add("ts-none-yet");
+      item.title = item.disabled
+        ? `${entry.label}: what TestStand puts here is not written down in Anvil yet.`
+        : empty
+          ? `${entry.label} step types — TestStand has these; Anvil has none of them yet.`
+          : `${entry.label} step types`;
+
+      const open = () => {
+        while (openMenus.length > depth + 1) openMenus.pop().remove();
+        if (item.disabled) return;
+        const sub = buildTypeMenu(entry.items, choose, depth + 1);
+        placeMenu(sub, item.getBoundingClientRect(), true);
+      };
+      // Hover opens it, as a menu does; the submenu sits against this item.
+      // Click opens it too, for anyone not driving this with a mouse.
+      item.addEventListener("mouseenter", open);
+      item.addEventListener("click", (event) => {
+        event.stopPropagation();
+        open();
+      });
+    } else {
+      item.title = entry.type
+        ? `Make this a ${entry.label}`
+        : `${NOT_YET} (${entry.label})`;
+      item.addEventListener("mouseenter", () => {
+        while (openMenus.length > depth + 1) openMenus.pop().remove();
+      });
+      if (entry.type) {
+        item.addEventListener("click", () => {
+          const chosen = entry.type;
+          closeTypeMenu();
+          choose(chosen);
+        });
+      }
+    }
+
+    menu.append(item);
   }
 
-  const step = doc.steps(sel.phase)[sel.index];
-  if (!step) {
-    state.selected = null;
-    return renderStep();
+  return menu;
+}
+
+/**
+ * Puts a menu on screen against `anchor`, flipping it when it would fall off.
+ *
+ * Every menu, the first one included, opens against the right edge of what it
+ * belongs to and top-aligned with it — which is where TestStand drops the step
+ * type menu: beside the Type control, not under it, overlaying whatever is to
+ * its right. When there is not enough room below, it rides up until it fits
+ * rather than being cut off, so the whole list is always reachable.
+ */
+function placeMenu(menu, anchor, isSubmenu) {
+  menu.style.visibility = "hidden";
+  document.body.append(menu);
+  openMenus.push(menu);
+
+  const { width, height } = menu.getBoundingClientRect();
+  const margin = 4;
+
+  let left = anchor.right - (isSubmenu ? 2 : -2);
+  let top = anchor.top - (isSubmenu ? 4 : 0);
+
+  if (left + width > window.innerWidth - margin) {
+    left = anchor.left - width + (isSubmenu ? 2 : -2);
+  }
+  if (top + height > window.innerHeight - margin) {
+    top = window.innerHeight - height - margin;
   }
 
-  ui.stepTitle.textContent = `Step — ${step.name ?? "(unnamed)"}`;
+  menu.style.left = `${Math.max(margin, left)}px`;
+  menu.style.top = `${Math.max(margin, top)}px`;
+  menu.style.visibility = "";
+  return menu;
+}
 
-  const fields = document.createElement("div");
-  fields.className = "fields";
+/** A small inline icon, drawn rather than loaded: 16×16, currentColor-aware. */
+function svgIcon(body) {
+  const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+  svg.setAttribute("viewBox", "0 0 16 16");
+  svg.setAttribute("width", "16");
+  svg.setAttribute("height", "16");
+  svg.setAttribute("aria-hidden", "true");
+  svg.innerHTML = body;
+  return svg;
+}
 
-  const edit = (key, value) => {
-    doc.setStepField(sel.phase, sel.index, key, value);
-    afterEdit();
-  };
+/** TestStand's Type row: a read-only box, and the button that drops the menu. */
+function typeField(step, choose) {
+  const row = document.createElement("div");
+  row.className = "type-row";
 
-  field(fields, "Name", textInput(step.name, (v) => edit("name", v)));
+  const box = document.createElement("input");
+  box.type = "text";
+  box.readOnly = true;
+  box.className = "type-box";
+  box.value = TYPE_LABELS[step.type] ?? step.type ?? "";
+
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = "type-button";
+  button.setAttribute("aria-haspopup", "menu");
+  button.setAttribute("aria-label", "Choose the step type");
+  // TestStand's step-types glyph — a little hierarchy of shapes — not a
+  // dropdown arrow: this button opens the type menu, it does not expand the
+  // box beside it.
+  button.append(
+    svgIcon(
+      `<path d="M4 3v9h3M4 7.5h3" fill="none" stroke="currentColor" stroke-width="1.1"/>
+       <path d="M11.5 2.2 13.4 5.2H9.6z" fill="#c0392b"/>
+       <circle cx="11.5" cy="8" r="1.7" fill="#2f6fbf"/>
+       <rect x="9.9" y="10.6" width="3.2" height="3.2" fill="#2e8b57"/>`,
+    ),
+  );
+  button.addEventListener("click", (event) => {
+    event.stopPropagation();
+    if (openMenus.length > 0) return closeTypeMenu();
+    const menu = buildTypeMenu(TYPE_MENU, choose, 0);
+    placeMenu(menu, button.getBoundingClientRect(), false);
+    document.addEventListener("mousedown", onMenuOutside, true);
+    document.addEventListener("keydown", onMenuKey, true);
+  });
+
+  // Clicking the box itself drops the menu too: in TestStand the whole control
+  // is the thing you click, and a read-only box that ignores a click reads as
+  // broken.
+  box.addEventListener("mousedown", (event) => {
+    event.preventDefault();
+    button.click();
+  });
+
+  row.append(box, button);
+  return row;
+}
+
+const PROPERTY_PAGES = [
+  { name: "General", render: pageGeneral },
+  { name: "Run Options", render: pageRunOptions },
+  { name: "Looping", render: pageLooping },
+  { name: "Post Actions", render: pagePostActions },
+  {
+    name: "Switching",
+    todo: "TestStand drives an NI Switch Executive route around the step. Anvil has no switching.",
+  },
+  {
+    name: "Synchronization",
+    todo: "TestStand's locks, rendezvous, queues, notifications, semaphores and batches. Anvil runs one UUT at a time, so none of it exists yet.",
+  },
+  { name: "Expressions", render: pageExpressions },
+  { name: "Preconditions", render: pagePreconditions },
+  {
+    name: "Requirements",
+    todo: "TestStand links a step to a requirement in a requirements management tool. Anvil has no such link.",
+  },
+  {
+    name: "Additional Results",
+    todo: "TestStand logs extra expressions into the report per step. In Anvil a measurement reaches the report through `assign`, on the Expressions page; naming arbitrary expressions to log is not implemented.",
+  },
+  {
+    name: "Property Browser",
+    todo: "TestStand browses the step's raw property tree. In Anvil the raw form of a step is the YAML itself — use the Text view.",
+  },
+];
+
+/**
+ * The tabs a step of this type shows, in TestStand's order.
+ *
+ * What a type is judged on is **not** a page inside Properties: TestStand gives
+ * it a tab of its own beside Properties, and a step with nothing to judge
+ * simply has no such tab. So the tab strip changes with the type, while the
+ * Properties page list underneath is the same for every step.
+ */
+function tabsFor(type) {
+  const tabs = [["properties", "Properties"]];
+  if (type === "pass_fail" || type === "numeric_limit") {
+    tabs.push(["data-source", "Data Source"]);
+  }
+  if (type === "numeric_limit") tabs.push(["limits", "Limits"]);
+  tabs.push(["module", "Module"]);
+  return tabs;
+}
+
+/**
+ * A fresh field grid inside a page.
+ *
+ * `stacked` because that is how TestStand lays a step's settings out: the
+ * label sits above its field, not beside it. The variables pane keeps the
+ * label-beside-field grid, which is what it has always used.
+ */
+function newFields(parent, className = "fields stacked") {
+  const f = document.createElement("div");
+  f.className = className;
+  parent.append(f);
+  return f;
+}
+
+/** A read-only box that stands for something Anvil does not write yet. */
+function disabledInput(placeholder) {
+  const input = document.createElement("input");
+  input.type = "text";
+  input.disabled = true;
+  input.value = placeholder;
+  return input;
+}
+
+function checkbox(checked, onChange) {
+  const box = document.createElement("input");
+  box.type = "checkbox";
+  box.checked = Boolean(checked);
+  box.addEventListener("change", () => onChange(box.checked));
+  return box;
+}
+
+/**
+ * What TestStand does here that Anvil does not do yet.
+ *
+ * `detail` goes in the tooltip rather than on the page: the note has to fit
+ * beside the thing it is about, and a paragraph pushes the panel past the
+ * height TestStand's own has.
+ */
+function todoNote(parent, text, detail) {
+  const p = document.createElement("p");
+  p.className = "todo";
+  p.textContent = `Not implemented: ${text}`;
+  if (detail) p.title = detail;
+  parent.append(p);
+}
+
+function note(parent, text) {
+  const p = document.createElement("p");
+  p.className = "hint span";
+  p.textContent = text;
+  parent.append(p);
+}
+
+/**
+ * The Description box of TestStand's General page: written by the editor from
+ * the step itself, never typed. TestStand shows "Action, XPA.lvproj,
+ * TestNUSOBASequence.vi" — the type, then what it calls.
+ */
+function describeStep(step) {
+  const parts = [step.type ?? "(no type)"];
+  if (step.module) {
+    if (step.executor) parts.push(step.executor);
+    parts.push(step.module);
+  } else if (step.type === "statement" && step.statement) {
+    parts.push(step.statement);
+  } else if (step.type === "sequence_call" && step.sequence) {
+    parts.push(step.sequence);
+  } else if (step.type === "pass_fail" && step.condition) {
+    parts.push(step.condition);
+  } else if (step.type === "numeric_limit" && step.value) {
+    parts.push(step.value);
+  }
+  return parts.join(", ");
+}
+
+/**
+ * General, whole: TestStand's own fields in TestStand's arrangement — the
+ * identity of the step on the left, what it is and what it says on the right.
+ */
+function pageGeneral(body, ctx) {
+  const { step, doc, edit } = ctx;
+
+  const page = document.createElement("div");
+  page.className = "page-general";
+  body.append(page);
+
+  const left = newFields(page);
+  const right = newFields(page, "fields stacked wide");
+
   field(
-    fields,
+    left,
+    "Name",
+    textInput(step.name, (v) => edit("name", v)),
+    "What the report, the events and this list call the step.",
+  );
+  // Changing the type rewrites the rest of the step, so it does not go through
+  // `edit`: the fields the old type owned have to go with it (ADR-0040).
+  field(
+    left,
     "Type",
-    select(STEP_TYPES, step.type, (v) => edit("type", v)),
+    typeField(step, (type) => {
+      doc.setStepType(ctx.sel.phase, ctx.sel.index, type);
+      afterEdit();
+    }),
     "How the step is judged. What it calls is its module.",
   );
-  field(
-    fields,
-    "Retries",
-    numberInput(step.retries, (v) => edit("retries", v)),
-  );
 
-  const disabled = document.createElement("input");
-  disabled.type = "checkbox";
-  disabled.checked = step.disable;
-  disabled.addEventListener("change", () =>
-    edit("disable", disabled.checked ? true : undefined),
-  );
-  field(fields, "Disabled", disabled);
-
-  // Offered by type, not by whether the step already has one: a `pass_fail`
-  // starts with no module, and hiding the field until it had one meant the only
-  // way to give it one was the text view. `statement` and `sequence_call` never
-  // call an executor, and the loader refuses a module on them.
-  if (["action", "pass_fail", "numeric_limit"].includes(step.type)) {
+  // TestStand's Adapter, under the name Anvil gives it. A step that calls
+  // nothing shows <None>, exactly as TestStand does for a Statement.
+  const names = doc.executorNames();
+  if (CALLS_AN_EXECUTOR.includes(step.type) && step.module !== null && names.length > 0) {
     field(
-      fields,
-      "Module",
-      textInput(step.module, (v) => edit("module", v || undefined)),
-      step.type === "action"
-        ? "What the step calls on its executor."
-        : "What the step calls on its executor. Empty means it calls nothing.",
+      left,
+      "Executor",
+      select(names, step.executor ?? names[0], (v) => edit("executor", v)),
+      "TestStand's Adapter: the declared executor that serves this step.",
     );
-    if (step.module !== null) {
-      field(
-        fields,
-        "Executor",
-        textInput(step.executor, (v) => edit("executor", v || undefined)),
-        "Which declared executor serves this step. Required: anvil has no executor of its own.",
-      );
-    }
+  } else {
+    field(
+      left,
+      "Executor",
+      disabledInput(names.length === 0 ? "<None declared>" : "<None>"),
+      names.length === 0
+        ? "TestStand's Adapter. This sequence declares no executor."
+        : "TestStand's Adapter. This step calls no executor.",
+    );
   }
 
-  // The fields a type judges with. Each is offered only where the loader
-  // accepts it — a `condition` on anything but a `pass_fail` is a load error,
-  // and so is a `value` outside a `numeric_limit`.
+  field(
+    left,
+    "Icon",
+    disabledInput("<Adapter Icon>"),
+    "Not implemented: a step carries no icon yet.",
+  );
+
+  // The button TestStand puts on its own, under Icon: it opens the step's
+  // Attributes — the named values a step can carry for tooling to read, under
+  // a namespace of your own (Company.Category.Attribute). Anvil has no such
+  // thing, so the button is here and greyed, like everything else it has not
+  // built yet.
+  const attributes = document.createElement("button");
+  attributes.type = "button";
+  attributes.className = "icon-button";
+  attributes.disabled = true;
+  attributes.title =
+    "TestStand opens the step's Attributes here. Anvil has no attributes, yet.";
+  attributes.setAttribute("aria-label", "Attributes");
+  attributes.append(
+    svgIcon(
+      `<path d="M4.5 11.5 8 6.5l3.5-2" fill="none" stroke="currentColor" stroke-width="1"/>
+       <rect x="2" y="10.5" width="4" height="3.5" rx="0.6" fill="#d8a13a"/>
+       <path d="M8 4.6 9.4 6 8 7.4 6.6 6z" fill="#2f6fbf"/>
+       <path d="M12.8 2.2 14 3.4l-1.2 1.2-1.2-1.2z" fill="#2f6fbf"/>
+       <path d="M12.6 7.4 13.8 8.6l-1.2 1.2-1.2-1.2z" fill="#2f6fbf"/>`,
+    ),
+  );
+  left.append(attributes);
+
+  // A box, not a line: TestStand's Description wraps, and what it says about a
+  // step with a module is long enough to need it.
+  const description = document.createElement("textarea");
+  description.rows = 3;
+  description.readOnly = true;
+  description.className = "description";
+  description.value = describeStep(step);
+  field(
+    right,
+    "Description",
+    description,
+    "Written from the step itself, as TestStand writes it. Not editable.",
+  );
+
+  const comment = document.createElement("textarea");
+  comment.rows = 6;
+  comment.value = step.comment ?? "";
+  comment.addEventListener("change", () =>
+    edit("comment", comment.value.trim() || undefined),
+  );
+  field(
+    right,
+    "Comment",
+    comment,
+    "Free text for whoever reads the sequence. The engine never reads it and no verdict depends on it.",
+  );
+}
+
+/** TestStand's Data Source: which value the step's verdict is taken from. */
+function pageDataSource(body, ctx) {
+  const { step, edit } = ctx;
+  const fields = newFields(body);
+
   if (step.type === "pass_fail") {
     field(
       fields,
@@ -538,14 +1022,6 @@ function renderStep() {
         : "A boolean expression the engine evaluates. Required when the step calls no module.",
     );
   }
-  if (step.type === "statement") {
-    field(
-      fields,
-      "Statement",
-      textInput(step.statement ?? "", (v) => edit("statement", v || undefined)),
-      "Runs in the engine: assigns to a declared variable.",
-    );
-  }
   if (step.type === "numeric_limit") {
     field(
       fields,
@@ -554,58 +1030,118 @@ function renderStep() {
       "Which number to judge. Empty means the module's measurement.",
     );
   }
+}
+
+/** TestStand's Limits, in the shape ADR-0040 §7 took from it. */
+function pageLimits(body, ctx) {
+  const { step, doc, sel } = ctx;
+  const fields = newFields(body);
+
+  if (!step.limit) {
+    note(
+      fields,
+      "This numeric_limit has no limit, and the loader requires one. Add `limit:` in the Text view, or insert the step again from the palette.",
+    );
+    return;
+  }
+
+  const setLimit = (key, v) => {
+    doc.setStepLimit(sel.phase, sel.index, key, v);
+    afterEdit();
+  };
+
+  // The comparison decides which fields the limit has, so it is chosen here
+  // and the rest follows (ADR-0040 §7). It used to be the text view's job,
+  // which meant a `numeric_limit` inserted from the palette — `comparison:
+  // none` — could not be given a threshold at all without leaving the editor.
   field(
     fields,
-    "Precondition",
-    textInput(step.precondition ?? "", (v) => edit("precondition", v || undefined)),
-    "If it is false the step is skipped, without spending an attempt.",
-  );
-
-  const pause = document.createElement("input");
-  pause.type = "checkbox";
-  pause.checked = step.pause_on_fail;
-  pause.addEventListener("change", () =>
-    edit("pause_on_fail", pause.checked ? true : undefined),
-  );
-  field(fields, "Pause on fail", pause, "Stops the phase if this step fails.");
-
-  if (step.limit) {
-    group(fields, "Limit");
-    const setLimit = (key, v) => {
-      doc.setStepLimit(sel.phase, sel.index, key, v);
+    "Comparison",
+    select(COMPARISON_CODES, step.limit.comparison ?? "none", (code) => {
+      doc.setStepComparison(sel.phase, sel.index, code);
       afterEdit();
-    };
-    // The comparison decides which fields the limit has, so it is chosen here
-    // and the rest follows (ADR-0040 §7). It used to be the text view's job,
-    // which meant a `numeric_limit` inserted from the palette — `comparison:
-    // none` — could not be given a threshold at all without leaving the editor.
+    }),
+    COMPARISON_DOC[step.limit.comparison] ?? "How the number is judged.",
+  );
+  for (const key of ["low", "high", "nominal", "lower", "upper"]) {
+    if (key in step.limit) {
+      field(fields, key, numberInput(step.limit[key], (v) => setLimit(key, v)));
+    }
+  }
+  if ("threshold" in step.limit) {
     field(
       fields,
-      "Comparison",
-      select(COMPARISON_CODES, step.limit.comparison ?? "none", (code) => {
-        doc.setStepComparison(sel.phase, sel.index, code);
-        afterEdit();
-      }),
-      COMPARISON_DOC[step.limit.comparison] ?? "How the number is judged.",
+      "threshold",
+      select(["percent", "ppm", "delta"], step.limit.threshold, (v) =>
+        setLimit("threshold", v),
+      ),
+      "Whether lower/upper are a percentage of nominal, parts per million, or an absolute amount.",
     );
-    for (const key of ["low", "high", "nominal", "lower", "upper"]) {
-      if (key in step.limit) {
-        field(fields, key, numberInput(step.limit[key], (v) => setLimit(key, v)));
-      }
-    }
-    if ("threshold" in step.limit) {
-      field(
-        fields,
-        "threshold",
-        select(["percent", "ppm", "delta"], step.limit.threshold, (v) => setLimit("threshold", v)),
-        "Whether lower/upper are a percentage of nominal, parts per million, or an absolute amount.",
-      );
-    }
+  }
+  field(
+    fields,
+    "units",
+    textInput(step.limit.units ?? "", (v) => setLimit("units", v || undefined)),
+    "For the report only: it does not scale or convert anything.",
+  );
+}
+
+function pageRunOptions(body, ctx) {
+  const { step, edit } = ctx;
+  const fields = newFields(body);
+  field(
+    fields,
+    "Disabled",
+    checkbox(step.disable, (v) => edit("disable", v ? true : undefined)),
+    "TestStand's Run Mode ▸ Skip: the engine records the step as skipped without calling it.",
+  );
+  todoNote(
+    fields,
+    "Run Mode ▸ Force Pass and Force Fail, Record Results, and Step Failure Causes Sequence Failure — which ADR-0040 put out of its own scope.",
+  );
+}
+
+function pageLooping(body, ctx) {
+  const { step, edit } = ctx;
+  const fields = newFields(body);
+  field(
+    fields,
+    "Retries",
+    numberInput(step.retries, (v) => edit("retries", v)),
+    "How many attempts the step gets. Anvil's own, not TestStand's: it calls the step again while the step does not pass.",
+  );
+  todoNote(
+    fields,
+    "TestStand's loop types — Fixed number, While, Do While, Pass/Fail count — their pass and fail counts, and the Looping status. Retries is not a loop; issue #76 asks how the two should meet.",
+  );
+}
+
+function pagePostActions(body, ctx) {
+  const { step, edit } = ctx;
+  const fields = newFields(body);
+  field(
+    fields,
+    "Pause on fail",
+    checkbox(step.pause_on_fail, (v) => edit("pause_on_fail", v ? true : undefined)),
+    "Stops the phase if this step fails.",
+  );
+  todoNote(
+    fields,
+    "TestStand's On Pass and On Fail actions — Goto step, Call sequence, Terminate — and the custom conditions that choose between them.",
+  );
+}
+
+/** The expressions the engine evaluates around the step. */
+function pageExpressions(body, ctx) {
+  const { step, doc, sel, edit } = ctx;
+  const fields = newFields(body);
+
+  if (step.type === "statement") {
     field(
       fields,
-      "units",
-      textInput(step.limit.units ?? "", (v) => setLimit("units", v || undefined)),
-      "For the report only: it does not scale or convert anything.",
+      "Statement",
+      textInput(step.statement ?? "", (v) => edit("statement", v || undefined)),
+      "Runs in the engine: assigns to a declared variable.",
     );
   }
 
@@ -658,9 +1194,439 @@ function renderStep() {
     }
   }
 
-  group(fields, "Step");
+  todoNote(
+    fields,
+    "TestStand's Pre-Expression, which runs before the step, and its Status Expression. Anvil's `assign` runs after the step and can only write a declared local.",
+  );
+}
+
+function pagePreconditions(body, ctx) {
+  const { step, edit } = ctx;
+  const fields = newFields(body);
+  field(
+    fields,
+    "Precondition",
+    textInput(step.precondition ?? "", (v) => edit("precondition", v || undefined)),
+    "If it is false the step is skipped, without spending an attempt.",
+  );
+  note(
+    fields,
+    "TestStand builds this with a dialog of checkboxes over the previous steps' results; Anvil writes the expression itself.",
+  );
+}
+
+/**
+ * A row of square icon buttons, as TestStand puts beside its path fields.
+ *
+ * Every one of them is disabled: none of what they do exists in Anvil yet.
+ * They are here, in TestStand's arrangement, because that is what the Module
+ * tab looks like and because each one names a thing still to build.
+ */
+function iconButtons(specs) {
+  const group = document.createElement("div");
+  group.className = "icon-row";
+  for (const [label, glyph] of specs) {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.className = "icon-button";
+    b.disabled = true;
+    b.title = `${label}. Not implemented.`;
+    b.setAttribute("aria-label", label);
+    b.append(svgIcon(glyph));
+    group.append(b);
+  }
+  return group;
+}
+
+// The glyphs, drawn rather than loaded. They stand for the same actions
+// TestStand's icons stand for; they are not its artwork.
+const GLYPH = {
+  browse: `<path d="M1.5 4.5h4.2l1 1.4h7.8v7.6H1.5z" fill="#d8a13a"/>
+           <circle cx="10.6" cy="9.4" r="2.6" fill="none" stroke="#333" stroke-width="1.2"/>
+           <path d="m12.6 11.4 2.2 2.2" stroke="#333" stroke-width="1.4"/>`,
+  edit: `<rect x="2" y="2" width="8.5" height="11" fill="#e9eef5" stroke="#4a6fa5"/>
+         <path d="m9.5 11.5 4.3-4.3 1.6 1.6-4.3 4.3-2 .4z" fill="#d8a13a" stroke="#8a6a12" stroke-width=".7"/>`,
+  create: `<rect x="2.5" y="2.5" width="8.5" height="11" fill="#e9eef5" stroke="#4a6fa5"/>
+           <path d="M11.5 9.5v5M9 12h5" stroke="#2e8b57" stroke-width="1.8"/>`,
+  reload: `<path d="M13 8a5 5 0 1 1-1.6-3.6" fill="none" stroke="#2f6fbf" stroke-width="1.6"/>
+           <path d="M13.6 1.8v3.4h-3.4z" fill="#2f6fbf"/>`,
+  tools: `<path d="M2 12.5 8 6.5l1.5 1.5-6 6z" fill="#8a8f96"/>
+          <path d="m9.5 2.5 3.8 3.8-1.6 1.6-3.8-3.8z" fill="#c0392b"/>`,
+  terminals: `<rect x="6" y="6" width="4" height="4" fill="none" stroke="currentColor" stroke-width="1.1"/>
+              <path d="M1.5 5h4.5M1.5 11h4.5M10 8h4.5" stroke="currentColor" stroke-width="1.1"/>
+              <circle cx="1.6" cy="5" r="1.3" fill="#2f6fbf"/>
+              <circle cx="1.6" cy="11" r="1.3" fill="#2e8b57"/>
+              <circle cx="14.4" cy="8" r="1.3" fill="#c0392b"/>`,
+  help: `<path d="M5.8 6a2.2 2.2 0 1 1 2.6 2.2v1.4" fill="none" stroke="currentColor" stroke-width="1.4"/>
+         <circle cx="8.4" cy="12.4" r="1" fill="currentColor"/>`,
+  collapse: `<path d="m3 9 5-4 5 4M3 13l5-4 5 4" fill="none" stroke="currentColor" stroke-width="1.4"/>`,
+};
+
+/**
+ * The Module tab: what the step calls, and with what.
+ *
+ * Laid out as TestStand's: the call and its two paths across the top, each
+ * path showing what was written and, greyed beneath it, what that resolves to;
+ * then the parameter table on the left and, on the right, the panel that says
+ * what the thing being called looks like.
+ *
+ * TestStand's pair is Project Path and VI Path — the container, and the thing
+ * inside it. Anvil's is the executor and the module: an executor is a
+ * department of modules (ADR-0025) and a step names both (ADR-0027, ADR-0041).
+ * So the two rows carry the same meaning in the same places.
+ */
+function renderModuleTab(body, ctx) {
+  const { step, doc, edit } = ctx;
+
+  const page = document.createElement("div");
+  page.className = "page-module";
+  body.append(page);
+
+  const head = document.createElement("div");
+  head.className = "fields module-head";
+  page.append(head);
+
+  if (step.type === "statement") {
+    note(
+      head,
+      "This step calls no module: it runs in the engine. TestStand shows <None> as the adapter for a Statement.",
+    );
+    return;
+  }
+
+  if (step.type === "sequence_call") {
+    field(
+      head,
+      "Call Type",
+      disabledInput("Sequence Call"),
+      "TestStand's Sequence Adapter, which a sequence_call always uses.",
+    );
+    field(
+      head,
+      "Sequence",
+      pathRow(
+        textInput(step.sequence ?? "", (v) => edit("sequence", v || undefined)),
+        [["Browse for a sequence", GLYPH.browse]],
+        [["Open the subsequence", GLYPH.edit]],
+      ),
+      "The subsequence this step calls, by name or by path.",
+    );
+    resolved(head, step.sequence ? `resolved against this file's directory` : "nothing named yet");
+    parameterTable(
+      page,
+      step,
+      "the argument table.",
+      "A sequence_call's `args` wire the subsequence's parameters to locals. Only the Text view can write them today.",
+    );
+    return;
+  }
+
+  // What kind of call this is: in Anvil the executor decides, and there is one
+  // kind of call to each — a step request over gRPC (ADR-0003).
+  const executor = doc.executors().find((e) => e.name === step.executor) ?? null;
+  field(
+    head,
+    "Call Type",
+    disabledInput(executor ? `${executor.type} step call` : "step call"),
+    "How the step reaches its executor. Anvil has one: a step request over gRPC (ADR-0003).",
+  );
+
+  field(
+    head,
+    "Executor",
+    pathRow(
+      disabledInput(step.executor ?? "<None>"),
+      [["Browse for an executor", GLYPH.browse]],
+      [
+        ["Declare a new executor", GLYPH.create],
+        ["Edit this executor", GLYPH.edit],
+      ],
+    ),
+    "TestStand's Project Path: the department the module lives in. Chosen on the General page.",
+  );
+  resolved(
+    head,
+    executor
+      ? executor.type === "grpc"
+        ? `${executor.host}:${executor.port}`
+        : (executor.path ?? "no path declared")
+      : "this step names no executor",
+  );
+
+  field(
+    head,
+    "Module",
+    pathRow(
+      textInput(step.module ?? "", (v) => edit("module", v || undefined)),
+      [
+        ["Browse the executor's catalog", GLYPH.browse],
+        ["Pick a module from the executor", GLYPH.terminals],
+        ["Rename what this step calls", GLYPH.edit],
+        ["Break on this step", GLYPH.tools],
+      ],
+      [
+        ["Show the module's terminals", GLYPH.terminals],
+        ["Edit the module", GLYPH.edit],
+        ["Reload the catalog", GLYPH.reload],
+        ["Configure the call", GLYPH.tools],
+        ["Create a module", GLYPH.create],
+        ["Help on this module", GLYPH.help],
+        ["Collapse this panel", GLYPH.collapse],
+      ],
+    ),
+    step.type === "action"
+      ? "TestStand's VI Path: what the step calls on its executor."
+      : "TestStand's VI Path: what the step calls. Empty means it calls nothing.",
+  );
+  resolved(
+    head,
+    step.module
+      ? `${step.module} on '${step.executor ?? "?"}'`
+      : "this step calls nothing",
+  );
+
+  if (step.module === null) return;
+
+  const split = document.createElement("div");
+  split.className = "module-split";
+  page.append(split);
+
+  parameterTable(
+    split,
+    step,
+    "editing the parameter table.",
+    "The engine already sends a step's `inputs` (ADR-0020), so two steps can call one module with different values. Only the Text view can write them today.",
+  );
+  modulePanel(split, step, executor);
+}
+
+/** A field with its two rows of buttons, as TestStand hangs them off a path. */
+function pathRow(input, near, far) {
+  const row = document.createElement("div");
+  row.className = "path-row";
+  row.append(input, iconButtons(near));
+  const spacer = document.createElement("span");
+  spacer.className = "path-spacer";
+  row.append(spacer, iconButtons(far));
+  return row;
+}
+
+/**
+ * The greyed line TestStand puts under a path: what the thing above resolves
+ * to. A relative path means nothing without the place it is relative to, and
+ * showing both is how you catch the one that resolved somewhere unexpected.
+ */
+function resolved(parent, text) {
+  const line = document.createElement("p");
+  line.className = "resolved";
+  line.textContent = text;
+  parent.append(line);
+}
+
+/** TestStand's parameter grid, kept recognisable while it is still read-only. */
+function parameterTable(parent, step, todo, detail) {
+  const box = document.createElement("div");
+  box.className = "fields param-box";
+  parent.append(box);
+
+  group(box, "Parameters");
+  const table = document.createElement("div");
+  table.className = "param-table";
+  for (const heading of ["Parameter Name", "Type", "In/Out", "Value"]) {
+    const h = document.createElement("span");
+    h.className = "param-heading";
+    h.textContent = heading;
+    table.append(h);
+  }
+  const rows = Object.entries(step.inputs ?? {});
+  if (rows.length === 0) {
+    const empty = document.createElement("span");
+    empty.className = "param-empty";
+    empty.textContent = "This step declares no inputs.";
+    table.append(empty);
+  } else {
+    for (const [name, value] of rows) {
+      for (const cell of [name, typeof value, "in", String(value)]) {
+        const c = document.createElement("span");
+        c.className = "param-cell";
+        c.textContent = cell;
+        table.append(c);
+      }
+    }
+  }
+  box.append(table);
+  todoNote(box, todo, detail);
+}
+
+/**
+ * The panel TestStand fills with the VI: its project and name, its connector
+ * pane, and the documentation off the VI itself.
+ *
+ * Anvil's equivalent exists already on the wire and is not plugged in here
+ * yet: an executor describes its steps — each one's inputs, outputs and a line
+ * of documentation (`StepSpec` in `paso.proto`, ADR-0021) — which is the same
+ * three things this panel shows. Asking for it needs the bridge, so the shape
+ * is here and the content says what is missing rather than looking empty.
+ */
+function modulePanel(parent, step, executor) {
+  const panel = document.createElement("div");
+  panel.className = "module-panel";
+  parent.append(panel);
+
+  const project = document.createElement("div");
+  project.className = "module-project";
+  project.textContent = executor?.name ?? "no executor";
+  panel.append(project);
+
+  const name = document.createElement("div");
+  name.className = "module-name";
+  name.textContent = step.module ?? "";
+  panel.append(name);
+
+  // The connector pane: what goes in on the left, what comes out on the right,
+  // around the thing being called.
+  const pane = document.createElement("div");
+  pane.className = "connector";
+
+  const ins = document.createElement("div");
+  ins.className = "terminals in";
+  const inputs = Object.keys(step.inputs ?? {});
+  for (const t of inputs.length > 0 ? inputs : ["(inputs)"]) {
+    const s = document.createElement("span");
+    s.textContent = t;
+    if (inputs.length === 0) s.className = "unknown";
+    ins.append(s);
+  }
+
+  const box = document.createElement("div");
+  box.className = "connector-box";
+  box.textContent = (step.module ?? "").split("/").pop() ?? "";
+
+  const outs = document.createElement("div");
+  outs.className = "terminals out";
+  for (const t of ["measured value", "status"]) {
+    const s = document.createElement("span");
+    s.className = "unknown";
+    s.textContent = t;
+    outs.append(s);
+  }
+
+  pane.append(ins, box, outs);
+  panel.append(pane);
+
+  const doc = document.createElement("p");
+  doc.className = "module-doc";
+  doc.textContent = "Not connected: the executor has not been asked to describe this module.";
+  doc.title =
+    "What a module takes and returns, and what it is for, is what its executor answers to Describe (StepSpec in paso.proto, ADR-0021). Asking needs the bridge, which the editor cannot use yet, so these terminals are the shape of the answer rather than the answer.";
+  panel.append(doc);
+}
+
+
+function renderStep() {
+  // The menu is anchored to a button this call is about to throw away, so it
+  // would otherwise float over the panel pointing at nothing.
+  closeTypeMenu();
+  ui.stepEditor.replaceChildren();
+  const sel = state.selected;
+  const doc = state.doc;
+
+  if (!doc || !sel) {
+    ui.stepTitle.textContent = "Step Settings";
+    const p = document.createElement("p");
+    p.className = "empty";
+    p.textContent = doc ? "Select a step." : "Open a sequence to begin.";
+    ui.stepEditor.append(p);
+    return;
+  }
+
+  const step = doc.steps(sel.phase)[sel.index];
+  if (!step) {
+    state.selected = null;
+    return renderStep();
+  }
+
+  ui.stepTitle.textContent = `Step Settings for ${step.name ?? "(unnamed)"}`;
+
+  const edit = (key, value) => {
+    doc.setStepField(sel.phase, sel.index, key, value);
+    afterEdit();
+  };
+  const ctx = { step, doc, sel, edit };
+
+  const tabs = document.createElement("div");
+  tabs.className = "step-tabs";
+  tabs.setAttribute("role", "tablist");
+  const available = tabsFor(step.type);
+  // The tab strip changes with the type, so a tab the new type does not have
+  // must not stay selected — Limits is gone the moment a numeric_limit becomes
+  // an action.
+  if (!available.some(([key]) => key === state.stepTab)) state.stepTab = "properties";
+  for (const [key, label] of available) {
+    const tab = document.createElement("button");
+    tab.type = "button";
+    tab.className = "step-tab";
+    tab.setAttribute("role", "tab");
+    tab.setAttribute("aria-selected", String(state.stepTab === key));
+    tab.textContent = label;
+    tab.addEventListener("click", () => {
+      state.stepTab = key;
+      renderStep();
+    });
+    tabs.append(tab);
+  }
+  ui.stepEditor.append(tabs);
+
+  const body = document.createElement("div");
+  body.className = "step-body";
+  ui.stepEditor.append(body);
+
+  if (state.stepTab === "module") {
+    renderModuleTab(body, ctx);
+  } else if (state.stepTab === "data-source") {
+    pageDataSource(body, ctx);
+  } else if (state.stepTab === "limits") {
+    pageLimits(body, ctx);
+  } else {
+    const pages = PROPERTY_PAGES.filter(
+      (page) => !page.types || page.types.includes(step.type),
+    );
+    // A page that the current type does not have, or that Anvil cannot fill,
+    // must not stay selected when the type changes underneath it.
+    if (!pages.some((page) => page.name === state.stepPage && !page.todo)) {
+      state.stepPage = "General";
+    }
+
+    const nav = document.createElement("nav");
+    nav.className = "prop-pages";
+    for (const page of pages) {
+      const item = document.createElement("button");
+      item.type = "button";
+      item.className = "prop-page";
+      item.textContent = page.name;
+      // Greyed out, not left off: the page is where TestStand puts it, and the
+      // tooltip says what it would hold.
+      item.disabled = Boolean(page.todo);
+      item.title = page.todo ?? `${page.name} settings for this step`;
+      if (page.name === state.stepPage) item.setAttribute("aria-current", "true");
+      item.addEventListener("click", () => {
+        state.stepPage = page.name;
+        renderStep();
+      });
+      nav.append(item);
+    }
+
+    const content = document.createElement("div");
+    content.className = "prop-content";
+    body.append(nav, content);
+    pages.find((page) => page.name === state.stepPage)?.render?.(content, ctx);
+  }
+
+  // Moving and deleting a step are not step properties — TestStand keeps them
+  // on the toolbar and the context menu — so they stay outside the tabs, where
+  // they do not disappear when a page changes.
   const actions = document.createElement("div");
-  actions.className = "actions";
+  actions.className = "step-actions";
   actions.append(
     action("Move up", () => {
       const to = doc.moveStep(sel.phase, sel.index, -1);
@@ -678,10 +1644,9 @@ function renderStep() {
       afterEdit();
     }),
   );
-  fields.append(actions);
-
-  ui.stepEditor.append(fields);
+  ui.stepEditor.append(actions);
 }
+
 
 function action(label, onClick, disabled = false) {
   const b = document.createElement("button");

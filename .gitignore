@@ -43,3 +43,9 @@ dist/
 
 # electron-builder output for the Sequence Editor downloads (editor/package.json, directories.output).
 /dist-app/
+
+# Reference screenshots of NI TestStand, kept locally while the editor is made
+# to match it. They are NI's interface, not this project's, so they stay out of
+# a public repository — as ADR-0040 says, everything here about TestStand is
+# second-hand and cited, never redistributed.
+/Capturas_de_TS/

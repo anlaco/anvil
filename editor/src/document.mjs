@@ -35,6 +35,27 @@ export const STEP_TYPES = ["action", "pass_fail", "numeric_limit", "statement", 
 const CALLS_AN_EXECUTOR = new Set(["action", "numeric_limit"]);
 
 /**
+ * Which fields each step type may carry (ADR-0040). The loader refuses the
+ * rest: a `limit` on an `action`, a `module` on a `statement`, a `condition`
+ * on a `numeric_limit`. `setStepType` drops whatever is not on the new type's
+ * list, so changing a type cannot leave the previous one's fields behind.
+ *
+ * `inputs` and `assign` go with `module`: they are what a step sends to its
+ * executor and what it keeps from the answer, so a step that calls nothing has
+ * neither.
+ */
+const TYPE_FIELDS = {
+  action: ["module", "executor", "inputs", "assign"],
+  pass_fail: ["module", "executor", "inputs", "assign", "condition"],
+  numeric_limit: ["module", "executor", "inputs", "assign", "limit", "value"],
+  statement: ["statement"],
+  sequence_call: ["sequence", "args"],
+};
+
+/** Every field that belongs to some type and not to others. */
+const TYPE_OWNED = [...new Set(Object.values(TYPE_FIELDS).flat())];
+
+/**
  * Which fields each comparison code uses, and with what value when there is
  * nothing to carry over. Mirrored from the loader, which refuses a code that
  * carries a field it does not use and one that is missing a field it does
@@ -156,6 +177,12 @@ export class SequenceDocument {
       value: item.get?.("value") ?? null,
       precondition: item.get?.("precondition") ?? null,
       pause_on_fail: item.get?.("pause_on_fail") ?? false,
+      comment: item.get?.("comment") ?? null,
+      sequence: item.get?.("sequence") ?? null,
+      // Read-only for now: the Module tab shows the parameter table TestStand
+      // puts there, and cannot yet write it. Reading it means a step that has
+      // inputs shows them rather than looking like a step that has none.
+      inputs: readMap(item, "inputs"),
     }));
   }
 
@@ -234,6 +261,99 @@ export class SequenceDocument {
    * the rule that the editor cannot build what the loader refuses (AP-04), so
    * the placeholders are part of the insert, not something to fill in later.
    */
+  /**
+   * Changes a step's type, and makes the rest of the step agree with it.
+   *
+   * A type decides which other fields a step may carry (ADR-0040): an `action`
+   * judges nothing, so a `limit` on one is a load error; a `statement` calls
+   * nothing, so a `module` on one is too. Setting `type` on its own therefore
+   * left the previous type's fields behind and the sequence stopped loading —
+   * one click from the type menu, which is exactly what the editor must not be
+   * able to do (AP-04).
+   *
+   * So the fields the new type refuses go, and the ones it requires arrive with
+   * the same placeholders `addStep` gives a fresh step of that type.
+   */
+  setStepType(phase, index, type) {
+    if (!STEP_TYPES.includes(type)) {
+      throw new Error(`unknown step type '${type}'`);
+    }
+    const step = this.#stepNode(phase, index);
+    if (step.get("type") === type) return;
+    step.set("type", type);
+
+    for (const key of TYPE_OWNED) {
+      if (!TYPE_FIELDS[type].includes(key)) step.delete(key);
+    }
+
+    const name = step.get("name") ?? uniqueName(this, type);
+    for (const [key, value] of Object.entries(this.#requiredFor(type, name))) {
+      if (step.get(key) === undefined) step.set(key, value);
+    }
+
+    this.#reemit();
+  }
+
+  /**
+   * The fields a step of this type cannot be without, with the placeholders a
+   * new one gets. Shared by `addStep` and `setStepType` so that a step reached
+   * either way is the same step.
+   */
+  #requiredFor(type, name) {
+    const step = {};
+    if (CALLS_AN_EXECUTOR.has(type)) {
+      step.module = name;
+      step.executor = this.executorNames()[0];
+    }
+    // `none` records the value and judges nothing (ADR-0040 §8): a new limit
+    // that reads `done` until its comparison is set, never a pass.
+    if (type === "numeric_limit") step.limit = { comparison: "none" };
+    if (type === "pass_fail") step.condition = "true";
+    if (type === "statement") step.statement = `locals.${this.#aLocal()} = true`;
+    if (type === "sequence_call") {
+      const target = this.subsequenceNames()[0];
+      step.sequence = target;
+      const args = this.#argsFor(target);
+      if (args) step.args = args;
+    }
+    return step;
+  }
+
+  /**
+   * A local to write to, declaring one when the sequence has none: a statement
+   * must assign to a declared variable or the loader rejects the sequence
+   * (`validar_lvalues`, crates/cargador/src/lib.rs).
+   */
+  #aLocal() {
+    const existing = Object.keys(this.variables("locals"))[0];
+    if (existing) return existing;
+    const locals = this.#doc.get("locals");
+    if (isMap(locals)) locals.set("ok", false);
+    else this.#doc.set("locals", { ok: false });
+    return "ok";
+  }
+
+  /**
+   * Every parameter of `target` wired to a local, declaring the ones that do
+   * not exist. A call must match the subsequence's signature parameter for
+   * parameter, and `args` may only name a local.
+   */
+  #argsFor(target) {
+    const params = this.subsequenceParameters(target);
+    if (Object.keys(params).length === 0) return null;
+    const args = {};
+    for (const [param, initial] of Object.entries(params)) {
+      const local = `${target}_${param}`;
+      if (!(local in this.variables("locals"))) {
+        const locals = this.#doc.get("locals");
+        if (isMap(locals)) locals.set(local, initial);
+        else this.#doc.set("locals", { [local]: initial });
+      }
+      args[param] = `locals.${local}`;
+    }
+    return args;
+  }
+
   addStep(phase, type = "action", at = null) {
     assertPhase(phase);
     if (!STEP_TYPES.includes(type)) {
@@ -248,59 +368,14 @@ export class SequenceDocument {
       seq = this.#doc.get(phase, true);
     }
 
-    const step = { name: uniqueName(this, type), type };
-    // A step that calls something names a module and its executor: the first
-    // declared one, which the person changes in the step's settings. The
-    // module is a placeholder the catalog check will name as unknown until it
-    // is set — not something that runs quietly.
-    if (CALLS_AN_EXECUTOR.has(type)) {
-      step.module = step.name;
-      step.executor = this.executorNames()[0];
-    }
-    // `none` records the value and judges nothing (ADR-0040 §8): a new limit
-    // that reads `done` until its comparison is set, never a pass.
-    if (type === "numeric_limit") step.limit = { comparison: "none" };
-
-    if (type === "statement") {
-      // A statement must assign to a declared variable, or the loader rejects
-      // the sequence (`validar_lvalues`, crates/cargador/src/lib.rs:1046). So
-      // inserting one declares its target when there is none to write to —
-      // found by inserting a statement into `basica.yaml`, which declares no
-      // `locals` at all, and watching the engine refuse the result.
-      const target = Object.keys(this.variables("locals"))[0] ?? "ok";
-      if (!(target in this.variables("locals"))) {
-        const locals = this.#doc.get("locals");
-        if (isMap(locals)) locals.set(target, false);
-        else this.#doc.set("locals", { [target]: false });
-      }
-      step.statement = `locals.${target} = true`;
-    }
-
-    if (type === "pass_fail") step.condition = "true";
-
-    if (type === "sequence_call") {
-      // A call must match the subsequence's signature, parameter for parameter
-      // — the loader checks it and rejects a call that is missing any
-      // (`el sequence call ... no encaja con la firma de ...`). And `args` may
-      // only name a local (crates/cargador/src/lib.rs:2259-2288). So inserting
-      // one wires every parameter to a local, declaring the ones that do not
-      // exist with the subsequence's own default as their initial value.
-      const name = this.subsequenceNames()[0];
-      step.sequence = name;
-      const params = this.subsequenceParameters(name);
-      if (Object.keys(params).length > 0) {
-        step.args = {};
-        for (const [param, initial] of Object.entries(params)) {
-          const local = `${name}_${param}`;
-          if (!(local in this.variables("locals"))) {
-            const locals = this.#doc.get("locals");
-            if (isMap(locals)) locals.set(local, initial);
-            else this.#doc.set("locals", { [local]: initial });
-          }
-          step.args[param] = `locals.${local}`;
-        }
-      }
-    }
+    // The fields its type requires, never fewer: the loader's coherence rules
+    // make `statement` mandatory on a statement step, `condition` on a
+    // pass_fail and `sequence` on a sequence_call, and a step missing them is
+    // rejected at load. The placeholders are part of the insert, not something
+    // to fill in later (AP-04). `setStepType` fills the same ones, so a step
+    // reached either way is the same step.
+    const name = uniqueName(this, type);
+    const step = { name, type, ...this.#requiredFor(type, name) };
 
     // `createNode` makes a real YAML node. Adding the plain object works for
     // emitting but leaves an item with no `get`, so the step view reads it back

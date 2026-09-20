@@ -202,7 +202,10 @@ body {
  * for now — a resizer is worth having, but not before the panes are right. */
 .middle {
   display: grid;
-  grid-template-rows: minmax(0, 1fr) minmax(0, 320px);
+  /* The step settings need room: General alone is four fields, the Attributes
+     button and two boxes, and a pane capped at 320px hid the button below the
+     fold. It grows with the window and keeps a floor on short ones. */
+  grid-template-rows: minmax(0, 1fr) minmax(320px, 48%);
   min-width: 0;
   min-height: 0;
   border-left: 1px solid var(--line-strong);
@@ -358,6 +361,505 @@ body {
 }
 
 /* ---------- step editor ---------- */
+
+/*
+ * TestStand's own arrangement for a step's settings: two tabs across the top,
+ * Properties and Module, and inside Properties the page list down the left.
+ * A page Anvil has not built is greyed out and still there, so the list doubles
+ * as the parity inventory.
+ */
+
+.step-tabs {
+  display: flex;
+  gap: 1px;
+  padding: 4px 8px 0;
+  border-bottom: 1px solid var(--line-strong);
+  background: var(--panel);
+}
+
+.step-tab {
+  padding: 4px 14px;
+  border: 1px solid var(--line-strong);
+  border-bottom: none;
+  border-radius: 3px 3px 0 0;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  cursor: pointer;
+}
+
+.step-tab[aria-selected="true"] {
+  background: var(--bg);
+  color: inherit;
+  font-weight: 600;
+  /* Sits on top of the tab strip's border, as a selected tab does. */
+  margin-bottom: -1px;
+  padding-bottom: 5px;
+}
+
+.step-body {
+  display: flex;
+  align-items: stretch;
+  min-height: 0;
+}
+
+.prop-pages {
+  display: flex;
+  flex-direction: column;
+  flex: 0 0 auto;
+  width: 160px;
+  padding: 8px 0;
+  border-right: 1px solid var(--line);
+  background: var(--panel);
+}
+
+.prop-page {
+  position: relative;
+  padding: 2px 10px 2px 22px;
+  border: none;
+  background: transparent;
+  color: var(--accent);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.prop-page:hover:not(:disabled) {
+  text-decoration: underline;
+}
+
+.prop-page[aria-current="true"] {
+  color: inherit;
+  font-weight: 700;
+}
+
+/* The arrow TestStand puts against the page being shown. */
+.prop-page[aria-current="true"]::before {
+  content: "▸";
+  position: absolute;
+  left: 8px;
+}
+
+/* Greyed out means "Anvil has not built this yet", everywhere in this editor. */
+.prop-page:disabled {
+  color: var(--muted);
+  opacity: 0.55;
+  cursor: default;
+}
+
+.prop-content {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+/*
+ * TestStand stacks a step's settings: the label above its field, with a colon,
+ * left-aligned. Only the step pane does this; the variables pane keeps the
+ * label-beside-field grid it has always had.
+ */
+.fields.stacked {
+  grid-template-columns: minmax(0, 1fr);
+  gap: 0;
+}
+
+.fields.stacked label {
+  margin-top: 8px;
+  padding-top: 0;
+  text-align: left;
+}
+
+.fields.stacked label::after {
+  content: ":";
+}
+
+.fields.stacked .hint {
+  grid-column: 1;
+  margin-top: 2px;
+}
+
+/* General puts identity on the left and what the step says on the right. */
+.page-general {
+  display: grid;
+  grid-template-columns: minmax(0, 22em) minmax(0, 1fr);
+  gap: 0 24px;
+  align-items: start;
+}
+
+.fields.wide input,
+.fields textarea {
+  max-width: none;
+}
+
+.fields textarea {
+  width: 100%;
+  padding: 3px 6px;
+  background: var(--bg);
+  border: 1px solid var(--line-strong);
+  border-radius: 2px;
+  color: inherit;
+  font: inherit;
+  font-family: var(--mono);
+  resize: vertical;
+}
+
+.fields textarea:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+/*
+ * TestStand's Type control: a read-only box with a button against its right
+ * edge that drops the step-type menu.
+ */
+.type-row {
+  display: flex;
+  align-items: center;
+  /* TestStand leaves a clear gap: the button opens a menu, it does not expand
+     the box, and butting them together says the opposite. */
+  gap: 8px;
+  max-width: 320px;
+}
+
+.fields .type-box {
+  flex: 1 1 auto;
+  max-width: none;
+  background: var(--panel);
+  cursor: default;
+}
+
+/* The square icon buttons of the General page: the type menu, and Attributes. */
+.type-button,
+.icon-button {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border: 1px solid var(--line-strong);
+  border-radius: 3px;
+  background: var(--panel);
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.type-button:hover:not(:disabled),
+.icon-button:hover:not(:disabled) {
+  background: var(--bg);
+  color: inherit;
+}
+
+.type-button:disabled,
+.icon-button:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+/* It stands on its own under Icon, as TestStand puts it. */
+.fields.stacked .icon-button {
+  margin-top: 10px;
+}
+
+/* The menu itself: a plain menu, over everything, no animation. */
+.ts-menu {
+  position: fixed;
+  z-index: 60;
+  min-width: 190px;
+  padding: 2px 0;
+  border: 1px solid var(--line-strong);
+  background: var(--panel);
+  box-shadow: 2px 2px 6px rgb(0 0 0 / 0.28);
+}
+
+.ts-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  /* The left inset is where TestStand puts each type's icon. Kept empty so
+     that adding icons later does not move every label sideways. */
+  padding: 3px 8px 3px 28px;
+  border: none;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.ts-label {
+  flex: 1 1 auto;
+}
+
+.ts-arrow {
+  flex: 0 0 auto;
+  color: var(--muted);
+}
+
+.ts-item:hover:not(:disabled),
+.ts-item:focus-visible:not(:disabled) {
+  background: var(--accent);
+  color: var(--accent-ink);
+  outline: none;
+}
+
+.ts-item:hover:not(:disabled) .ts-arrow {
+  color: var(--accent-ink);
+}
+
+/*
+ * A heading that opens onto types Anvil has none of: dimmer than a usable
+ * entry, but not disabled — you can look inside, you just cannot pick anything
+ * there yet.
+ */
+.ts-item.ts-none-yet .ts-label {
+  color: var(--muted);
+}
+
+.ts-item.ts-none-yet:hover .ts-label {
+  color: var(--accent-ink);
+}
+
+/* Greyed out means "Anvil has not built this yet", as everywhere else here. */
+.ts-item:disabled {
+  color: var(--muted);
+  opacity: 0.55;
+  cursor: default;
+}
+
+.ts-sep {
+  margin: 3px 1px;
+  border-top: 1px solid var(--line);
+}
+
+/* Written by the editor, not typed: it reads as a label, not as a field. */
+.fields textarea.description {
+  background: var(--panel);
+  color: var(--muted);
+  resize: none;
+}
+
+.fields input:disabled {
+  background: var(--panel);
+  color: var(--muted);
+  opacity: 0.7;
+}
+
+/* What TestStand does on this page that Anvil does not do yet. */
+.fields .todo,
+.fields .hint.span {
+  grid-column: 1 / -1;
+  margin: 10px 0 0;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.fields .todo {
+  padding: 6px 8px;
+  border-left: 3px solid var(--line-strong);
+  background: var(--panel);
+}
+
+/*
+ * The Module tab, as TestStand arranges it: the call and its paths across the
+ * top, then the parameter table beside the panel describing what is called.
+ * Labels sit beside their fields here, not above them — TestStand stacks them
+ * on General and lays them out in a column on Module.
+ */
+.page-module {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.fields.module-head {
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: 3px 12px;
+  padding: 8px 14px 4px;
+}
+
+.fields.module-head label {
+  margin-top: 0;
+  padding-top: 3px;
+  text-align: right;
+}
+
+.path-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.path-row > input {
+  flex: 1 1 auto;
+  min-width: 0;
+  max-width: none;
+}
+
+.path-spacer {
+  flex: 0 1 40px;
+}
+
+.icon-row {
+  display: flex;
+  flex: 0 0 auto;
+  gap: 3px;
+}
+
+/* Smaller than General's: there are up to seven of them in a row. */
+.icon-row .icon-button {
+  width: 22px;
+  height: 22px;
+  margin-top: 0;
+}
+
+/* What the line above resolves to. Greyed and unselectable-looking, as
+   TestStand shows it: information, not a field. */
+.resolved {
+  grid-column: 2;
+  margin: 0 0 2px;
+  padding: 1px 6px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 2px;
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: 11px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.module-split {
+  display: grid;
+  grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr);
+  gap: 0 14px;
+  align-items: start;
+  min-width: 0;
+}
+
+.fields.param-box {
+  padding-top: 0;
+}
+
+/* The panel that says what is being called: project, name, connector pane and
+   the documentation that comes off the thing itself. */
+.module-panel {
+  margin: 8px 14px 10px 0;
+  padding: 8px 10px;
+  border: 1px solid var(--line-strong);
+  background: var(--panel);
+  min-width: 0;
+}
+
+.module-project,
+.module-name {
+  text-align: center;
+  font-weight: 700;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.module-name {
+  margin-bottom: 8px;
+  font-family: var(--mono);
+  font-size: 12px;
+}
+
+.connector {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  gap: 8px;
+  align-items: center;
+}
+
+.terminals {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 11px;
+  min-width: 0;
+}
+
+.terminals span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.terminals.in {
+  text-align: right;
+}
+
+/* A terminal the editor has not been told about: the shape, not the answer. */
+.terminals .unknown {
+  color: var(--muted);
+  font-style: italic;
+}
+
+.connector-box {
+  display: grid;
+  place-items: center;
+  width: 58px;
+  height: 40px;
+  padding: 2px;
+  border: 2px solid var(--line-strong);
+  background: var(--bg);
+  font-family: var(--mono);
+  font-size: 9px;
+  line-height: 1.1;
+  overflow: hidden;
+  text-align: center;
+  word-break: break-all;
+}
+
+.module-doc {
+  margin: 10px 0 0;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+/* TestStand's parameter grid, kept recognisable while it is still read-only. */
+.param-table {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: 2fr 1fr 1fr 2fr;
+  border: 1px solid var(--line-strong);
+  font-size: 11px;
+}
+
+.param-heading,
+.param-cell,
+.param-empty {
+  padding: 2px 6px;
+  border-bottom: 1px solid var(--line);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.param-heading {
+  background: var(--panel);
+  color: var(--muted);
+  font-weight: 600;
+}
+
+.param-cell {
+  color: var(--muted);
+  font-family: var(--mono);
+}
+
+.param-empty {
+  grid-column: 1 / -1;
+  border-bottom: none;
+  color: var(--muted);
+  font-style: italic;
+}
 
 .fields {
   display: grid;
@@ -578,17 +1080,19 @@ button:focus-visible {
  * parsed, not what is in the text right now. It has to be visible without
  * being read — nobody reads a status bar while typing. */
 .panes[data-stale="true"] .sequence,
-.panes[data-stale="true"] .step .fields,
+.panes[data-stale="true"] .step .step-body,
 .panes[data-stale="true"] .variables {
   opacity: 0.45;
 }
 
 /* ---------- step actions ---------- */
 
-.fields .actions {
-  grid-column: 1 / -1;
+.step-actions {
   display: flex;
   gap: 6px;
+  padding: 6px 14px;
+  border-top: 1px solid var(--line);
+  background: var(--panel);
 }
 
 .action {
