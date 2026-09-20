@@ -3,7 +3,7 @@
 // This is the piece where a wrong answer points an operator at the wrong step
 // while a unit is on the bench, so it is a pure state machine and it is
 // asserted here with no browser. The lines below are the real shape the engine
-// emits — taken from `anvil ejemplos/basica.yaml --events`, trimmed of the
+// emits — taken from `anvil ejemplos/basica.yseq --events`, trimmed of the
 // fields the view does not read.
 //
 // Run with: npm test

@@ -104,7 +104,7 @@ on_fin_secuencia(resultado)   # el ResultadoSecuencia agregado
 > ...,main,,channel_used=1;temperature=21.5,demo/measure_voltage,GELE,
 > ```
 >
-> (la cola de la cabecera y de una fila de `ejemplos/basica.yaml`; lo que va
+> (la cola de la cabecera y de una fila de `ejemplos/basica.yseq`; lo que va
 > delante no cambia)
 >
 > Sin campos nuevos en `paso.proto`: `comparison` y `units` los pone el motor

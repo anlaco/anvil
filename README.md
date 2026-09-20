@@ -35,14 +35,14 @@ curl -LO https://github.com/anlaco/anvil/releases/download/v0.7.0/anvil-v0.7.0-x
 tar xzf anvil-v0.7.0-x86_64-linux-musl.tar.gz
 cd anvil-v0.7.0-x86_64-linux-musl
 
-./anvil ejemplos/subsecuencia.yaml --json ./out.json --csv ./out.csv
+./anvil ejemplos/subsecuencia.yseq --json ./out.json --csv ./out.csv
 ```
 
 Linux x86_64, any libc. The [release page][rel] publishes one `SHA256SUMS`
 for every download; to check the tarball, download it alongside and run
 `sha256sum -c --ignore-missing SHA256SUMS` (it lists the Windows downloads
 too, which you did not fetch). The `.yaml` files ship in the package because
-`subsecuencia.yaml` invokes `medir_fuentes.yaml` by relative path, and the demo
+`subsecuencia.yseq` invokes `medir_fuentes.yseq` by relative path, and the demo
 bench ships in `ejemplos/departamento/dist/` because every example names it.
 
 **Windows** (ADR-0036): the [release page][rel] also publishes
@@ -91,7 +91,7 @@ cd anvil
 ```sh
 make release   # WASM guest and example components → bridge → host, in that order
 
-./packaging/anvil-host/target/release/anvil ejemplos/subsecuencia.yaml --json ./out.json --csv ./out.csv
+./packaging/anvil-host/target/release/anvil ejemplos/subsecuencia.yseq --json ./out.json --csv ./out.csv
 ```
 
 These are three chained builds (the host's `build.rs` copies the artifacts,
@@ -132,7 +132,7 @@ make release
 ejemplos/departamento/dist/anvil-exec-wasm --port 9300
 # terminal 2
 wasmtime -S cli -S tcp=y -S inherit-network=y --dir=. \
-  target/wasm32-wasip2/release/anvil-guest.wasm ejemplos/basica.yaml \
+  target/wasm32-wasip2/release/anvil-guest.wasm ejemplos/basica.yseq \
   --executor demo=127.0.0.1:9300
 ```
 

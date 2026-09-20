@@ -99,8 +99,8 @@ function capture(onLine) {
  * `path -> contents`.
  *
  * Paths may contain `/` and intermediate directories are created, so
- * `{ "ejemplos/basica.yaml": "..." }` produces the tree the engine expects when
- * given `ejemplos/basica.yaml` as its sequence argument.
+ * `{ "ejemplos/basica.yseq": "..." }` produces the tree the engine expects when
+ * given `ejemplos/basica.yseq` as its sequence argument.
  */
 export function fileTree(files) {
   const root = { dir: {} };

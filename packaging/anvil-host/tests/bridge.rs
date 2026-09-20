@@ -11,7 +11,7 @@
 //!
 //! These are cheap: the bridge does not instantiate the engine, so unlike
 //! `exit_codes.rs` they do not need a release build to be quick. They do start
-//! the demo bench's executor `basica.yaml` declares, which is why they allow a
+//! the demo bench's executor `basica.yseq` declares, which is why they allow a
 //! few seconds to come up.
 
 use std::io::{BufRead, BufReader};
@@ -59,7 +59,7 @@ impl Drop for Bridge {
 /// either would be testing a fiction.
 fn start_bridge() -> Bridge {
     let mut child = Command::new(binary())
-        .arg("ejemplos/basica.yaml")
+        .arg("ejemplos/basica.yseq")
         .arg("--bridge")
         .current_dir(repo_root())
         .stdout(Stdio::piped())
@@ -196,7 +196,7 @@ fn echo_server() -> std::net::SocketAddr {
 /// starvation, not slowness: the frame reader held the socket's mutex in a
 /// tight loop and the connection's relay thread, holding bytes the editor was
 /// blocked waiting for, could not get in. Most exchanges were fast and a few
-/// took seconds — measured from the editor, 20 runs of `ejemplos/basica.yaml`
+/// took seconds — measured from the editor, 20 runs of `ejemplos/basica.yseq`
 /// ranged from 99 ms to 32 s with a 6.8 s median. A mean stays green through
 /// that. What is being asserted is that no single exchange stalls, because the
 /// engine has no per-step deadline and `wasi-grpc` has none either: the only

@@ -12,7 +12,7 @@
 #   3. the ENGINE evaluates the CONDITION over variables → verificar_dut (ADR-0018)
 #
 # Run:
-#   ./anvil ejemplos/veredicto.yaml
+#   ./anvil ejemplos/veredicto.yseq
 #
 # Expected result: demo/measure_voltage reads 4.2, inside its loose limit
 # (4.0–6.0) → `pass`; but the product's real criterion is narrower (4.9–5.1),

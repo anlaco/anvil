@@ -43,7 +43,7 @@ echo "== Beta 2026-08 regression ========================================"
 
 # ---- DEF-1: --limits must reach the operator's sequence under a PM ----
 $A --process-model $R/pm-minimal.yaml \
-   ejemplos/limites.yaml --limits ejemplos/limites.limits.yaml \
+   ejemplos/limites.yseq --limits ejemplos/limites.limits.yaml \
    >"$TMP/d1.out" 2>"$TMP/d1.err"
 afectados=$(grep -oE 'aplicado \([0-9]+ paso' "$TMP/d1.err" | grep -oE '[0-9]+' | head -1)
 grep -q ': pass ===' "$TMP/d1.out"; agregado=$?
@@ -93,14 +93,14 @@ paso_que_no_existe:
   comparison: GE
   low: 4.0
 YAML
-$A ejemplos/limites.yaml --limits "$TMP/huerfano.limits.yaml" 2>&1 |
+$A ejemplos/limites.yseq --limits "$TMP/huerfano.limits.yaml" 2>&1 |
   grep -qiE 'aviso.*sidecar|sidecar.*no afect|ningún paso'
 check DIAG-1 "warning when the sidecar affects 0 steps" $?
 
 # ---- DIAG-3: the report must say which phase each step ran in ----
 # Without it, post-processing cannot tell a Setup failure (the DUT could not
 # even be connected) from a Main or Cleanup one.
-$A ejemplos/basica.yaml --json "$TMP/d3.json" --csv "$TMP/d3.csv" >/dev/null 2>&1
+$A ejemplos/basica.yseq --json "$TMP/d3.json" --csv "$TMP/d3.csv" >/dev/null 2>&1
 res=0
 for f in setup main cleanup; do
   grep -q "\"phase\": \"$f\"" "$TMP/d3.json" || res=1
@@ -116,8 +116,8 @@ check DIAG-3 "phase (setup/main/cleanup) in the JSON and the CSV" $res
 # `sequence` is the PM's name, so the test has to travel as a field of its
 # own: without it, the archived result does not record what was run.
 $A --process-model $R/pm-minimal.yaml \
-   ejemplos/limites.yaml --json "$TMP/d4.json" >/dev/null 2>&1
-grep -q '"user_sequence": "ejemplos/limites.yaml"' "$TMP/d4.json"
+   ejemplos/limites.yseq --json "$TMP/d4.json" >/dev/null 2>&1
+grep -q '"user_sequence": "ejemplos/limites.yseq"' "$TMP/d4.json"
 check DIAG-4 "the operator's sequence is a JSON field" $?
 
 # ---- DIAG-5a: a wrapped sidecar must point at the wrapper ----
@@ -129,7 +129,7 @@ limits:
     comparison: GE
     low: 4.0
 YAML
-$A ejemplos/limites.yaml --limits "$TMP/envoltorio.limits.yaml" 2>&1 |
+$A ejemplos/limites.yseq --limits "$TMP/envoltorio.limits.yaml" 2>&1 |
   grep -qiE 'mapa plano|envoltorio'
 check DIAG-5a "a wrapped sidecar points at the wrapper, not the step" $?
 
@@ -282,9 +282,9 @@ check LEC-2 "a green with skipped steps declares it (console and JSON)" $res
 # died with `address in use`, which prevented parallelising a campaign by
 # launching N processes. That executor is gone (ADR-0041); the case stays
 # because each run still spawns its declared executors on ports of its own.
-$A ejemplos/basica.yaml >"$TMP/n1a.out" 2>&1 &
+$A ejemplos/basica.yseq >"$TMP/n1a.out" 2>&1 &
 p1=$!
-$A ejemplos/basica.yaml >"$TMP/n1b.out" 2>&1 &
+$A ejemplos/basica.yseq >"$TMP/n1b.out" 2>&1 &
 p2=$!
 wait $p1; wait $p2
 res=0
@@ -304,7 +304,7 @@ check NOTA-1 "two simultaneous anvil run without a port clash" $res
 F=packaging/anvil-host/tests/fixtures
 res=0
 $A "$F/paso.yaml"          --quiet >/dev/null 2>&1; [ $? -eq 0 ] || res=1
-$A ejemplos/veredicto.yaml --quiet >/dev/null 2>&1; [ $? -eq 1 ] || res=1
+$A ejemplos/veredicto.yseq --quiet >/dev/null 2>&1; [ $? -eq 1 ] || res=1
 $A "$F/error_runtime.yaml" --quiet >/dev/null 2>&1; [ $? -eq 1 ] || res=1
 $A no-existe-de-verdad.yaml        >/dev/null 2>&1; [ $? -eq 1 ] || res=1
 check EXIT-1 "exit 0 only on a pass verdict; fail/error/load exit 1" $res

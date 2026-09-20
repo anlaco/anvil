@@ -27,7 +27,7 @@ BRIDGE  := executors/wasm/Cargo.toml
 RUSTSDK := executors/rust/Cargo.toml
 EXAMPLE := ejemplos/hola-paso/Cargo.toml
 # The two-module department (`ejemplos/departamento`), what
-# `demo_departamento.yaml` loads (ADR-0025).
+# `demo_departamento.yseq` loads (ADR-0025).
 DEPT    := ejemplos/departamento/Cargo.toml
 GUESTS  := -p motor
 TARGET  := wasm32-wasip2
@@ -54,7 +54,7 @@ build: example
 	@echo "ready → $(ANVIL_DEBUG)"
 
 ## The reference step component (`ejemplos/hola-paso`), the one
-## `demo_wasm.yaml` loads. It builds with the plain toolchain: the SDK carries
+## `demo_wasm.yseq` loads. It builds with the plain toolchain: the SDK carries
 ## the WIT and the bindings, so there is no `cargo component` to install
 ## (ADR-0024). Until the SDK existed nothing built it — not the Makefile and
 ## not CI — and it was a manual acceptance criterion.
@@ -192,7 +192,7 @@ fmt:
 
 ## Smoke: runs the basic example with the freshly built binary.
 run: build
-	$(ANVIL_DEBUG) ejemplos/basica.yaml
+	$(ANVIL_DEBUG) ejemplos/basica.yseq
 
 clean:
 	cargo clean

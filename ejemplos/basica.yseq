@@ -28,6 +28,12 @@ main:
     module: demo/measure_voltage
     executor: demo
     retries: 1
+    # `comment` is TestStand's Comment, on the General page of a step's
+    # properties: free text for whoever reads the sequence. The engine never
+    # reads it and no verdict depends on it.
+    comment: |
+      The 4.5-5.5 V window is the one on the drawing. The bench reads 4.2 V,
+      so this step fails on purpose — that is what this example is for.
     limit:
       comparison: GELE
       low: 4.5

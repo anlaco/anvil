@@ -1897,7 +1897,7 @@ pub fn cargar_programa_con_pm(ruta_pm: &str, ruta_usuario: &str) -> Result<Progr
     // al cwd del proceso), normalizada (resolviendo `.`/`..`) **sin
     // anteponer su directorio**: `ruta_usuario` ya va expresada relativa al
     // cwd, así que `normalizar(dir_de(ruta_usuario), ruta_usuario)` la
-    // duplicaría (`ejemplos/` + `ejemplos/basica.yaml`). Las subsecuencias
+    // duplicaría (`ejemplos/` + `ejemplos/basica.yseq`). Las subsecuencias
     // externas del usuario sí se normalizan relativas a `dir_de(ruta_usuario)`
     // (paso 5a), que es como se leen del disco.
     let usuario = cargar_de_archivo(ruta_usuario)?;
@@ -3001,7 +3001,7 @@ cleanup:
     #[test]
     fn la_traduccion_coincide_con_el_ejemplo_en_codigo() {
         // The YAML and the same sequence built in code agree. The M4 scopes
-        // stay empty (`basica.yaml` does not use them).
+        // stay empty (`basica.yseq` does not use them).
         let s = cargar_de_texto(basica_yaml()).unwrap();
         let en_bench = |mut p: DefinicionPaso| {
             p.ejecutor = Some("bench".into());
@@ -3518,20 +3518,20 @@ main:
         assert!(matches!(&err, ErrorCarga::Lectura(_)));
     }
 
-    /// El ejemplo `ejemplos/subsecuencia.yaml` carga como programa: la
-    /// subsecuencia externa `./medir_fuentes.yaml` se resuelve, la inline
+    /// El ejemplo `ejemplos/subsecuencia.yseq` carga como programa: la
+    /// subsecuencia externa `./medir_fuentes.yseq` se resuelve, la inline
     /// `init_comun` se enlaza por nombre y la firma/lvalues validan.
     #[test]
     fn ejemplo_subsecuencia_carga_como_programa() {
         let ruta = format!(
-            "{}/../../ejemplos/subsecuencia.yaml",
+            "{}/../../ejemplos/subsecuencia.yseq",
             env!("CARGO_MANIFEST_DIR")
         );
         let prog = cargar_programa_de_archivo(&ruta)
             .unwrap_or_else(|e| panic!("no carga el programa {ruta}: {e}"));
         assert_eq!(prog.raiz.nombre, "basica");
         assert_eq!(prog.raiz.subsecuencias.len(), 1, "una inline: init_comun");
-        assert_eq!(prog.archivos.len(), 1, "una externa: medir_fuentes.yaml");
+        assert_eq!(prog.archivos.len(), 1, "una externa: medir_fuentes.yseq");
         // El call externo reescribe su `secuencia` a la clave canónica (path).
         let call_ext = &prog.raiz.pasos_main[1];
         assert_eq!(call_ext.tipo, modelo::TipoPaso::SequenceCall);
@@ -4524,7 +4524,7 @@ main:
     #[test]
     fn statement_a_parameter_declarado_es_valido() {
         // No debe romper el canal de retorno by-reference de una subsecuencia
-        // (patrón de ejemplos/medir_fuentes.yaml).
+        // (patrón de ejemplos/medir_fuentes.yseq).
         let yaml = "\
 name: s
 parameters:
@@ -4618,13 +4618,13 @@ main:
         assert!(m.contains("comparison: LE, low: 1"), "{m}");
     }
 
-    /// End-to-end: el ejemplo `ejemplos/variables.yaml` carga con todos los
+    /// End-to-end: el ejemplo `ejemplos/variables.yseq` carga con todos los
     /// campos de M4 (scopes, precondición, asigna, statement, disable,
     /// pause_on_fail). Valida que el schema admite el ejemplo de referencia.
     #[test]
     fn ejemplo_variables_yaml_carga() {
         let ruta = format!(
-            "{}/../../ejemplos/variables.yaml",
+            "{}/../../ejemplos/variables.yseq",
             env!("CARGO_MANIFEST_DIR")
         );
         let s = cargar_de_archivo(&ruta).unwrap_or_else(|e| panic!("no carga {ruta}: {e}"));
@@ -5163,13 +5163,13 @@ main:
         );
     }
 
-    /// M5-ext.1: el ejemplo `ejemplos/demo_ejecutores.yaml` carga como
+    /// M5-ext.1: el ejemplo `ejemplos/demo_ejecutores.yseq` carga como
     /// programa: la tabla `ejecutores:` se traduce y los pasos que la
     /// referencian se enlazan.
     #[test]
     fn ejemplo_demo_ejecutores_carga_como_programa() {
         let ruta = format!(
-            "{}/../../ejemplos/demo_ejecutores.yaml",
+            "{}/../../ejemplos/demo_ejecutores.yseq",
             env!("CARGO_MANIFEST_DIR")
         );
         let prog = cargar_programa_de_archivo(&ruta)
@@ -5266,7 +5266,7 @@ main:
 "
     }
 
-    /// PM canónico + usuario `basica.yaml` (sin parameters): el cargador
+    /// PM canónico + usuario `basica.yseq` (sin parameters): el cargador
     /// reescribe el placeholder al path canónico del usuario y lo registra.
     fn dir_pm(tag: &str) -> std::path::PathBuf {
         let dir = std::env::temp_dir().join(format!("anvil_m5_{tag}"));
@@ -5349,25 +5349,25 @@ main:
 
     #[test]
     fn pm_usuario_con_subsecuencias_externas_las_resuelve() {
-        // El usuario es `ejemplos/subsecuencia.yaml`, que referencia a
-        // `./medir_fuentes.yaml` y a la inline `init_comun`. El PM debe
+        // El usuario es `ejemplos/subsecuencia.yseq`, que referencia a
+        // `./medir_fuentes.yseq` y a la inline `init_comun`. El PM debe
         // resolver tanto al usuario como a sus dependencias externas.
         let dir = dir_pm("subs");
         std::fs::write(dir.join("pm.yaml"), pm_yaml()).unwrap();
         std::fs::copy(
             format!(
-                "{}/../../ejemplos/subsecuencia.yaml",
+                "{}/../../ejemplos/subsecuencia.yseq",
                 env!("CARGO_MANIFEST_DIR")
             ),
-            dir.join("subsecuencia.yaml"),
+            dir.join("subsecuencia.yseq"),
         )
         .unwrap();
         std::fs::copy(
             format!(
-                "{}/../../ejemplos/medir_fuentes.yaml",
+                "{}/../../ejemplos/medir_fuentes.yseq",
                 env!("CARGO_MANIFEST_DIR")
             ),
-            dir.join("medir_fuentes.yaml"),
+            dir.join("medir_fuentes.yseq"),
         )
         .unwrap();
         // The copied sequence declares the demo bench's executor by path, and
@@ -5376,10 +5376,10 @@ main:
         std::fs::write(dir.join("departamento/dist/anvil-exec-wasm"), b"").unwrap();
         let prog = cargar_programa_con_pm(
             dir.join("pm.yaml").to_str().unwrap(),
-            dir.join("subsecuencia.yaml").to_str().unwrap(),
+            dir.join("subsecuencia.yseq").to_str().unwrap(),
         )
         .unwrap();
-        // archivos contiene al usuario + a medir_fuentes.yaml (su externa).
+        // archivos contiene al usuario + a medir_fuentes.yseq (su externa).
         assert!(
             prog.archivos.len() >= 2,
             "usuario + subsecuencia externa del usuario"
@@ -5737,7 +5737,7 @@ main:
     }
 
     /// `estado` y `mensaje` sí los produce un sequence call: siguen valiendo.
-    /// Protege a `ejemplos/subsecuencia.yaml` y a cualquier process model que lo use.
+    /// Protege a `ejemplos/subsecuencia.yseq` y a cualquier process model que lo use.
     #[test]
     fn asigna_de_estado_en_un_sequence_call_sigue_siendo_valido() {
         let s = cargar_de_texto(

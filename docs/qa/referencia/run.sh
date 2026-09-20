@@ -86,7 +86,7 @@ arranca_banco || exit 1
 # El criterio central: el objeto se queda en el ejecutor, la secuencia lleva la
 # referencia, y el identificador queda escrito en el informe (Regla 3 de
 # ADR-0019: se puede reconstruir contra qué banco se midió).
-$A ejemplos/referencia.yaml --json "$TMP/r1.json" --csv "$TMP/r1.csv" \
+$A ejemplos/referencia.yseq --json "$TMP/r1.json" --csv "$TMP/r1.csv" \
   >"$TMP/r1.out" 2>"$TMP/r1.err"
 salida=$?
 res=0

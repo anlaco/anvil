@@ -26,7 +26,7 @@ const fixture = (name) => readFile(join(REPO, "ejemplos", name), "utf8");
  * Runs the loader over a document's current text and returns its verdict.
  *
  * `alongside` mounts the other files the sequence needs: the demo bench's
- * binary, and for `subsecuencia.yaml` the `./medir_fuentes.yaml` it calls — a
+ * binary, and for `subsecuencia.yseq` the `./medir_fuentes.yseq` it calls — a
  * file the loader cannot read is a load error.
  */
 async function validate(doc, alongside = {}) {
@@ -41,8 +41,8 @@ for (const type of STEP_TYPES) {
   test(`inserting a '${type}' step leaves the sequence loadable`, async () => {
     // `sequence_call` needs a subsequence to call, so it gets the fixture that
     // has one; the others use the plainest sequence in the repo, which is also
-    // the least forgiving — `basica.yaml` declares no variables at all.
-    const file = type === "sequence_call" ? "subsecuencia.yaml" : "basica.yaml";
+    // the least forgiving — `basica.yseq` declares no variables at all.
+    const file = type === "sequence_call" ? "subsecuencia.yseq" : "basica.yseq";
     const doc = new SequenceDocument(await fixture(file));
     const { [file]: _self, ...alongside } = await exampleFiles(file);
 
@@ -65,7 +65,7 @@ test("a sequence_call is refused when there is no subsequence to call", async ()
   // `sequence` is mandatory on that type (crates/cargador/src/lib.rs:2323-2328)
   // and naming one that does not exist fails to load, so there is no valid step
   // to insert. Refusing with a reason beats inserting something broken.
-  const doc = new SequenceDocument(await fixture("basica.yaml"));
+  const doc = new SequenceDocument(await fixture("basica.yseq"));
 
   const why = doc.cannotAdd("sequence_call");
   assert.ok(why, "a file with no subsequences must refuse a sequence_call");
@@ -76,7 +76,7 @@ test("a sequence_call is refused when there is no subsequence to call", async ()
 test("an inserted step is readable by the step view straight away", async () => {
   // `seq.add(plainObject)` emits fine but leaves an item with no `get`, so the
   // step view read it back as unnamed until the document was re-parsed.
-  const doc = new SequenceDocument(await fixture("basica.yaml"));
+  const doc = new SequenceDocument(await fixture("basica.yseq"));
   const index = doc.addStep("main", "statement");
 
   const step = doc.steps("main")[index];
@@ -85,7 +85,7 @@ test("an inserted step is readable by the step view straight away", async () => 
 });
 
 test("inserted names do not collide", async () => {
-  const doc = new SequenceDocument(await fixture("basica.yaml"));
+  const doc = new SequenceDocument(await fixture("basica.yseq"));
   doc.addStep("main", "action");
   doc.addStep("main", "action");
 
@@ -97,7 +97,7 @@ test("a step that calls an executor names the first declared one, and needs one 
   // There is no executor built into anvil to fall back on (ADR-0041): a step
   // that calls one with no `executor` does not load, so the palette must fill it
   // in, and must refuse when there is nothing to fill it in with.
-  const doc = new SequenceDocument(await fixture("basica.yaml"));
+  const doc = new SequenceDocument(await fixture("basica.yseq"));
   const index = doc.addStep("main", "action");
   assert.equal(doc.steps("main")[index].executor, "demo");
 

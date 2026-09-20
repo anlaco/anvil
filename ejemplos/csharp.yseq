@@ -1,4 +1,4 @@
-# The C# executor, doing what ejemplos/referencia.yaml does with the Python one:
+# The C# executor, doing what ejemplos/referencia.yseq does with the Python one:
 # open a bench object, work through the reference, and cut the output in cleanup.
 #
 # Bring the executor up first — the process is the user's, so Anvil does not

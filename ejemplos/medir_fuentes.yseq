@@ -1,5 +1,5 @@
 # External subsequence (M4b): a public sequence reusable by path.
-# `subsecuencia.yaml` calls it with `sequence: ./medir_fuentes.yaml`.
+# `subsecuencia.yseq` calls it with `sequence: ./medir_fuentes.yseq`.
 #
 # Shows input/output Parameters by reference (as in TestStand):
 #   - It receives `canal` from the parent when it starts.

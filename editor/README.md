@@ -37,7 +37,7 @@ npm run dev           # http://localhost:5180/
 and the dev server serves the repo's own `ejemplos/`:
 
 ```
-http://localhost:5180/?open=/ejemplos/basica.yaml
+http://localhost:5180/?open=/ejemplos/basica.yseq
 ```
 
 That is dev-only, and it is how the editor gets exercised against the real
@@ -177,10 +177,10 @@ refuses anything else.
 ## Running against a bridge
 
 ```sh
-anvil ejemplos/basica.yaml --bridge      # prints a URL with a token
+anvil ejemplos/basica.yseq --bridge      # prints a URL with a token
 ```
 
-Open the URL it prints, adding `&open=/ejemplos/basica.yaml`. Run is disabled
+Open the URL it prints, adding `&open=/ejemplos/basica.yseq`. Run is disabled
 until a bridge is attached, and says so on hover.
 
 The bridge sends the engine's arguments — an `--executor` for each `type: wasm`

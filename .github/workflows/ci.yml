@@ -198,14 +198,14 @@ jobs:
 
       # "Ejercer es la única forma de saber": a build that only compiles is
       # not verified. Runs the actual binary and greps a stable string from
-      # its report. `basica.yaml` judges `fail` by design (a voltage out of
+      # its report. `basica.yseq` judges `fail` by design (a voltage out of
       # range) — exit code 1 here means the engine judged correctly, not
       # that something crashed, so the check is on the report line, not on
       # the exit code.
       - name: "Smoke: anvil.exe runs a sequence"
         working-directory: anvil
         run: |
-          ./packaging/anvil-host/target/release/anvil.exe ejemplos/basica.yaml | tee run.out || true
+          ./packaging/anvil-host/target/release/anvil.exe ejemplos/basica.yseq | tee run.out || true
           grep -q "=== basica: fail ===" run.out
 
       # `--bridge` opens a loopback relay for the editor's WASM-hosted engine
@@ -217,7 +217,7 @@ jobs:
       - name: "Smoke: --bridge listens"
         working-directory: anvil
         run: |
-          ./packaging/anvil-host/target/release/anvil.exe ejemplos/basica.yaml --bridge > bridge.out 2>&1 &
+          ./packaging/anvil-host/target/release/anvil.exe ejemplos/basica.yseq --bridge > bridge.out 2>&1 &
           PID=$!
           for i in $(seq 1 50); do
             grep -q "bridge listening on" bridge.out && break

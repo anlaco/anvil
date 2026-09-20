@@ -11,14 +11,14 @@ nada lo advierta: un lote se puede dar por bueno con los umbrales equivocados.
 cd <raíz del repo>
 
 # A) sin process model: el sidecar se aplica y la secuencia pasa
-anvil ejemplos/limites.yaml --limits ejemplos/limites.limits.yaml
+anvil ejemplos/limites.yseq --limits ejemplos/limites.limits.yaml
 #   stderr: sidecar de límites '...' aplicado (1 paso(s) afectado(s))
 #   stdout: === limites: paso ===
 #             [paso] medir_voltaje: medido: 4.2 V
 
 # B) con process model: el mismo sidecar afecta a 0 pasos y la secuencia falla
 anvil --process-model ejemplos/process_model_sequential.yaml \
-        ejemplos/limites.yaml --limits ejemplos/limites.limits.yaml
+        ejemplos/limites.yseq --limits ejemplos/limites.limits.yaml
 #   stderr: sidecar de límites '...' aplicado (0 paso(s) afectado(s))
 #   stdout: === process_model_sequential: fallo ===
 #             [fallo] medir_voltaje: 4.2 fuera de rango [4.5, 5.5]

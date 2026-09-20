@@ -284,7 +284,7 @@ tocar `server.py`.
 | `conectar_equipo` | Fallo transitorio en el intento 1, pasa desde el 2 (RF-09: el `intento` llega al paso por `ctx`). |
 | `medir_simulador` | Mide contra el simulador por TCP; devuelve la medida y el canal usado (el límite lo evalúa el motor, ADR-0008). |
 | `verificar_led` | Pass/fail sin medida. |
-| `open_bench` / `configure_bench` / `measure_bench` / `close_bench` | El patrón de objeto de ADR-0022: uno abre y acuña, varios usan, uno cierra. Ver [`ejemplos/referencia.yaml`](../../ejemplos/referencia.yaml). |
+| `open_bench` / `configure_bench` / `measure_bench` / `close_bench` | El patrón de objeto de ADR-0022: uno abre y acuña, varios usan, uno cierra. Ver [`ejemplos/referencia.yseq`](../../ejemplos/referencia.yseq). |
 
 Un nombre desconocido devuelve `status: error` con la lista de los que sí sirve,
 nunca una excepción (RF-12).

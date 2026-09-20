@@ -5,7 +5,7 @@
 // mutates the corresponding node and the text is re-emitted, so comments, key
 // order and formatting survive (AP-05). This matters because Anvil's sequences
 // are hand-written files that live in git and carry comments worth as much as
-// the content: `ejemplos/basica.yaml` opens with nine lines explaining where its
+// the content: `ejemplos/basica.yseq` opens with nine lines explaining where its
 // threshold comes from and which ADR decided it. An editor that reformats that
 // on save is an editor people stop using.
 //
@@ -687,7 +687,7 @@ export class SequenceDocument {
   // changed is written differently.
   //
   // The trailing newline is restored to whatever the file had. The emitter
-  // always ends with one, and `ejemplos/basica.yaml` ends without — so saving
+  // always ends with one, and `ejemplos/basica.yseq` ends without — so saving
   // would append a line nobody asked to change, in a file reviewed as a diff.
   // Whether a file should end in a newline is not this editor's opinion to
   // impose on someone else's file.

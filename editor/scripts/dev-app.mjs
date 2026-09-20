@@ -5,7 +5,7 @@
 // error and never retries.
 //
 //   npm run app                                   # just open it
-//   ANVIL_EDITOR_OPEN=/ejemplos/basica.yaml npm run app   # with a sequence
+//   ANVIL_EDITOR_OPEN=/ejemplos/basica.yseq npm run app   # with a sequence
 //   ANVIL_EDITOR_DEBUG_PORT=9222 npm run app      # inspectable over CDP
 import { spawn } from "node:child_process";
 import { statSync } from "node:fs";

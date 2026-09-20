@@ -26,8 +26,8 @@ const runEngine = (opts) => run({ ...opts, load });
 
 test("a valid sequence validates clean", async () => {
   const { exitCode, stderr } = await runEngine({
-    args: ["basica.yaml", "--validate"],
-    files: await exampleFiles("basica.yaml"),
+    args: ["basica.yseq", "--validate"],
+    files: await exampleFiles("basica.yseq"),
   });
 
   assert.equal(exitCode, 0, `expected a clean exit, got ${exitCode}:\n${stderr}`);

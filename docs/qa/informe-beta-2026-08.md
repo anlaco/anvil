@@ -62,13 +62,13 @@ Con ficheros del propio repo:
 
 ```sh
 # A) sin PM: el sidecar se aplica y la secuencia pasa
-anvil ejemplos/limites.yaml --limits ejemplos/limites.limits.yaml
+anvil ejemplos/limites.yseq --limits ejemplos/limites.limits.yaml
 #   sidecar de límites '...' aplicado (1 paso(s) afectado(s))
 #   === limites: paso ===
 
 # B) con PM: el mismo sidecar afecta a 0 pasos y la secuencia falla
 anvil --process-model process_models/sequential.yaml \
-      ejemplos/limites.yaml --limits ejemplos/limites.limits.yaml
+      ejemplos/limites.yseq --limits ejemplos/limites.limits.yaml
 #   sidecar de límites '...' aplicado (0 paso(s) afectado(s))
 #   === process_model_sequential: fallo ===
 #     [fallo] medir_voltaje: 4.2 fuera de rango [4.5, 5.5]
@@ -253,7 +253,7 @@ primer orden para un `ResultSink` y para triar en fábrica. Ver
 > ```
 > === sequential: fallo ===
 >   [paso] identificar_uut: UUT-DEMO-001
->   [fallo] correr_secuencia_usuario: sequence call 'ejemplos/limites.yaml' → fallo
+>   [fallo] correr_secuencia_usuario: sequence call 'ejemplos/limites.yseq' → fallo
 > ```
 >
 > **La parte grave de DIAG-4 está resuelta**: sí se registra qué test se corrió,

@@ -3,7 +3,7 @@
 # 1. **Inline** (`init_comun`): declared under `subsequences:`, called by
 #    name (`sequence: init_comun`). Private to this file. Only this sequence
 #    uses it, so it stays inside.
-# 2. **External** (`./medir_fuentes.yaml`): in a separate file, called by
+# 2. **External** (`./medir_fuentes.yseq`): in a separate file, called by
 #    path. Reusable by other sequences.
 #
 # Both pass `args` by reference: each argument is the parent's `locals.X` ↔ the
@@ -37,7 +37,7 @@ main:
     # on return: locals.ok_init = parameters.listo (final, true)
   - name: test_fuentes
     type: sequence_call
-    sequence: ./medir_fuentes.yaml    # path → external file
+    sequence: ./medir_fuentes.yseq    # path → external file
     args: { canal: locals.canal_in }
     assign: { estado_fuentes: "${result.status}" }
     # on return: locals.canal_in = parameters.canal (final, mutated to 1.5)

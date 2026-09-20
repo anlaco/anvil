@@ -852,7 +852,7 @@ mod tests {
     /// measure the wrong thing. Flagging it would refuse to run a sequence
     /// over a step its author explicitly turned off — the check overreaching.
     ///
-    /// Seen failing by removing the `disable` guard: `ejemplos/variables.yaml`,
+    /// Seen failing by removing the `disable` guard: `ejemplos/variables.yseq`,
     /// which ships a disabled `paso_obsoleto`, stops running.
     #[test]
     fn un_paso_deshabilitado_no_se_comprueba() {

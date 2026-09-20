@@ -621,18 +621,18 @@ mod tests {
     #[test]
     fn la_secuencia_de_operador_es_la_del_cli_solo_con_process_model() {
         let con_pm = parse_cli(vec![
-            "ejemplos/basica.yaml".into(),
+            "ejemplos/basica.yseq".into(),
             "--process-model".into(),
             "pm.yaml".into(),
         ])
         .unwrap();
         assert_eq!(
             secuencia_de_operador(&con_pm).as_deref(),
-            Some("ejemplos/basica.yaml")
+            Some("ejemplos/basica.yseq")
         );
 
         // Sin PM, la raíz ya es la secuencia del usuario: el campo sobra.
-        let sin_pm = parse_cli(vec!["ejemplos/basica.yaml".into()]).unwrap();
+        let sin_pm = parse_cli(vec!["ejemplos/basica.yseq".into()]).unwrap();
         assert!(secuencia_de_operador(&sin_pm).is_none());
     }
 

@@ -184,11 +184,11 @@ Factorizar `corre_un_paso(p, &mut entorno, sink)` compartido por Setup/Main/Clea
 ### Tests afectados (rotura esperada, trivial)
 - `campo_desconocido_es_error` (l.406): hoy usa `disable: true` que **ya será válido** → cambiar a un campo raro (`foo: bar`) y actualizar comentario.
 - `la_traduccion_coincide_con_el_ejemplo_en_codigo` (l.330): construye `DefinicionSecuencia` como literal → añadir `..Default::default()` o los 3 mapas vacíos.
-- Resto de tests y ejemplos (`basica.yaml`, `limites.yaml`) siguen pasando (defaults).
+- Resto de tests y ejemplos (`basica.yseq`, `limites.yseq`) siguen pasando (defaults).
 
 ---
 
-## Pieza 5 — Ejemplo `ejemplos/variables.yaml` (nuevo)
+## Pieza 5 — Ejemplo `ejemplos/variables.yseq` (nuevo)
 Ejercita: `file_globals` (texto + número), `locals` (numérico + bool), `parameters: {}`, un **statement** (`tipo: statement`, `statement: 'locals.ok = false'`), un paso Grpc con `precondicion` + `limite` + `asigna` (vuelca `resultado.valor_medido` y `resultado.estado == "paso"`), un paso `disable: true`, y un paso `pause_on_fail: true`. Documenta el resultado esperado (estado agregado `fallo`, locals finales, líneas de reporte).
 
 ---
@@ -211,19 +211,19 @@ Ejercita: `file_globals` (texto + número), `locals` (numérico + bool), `parame
 4. `cargador`: `ValorYaml`, ampliar `SecuenciaYaml`/`PasoYaml`, `a_definicion` con parseo `expr`, materializar mapas. Arreglar los 2 tests rotos. Nuevos tests de carga.
 5. `motor/entorno.rs`: `EntornoMotor` + impl `Entorno` + `ValorDefinicion::a_value`.
 6. `motor/lib.rs`: `mod entorno`; factorizar `corre_un_paso`, `ejecuta_statement`, precondición, asigna, `pause_on_fail`. Tests con entorno construido a mano (sin gRPC).
-7. `ejemplos/variables.yaml`.
+7. `ejemplos/variables.yseq`.
 8. Docs + ADR-0009 + requisitos/roadmap.
 
 ## Verificación end-to-end
 - `cargo test -p expr` — parser (precedencia, no-asociatividad de comparaciones, `and/or/not`, scopes, asignación, errores posicionales) y evaluator (`EntornoMock`: aritmética, div/0, `Nulo` en aritmética→error, cortocircuito, tipos, escritura sólo Locals).
 - `cargo test -p modelo` — `estado()` con saltado neutral; reporte congelado + nueva línea saltado; constructores con defaults.
-- `cargo test -p cargador` — carga de `variables.yaml`, precondición/asigna/statement parseados, errores de sintaxis→`ErrorCarga::Validacion` con nombre de paso, cross-field statement/grpc, `deny_unknown_fields` sigue rechazando campos raros.
+- `cargo test -p cargador` — carga de `variables.yseq`, precondición/asigna/statement parseados, errores de sintaxis→`ErrorCarga::Validacion` con nombre de paso, cross-field statement/grpc, `deny_unknown_fields` sigue rechazando campos raros.
 - `cargo test -p motor` — `EntornoMotor` pura: precondición falsa→saltado, precondición no-bool→error, statement local, asigna vuelca Locals, asigna a parameters→error, `disable`→saltado, `pause_on_fail` corta Setup.
 - `cargo build --target wasm32-wasip2 -p expr` — confirma sin deps externas (ADR-0001).
 - Smoke manual (requiere `wasi-grpc` y `ejecutor_pasos` corriendo en `127.0.0.1:9100`):
   ```
   wasmtime -S cli -S tcp=y -S inherit-network=y --dir=. \
-    target/wasm32-wasip2/debug/anvil.wasm ejemplos/variables.yaml --json /tmp/out.json
+    target/wasm32-wasip2/debug/anvil.wasm ejemplos/variables.yseq --json /tmp/out.json
   ```
   Verificar reporte textual con `  [saltado] paso_obsoleto: disable`, JSON/CSV con `estado="saltado"`, y que `locals.voltaje_leido` quedó volcada (inspeccionar vía un statement de diagnóstico `locals.voltaje_leido` si se quiere; el reporte no muestra locals hoy — opcional post-MVP).
 

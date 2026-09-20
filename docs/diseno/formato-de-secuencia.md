@@ -6,7 +6,7 @@
 
 La secuencia es **datos** (ADR-0002). El cargador (`crates/cargador`) lee el
 YAML y lo traduce a `DefinicionSecuencia` sin tocar el motor (ADR-0005). La
-secuencia de referencia es `ejemplos/basica.yaml`.
+secuencia de referencia es `ejemplos/basica.yseq`.
 
 ## Estado actual
 
@@ -17,7 +17,7 @@ retirado con ADR-0041); desde entonces es un YAML que el cargador traduce a
 ## Schema YAML propuesto
 
 ```yaml
-# Secuencia de ejemplo "basica" (ejemplos/basica.yaml)
+# Secuencia de ejemplo "basica" (ejemplos/basica.yseq)
 name: basica
 executors:
   - { name: demo, type: wasm, path: departamento/dist/anvil-exec-wasm }
@@ -163,7 +163,7 @@ Una subsecuencia se declara de dos formas:
 - **Inline** bajo `subsecuencias:`, invocada por **nombre**. Privada del
   archivo. Útil cuando sólo la usa esa secuencia.
 - **En archivo aparte**, invocada por **path relativo**
-  (`secuencia: ./medir_fuentes.yaml`). Reutilizable desde varias secuencias.
+  (`secuencia: ./medir_fuentes.yseq`). Reutilizable desde varias secuencias.
 
 Convención para distinguir nombre vs path en `secuencia`: si contiene `/` o
 termina en `.yseq`, `.yaml` o `.yml` → path (relativo al directorio del archivo

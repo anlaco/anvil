@@ -1,6 +1,6 @@
 // The repo's examples as the desktop shell hands them to the engine: the file
 // and what it references beside it on disk (src/neighbours.mjs). Since the demo
-// bench (ADR-0041) `basica.yaml` names an executor binary, and the loader
+// bench (ADR-0041) `basica.yseq` names an executor binary, and the loader
 // refuses a sequence whose binary it cannot see.
 
 import { existsSync } from "node:fs";

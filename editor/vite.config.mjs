@@ -4,7 +4,7 @@ import { defineConfig } from "vite";
 
 const REPO = resolve(import.meta.dirname, "..");
 
-// Serves the repo's own `ejemplos/` in dev, so `?open=/ejemplos/basica.yaml`
+// Serves the repo's own `ejemplos/` in dev, so `?open=/ejemplos/basica.yseq`
 // works without a file picker. Dev only — it is how the editor is exercised
 // against the real fixtures, and the browser's file dialog cannot be driven
 // from a test.

@@ -6,7 +6,7 @@
 # sequence with different channels produced identical reports.
 #
 # Run:
-#   ./anvil ejemplos/parametros.yaml --json /tmp/r.json
+#   ./anvil ejemplos/parametros.yseq --json /tmp/r.json
 #   # and look at "inputs" and "outputs" of each step in the JSON.
 name: parametros
 

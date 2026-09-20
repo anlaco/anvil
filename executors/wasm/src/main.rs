@@ -1186,7 +1186,7 @@ mod tests {
     }
 
     /// Single-file mode keeps bare names: this is what every sequence written
-    /// before ADR-0025 says, `ejemplos/demo_wasm.yaml` included.
+    /// before ADR-0025 says, `ejemplos/demo_wasm.yseq` included.
     #[test]
     fn one_module_keeps_bare_step_names() {
         let set = set_with(&["hola_paso"], false);

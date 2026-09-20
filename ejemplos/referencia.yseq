@@ -13,10 +13,10 @@
 #   # terminal 2: the Python executor (its steps live in executors/python/steps)
 #   cd executors/python && python3 server.py
 #   # terminal 3
-#   ./anvil ejemplos/referencia.yaml --json /tmp/r.json
+#   ./anvil ejemplos/referencia.yseq --json /tmp/r.json
 #
 # And to check the whole thing without measuring anything:
-#   ./anvil ejemplos/referencia.yaml --validate
+#   ./anvil ejemplos/referencia.yseq --validate
 name: referencia
 
 executors:

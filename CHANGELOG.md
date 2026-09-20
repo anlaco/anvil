@@ -26,6 +26,21 @@ applies from 0.6.0 on; by it, 0.6.0 itself would have been 0.5.1.
 
 ## [Unreleased]
 
+### Changed
+
+- **Every example sequence is a `.yseq` file.** `ejemplos/*.yaml` became
+  `ejemplos/*.yseq` — the extension ADR-0039 gave a sequence — and everything
+  that pointed at them moved with them: CI, the host and editor tests, the QA
+  regression, the packaging scripts, the guides and the book. `git mv`, so each
+  file keeps its history.
+
+  `ejemplos/limites.limits.yaml` keeps its extension on purpose: it is a limits
+  sidecar, not a sequence.
+
+  The ADRs were not rewritten. They record what was true when they were
+  accepted, so their paths still read `.yaml`; ADR-0039 carries a note saying
+  when the rename happened and why they were left alone.
+
 ### Added
 
 - **A step may carry a `comment`.** Free text about the step, for whoever reads
@@ -93,7 +108,7 @@ with a message that says what to write for each step.
   gets its **comparison** from the panel, which rewrites the limit with the
   fields that code uses and keeps the bounds it still needs. `condition`,
   `statement`, `value`, `precondition` and `pause_on_fail` are editable too.
-  The test that holds this up builds `ejemplos/basica.yaml` from an empty
+  The test that holds this up builds `ejemplos/basica.yseq` from an empty
   sequence and checks it against the file in the repo, step for step.
 
 ### Removed
@@ -157,7 +172,7 @@ with a message that says what to write for each step.
 - **A sequence path naming an executor binary without `.exe` works on
   Windows.** `path: departamento/dist/anvil-exec-wasm` finds
   `anvil-exec-wasm.exe`, so one sequence runs on Linux and Windows.
-- **`ejemplos/variables.yaml` and `ejemplos/veredicto.yaml` compared
+- **`ejemplos/variables.yseq` and `ejemplos/veredicto.yseq` compared
   `result.status` with `"paso"`**, a status that no longer exists, so a
   condition reading the led's result could never pass.
 
@@ -277,7 +292,7 @@ with a message that says what to write for each step.
   **yours**: the SDK is a library you reference, and your executable listens —
   so there is no `--steps`, because your catalog is compiled in. Lives in
   [`executors/csharp/`](executors/csharp/) under Apache-2.0 like its siblings,
-  with [`ejemplos/csharp.yaml`](ejemplos/csharp.yaml) as the worked example.
+  with [`ejemplos/csharp.yseq`](ejemplos/csharp.yseq) as the worked example.
   The contract is untouched and stays at version 4.
 
 - **Windows support** ([ADR-0036](docs/adr/0036-the-sequence-editor-is-wrapped-by-tauri-not-the-browser.md)):
@@ -309,7 +324,7 @@ with a message that says what to write for each step.
   it is readable by hand:
 
   ```sh
-  anvil ejemplos/basica.yaml --events 2>&1 >/dev/null
+  anvil ejemplos/basica.yseq --events 2>&1 >/dev/null
   ```
 
   **Identity on the line is the execution, not the step**
@@ -388,7 +403,7 @@ with a message that says what to write for each step.
 
   Measured, 200 loopback echoes through the relay: mean 932 ms and a worst case
   of 10.7 s before, **mean 6.0 ms and worst 7.1 ms** after. From the editor, 20
-  runs of `ejemplos/basica.yaml`: median 7.3 s and a worst case of 32.2 s
+  runs of `ejemplos/basica.yseq`: median 7.3 s and a worst case of 32.2 s
   before, **median 103 ms and worst 358 ms** after. This mattered beyond
   comfort — the engine has no per-step deadline and `wasi-grpc` has no
   deadlines at all, so nothing under a stalled exchange would have caught it
@@ -508,8 +523,8 @@ with a message that says what to write for each step.
   Pointing `path` at a `.wasm` is stopped with a message that explains it,
   instead of failing with "Exec format error".
 
-  Updated in this repo: `ejemplos/demo_wasm.yaml` and
-  `ejemplos/demo_departamento.yaml`. `make build`/`make release` assemble the
+  Updated in this repo: `ejemplos/demo_wasm.yseq` and
+  `ejemplos/demo_departamento.yseq`. `make build`/`make release` assemble the
   example department in `ejemplos/departamento/dist/`.
 
   **Amends [ADR-0023](docs/adr/0023-the-bridge-ships-as-a-file-next-to-anvil.md):**
@@ -567,8 +582,8 @@ with a message that says what to write for each step.
   two files with the same name under two different `--steps` make the executor
   refuse to start, naming both.
 
-  Updated in this repo: `ejemplos/demo_ejecutores.yaml`,
-  `ejemplos/referencia.yaml` and `docs/qa/referencia/run.sh`.
+  Updated in this repo: `ejemplos/demo_ejecutores.yseq`,
+  `ejemplos/referencia.yseq` and `docs/qa/referencia/run.sh`.
 
 - **`paso.proto` goes to contract 4, and this is a flag day.** `Value`'s
   `oneof` gains a branch and `ValueType` a value (ADR-0022). The contract echo
@@ -602,7 +617,7 @@ with a message that says what to write for each step.
   Neither the extension nor the path appears in the sequence, so the executor
   can reorganise its folders — or rewrite a module in another language —
   without editing any YAML. Worked example in
-  [`ejemplos/demo_departamento.yaml`](ejemplos/demo_departamento.yaml).
+  [`ejemplos/demo_departamento.yseq`](ejemplos/demo_departamento.yseq).
 
   The qualified name travels inside `StepRequest.name`, which for `paso.proto`
   is an opaque string: **no contract change, no engine change and no WIT
@@ -708,7 +723,7 @@ with a message that says what to write for each step.
   - **The Python executor is the worked example**: `ctx.objects` keeps the
     slots, `Reference` is a parameter type like any other, and `steps/instrument.py`
     ships `open_bench` / `configure_bench` / `measure_bench` / `close_bench`.
-    See `ejemplos/referencia.yaml` and `docs/qa/referencia/run.sh`.
+    See `ejemplos/referencia.yseq` and `docs/qa/referencia/run.sh`.
 
   **Not covered**: a reference reaching a WASM component. `anvil:step` is a
   function with no state between calls, so the component has nowhere to keep
@@ -811,10 +826,10 @@ no altera ninguno.
 - **El ejecutor Python estaba roto desde la traducción al inglés** (`579f468`):
   leía `request.nombre` y `request.intento`, campos que el contrato ya no
   tiene, así que toda invocación moría. Reproducido con
-  `ejemplos/demo_ejecutores.yaml` antes de tocar nada. Que pasara inadvertido
+  `ejemplos/demo_ejecutores.yseq` antes de tocar nada. Que pasara inadvertido
   es el mejor argumento de ADR-0021: un ejecutor que no se puede interrogar
   tampoco se puede comprobar.
-- **`ejemplos/variables.yaml` llamaba a un paso que no existe**
+- **`ejemplos/variables.yseq` llamaba a un paso que no existe**
   (`verificar_frecuencia`). Nunca dio guerra porque Main corta en el primer
   fallo y no se llegaba a invocar — hasta que alguien tocase el límite del paso
   anterior. Lo encontró la comprobación de catálogos el día que se escribió,
@@ -970,7 +985,7 @@ producían informes idénticos.**
   En un `statement` o un `pass_fail` sigue sin admitirse.
 - **`pasos_demo::medir_voltaje` acepta `canal` y `offset`** y devuelve las
   salidas `canal_usado` y `temperatura`. Sin parámetros mide los 4,2 V de
-  siempre, así que `ejemplos/basica.yaml` no cambia.
+  siempre, así que `ejemplos/basica.yseq` no cambia.
 
 **`--validate` deja de decir «válida» a secuencias que no lo son.** El manual
 promete que el flag «carga la secuencia, valida el schema, resuelve
@@ -982,8 +997,8 @@ a mitad de la corrida ni en silencio.
 **Hay secuencias que hoy cargan y pasarán a fallar al cargar.** Cada una de
 ellas es una definición que ya estaba rota: todas morían en ejecución, sólo que
 más tarde y con la unidad medio probada. Un caso concreto del propio repo:
-`ejemplos/medir_fuentes.yaml` escribe `parameters.canal`, legítimo porque
-`ejemplos/subsecuencia.yaml` la invoca — pero corrida **como raíz** ahora se
+`ejemplos/medir_fuentes.yseq` escribe `parameters.canal`, legítimo porque
+`ejemplos/subsecuencia.yseq` la invoca — pero corrida **como raíz** ahora se
 rechaza al cargar en vez de morir a mitad.
 
 ### Cambiado

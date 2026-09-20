@@ -64,7 +64,7 @@ nothing to point at.
 default because the executor's stderr belongs to whoever is running the
 sequence.
 
-Then point a sequence at it — [`ejemplos/csharp.yaml`](../../ejemplos/csharp.yaml)
+Then point a sequence at it — [`ejemplos/csharp.yseq`](../../ejemplos/csharp.yseq)
 is the worked example:
 
 ```yaml

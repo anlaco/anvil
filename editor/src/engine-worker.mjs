@@ -3,7 +3,7 @@
 // The engine is a synchronous WASM component: while it runs, whatever thread it
 // is on does nothing else. On the page's main thread that means a frozen
 // interface — dead buttons, no way to abort — for as long as a sequence takes.
-// Fine for the 80 ms `ejemplos/basica.yaml` takes to validate; not fine for a
+// Fine for the 80 ms `ejemplos/basica.yseq` takes to validate; not fine for a
 // real run.
 //
 // A worker is a real operating-system thread, so this is also the shape

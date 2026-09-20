@@ -34,7 +34,7 @@ const mapReader = (map) => ({
 });
 
 test("the loader's path rule, not a looser one", () => {
-  assert.equal(isPath("./medir_fuentes.yaml"), true);
+  assert.equal(isPath("./medir_fuentes.yseq"), true);
   assert.equal(isPath("sub.yseq"), true);
   assert.equal(isPath("init_comun"), false);
 });
@@ -65,25 +65,25 @@ main:
 });
 
 test("with no reader, only the open document is mounted", async () => {
-  const text = await readFile(join(EJEMPLOS, "basica.yaml"), "utf8");
-  assert.deepEqual(Object.keys(await gatherFiles("basica.yaml", text)), ["basica.yaml"]);
+  const text = await readFile(join(EJEMPLOS, "basica.yseq"), "utf8");
+  assert.deepEqual(Object.keys(await gatherFiles("basica.yseq", text)), ["basica.yseq"]);
 });
 
 test("the demo bench's binary is mounted, and basica validates as the binary says", async () => {
-  const text = await readFile(join(EJEMPLOS, "basica.yaml"), "utf8");
-  const files = await gatherFiles("basica.yaml", text, diskReader(EJEMPLOS));
+  const text = await readFile(join(EJEMPLOS, "basica.yseq"), "utf8");
+  const files = await gatherFiles("basica.yseq", text, diskReader(EJEMPLOS));
   assert.ok("departamento/dist/anvil-exec-wasm" in files, Object.keys(files).join(", "));
 
-  const { exitCode, stderr } = await run({ args: ["basica.yaml", "--validate"], files, load });
+  const { exitCode, stderr } = await run({ args: ["basica.yseq", "--validate"], files, load });
   assert.equal(exitCode, 0, stderr);
 });
 
 test("an external subsequence is mounted, and so is what it references", async () => {
-  const text = await readFile(join(EJEMPLOS, "subsecuencia.yaml"), "utf8");
-  const files = await gatherFiles("subsecuencia.yaml", text, diskReader(EJEMPLOS));
-  assert.ok("medir_fuentes.yaml" in files, Object.keys(files).join(", "));
+  const text = await readFile(join(EJEMPLOS, "subsecuencia.yseq"), "utf8");
+  const files = await gatherFiles("subsecuencia.yseq", text, diskReader(EJEMPLOS));
+  assert.ok("medir_fuentes.yseq" in files, Object.keys(files).join(", "));
 
-  const { exitCode, stderr } = await run({ args: ["subsecuencia.yaml", "--validate"], files, load });
+  const { exitCode, stderr } = await run({ args: ["subsecuencia.yseq", "--validate"], files, load });
   assert.equal(exitCode, 0, stderr);
 });
 

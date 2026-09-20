@@ -1,4 +1,4 @@
-# Limits sidecar for ejemplos/limites.yaml (RF-30, property loader).
+# Limits sidecar for ejemplos/limites.yseq (RF-30, property loader).
 # Overrides demo/measure_voltage's limit: the 4.5–5.5 range written in the
 # sequence becomes a comparison (>= 4.0), which 4.2 does meet. So the sequence
 # passes without touching the flow — in production the threshold changes per

@@ -96,8 +96,8 @@ test("a socket the guest left open is closed when it exits", async () => {
     );
 
     const { exitCode } = await run({
-      args: ["basica.yaml", "--validate"],
-      files: await exampleFiles("basica.yaml"),
+      args: ["basica.yseq", "--validate"],
+      files: await exampleFiles("basica.yseq"),
       load,
     });
     assert.equal(exitCode, 0);

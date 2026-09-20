@@ -123,7 +123,7 @@ struct Relay {
 /// it again the instant it let go — so a relay thread holding bytes the engine
 /// was blocked waiting for could lose the race repeatedly. Measured through
 /// the relay, a loopback echo averaged 932 ms and stalled as long as 10.7 s;
-/// from the editor, twenty runs of `ejemplos/basica.yaml` ranged from 99 ms to
+/// from the editor, twenty runs of `ejemplos/basica.yseq` ranged from 99 ms to
 /// 32 s. A sequencer that drives hardware cannot have an unbounded pause
 /// between two steps, and nothing underneath would have caught it: the engine
 /// has no per-step deadline and `wasi-grpc` has no deadlines at all.

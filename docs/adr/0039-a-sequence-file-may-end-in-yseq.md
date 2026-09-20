@@ -144,3 +144,16 @@ person who develops here, and nothing found contradicts it.
   subsequence `something.yseq`, it changes meaning and fails to load, loudly.
   **Not verified** that the loader forbids a dot in an inline subsequence's
   name; no sequence in this repo uses one.
+
+---
+
+**Followed through on 2026-09-20.** Every example sequence in `ejemplos/` was
+renamed from `.yaml` to `.yseq`, and the ~78 references to them across CI, the
+host and editor tests, the QA regression, the guides and the book were updated
+with them. `ejemplos/limites.limits.yaml` keeps its extension: it is a limits
+sidecar, not a sequence, and `.yseq` says "sequence file".
+
+The ADRs were deliberately **not** rewritten. They are dated records of what was
+decided and what was true when it was decided; a path inside one is part of that
+record, not a link to maintain. So the paths in ADRs older than this note read
+`.yaml`, and this note is where that is explained.

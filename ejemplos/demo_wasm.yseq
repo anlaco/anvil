@@ -16,7 +16,7 @@
 #
 # Start-up (from the repo root):
 #   make release
-#   ./packaging/anvil-host/target/release/anvil ejemplos/demo_wasm.yaml --json out.json
+#   ./packaging/anvil-host/target/release/anvil ejemplos/demo_wasm.yseq --json out.json
 #
 # (The `path:` is relative to the YAML's directory (`ejemplos/`) and points
 # **at the executor's binary** (ADR-0027), not at the `.wasm`: the executor

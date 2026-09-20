@@ -53,7 +53,7 @@ Copy-Item "executors/wasm/target/$Target/release/anvil-exec-wasm.exe" $PkgDir
 Copy-Item README.md, CHANGELOG.md $PkgDir
 Copy-Item LICENSE (Join-Path $PkgDir "LICENSE")                       # anvil: AGPL-3.0-or-later
 Copy-Item executors/LICENSE (Join-Path $PkgDir "LICENSE.executors")   # anvil-exec-wasm: Apache-2.0
-Copy-Item ejemplos/*.yaml (Join-Path $PkgDir "ejemplos")
+Copy-Item ejemplos/*.yseq, ejemplos/*.yaml (Join-Path $PkgDir "ejemplos")
 
 # The example department: the executor's binary with its modules beside it,
 # which is what the demos' `path:` points at (ADR-0027).

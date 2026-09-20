@@ -91,7 +91,7 @@ Modelo/cargador/motor: `TipoEjecutor` (Embebido/Wasm/Grpc),
 4. **CLI** (`anvil.rs`): flag `--ejecutor`; conecta con `desde_programa`.
 5. **Host** (`anvil-host`): `wasi_loopback_con_declaradas` (IPs del YAML),
    flag `--solo-loopback`, deps de `cargador`+`modelo` (nativo, sin wasmtime).
-6. **Ejemplo** `ejemplos/demo_ejecutores.yaml` (embebido + Python, sin
+6. **Ejemplo** `ejemplos/demo_ejecutores.yseq` (embebido + Python, sin
    Docker) + smoke end-to-end verificado.
 7. **Docs**: ADR-0013 (nuevo, supersede ADR-0012 en cargador/routing),
    ADR-0012 marcado superseded, roadmap (M5-ext.1/2/3/4), requisitos
@@ -107,7 +107,7 @@ Modelo/cargador/motor: `TipoEjecutor` (Embebido/Wasm/Grpc),
 - `cargo build --manifest-path packaging/anvil-host/Cargo.toml` — el host
   con `wasi_loopback_con_declaradas` compila.
 - **Smoke manual**: simulador TCP + `server.py` (Python, 9101) + ejecutor
-  embebido (9100) + `anvil-guest.wasm ejemplos/demo_ejecutores.yaml` →
+  embebido (9100) + `anvil-guest.wasm ejemplos/demo_ejecutores.yseq` →
   tres pasos en dos ejecutores distintos, JSON/CSV correctos.
 
 ### Verificación (M5-ext.2)
@@ -121,7 +121,7 @@ Modelo/cargador/motor: `TipoEjecutor` (Embebido/Wasm/Grpc),
   puente compila (wasmtime + tonic + wit-bindgen, workspace aparte).
 - `cargo build --manifest-path packaging/anvil-host/Cargo.toml` — el host
   con `instanciar_wasm` (spawn del puente) compila sin warnings.
-- **Smoke manual**: `./anvil ejemplos/demo_wasm.yaml --json out.json` → el
+- **Smoke manual**: `./anvil ejemplos/demo_wasm.yseq --json out.json` → el
   host spawnea el puente (log: `ejecutor 'mi_paso_wasm' cargado (... →
   127.0.0.1:<puerto>)`), el puente carga el componente y llama a su `run`,
   el motor despacha los tres pasos (embebido + componente), límite y
@@ -161,7 +161,7 @@ no por los de un generador externo.
   `Error::EjecutorWasmSinHost`.
 - **Caso remoto (Pi, futuro)**: el mismo puente se distribuye suelto y se
   corre con `--bind 0.0.0.0`; el YAML declara `tipo: grpc`.
-- Demo `ejemplos/demo_wasm.yaml` + componente `ejemplos/hola-paso` (el
+- Demo `ejemplos/demo_wasm.yseq` + componente `ejemplos/hola-paso` (el
   "hola mundo"), verificado end-to-end.
 - **Post-M5-ext.2**: AOT precompile a `.cwasm`, `StoreLimitsBuilder`, lazy
   loading, modo Debug, pooling/async — si la medición de 50+ Stores lo pide.

@@ -89,10 +89,10 @@ fn una_secuencia_que_pasa_sale_con_cero() {
 
 #[test]
 fn una_secuencia_que_falla_sale_con_uno() {
-    // `ejemplos/veredicto.yaml` documenta en su cabecera que acaba en `fallo`
+    // `ejemplos/veredicto.yseq` documenta en su cabecera que acaba en `fallo`
     // (ADR-0018, veredicto compuesto). Es el caso que motivó el issue #16:
     // corrida exitosa, resultado negativo — y antes salía 0.
-    let s = corre("ejemplos/veredicto.yaml");
+    let s = corre("ejemplos/veredicto.yseq");
     assert_eq!(
         codigo(&s),
         1,
@@ -226,14 +226,14 @@ fn valida(secuencia: &str) -> Output {
 
 /// Every example sequence loads. Examples are what a reader copies, and a
 /// loader change can break one nobody runs: removing the embedded executor
-/// left `variables.yaml` refusing to load for a disabled step with no
+/// left `variables.yseq` refusing to load for a disabled step with no
 /// `executor:`, and no test noticed.
 ///
 /// Not sequences on their own, and so left out: a limits sidecar, and a file
 /// that is only ever called as a subsequence.
 #[test]
 fn every_example_sequence_validates() {
-    const NOT_A_ROOT: [&str; 2] = ["limites.limits.yaml", "medir_fuentes.yaml"];
+    const NOT_A_ROOT: [&str; 2] = ["limites.limits.yaml", "medir_fuentes.yseq"];
     let mut checked = 0;
     for entry in std::fs::read_dir(raiz_repo().join("ejemplos")).expect("read ejemplos/") {
         let path = entry.expect("dir entry").path();

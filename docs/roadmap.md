@@ -149,7 +149,7 @@ Lo que ya existe en el repo:
   `--loopback-only` en el host.
 - **`TipoEjecutor::Wasm` definido y validado al cargar** (el path debe
   existir); la instanciación llegó con M5-ext.2 (ADR-0014).
-- Demo `ejemplos/demo_ejecutores.yaml`: embebido + ejecutor Python en
+- Demo `ejemplos/demo_ejecutores.yseq`: embebido + ejecutor Python en
   loopback (sin Docker). Hoy es el banco de demo WASM + Python (ADR-0041).
 
 #### M5-ext.2 — Cargador de `.wasm` por path host-side ✅ (hecho, ADR-0014/0015)
@@ -176,7 +176,7 @@ Lo que ya existe en el repo:
   mano, Rust, Zig, un editor visual, un tercero— es opaco. El roadmap de
   Anvil avanza por sus propios requisitos, no por los de un generador
   externo.
-- Demo `ejemplos/demo_wasm.yaml` + componente `ejemplos/hola-paso` (el
+- Demo `ejemplos/demo_wasm.yseq` + componente `ejemplos/hola-paso` (el
   "hola mundo"), verificada end-to-end.
 
 > **Patrón soportado desde M5-ext.1** (sin hito propio): un **único `.wasm`

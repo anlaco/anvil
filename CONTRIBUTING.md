@@ -41,7 +41,7 @@ ese orden):
 
 ```sh
 make release
-./packaging/anvil-host/target/release/anvil ejemplos/basica.yaml
+./packaging/anvil-host/target/release/anvil ejemplos/basica.yseq
 ```
 
 `anvil` no lleva ejecutor de pasos propio
@@ -56,7 +56,7 @@ ejemplos/departamento/dist/anvil-exec-wasm --port 9300
 
 # terminal 2 — motor con la secuencia "basica"
 wasmtime -S cli -S tcp=y -S inherit-network=y --dir=. \
-  target/wasm32-wasip2/release/anvil-guest.wasm ejemplos/basica.yaml \
+  target/wasm32-wasip2/release/anvil-guest.wasm ejemplos/basica.yseq \
   --executor demo=127.0.0.1:9300
 ```
 

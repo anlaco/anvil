@@ -42,18 +42,18 @@ Examples (the repo's own are in `ejemplos/`; they call the demo bench's steps,
 `demo/<step>`, on the executor they declare as `demo`):
 
 ```sh
-./anvil ejemplos/subsecuencia.yaml --json ./out.json --csv ./out.csv
-./anvil ejemplos/basica.yaml
-./anvil ejemplos/limites.yaml
-./anvil ejemplos/variables.yaml
-./anvil ejemplos/basica.yaml --limits ejemplos/limites.limits.yaml
-./anvil ejemplos/demo_ejecutores.yaml      # routing: demo bench + Python on loopback
-./anvil ejemplos/demo_ejecutores.yaml --executor python=127.0.0.1:9200
+./anvil ejemplos/subsecuencia.yseq --json ./out.json --csv ./out.csv
+./anvil ejemplos/basica.yseq
+./anvil ejemplos/limites.yseq
+./anvil ejemplos/variables.yseq
+./anvil ejemplos/basica.yseq --limits ejemplos/limites.limits.yaml
+./anvil ejemplos/demo_ejecutores.yseq      # routing: demo bench + Python on loopback
+./anvil ejemplos/demo_ejecutores.yseq --executor python=127.0.0.1:9200
 # Validate without executing or touching hardware (CI):
-./anvil ejemplos/subsecuencia.yaml --validate
+./anvil ejemplos/subsecuencia.yseq --validate
 # And with the executors up, also check step names, parameter names and
 # outputs against what each executor says it serves (ADR-0021):
-./anvil ejemplos/demo_ejecutores.yaml --validate --with-executors
+./anvil ejemplos/demo_ejecutores.yseq --validate --with-executors
 ```
 
 A sequence file may end in `.yseq` as well as `.yaml` or `.yml`: it is the
@@ -69,7 +69,7 @@ none ships since ADR-0041 removed `process_models/sequential.yaml`);
 `--validate` loads and validates without executing; `--quiet` silences the
 console. There are no dependencies to install.
 
-> **Executor routing (M5-ext.1, ADR-0013):** `ejemplos/demo_ejecutores.yaml`
+> **Executor routing (M5-ext.1, ADR-0013):** `ejemplos/demo_ejecutores.yseq`
 > demonstrates the name→endpoint dispatch: `demo/check_led` is served by the
 > demo bench (`type: wasm`, which the host starts) and `instrument/medir_simulador` /
 > `instrument/conectar_equipo` by a Python executor on `127.0.0.1:9101` (start
@@ -91,7 +91,7 @@ console. There are no dependencies to install.
 > catalog is compiled from the signatures
 > ([ADR-0038](adr/0038-the-csharp-step-sdk-is-hosted-by-the-users-own-process.md);
 > the how, in [`executors/csharp/README.md`](../executors/csharp/README.md),
-> with [`ejemplos/csharp.yaml`](../ejemplos/csharp.yaml) as the worked
+> with [`ejemplos/csharp.yseq`](../ejemplos/csharp.yseq) as the worked
 > example).
 
 ## For developers (build from source)
@@ -163,7 +163,7 @@ cargo test -p motor        # sequence call with a mock (no gRPC)
 ### Trying the binary
 
 ```sh
-./packaging/anvil-host/target/debug/anvil ejemplos/subsecuencia.yaml --json ./out.json --csv ./out.csv
+./packaging/anvil-host/target/debug/anvil ejemplos/subsecuencia.yseq --json ./out.json --csv ./out.csv
 ```
 
 Same nested/JSON/CSV report as the smoke test. The executors' logs go to
@@ -177,7 +177,7 @@ stderr; stdout stays clean for the report.
 === basica: pass ===
   [pass] preparar: sequence call 'init_comun' → pass
     [done] preparar_canal: statement ok
-  [pass] test_fuentes: sequence call 'ejemplos/medir_fuentes.yaml' → pass
+  [pass] test_fuentes: sequence call 'ejemplos/medir_fuentes.yseq' → pass
     [done] ajustar_canal: statement ok
     [pass] demo/measure_voltage: measured: 4.2 V (channel 1)
     [done] demo/disconnect: instrument disconnected
@@ -198,7 +198,7 @@ units.
 
 ## M4b variations (subsequences)
 
-Edit `ejemplos/subsecuencia.yaml` and run again (no rebuild needed: the YAML
+Edit `ejemplos/subsecuencia.yseq` and run again (no rebuild needed: the YAML
 is read at runtime):
 
 - **Signature mismatch**: add one extra parameter to the outer call →
@@ -274,7 +274,7 @@ make release
 ejemplos/departamento/dist/anvil-exec-wasm --port 9300
 # Terminal 2 — engine, pointed at it
 wasmtime -S cli -S tcp=y -S inherit-network=y --dir=. \
-  target/wasm32-wasip2/release/anvil-guest.wasm ejemplos/basica.yaml \
+  target/wasm32-wasip2/release/anvil-guest.wasm ejemplos/basica.yseq \
   --executor demo=127.0.0.1:9300
 ```
 
@@ -437,8 +437,8 @@ main:
 
 The extension and the module's location never appear in the sequence, so a
 department can reorganise itself — or rewrite a module in another language —
-without editing any YAML. `ejemplos/demo_departamento.yaml` and
-`ejemplos/demo_wasm.yaml` are the worked examples, and `make build` assembles
+without editing any YAML. `ejemplos/demo_departamento.yseq` and
+`ejemplos/demo_wasm.yseq` are the worked examples, and `make build` assembles
 the department they use.
 
 To see what a department serves without writing a sequence first, ask its

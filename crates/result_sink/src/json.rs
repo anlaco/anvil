@@ -398,11 +398,11 @@ mod tests {
         // (#9): así el resultado archivado registra qué test se corrió.
         let mut pm = ResultadoSecuencia::nueva("sequential");
         pm.registra(ResultadoStep::nuevo("identificar_uut", "pass", "UUT-001"));
-        let mut sink = SinkJson::nuevo(Vec::new()).con_secuencia_usuario("ejemplos/basica.yaml");
+        let mut sink = SinkJson::nuevo(Vec::new()).con_secuencia_usuario("ejemplos/basica.yseq");
         sink.on_fin_secuencia(&pm);
         let doc: Value = serde_json::from_slice(&sink.salida).unwrap();
         assert_eq!(doc["sequence"], "sequential");
-        assert_eq!(doc["user_sequence"], "ejemplos/basica.yaml");
+        assert_eq!(doc["user_sequence"], "ejemplos/basica.yseq");
     }
     /// ADR-0020: los parámetros y las salidas van al JSON **con su tipo**.
     /// Aplanarlos a texto perdería justo lo que este ADR fue a ganar: que

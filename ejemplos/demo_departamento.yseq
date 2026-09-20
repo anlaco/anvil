@@ -13,7 +13,7 @@
 #   cp ejemplos/departamento/target/wasm32-wasip2/debug/*.wasm ejemplos/departamento/dist/
 #
 # Run (from the repo root):
-#   ./packaging/anvil-host/target/release/anvil ejemplos/demo_departamento.yaml
+#   ./packaging/anvil-host/target/release/anvil ejemplos/demo_departamento.yseq
 #
 # See what the department serves, without running anything:
 #   ./ejemplos/departamento/dist/anvil-exec-wasm --list

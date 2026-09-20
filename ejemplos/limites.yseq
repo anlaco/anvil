@@ -7,7 +7,7 @@
 # sequence passes. Changing the verdict without touching the sequence is the
 # value of the property loader.
 #
-#   ./anvil ejemplos/limites.yaml --limits ejemplos/limites.limits.yaml
+#   ./anvil ejemplos/limites.yseq --limits ejemplos/limites.limits.yaml
 
 name: limites
 executors:

@@ -16,7 +16,7 @@ import { fileURLToPath } from "node:url";
 import { SequenceDocument } from "../src/document.mjs";
 
 const REPO = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
-const basica = () => readFile(join(REPO, "ejemplos", "basica.yaml"), "utf8");
+const basica = () => readFile(join(REPO, "ejemplos", "basica.yseq"), "utf8");
 
 /** The lines that differ between two texts, as `[lineNumber, before, after]`. */
 function changedLines(before, after) {
@@ -71,7 +71,7 @@ test("the header comments survive an edit", async () => {
 // A sequence saved on Windows usually has CRLF line endings — git checks the
 // repo's own files out that way there, and so does a Windows editor. The
 // emitter writes `\n`, and re-emitting in LF turned a one-value change into a
-// diff of every line: 26 of 26 in `basica.yaml`, caught on windows-latest.
+// diff of every line: 26 of 26 in `basica.yseq`, caught on windows-latest.
 // The CRLF copy is built here, so the test does not depend on how git happened
 // to check the fixture out.
 test("a CRLF file keeps its line endings, so an edit is still one line", async () => {
@@ -119,7 +119,7 @@ test("absent fields are shown as the engine will read them", async () => {
   // step that will not be retried at all. `type` has no default (ADR-0040 §2),
   // and a step without one reads as having none.
   //
-  // This needs its own fixture. Every step in `ejemplos/basica.yaml` declares
+  // This needs its own fixture. Every step in `ejemplos/basica.yseq` declares
   // `retries`, so asserting the defaults against it passes no matter what the
   // defaults are — which is what mutating them proved.
   const doc = new SequenceDocument("name: bare\nmain:\n  - name: measure\n");

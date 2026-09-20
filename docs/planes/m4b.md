@@ -14,7 +14,7 @@
      (`secuencia: init_comun`).
    - **En archivo aparte** — útil para reutilizarla desde varias
      secuencias. Se referencia **por path relativo**
-     (`secuencia: ./medir_fuentes.yaml`).
+     (`secuencia: ./medir_fuentes.yseq`).
 
    Un archivo expone su **secuencia raíz** (la de `nombre:`) como pública;
    sus `subsecuencias:` inline son **privadas del archivo** (sólo las puede
@@ -473,7 +473,7 @@ Refactor a función recursiva `escribe_paso(w, p, nivel)`:
 - Nuevo test `reporte_anida_sub_pasos` congela:
   ```
   === basica: fallo ===
-    [fallo] test_fuentes: sequence call './medir_fuentes.yaml' → fallo
+    [fallo] test_fuentes: sequence call './medir_fuentes.yseq' → fallo
       [paso] medir_canal_1: ok
       [fallo] medir_canal_2: fuera de rango
       [paso] desconectar: ok
@@ -495,7 +495,7 @@ pasando; test nuevo congela el aplanado.
 
 ## Pieza 5 — Ejemplos
 
-- `ejemplos/subsecuencia.yaml` (padre): demuestra **ambas** rutas y el
+- `ejemplos/subsecuencia.yseq` (padre): demuestra **ambas** rutas y el
   cableo by-reference de ida/vuelta.
   ```yaml
   nombre: basica
@@ -515,12 +515,12 @@ pasando; test nuevo congela el aplanado.
       # al volver: locals.ok_init = parameters.lista_ok (final)
     - nombre: test_fuentes
       tipo: sequence_call
-      secuencia: ./medir_fuentes.yaml    # path → archivo externo
+      secuencia: ./medir_fuentes.yseq    # path → archivo externo
       parametros: { canal: locals.canal_in }
       # al volver: locals.canal_in = parameters.canal (final; la subsecuencia
       # podría haberlo modificado)
   ```
-- `ejemplos/medir_fuentes.yaml` (hija, archivo externo público):
+- `ejemplos/medir_fuentes.yseq` (hija, archivo externo público):
   ```yaml
   nombre: medir_fuentes
   parameters: { canal: 0.0 }
@@ -589,7 +589,7 @@ pasando; test nuevo congela el aplanado.
 5. `result_sink`: `reporte_a` recursivo, `paso_a_json` anidado, CSV
    aplanado. Tests congelados.
 6. `anvil.rs`: `cargar_programa_de_archivo` + `ejecuta_programa`.
-7. `ejemplos/subsecuencia.yaml` + `medir_fuentes.yaml`.
+7. `ejemplos/subsecuencia.yseq` + `medir_fuentes.yseq`.
 8. Docs + ADR-0010 + requisitos/roadmap.
 
 ## Verificación end-to-end
@@ -617,7 +617,7 @@ pasando; test nuevo congela el aplanado.
 - Smoke manual (ejecutor en `127.0.0.1:9100`):
   ```
   wasmtime -S cli -S tcp=y -S inherit-network=y --dir=. \
-    target/wasm32-wasip2/debug/anvil.wasm ejemplos/subsecuencia.yaml \
+    target/wasm32-wasip2/debug/anvil.wasm ejemplos/subsecuencia.yseq \
     --json /tmp/out.json --csv /tmp/out.csv
   ```
   Verificar reporte con `preparar` y `test_fuentes` anidados, JSON con

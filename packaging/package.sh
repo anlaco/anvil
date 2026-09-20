@@ -44,7 +44,7 @@ cp executors/wasm/target/$TARGET/release/anvil-exec-wasm "$OUT/$NAME/"
 cp README.md CHANGELOG.md "$OUT/$NAME/"
 cp LICENSE "$OUT/$NAME/LICENSE"                    # anvil: AGPL-3.0-or-later
 cp executors/LICENSE "$OUT/$NAME/LICENSE.executors" # anvil-exec-wasm: Apache-2.0
-cp ejemplos/*.yaml "$OUT/$NAME/ejemplos/"
+cp ejemplos/*.yseq ejemplos/*.yaml "$OUT/$NAME/ejemplos/"
 
 # The example department: the executor's binary with its modules beside it,
 # which is what the demos' `path:` points at (ADR-0027). Without this the two

@@ -1610,7 +1610,7 @@ mod tests {
         let mut call = ResultadoStep::nuevo(
             "test_fuentes",
             "fail",
-            "sequence call './medir_fuentes.yaml' → fallo",
+            "sequence call './medir_fuentes.yseq' → fallo",
         );
         call.sub_pasos = Some(vec![
             ResultadoStep::nuevo("medir_canal_1", "pass", "ok"),
@@ -1625,7 +1625,7 @@ mod tests {
 
         let esperado = "\
 === basica: fail ===
-  [fail] test_fuentes: sequence call './medir_fuentes.yaml' → fallo
+  [fail] test_fuentes: sequence call './medir_fuentes.yseq' → fallo
     [pass] medir_canal_1: ok
     [fail] medir_canal_2: fuera de rango
     [pass] desconectar: ok

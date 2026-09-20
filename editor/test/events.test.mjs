@@ -27,12 +27,12 @@ import { exampleFiles } from "./ejemplos.mjs";
 const HERE = dirname(fileURLToPath(import.meta.url));
 const load = (name) => readFile(join(HERE, "..", "generated", name));
 
-/** Validates `basica.yaml`, collecting stderr both ways. */
+/** Validates `basica.yseq`, collecting stderr both ways. */
 async function valida() {
   const lineas = [];
   const r = await run({
-    args: ["basica.yaml", "--validate"],
-    files: await exampleFiles("basica.yaml"),
+    args: ["basica.yseq", "--validate"],
+    files: await exampleFiles("basica.yseq"),
     load,
     onStderrLine: (l) => lineas.push(l),
   });
@@ -62,12 +62,12 @@ test("the delivered lines are exactly the text, in order", async () => {
 });
 
 test("delivery happens during the run, not after it", async () => {
-  const files = await exampleFiles("basica.yaml");
+  const files = await exampleFiles("basica.yseq");
   let durante = 0;
   let terminado = false;
 
   const p = run({
-    args: ["basica.yaml", "--validate"],
+    args: ["basica.yseq", "--validate"],
     files,
     load,
     onStderrLine: () => {
@@ -86,8 +86,8 @@ test("delivery happens during the run, not after it", async () => {
 
 test("without a callback nothing changes for the caller", async () => {
   const { exitCode, stderr } = await run({
-    args: ["basica.yaml", "--validate"],
-    files: await exampleFiles("basica.yaml"),
+    args: ["basica.yseq", "--validate"],
+    files: await exampleFiles("basica.yseq"),
     load,
   });
 

@@ -101,7 +101,7 @@ descendiente profundo llega a la raíz por el mismo camino que un `fallo`.
 **string** (vacío si no hay). Un ejecutor devuelve la medida; el umbral lo pone
 la secuencia (abajo).
 
-Ejemplo del repo (`demo/measure_voltage` en `ejemplos/basica.yaml`): mide 4.2
+Ejemplo del repo (`demo/measure_voltage` en `ejemplos/basica.yseq`): mide 4.2
 contra `GELE` 4.5–5.5 → `fail`.
 
 ## Límites como datos first-class
@@ -190,7 +190,7 @@ inyecta en `limite` antes de ejecutar
 (`cargador::cargar_limites_de_archivo` + `cargador::aplicar_limites_programa`),
 asociando cada límite al paso por `nombre`. El sidecar **manda** sobre el
 límite embebido en la secuencia: es el mecanismo para cambiar umbrales por
-lote/variante sin tocar la secuencia. Ejemplo en `ejemplos/limites.yaml` +
+lote/variante sin tocar la secuencia. Ejemplo en `ejemplos/limites.yseq` +
 `ejemplos/limites.limits.yaml`, invocado con
 `anvil secuencia.yaml --limits limites.limits.yaml`.
 

@@ -87,7 +87,7 @@ jobs:
           # `--version` writes to stderr, hence the 2>&1: without it grep
           # reads nothing and the smoke fails on a correct binary.
           "$D/anvil" --version 2>&1 | grep -F "$VERSION"
-          "$D/anvil" --validate "$D/ejemplos/basica.yaml"
+          "$D/anvil" --validate "$D/ejemplos/basica.yseq"
 
       - uses: actions/setup-node@v4
         with:
@@ -185,7 +185,7 @@ jobs:
           D="dist/anvil-v$VERSION-x86_64-windows"
           # `--version` writes to stderr, hence the 2>&1.
           "$D/anvil.exe" --version 2>&1 | grep -F "$VERSION"
-          "$D/anvil.exe" --validate "$D/ejemplos/basica.yaml"
+          "$D/anvil.exe" --validate "$D/ejemplos/basica.yseq"
 
       # The editor embeds the engine guest transpiled to JavaScript, and
       # `generated/` is not committed: it is transpiled here from the release

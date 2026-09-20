@@ -76,7 +76,7 @@ fn un_departamento_declarado_por_su_binario_corre() {
         );
         return;
     };
-    let s = corre("ejemplos/demo_departamento.yaml");
+    let s = corre("ejemplos/demo_departamento.yseq");
     assert_eq!(
         codigo(&s),
         0,

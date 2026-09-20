@@ -286,7 +286,7 @@ executor (`statement`, `pass_fail`, `sequence_call`).
 
 ## Demo M5-ext.1 (done, no Docker)
 
-The real demo is `ejemplos/demo_ejecutores.yaml`: **the demo bench (WASM) +
+The real demo is `ejemplos/demo_ejecutores.yseq`: **the demo bench (WASM) +
 Python on loopback** (no Docker, no LID).
 
 ```yaml
@@ -307,7 +307,7 @@ main:
 Verification: the sequence passes/fails per step, and the report shows steps
 served by two different executors without the engine knowing anything about
 the language. The demo with an own `.wasm` step (`type: wasm`) is
-`ejemplos/demo_wasm.yaml` (M5-ext.2, ADR-0015): the host spawns the bridge,
+`ejemplos/demo_wasm.yseq` (M5-ext.2, ADR-0015): the host spawns the bridge,
 which loads the `ejemplos/hola-paso` component (the "hello world") and calls
 its `run`; the engine dispatches its steps (`demo/check_led` and the
 component's) with

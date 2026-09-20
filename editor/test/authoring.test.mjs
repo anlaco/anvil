@@ -5,7 +5,7 @@
 // it, declaring a variable to keep what a module returns, and giving a numeric
 // limit its comparison. An editor that needs the text view to finish the job is
 // not an editor, and the fourth test here is the one that says so out loud: it
-// builds `basica.yaml` from an empty document, through the same calls the UI
+// builds `basica.yseq` from an empty document, through the same calls the UI
 // makes, and hands the result to the real engine.
 
 import { strict as assert } from "node:assert";
@@ -34,7 +34,7 @@ async function validate(doc, alongside = {}) {
 // ---------------------------------------------------------------- placement
 
 test("a step can be inserted at a position, not only at the end", async () => {
-  const doc = new SequenceDocument(await fixture("basica.yaml"));
+  const doc = new SequenceDocument(await fixture("basica.yseq"));
   const before = doc.steps("main").map((s) => s.name);
   assert.equal(before.length, 2, "basica's main has two steps");
 
@@ -47,8 +47,8 @@ test("a step can be inserted at a position, not only at the end", async () => {
 });
 
 test("a step moves to any position in any phase, which is a real edit", async () => {
-  const doc = new SequenceDocument(await fixture("basica.yaml"));
-  const { "basica.yaml": _self, ...alongside } = await exampleFiles("basica.yaml");
+  const doc = new SequenceDocument(await fixture("basica.yseq"));
+  const { "basica.yseq": _self, ...alongside } = await exampleFiles("basica.yseq");
 
   // main: [measure_voltage, check_led] → drag check_led onto cleanup's front.
   doc.moveStepTo("main", 1, "cleanup", 0);
@@ -69,8 +69,8 @@ test("a step moves to any position in any phase, which is a real edit", async ()
 // ------------------------------------------------------------------- types
 
 test("changing a step's type takes the old type's fields with it", async () => {
-  const doc = new SequenceDocument(await fixture("basica.yaml"));
-  const { "basica.yaml": _self, ...alongside } = await exampleFiles("basica.yaml");
+  const doc = new SequenceDocument(await fixture("basica.yseq"));
+  const { "basica.yseq": _self, ...alongside } = await exampleFiles("basica.yseq");
 
   // main[0] is a numeric_limit with a limit. An action judges nothing, so a
   // limit left on one is a load error (ADR-0040 §3) — which is what setting
@@ -101,12 +101,12 @@ test("changing a step's type takes the old type's fields with it", async () => {
 });
 
 test("every type a step can become leaves a sequence the engine loads", async () => {
-  const { "basica.yaml": _self, ...alongside } = await exampleFiles("basica.yaml");
+  const { "basica.yseq": _self, ...alongside } = await exampleFiles("basica.yseq");
 
   // Every type but sequence_call, which needs a subsequence basica has not got
   // — `cannotAdd` says so, and the palette greys it out for the same reason.
   for (const type of ["action", "pass_fail", "numeric_limit", "statement"]) {
-    const doc = new SequenceDocument(await fixture("basica.yaml"));
+    const doc = new SequenceDocument(await fixture("basica.yseq"));
     doc.setStepType("main", 0, type);
     const out = await validate(doc, alongside);
     assert.equal(out.exitCode, 0, `main[0] as '${type}' does not load:\n${out.stderr}`);
@@ -116,7 +116,7 @@ test("every type a step can become leaves a sequence the engine loads", async ()
 // ---------------------------------------------------------------- variables
 
 test("a variable can be declared, renamed and removed", async () => {
-  const doc = new SequenceDocument(await fixture("basica.yaml"));
+  const doc = new SequenceDocument(await fixture("basica.yseq"));
   assert.deepEqual(doc.variables("locals"), {}, "basica declares none");
 
   doc.setVariable("locals", "voltaje", 0);
@@ -131,8 +131,8 @@ test("a variable can be declared, renamed and removed", async () => {
 });
 
 test("what a module returns can be kept in a local, and the engine accepts it", async () => {
-  const doc = new SequenceDocument(await fixture("basica.yaml"));
-  const { "basica.yaml": _self, ...alongside } = await exampleFiles("basica.yaml");
+  const doc = new SequenceDocument(await fixture("basica.yseq"));
+  const { "basica.yseq": _self, ...alongside } = await exampleFiles("basica.yseq");
 
   doc.setVariable("locals", "voltaje", 0);
   const index = doc.steps("main").findIndex((s) => s.name === "demo/measure_voltage");
@@ -147,7 +147,7 @@ test("what a module returns can be kept in a local, and the engine accepts it", 
 // ------------------------------------------------------------------- limits
 
 test("a fresh numeric_limit can be given every comparison, and each one loads", async () => {
-  const { "basica.yaml": _self, ...alongside } = await exampleFiles("basica.yaml");
+  const { "basica.yseq": _self, ...alongside } = await exampleFiles("basica.yseq");
   // Every code the loader accepts (ADR-0040 §7), including the one the palette
   // starts from. A code whose fields the editor got wrong is refused at load,
   // which is the whole point of walking all of them.
@@ -159,7 +159,7 @@ test("a fresh numeric_limit can be given every comparison, and each one loads", 
   ];
 
   for (const code of codes) {
-    const doc = new SequenceDocument(await fixture("basica.yaml"));
+    const doc = new SequenceDocument(await fixture("basica.yseq"));
     const index = doc.addStep("main", "numeric_limit");
     assert.equal(doc.steps("main")[index].limit.comparison, "none", "a new limit starts at none");
 
@@ -176,7 +176,7 @@ test("a fresh numeric_limit can be given every comparison, and each one loads", 
 });
 
 test("changing the comparison drops the fields the new code does not use", async () => {
-  const doc = new SequenceDocument(await fixture("basica.yaml"));
+  const doc = new SequenceDocument(await fixture("basica.yseq"));
   const index = doc.addStep("main", "numeric_limit");
 
   doc.setStepComparison("main", index, "GELE");
@@ -195,7 +195,7 @@ test("changing the comparison drops the fields the new code does not use", async
 });
 
 test("a limit keeps the bounds it already had when the new code still uses them", async () => {
-  const doc = new SequenceDocument(await fixture("basica.yaml"));
+  const doc = new SequenceDocument(await fixture("basica.yseq"));
   const index = doc.steps("main").findIndex((s) => s.name === "demo/measure_voltage");
   assert.equal(doc.steps("main")[index].limit.low, 4.5);
 
@@ -251,7 +251,7 @@ test("a step inserted into an empty flow list is written in block style", async 
 // ------------------------------------------------- the whole thing, no text
 
 test("basica is built from nothing with the editor's own calls, and runs", async () => {
-  const { "basica.yaml": _self, ...alongside } = await exampleFiles("basica.yaml");
+  const { "basica.yseq": _self, ...alongside } = await exampleFiles("basica.yseq");
   // What File ▸ New starts from, so the test builds what a person would.
   const doc = new SequenceDocument("name: sequence\nmain: []\n");
 
@@ -291,7 +291,7 @@ test("basica is built from nothing with the editor's own calls, and runs", async
   // demo bench, which is the shell's job, not this harness's — so the run is
   // exercised through the UI, not here.
   const written = new SequenceDocument(doc.text);
-  const original = new SequenceDocument(await fixture("basica.yaml"));
+  const original = new SequenceDocument(await fixture("basica.yseq"));
   const shape = (d) =>
     d.allSteps().map((s) => ({
       phase: s.phase,
