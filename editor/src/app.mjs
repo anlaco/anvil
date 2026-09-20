@@ -394,15 +394,20 @@ function field(parent, label, input, hint) {
   const l = document.createElement("label");
   l.textContent = label;
   const id = `f-${label.toLowerCase().replace(/\W+/g, "-")}`;
+  // The id goes on the control, never on a wrapper. Type and Module hand in a
+  // row of elements rather than a bare input, and putting the id on that <div>
+  // left `<label for>` pointing at something that cannot be focused — clicking
+  // the label did nothing, and anything looking the field up by id got a <div>
+  // with no value. Found by driving the editor: two modules typed into the
+  // Module field never reached the file.
+  const control = input.matches("input, select, textarea, button")
+    ? input
+    : (input.querySelector("input, select, textarea, button") ?? input);
+  control.id = id;
   l.htmlFor = id;
-  input.id = id;
   if (hint) {
     l.title = hint;
-    // A wrapper (the Type row) explains itself through the control inside it.
-    const target = input.matches("input, select, textarea")
-      ? input
-      : input.querySelector("input, select, textarea, button");
-    if (target) target.title = hint;
+    control.title = hint;
   }
   parent.append(l, input);
 }
@@ -2073,11 +2078,20 @@ async function openBridge(url) {
   try {
     await engine.attachBridge(url, connectBridge, bridgeLost);
     state.bridge = url;
+    state.runUnavailable = null;
     status("pass", "bridge connected — Run is available");
   } catch (e) {
     // Not being connected is a normal state, not a broken editor, so this says
     // what is missing rather than looking like a crash.
-    status("error", e?.message ?? "could not connect to the bridge");
+    //
+    // And the reason is **kept**, not just printed: a page opened with both
+    // `?bridge=` and `?open=` loads the file right after this, and its status
+    // overwrites this line within the same tick. Without keeping it, all that
+    // is left on screen is a Run button whose tooltip says "start a bridge"
+    // while a bridge is running and refusing — which is exactly the state this
+    // was found in, with no way to tell a refused token from a dead port.
+    state.runUnavailable = e?.message ?? "could not connect to the bridge";
+    status("error", state.runUnavailable);
   }
   renderAll();
 }
