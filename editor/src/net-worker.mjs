@@ -138,16 +138,63 @@ function onFrame(bytes) {
   }
 }
 
+/**
+ * How long the handshake gets before the bridge is called dead.
+ *
+ * Long enough that a loopback bridge busy starting its executors still makes
+ * it, short enough that nobody sits watching a spinner wondering.
+ */
+const HANDSHAKE_TIMEOUT_MS = 5000;
+
 function connect(url) {
   return new Promise((resolve, reject) => {
     const ws = new WebSocket(url);
     ws.binaryType = "arraybuffer";
-    ws.onopen = () => resolve(ws);
+
+    // The socket has to settle this promise exactly once, and there are four
+    // ways out: open, error, close-before-open, and nothing at all.
+    let done = false;
+    const settle = (fn, value) => {
+      if (done) return;
+      done = true;
+      clearTimeout(deadline);
+      fn(value);
+    };
+
+    // **Nothing at all** is the one that used to hang. A port that accepts the
+    // connection and never answers the upgrade fires no `error` and no `close`:
+    // the editor sat at "connecting to the bridge…" for ever, and because the
+    // page opens its file only after this settles, the sequence never loaded
+    // either. That is a bridge that has hung, or anything in between that
+    // swallows the upgrade. Verified against a listener that accepts and stays
+    // silent.
+    const deadline = setTimeout(() => {
+      // Closing drops the pending handshake; without it the socket stays open
+      // behind a promise nobody is waiting on any more.
+      try {
+        ws.close();
+      } catch {
+        /* already gone */
+      }
+      settle(
+        reject,
+        new Error(
+          // Without the query: it carries the token, and this string reaches
+          // the status bar and the Run button's tooltip.
+          `the bridge at ${url.split("?")[0]} accepted the connection but did not ` +
+            `finish the handshake within ${HANDSHAKE_TIMEOUT_MS / 1000}s. Check that ` +
+            "what is listening there is an Anvil bridge and that it is not stuck.",
+        ),
+      );
+    }, HANDSHAKE_TIMEOUT_MS);
+
+    ws.onopen = () => settle(resolve, ws);
     // A refused handshake — a wrong token answers 403 — surfaces here as a
     // bare error event with nothing in it, so the message says what to check
     // rather than repeating "undefined".
     ws.onerror = () =>
-      reject(
+      settle(
+        reject,
         new Error(
           "could not connect to the bridge. Check that `anvil <sequence> --bridge` " +
             "is running and that the URL carries the token it printed.",
@@ -155,6 +202,16 @@ function connect(url) {
       );
     ws.onmessage = (e) => onFrame(new Uint8Array(e.data));
     ws.onclose = (event) => {
+      // Closed before it ever opened: some browsers close a refused handshake
+      // without firing `error` first, and then nothing else would settle this.
+      settle(
+        reject,
+        new Error(
+          "the bridge closed the connection before the handshake finished. Check " +
+            "that `anvil <sequence> --bridge` is running and that the URL carries " +
+            "the token it printed.",
+        ),
+      );
       // Everything in flight dies with the socket; anything blocked has to be
       // released or the engine's thread never comes back.
       for (const [, conn] of connections) {

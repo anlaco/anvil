@@ -26,6 +26,16 @@ applies from 0.6.0 on; by it, 0.6.0 itself would have been 0.5.1.
 
 ## [Unreleased]
 
+### Fixed
+
+- **A bridge that accepts and never answers no longer hangs the editor.** The
+  WebSocket handshake had no deadline, so a port that accepted the connection
+  and stayed silent left the editor at "connecting to the bridge…" for ever —
+  and because the page opens its file only after that settles, the sequence
+  never loaded either. The handshake now gets 5 seconds and then says what it
+  was waiting for, naming the address without its token. A socket closed before
+  it opened is reported too, which some browsers do instead of raising an error.
+
 ### Changed
 
 - **Every example sequence is a `.yseq` file.** `ejemplos/*.yaml` became
