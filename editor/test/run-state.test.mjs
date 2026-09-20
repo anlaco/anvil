@@ -11,7 +11,15 @@
 import { strict as assert } from "node:assert";
 import { test } from "node:test";
 
-import { applyEvent, neverRan, newRunState, rowKey, runButton } from "../src/run-state.mjs";
+import {
+  applyEvent,
+  callStack,
+  neverRan,
+  nestedRows,
+  newRunState,
+  rowKey,
+  runButton,
+} from "../src/run-state.mjs";
 
 const ev = (o) => JSON.stringify(o);
 
@@ -211,4 +219,219 @@ test("a Run the desktop app could not arm says why, not how to start a bridge", 
   // A run in flight still wins, as above.
   const running = runButton({ hasDoc: true, bridged: false, inFlight: true, unavailable: reason });
   assert.match(running.title, /in flight/);
+});
+
+// ---------------------------------------------------------------------------
+// The call stack, and the rows a subsequence's steps now have.
+//
+// Until these existed the step list was flat: a `sequence_call` stayed lit and
+// the status bar named whatever was running under it, so nothing on screen
+// said what had already passed or failed down there. `editor/README.md` listed
+// that as one of two honest limits. The engine had been emitting what it takes
+// — `parent_run_id` and `depth` — since ADR-0033.
+// ---------------------------------------------------------------------------
+
+/** A step one level down, inside the subsequence `main[0]` calls. */
+const dentro = (event, name, seq, extra = {}) =>
+  ev({
+    event,
+    name,
+    step_run_id: `sub-${name}`,
+    parent_run_id: "id-main-0",
+    depth: 1,
+    phase: "main",
+    locator: { sequence: "sub", path: ["main", 0, "main", 0] },
+    seq,
+    ...extra,
+  });
+
+test("the call stack is what is running and what it runs under", () => {
+  const s = newRunState();
+  applyEvent(s, inicio(PLAN));
+  applyEvent(s, paso("step_start", "main", 0, 1));
+  applyEvent(s, dentro("step_start", "medir_interno", 2));
+
+  const { frames, truncated } = callStack(s);
+  assert.equal(truncated, false);
+  assert.deepEqual(
+    frames.map((f) => f.name),
+    ["p0", "medir_interno"],
+    "outermost first, as TestStand shows it",
+  );
+  assert.deepEqual(frames.map((f) => f.depth), [0, 1]);
+});
+
+test("the stack unwinds to the caller when the inner step ends", () => {
+  const s = newRunState();
+  applyEvent(s, inicio(PLAN));
+  applyEvent(s, paso("step_start", "main", 0, 1));
+  applyEvent(s, dentro("step_start", "medir_interno", 2));
+  applyEvent(s, dentro("step_end", "medir_interno", 3));
+
+  assert.deepEqual(callStack(s).frames.map((f) => f.name), ["p0"]);
+  // And the call is still the lit row: it has not finished.
+  assert.deepEqual(s.current, { phase: "main", index: 0 });
+});
+
+test("a stack whose parent line was lost says so instead of starting halfway", () => {
+  // ADR-0033 §2: paternity is asserted on every line, so a lost line costs one
+  // node. What must not happen is the walk stopping quietly — a stack that
+  // begins in the middle reads as the whole truth, which is Rule 2 of
+  // ADR-0019 all over again.
+  const s = newRunState();
+  applyEvent(s, inicio(PLAN));
+  // `step_start` for main[0] never arrives; its child does.
+  applyEvent(s, dentro("step_start", "medir_interno", 2));
+
+  const { frames, truncated } = callStack(s);
+  assert.deepEqual(frames.map((f) => f.name), ["medir_interno"]);
+  assert.equal(truncated, true, "the walk ran out of parents and admits it");
+});
+
+test("a step inside a subsequence gets a row under the call it ran in", () => {
+  const s = newRunState();
+  applyEvent(s, inicio(PLAN));
+  applyEvent(s, paso("step_start", "main", 0, 1));
+  applyEvent(s, dentro("step_start", "medir_interno", 2));
+  applyEvent(s, dentro("step_result", "medir_interno", 3, { status: "fail" }));
+
+  const under = nestedRows(s);
+  const rows = under.get(rowKey("main", 0));
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].name, "medir_interno");
+  assert.equal(rows[0].status, "fail", "the nested row carries its own verdict");
+
+  // And it did not leak into the parent row's verdict: that is the call's own,
+  // and it has not produced one yet.
+  assert.equal(s.results.has(rowKey("main", 0)), false);
+});
+
+test("a nested step whose ancestry was lost is not filed under the wrong call", () => {
+  // Guessing a parent here attaches a step to a call it never ran in, which is
+  // worse than not showing it: it is a wrong answer stated confidently.
+  const s = newRunState();
+  applyEvent(s, inicio(PLAN));
+  applyEvent(s, paso("step_start", "main", 1, 1));
+  // Its `parent_run_id` names a step that never arrived.
+  applyEvent(s, dentro("step_start", "huerfano", 2));
+
+  assert.equal(nestedRows(s).size, 0, "no row claims it");
+});
+
+test("a parent chain that loops does not hang the interface", () => {
+  // The ids come off a wire this code does not control.
+  const s = newRunState();
+  applyEvent(s, inicio(PLAN));
+  applyEvent(
+    s,
+    ev({
+      event: "step_start",
+      name: "bucle",
+      step_run_id: "a",
+      parent_run_id: "a",
+      depth: 1,
+      phase: "main",
+      locator: { sequence: "sub", path: ["main", 0, "main", 0] },
+      seq: 1,
+    }),
+  );
+  const { truncated } = callStack(s);
+  assert.equal(truncated, true);
+});
+
+// ---------------------------------------------------------------------------
+// The whole of a real run, replayed.
+//
+// The lines below are **the engine's own output**, captured from
+//
+//     anvil ejemplos/subsecuencia.yseq --events
+//
+// trimmed to the fields this view reads, with the 128-bit run ids replaced by
+// short ones so the parentage is legible. Nothing else is edited.
+//
+// The tests above each pin one rule against a line written to exercise it.
+// This one checks the rules compose over a stream nobody wrote for them: two
+// sequence calls, six nested steps, one of them in the subsequence's own
+// cleanup phase, and nineteen lines in the order the engine really emits them.
+// ---------------------------------------------------------------------------
+
+const STREAM = [
+  {"event": "sequence_start", "seq": 0, "plan": [{"name": "preparar", "phase": "main", "index": 0}, {"name": "test_fuentes", "phase": "main", "index": 1}]},
+  {"event": "step_start", "name": "preparar", "step_run_id": "r0", "parent_run_id": null, "depth": 0, "phase": "main", "locator": {"sequence": "basica", "path": ["main", 0]}, "seq": 1},
+  {"event": "step_start", "name": "preparar_canal", "step_run_id": "r1", "parent_run_id": "r0", "depth": 1, "phase": "main", "locator": {"sequence": "init_comun", "path": ["main", 0, "main", 0]}, "seq": 2},
+  {"event": "step_result", "name": "preparar_canal", "step_run_id": "r1", "parent_run_id": "r0", "depth": 1, "phase": "main", "locator": {"sequence": "init_comun", "path": ["main", 0, "main", 0]}, "status": "done", "seq": 3},
+  {"event": "step_end", "name": "preparar_canal", "step_run_id": "r1", "parent_run_id": "r0", "depth": 1, "phase": "main", "locator": {"sequence": "init_comun", "path": ["main", 0, "main", 0]}, "seq": 4},
+  {"event": "step_result", "name": "preparar", "step_run_id": "r0", "parent_run_id": null, "depth": 0, "phase": "main", "locator": {"sequence": "basica", "path": ["main", 0]}, "status": "pass", "seq": 5},
+  {"event": "step_end", "name": "preparar", "step_run_id": "r0", "parent_run_id": null, "depth": 0, "phase": "main", "locator": {"sequence": "basica", "path": ["main", 0]}, "seq": 6},
+  {"event": "step_start", "name": "test_fuentes", "step_run_id": "r2", "parent_run_id": null, "depth": 0, "phase": "main", "locator": {"sequence": "basica", "path": ["main", 1]}, "seq": 7},
+  {"event": "step_start", "name": "ajustar_canal", "step_run_id": "r3", "parent_run_id": "r2", "depth": 1, "phase": "main", "locator": {"sequence": "medir_fuentes", "path": ["main", 1, "main", 0]}, "seq": 8},
+  {"event": "step_result", "name": "ajustar_canal", "step_run_id": "r3", "parent_run_id": "r2", "depth": 1, "phase": "main", "locator": {"sequence": "medir_fuentes", "path": ["main", 1, "main", 0]}, "status": "done", "seq": 9},
+  {"event": "step_end", "name": "ajustar_canal", "step_run_id": "r3", "parent_run_id": "r2", "depth": 1, "phase": "main", "locator": {"sequence": "medir_fuentes", "path": ["main", 1, "main", 0]}, "seq": 10},
+  {"event": "step_start", "name": "demo/measure_voltage", "step_run_id": "r4", "parent_run_id": "r2", "depth": 1, "phase": "main", "locator": {"sequence": "medir_fuentes", "path": ["main", 1, "main", 1]}, "seq": 11},
+  {"event": "step_result", "name": "demo/measure_voltage", "step_run_id": "r4", "parent_run_id": "r2", "depth": 1, "phase": "main", "locator": {"sequence": "medir_fuentes", "path": ["main", 1, "main", 1]}, "status": "pass", "seq": 12},
+  {"event": "step_end", "name": "demo/measure_voltage", "step_run_id": "r4", "parent_run_id": "r2", "depth": 1, "phase": "main", "locator": {"sequence": "medir_fuentes", "path": ["main", 1, "main", 1]}, "seq": 13},
+  {"event": "step_start", "name": "demo/disconnect", "step_run_id": "r5", "parent_run_id": "r2", "depth": 1, "phase": "cleanup", "locator": {"sequence": "medir_fuentes", "path": ["main", 1, "cleanup", 0]}, "seq": 14},
+  {"event": "step_result", "name": "demo/disconnect", "step_run_id": "r5", "parent_run_id": "r2", "depth": 1, "phase": "cleanup", "locator": {"sequence": "medir_fuentes", "path": ["main", 1, "cleanup", 0]}, "status": "done", "seq": 15},
+  {"event": "step_end", "name": "demo/disconnect", "step_run_id": "r5", "parent_run_id": "r2", "depth": 1, "phase": "cleanup", "locator": {"sequence": "medir_fuentes", "path": ["main", 1, "cleanup", 0]}, "seq": 16},
+  {"event": "step_result", "name": "test_fuentes", "step_run_id": "r2", "parent_run_id": null, "depth": 0, "phase": "main", "locator": {"sequence": "basica", "path": ["main", 1]}, "status": "pass", "seq": 17},
+  {"event": "step_end", "name": "test_fuentes", "step_run_id": "r2", "parent_run_id": null, "depth": 0, "phase": "main", "locator": {"sequence": "basica", "path": ["main", 1]}, "seq": 18},
+  {"event": "sequence_end", "status": "pass", "seq": 19},
+];
+
+test("a real run of subsecuencia.yseq fills both rows and both stacks", () => {
+  const s = newRunState();
+  // The stack after every line, with repeats collapsed: what the Call Stack
+  // pane would have shown, in order.
+  const seen = [];
+  for (const line of STREAM) {
+    applyEvent(s, JSON.stringify(line));
+    const stack = callStack(s).frames.map((f) => f.name).join(" > ");
+    if (seen.at(-1) !== stack) seen.push(stack);
+  }
+
+  // Both calls are verdicts of the editor's own rows, and both passed.
+  assert.equal(s.results.get(rowKey("main", 0)), "pass");
+  assert.equal(s.results.get(rowKey("main", 1)), "pass");
+  assert.equal(s.done, true);
+  assert.equal(s.lost, 0, "nothing was dropped replaying the engine's own lines");
+
+  // Every nested step found the call it ran under: none went missing, and none
+  // landed on the wrong row.
+  const under = nestedRows(s);
+  assert.deepEqual(
+    (under.get(rowKey("main", 0)) ?? []).map((f) => f.name + ":" + f.status),
+    ["preparar_canal:done"],
+  );
+  assert.deepEqual(
+    (under.get(rowKey("main", 1)) ?? []).map((f) => f.name + ":" + f.status),
+    ["ajustar_canal:done", "demo/measure_voltage:pass", "demo/disconnect:done"],
+  );
+
+  // A step in the subsequence's **cleanup** is still filed under the call that
+  // ran it. The phase on the line is the sub-step's own, not the caller's
+  // (DIAG-3), so anything that keyed off the phase would lose this row.
+  const cleanup = under.get(rowKey("main", 1)).find((f) => f.phase === "cleanup");
+  assert.equal(cleanup.name, "demo/disconnect");
+
+  // The stack, in full. Asserting the whole sequence rather than spot-checking
+  // it is what pins the **unwinding**: it has to come back to the caller
+  // between two nested steps, not only at the end. Checking the last line
+  // alone proves nothing, because `sequence_end` clears the stack whether it
+  // was unwinding correctly or not — which is how the first version of this
+  // test passed against a state machine that never popped at all.
+  assert.deepEqual(seen, [
+    "",
+    "preparar",
+    "preparar > preparar_canal",
+    "preparar",
+    "",
+    "test_fuentes",
+    "test_fuentes > ajustar_canal",
+    "test_fuentes",
+    "test_fuentes > demo/measure_voltage",
+    "test_fuentes",
+    "test_fuentes > demo/disconnect",
+    "test_fuentes",
+    "",
+  ]);
 });

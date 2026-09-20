@@ -8,30 +8,20 @@
   </head>
   <body>
     <!--
-      The TestStand layout, cut down to what the engine can actually do today
-      (AP-02, AP-04): a sequence list on the left, the step editor in the
-      middle, variables on the right, and a status bar that reports what the
-      engine says about the file as it is typed.
+      TestStand's Sequence Editor, arranged as TestStand 2026Q3 arranges it
+      (AP-02, ADR-0043): the Insertion Palette docked left with Templates and
+      IO Configurations beside it, the step list in the middle, Variables /
+      Sequences / Execution docked right, the settings of the selected step
+      underneath, and a status bar along the bottom.
+
+      What Anvil does not have is not left off: it is here, greyed, saying what
+      TestStand does there and where Anvil stands (AP-13). The menu bar and the
+      execution controls are built from `src/paridad.mjs`, which is the one
+      place that knows — so this file holds the shell and none of the
+      inventory.
     -->
     <header class="toolbar">
-      <nav class="menus">
-        <div class="menu">
-          <button type="button" data-menu="file">File</button>
-          <ul hidden>
-            <li><button type="button" data-action="new">New</button></li>
-            <li><button type="button" data-action="open">Open…</button></li>
-            <li><button type="button" data-action="save">Save</button></li>
-            <li><button type="button" data-action="save-as">Save As…</button></li>
-          </ul>
-        </div>
-        <div class="menu">
-          <button type="button" data-menu="view">View</button>
-          <ul hidden>
-            <li><button type="button" data-action="view-steps">Steps</button></li>
-            <li><button type="button" data-action="view-text">Text</button></li>
-          </ul>
-        </div>
-      </nav>
+      <nav class="menus" aria-label="Menu bar"></nav>
 
       <div class="views" role="tablist" aria-label="Editor view">
         <button type="button" role="tab" data-view="steps" aria-selected="true">Steps</button>
@@ -40,31 +30,70 @@
 
       <span class="filename" id="filename">no file</span>
 
-      <button type="button" class="run" id="run" disabled>
-        Run
-      </button>
+      <!-- TestStand's execution toolbar. Run is Anvil's; the rest are where
+           TestStand puts them, greyed, each naming what it waits on. -->
+      <div class="exec-controls" id="exec-controls" aria-label="Execution controls">
+        <button type="button" class="run" id="run" disabled>Run</button>
+      </div>
     </header>
 
-    <!--
-      TestStand's arrangement: the sequence occupies the middle, the settings
-      of the selected step sit directly beneath it, variables are on the right,
-      and the insertion palette is on the left.
-    -->
     <main class="panes">
+      <!--
+        The Insertion Palette, as TestStand 2026Q3 builds it: one pane holding
+        two collapsible sections — Step Types, and Templates/IO Configurations
+        with its own pair of tabs inside. Not three sibling tabs: the palette
+        is not one of them, it is what contains them.
+      -->
       <section class="pane palette" aria-label="Insertion palette">
         <h2>Insertion Palette</h2>
-        <div id="palette" class="scroll"></div>
+        <div class="scroll palette-body">
+          <h3 class="section">Step Types</h3>
+          <div id="palette"></div>
+
+          <h3 class="section">Templates/IO Configurations</h3>
+          <div class="pane-tabs" role="tablist" aria-label="Templates and IO configurations">
+            <button type="button" role="tab" data-left="templates" aria-selected="true">
+              Templates
+            </button>
+            <button type="button" role="tab" data-left="io" aria-selected="false">
+              IO Configurations
+            </button>
+          </div>
+          <div id="templates"></div>
+          <div id="io-configurations" hidden></div>
+        </div>
       </section>
 
       <div class="middle">
         <section class="pane sequence" aria-label="Sequence">
           <h2 id="sequence-title">Sequence</h2>
+          <!-- TestStand's three columns, and the gutter a breakpoint would
+               live in. The gutter is drawn and nothing can be set in it:
+               the engine cannot stop at a step. -->
+          <div class="step-head" aria-hidden="true">
+            <span class="gutter"></span>
+            <span class="c-step">Step</span>
+            <span class="c-desc">Description</span>
+            <span class="c-settings">Settings</span>
+          </div>
           <div id="sequence-list" class="scroll"></div>
         </section>
 
         <section class="pane step" aria-label="Step settings">
+          <div class="pane-tabs" role="tablist" aria-label="Docked bottom">
+            <button type="button" role="tab" data-bottom="step" aria-selected="true">
+              Step Settings
+            </button>
+            <button type="button" role="tab" data-bottom="output" aria-selected="false">
+              Output
+            </button>
+            <button type="button" role="tab" data-bottom="analysis" aria-selected="false">
+              Analysis Results
+            </button>
+          </div>
           <h2 id="step-title">Step Settings</h2>
           <div id="step-editor" class="scroll"></div>
+          <div id="output" class="scroll" hidden></div>
         </section>
 
         <section class="pane text" aria-label="Text" hidden>
@@ -73,15 +102,33 @@
         </section>
       </div>
 
-      <section class="pane variables" aria-label="Variables">
-        <h2>Variables</h2>
+      <section class="pane variables" aria-label="Variables, sequences and execution">
+        <div class="pane-tabs" role="tablist" aria-label="Docked right">
+          <button type="button" role="tab" data-right="variables" aria-selected="true">
+            Variables
+          </button>
+          <button type="button" role="tab" data-right="sequences" aria-selected="false">
+            Sequences
+          </button>
+          <button type="button" role="tab" data-right="execution" aria-selected="false">
+            Execution
+          </button>
+        </div>
         <div id="variables" class="scroll"></div>
+        <div id="sequences" class="scroll" hidden></div>
+        <div id="execution" class="scroll" hidden></div>
       </section>
     </main>
 
+    <!--
+      TestStand's status bar, in TestStand's order. User and Environment are
+      greyed: Anvil has no notion of who is running it, and configures a run
+      from its CLI switches.
+    -->
     <footer class="status" id="status">
       <span class="light" id="status-light" data-state="unknown"></span>
       <span id="status-text">no file open</span>
+      <span class="status-fields" id="status-fields"></span>
       <!-- Which editor this is and which engine Run uses. Filled in only inside
            the desktop shell, which is the only place both are known. -->
       <span class="versions" id="versions" hidden></span>

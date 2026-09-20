@@ -18,9 +18,29 @@ import {
   STEP_TYPES,
   COMPARISON_CODES,
 } from "./document.mjs";
+import {
+  EXECUTION,
+  INSERT_MENU,
+  MENU_BAR,
+  PAGE_DETAILS,
+  PROPERTY_PAGES as PARITY_PAGES,
+  SEQUENCE_WINDOW,
+  STATUS_BAR,
+  TYPE_LABELS,
+  VARIABLES_PANE,
+  gapTooltip,
+  parityById,
+} from "./paridad.mjs";
 import { browserPool, connectBridge, EngineHostError } from "./engine-pool.mjs";
 import { gatherFiles, unsavedPathHint } from "./neighbours.mjs";
-import { applyEvent, newRunState, rowKey, runButton } from "./run-state.mjs";
+import {
+  applyEvent,
+  callStack,
+  nestedRows,
+  newRunState,
+  rowKey,
+  runButton,
+} from "./run-state.mjs";
 
 // The shell forwards this window's console to its own stdout by itself
 // (ADR-0037 §e, `editor/electron/main.mjs`), so the page carries no
@@ -65,6 +85,13 @@ const ui = {
   versions: el("versions"),
   run: el("run"),
   menus: document.querySelector(".menus"),
+  sequences: el("sequences"),
+  templates: el("templates"),
+  ioConfigurations: el("io-configurations"),
+  output: el("output"),
+  execution: el("execution"),
+  statusFields: el("status-fields"),
+  execControls: el("exec-controls"),
 };
 
 const state = {
@@ -78,9 +105,19 @@ const state = {
   // Which tab and which Properties page the step settings are showing.
   // Remembered across re-renders, because every edit re-renders the pane and
   // being thrown back to General after typing a threshold is unusable.
-  stepTab: "properties",
+  stepTab: "module",
   stepPage: "General",
   view: "steps",
+  // Which of the docked panes is showing. TestStand's panes are tabbed, and
+  // the tab is remembered across repaints for the same reason the Properties
+  // page is: every edit re-renders, and being thrown back is unusable.
+  leftTab: "templates",
+  rightTab: "variables",
+  bottomTab: "step",
+  /** The phases collapsed in the step list, by name. */
+  collapsed: new Set(),
+  /** What the last run printed, for the Output tab. */
+  output: null,
   text: null, // CodeMirror view
   validateTimer: null,
   bridge: null, // the URL, once connected
@@ -130,22 +167,190 @@ function onEvent(line) {
   if (!state.run) return;
   if (!applyEvent(state.run, line)) return;
   renderSequence();
+  renderExecution();
   renderRunStatus();
 }
 
+// ---------------------------------------------------------------------------
+// The menu bar, built from the inventory.
+//
+// TestStand's ten menus, in TestStand's order. A menu Anvil does not have is
+// here and greyed, and it opens onto nothing rather than onto a list of
+// commands nobody checked — what TestStand puts under Execute, Debug,
+// Configure and Tools is not written down in this repo, and inventing it would
+// be asserting something about NI's product on no evidence (ADR-0043, and the
+// second-hand warning it carries).
+//
+// Inside the desktop shell this bar is hidden and the platform's native menu
+// carries the actions, so the greyed menus are a browser-only statement. That
+// is the honest limit of doing this in the page: a native menu cannot say why
+// an item is missing.
+// ---------------------------------------------------------------------------
+
+function renderMenuBar() {
+  ui.menus.replaceChildren();
+
+  for (const menu of MENU_BAR) {
+    const wrap = document.createElement("div");
+    wrap.className = "menu";
+    wrap.dataset.parity = menu.state ?? "built";
+
+    const button = document.createElement("button");
+    button.type = "button";
+    button.dataset.menu = menu.id;
+    button.textContent = menu.label;
+    // A menu with nothing behind it does not open. It stays on the bar so the
+    // person can see it exists in TestStand and hover for why it is dead here.
+    const opens = Array.isArray(menu.items) && menu.items.length > 0;
+    button.disabled = !opens;
+    button.title = gapTooltip(menu) ?? `${menu.label} menu`;
+
+    const list = document.createElement("ul");
+    list.hidden = true;
+    for (const entry of menu.items ?? []) {
+      if (entry.sep) {
+        list.append(document.createElement("hr"));
+        continue;
+      }
+      const item = document.createElement("li");
+      const b = document.createElement("button");
+      b.type = "button";
+      b.textContent = entry.label;
+      b.dataset.parity = entry.state;
+      if (entry.action) {
+        b.dataset.action = entry.action;
+      } else {
+        b.disabled = true;
+        b.title = gapTooltip(entry) ?? entry.label;
+      }
+      item.append(b);
+      list.append(item);
+    }
+
+    wrap.append(button, list);
+    ui.menus.append(wrap);
+  }
+}
+
 // ---------------------------------------------------------------- rendering
+
+/**
+ * The Sequences pane: what TestStand lists beside the step list.
+ *
+ * TestStand shows MainSequence and the sequence file's callbacks — the model's
+ * entry points, SequenceFilePreStep and the rest. Anvil has the first half:
+ * the sequence being edited, and the subsequences it declares inline. It has
+ * no callbacks, and that is a decision rather than a gap (ADR-0016 built the
+ * process model as a wrapper sequence with none), so the row that would list
+ * them says `never` and cites it.
+ *
+ * Selecting a subsequence is not offered yet: the document model edits one
+ * sequence, and a pane that switched to a subsequence it cannot edit would be
+ * a worse lie than not offering it. The names are listed because seeing what a
+ * file contains is most of what this pane is for.
+ */
+function renderSequences() {
+  ui.sequences.replaceChildren();
+  const doc = state.doc;
+  if (!doc) return;
+
+  // TestStand's columns for this tab: the sequence, its comment, and the
+  // requirement it is linked to. Anvil has neither of the last two, so they
+  // are headed and empty rather than left off — the heading is the gap.
+  const head = document.createElement("div");
+  head.className = "seq-head";
+  for (const h of ["Sequence", "Comment", "Requirement"]) {
+    const c = document.createElement("span");
+    c.textContent = h;
+    head.append(c);
+  }
+  head.title = gapTooltip(parityById("window.sequences.columns"));
+  ui.sequences.append(head);
+
+  const row = (name, { current = false, sub = false, hint } = {}) => {
+    const r = document.createElement("div");
+    r.className = "seq-row";
+    if (current) r.dataset.current = "true";
+    if (sub) r.dataset.sub = "true";
+    const n = document.createElement("span");
+    n.textContent = name;
+    r.append(n, document.createElement("span"), document.createElement("span"));
+    if (hint) r.title = hint;
+    ui.sequences.append(r);
+  };
+
+  row(doc.name ?? "MainSequence", {
+    current: true,
+    hint: "The sequence this editor is editing.",
+  });
+  for (const name of doc.subsequenceNames?.() ?? []) {
+    row(name, {
+      sub: true,
+      hint: "A subsequence declared in this file. Edit it in the Text view.",
+    });
+  }
+
+  parityRow(ui.sequences, "window.sequences.callbacks");
+}
+
+/** One greyed line standing for something TestStand lists and Anvil does not. */
+function parityRow(parent, id) {
+  const entry = parityById(id);
+  if (!entry) throw new Error(`no parity entry: ${id}`);
+  const row = document.createElement("div");
+  row.className = "parity-row";
+  row.dataset.parity = entry.state;
+  row.textContent = entry.label;
+  row.title = gapTooltip(entry) ?? entry.label;
+  parent.append(row);
+  return row;
+}
+
+/** TestStand's Settings column: what the step does besides call its module. */
+function settingsSummary(step) {
+  const bits = [];
+  if (step.disable) bits.push("Skip");
+  if (step.precondition) bits.push("Precondition");
+  if (step.pause_on_fail) bits.push("Post Action");
+  if (step.retries > 1) bits.push(`Loop ${step.retries}`);
+  if (step.assign && Object.keys(step.assign).length) bits.push("Expressions");
+  return bits.join(", ");
+}
 
 function renderSequence() {
   const doc = state.doc;
   ui.list.replaceChildren();
   if (!doc) return;
 
+  const nested = state.run ? nestedRows(state.run) : new Map();
+
   for (const phase of PHASES) {
     const steps = doc.steps(phase);
-    const head = document.createElement("div");
+    const collapsed = state.collapsed.has(phase);
+
+    // TestStand's group header: a `+`/`−`, the phase capitalised, and how many
+    // steps are in it — `+ Setup (17)`. Collapsing is per phase and survives a
+    // repaint, because every edit repaints and a group that sprang open again
+    // on each keystroke would be worse than not collapsing at all.
+    const head = document.createElement("button");
+    head.type = "button";
     head.className = "phase";
-    head.textContent = `${phase} (${steps.length})`;
+    head.dataset.collapsed = String(collapsed);
+    head.setAttribute("aria-expanded", String(!collapsed));
+    head.textContent = `${collapsed ? "+" : "\u2212"} ${phase[0].toUpperCase()}${phase.slice(1)} (${steps.length})`;
+    head.addEventListener("click", () => {
+      if (collapsed) state.collapsed.delete(phase);
+      else state.collapsed.add(phase);
+      renderSequence();
+    });
     ui.list.append(head);
+
+    // A collapsed phase is still a drop target, or dragging a step into one
+    // would need it opened first.
+    if (collapsed) {
+      makeDropTarget(head, phase, () => steps.length);
+      continue;
+    }
 
     for (const step of steps) {
       const row = document.createElement("button");
@@ -166,15 +371,25 @@ function renderSequence() {
         else if (verdict) row.dataset.run = verdict;
       }
 
+      // The gutter a breakpoint would sit in. Drawn, and nothing can be set in
+      // it: the engine cannot stop at a step. Hovering says so.
+      const gutter = document.createElement("span");
+      gutter.className = "gutter";
+      gutter.title = gapTooltip(parityById("window.steps.gutter"));
+
       const name = document.createElement("span");
-      name.className = "name";
+      name.className = "name c-step";
       name.textContent = step.name ?? "(unnamed)";
 
-      const kind = document.createElement("span");
-      kind.className = "kind";
-      // A step with no type does not load; saying so on the row is how the
-      // person finds it.
-      kind.textContent = step.type ?? "no type";
+      // TestStand's Description column: written by the editor from the step,
+      // never typed — the same text the General page shows.
+      const desc = document.createElement("span");
+      desc.className = "c-desc";
+      desc.textContent = describeStep(step);
+
+      const settings = document.createElement("span");
+      settings.className = "c-settings";
+      settings.textContent = settingsSummary(step);
 
       // A mark, not just a colour: a row that says pass or fail by hue alone is
       // unreadable to whoever cannot tell the hues apart, and this gets read
@@ -182,31 +397,87 @@ function renderSequence() {
       const mark = document.createElement("span");
       mark.className = "run-mark";
       const rs = row.dataset.run;
-      const MARKS = { running: "▶", pass: "✓", done: "•", fail: "✕", error: "!", skipped: "–" };
       mark.textContent = rs ? (MARKS[rs] ?? "?") : "";
       if (rs) mark.title = rs;
 
-      row.append(name, kind, mark);
+      row.append(gutter, name, desc, settings, mark);
       row.addEventListener("click", () => {
         state.selected = { phase, index: step.index };
         renderSequence();
         renderStep();
+        renderStatusFields();
       });
       makeDraggable(row, { kind: "move", phase, index: step.index });
       makeDropTarget(row, phase, () => step.index);
       ui.list.append(row);
+
+      // The steps that ran inside this call. Until these had rows the list was
+      // flat: a `sequence_call` stayed lit and nothing on screen said what had
+      // already passed or failed underneath it.
+      for (const frame of nested.get(rowKey(phase, step.index)) ?? []) {
+        ui.list.append(nestedRow(frame));
+      }
     }
 
     // A phase with no steps still has to be a target, or a sequence that starts
-    // empty can never receive its first step by dragging.
+    // empty can never receive its first step by dragging. TestStand's own
+    // wording for the row.
     if (steps.length === 0) {
       const empty = document.createElement("div");
       empty.className = "phase-empty";
-      empty.textContent = "(empty)";
+      empty.textContent = "<Insert Steps Here>";
       makeDropTarget(empty, phase, () => 0);
       ui.list.append(empty);
+    } else {
+      // TestStand closes a group with this, and it is what makes the extent of
+      // a phase readable when three of them sit in one flat list.
+      const end = document.createElement("div");
+      end.className = "phase-end";
+      end.textContent = "<End Group>";
+      makeDropTarget(end, phase, () => steps.length);
+      ui.list.append(end);
     }
   }
+}
+
+/** The marks a row carries for what the engine said about it. */
+const MARKS = { running: "▶", pass: "✓", done: "•", fail: "✕", error: "!", skipped: "–" };
+
+/**
+ * A step that ran inside a subsequence, shown under the call that ran it.
+ *
+ * Not a `button`: it is not part of the document and there is nothing to
+ * select. It exists only while a run's events describe it, and it is indented
+ * by its depth, which the engine states on every line (ADR-0033).
+ */
+function nestedRow(frame) {
+  const row = document.createElement("div");
+  row.className = "step-row nested";
+  row.style.setProperty("--depth", String(frame.depth));
+  if (frame.status) row.dataset.run = frame.status;
+
+  const gutter = document.createElement("span");
+  gutter.className = "gutter";
+
+  const name = document.createElement("span");
+  name.className = "name c-step";
+  name.textContent = frame.name;
+
+  const desc = document.createElement("span");
+  desc.className = "c-desc";
+  desc.textContent = frame.sequence ? `in ${frame.sequence}` : "";
+
+  const settings = document.createElement("span");
+  settings.className = "c-settings";
+  settings.textContent = frame.phase ?? "";
+
+  const mark = document.createElement("span");
+  mark.className = "run-mark";
+  mark.textContent = frame.status ? (MARKS[frame.status] ?? "?") : "";
+  if (frame.status) mark.title = frame.status;
+
+  row.append(gutter, name, desc, settings, mark);
+  return row;
 }
 
 // What is being dragged: a step being moved, or a type being inserted from the
@@ -333,12 +604,9 @@ const STEP_TYPE_DOC = {
 };
 
 function renderPalette() {
+  // The "Step Types" heading is the section's, in the HTML: the palette holds
+  // two sections and each is titled once.
   ui.palette.replaceChildren();
-
-  const group = document.createElement("div");
-  group.className = "palette-group";
-  group.textContent = "Step Types";
-  ui.palette.append(group);
 
   const phase = state.selected?.phase ?? "main";
 
@@ -495,74 +763,10 @@ const CALLS_AN_EXECUTOR = ["action", "pass_fail", "numeric_limit"];
 // order, with submenus opening to the right.
 //
 // The menu is complete on purpose, like the page list: a type Anvil does not
-// have is greyed out where TestStand puts it, rather than left off. That is
-// what makes this the inventory — you can see what is coming and what is not.
+// have is greyed out where TestStand puts it, rather than left off. What it
+// says there comes from `paridad.mjs` — the inventory lives in one place, and
+// a test holds this file and that one together (ADR-0043 §5).
 // ---------------------------------------------------------------------------
-
-/** What each of Anvil's types is called in TestStand's menu. */
-const TYPE_LABELS = {
-  action: "Action",
-  pass_fail: "Pass/Fail Test",
-  numeric_limit: "Numeric Limit Test",
-  statement: "Statement",
-  sequence_call: "Sequence Call",
-};
-
-const NOT_YET = "TestStand has this step type. Anvil does not, yet.";
-
-/** TestStand's Insert Step menu, separators and all (2019 screenshots). */
-const TYPE_MENU = [
-  {
-    label: "Tests",
-    items: [
-      { label: "Pass/Fail Test", type: "pass_fail" },
-      { label: "Numeric Limit Test", type: "numeric_limit" },
-      { label: "Multiple Numeric Limit Test" },
-      { label: "String Value Test" },
-    ],
-  },
-  { label: "Action", type: "action" },
-  { sep: true },
-  { label: "FTP Files" },
-  { label: "Additional Results" },
-  { label: "Sequence Call", type: "sequence_call" },
-  { label: "Statement", type: "statement" },
-  { label: "Property Loader" },
-  { label: "Label" },
-  { label: "Message Popup" },
-  { label: "Call Executable" },
-  { sep: true },
-  {
-    label: "Flow Control",
-    items: [
-      { label: "If" },
-      { label: "Else" },
-      { label: "Else If" },
-      { sep: true },
-      { label: "For" },
-      { label: "For Each" },
-      { label: "While" },
-      { label: "Do While" },
-      { label: "Sweep Loop" },
-      { sep: true },
-      { label: "Break" },
-      { label: "Continue" },
-      { sep: true },
-      { label: "Select" },
-      { label: "Case" },
-      { sep: true },
-      { label: "Goto" },
-      { sep: true },
-      { label: "End" },
-    ],
-  },
-  { sep: true },
-  { label: "Synchronization", items: [] },
-  { label: "Database", items: [] },
-  { label: "Data Streams", items: [] },
-  { label: "LabVIEW Utility", items: [] },
-  { label: "DataLogger" },
-];
 
 /**
  * Whether an entry can be used at all.
@@ -575,7 +779,8 @@ const TYPE_MENU = [
  *
  * A group whose contents are not written down yet — Synchronization, Database,
  * Data Streams, LabVIEW Utility — has nothing to open, and stays greyed until
- * someone reads them off TestStand.
+ * someone reads them off TestStand. It carries its own verdict for that
+ * reason: an empty group is itself a gap.
  */
 function entryEnabled(entry) {
   if (entry.sep) return false;
@@ -647,7 +852,7 @@ function buildTypeMenu(entries, choose, depth) {
       const empty = !groupHasAType(entry);
       if (empty) item.classList.add("ts-none-yet");
       item.title = item.disabled
-        ? `${entry.label}: what TestStand puts here is not written down in Anvil yet.`
+        ? (gapTooltip(entry) ?? `${entry.label}: nothing to open yet.`)
         : empty
           ? `${entry.label} step types — TestStand has these; Anvil has none of them yet.`
           : `${entry.label} step types`;
@@ -668,7 +873,7 @@ function buildTypeMenu(entries, choose, depth) {
     } else {
       item.title = entry.type
         ? `Make this a ${entry.label}`
-        : `${NOT_YET} (${entry.label})`;
+        : (gapTooltip(entry) ?? `${entry.label}: not available.`);
       item.addEventListener("mouseenter", () => {
         while (openMenus.length > depth + 1) openMenus.pop().remove();
       });
@@ -761,7 +966,7 @@ function typeField(step, choose) {
   button.addEventListener("click", (event) => {
     event.stopPropagation();
     if (openMenus.length > 0) return closeTypeMenu();
-    const menu = buildTypeMenu(TYPE_MENU, choose, 0);
+    const menu = buildTypeMenu(INSERT_MENU, choose, 0);
     placeMenu(menu, button.getBoundingClientRect(), false);
     document.addEventListener("mousedown", onMenuOutside, true);
     document.addEventListener("keydown", onMenuKey, true);
@@ -779,50 +984,48 @@ function typeField(step, choose) {
   return row;
 }
 
-const PROPERTY_PAGES = [
-  { name: "General", render: pageGeneral },
-  { name: "Run Options", render: pageRunOptions },
-  { name: "Looping", render: pageLooping },
-  { name: "Post Actions", render: pagePostActions },
-  {
-    name: "Switching",
-    todo: "TestStand drives an NI Switch Executive route around the step. Anvil has no switching.",
-  },
-  {
-    name: "Synchronization",
-    todo: "TestStand's locks, rendezvous, queues, notifications, semaphores and batches. Anvil runs one UUT at a time, so none of it exists yet.",
-  },
-  { name: "Expressions", render: pageExpressions },
-  { name: "Preconditions", render: pagePreconditions },
-  {
-    name: "Requirements",
-    todo: "TestStand links a step to a requirement in a requirements management tool. Anvil has no such link.",
-  },
-  {
-    name: "Additional Results",
-    todo: "TestStand logs extra expressions into the report per step. In Anvil a measurement reaches the report through `assign`, on the Expressions page; naming arbitrary expressions to log is not implemented.",
-  },
-  {
-    name: "Property Browser",
-    todo: "TestStand browses the step's raw property tree. In Anvil the raw form of a step is the YAML itself — use the Text view.",
-  },
-];
+/**
+ * What fills each page Anvil has built, by the id `paridad.mjs` gives it.
+ *
+ * The list, its order and what a greyed page says all live there; this map is
+ * only the wiring, and a test asserts the two agree — every `built` id has a
+ * renderer here, and every renderer here answers to a `built` id.
+ */
+const PAGE_RENDERERS = {
+  pageGeneral,
+  pageRunOptions,
+  pageLooping,
+  pagePostActions,
+  pageExpressions,
+  pagePreconditions,
+};
+
+/** The page list as the editor uses it: the inventory, plus its renderer. */
+const PROPERTY_PAGES = PARITY_PAGES.map((page) => ({
+  ...page,
+  render: page.render ? PAGE_RENDERERS[page.render] : undefined,
+}));
 
 /**
  * The tabs a step of this type shows, in TestStand's order.
  *
  * What a type is judged on is **not** a page inside Properties: TestStand gives
- * it a tab of its own beside Properties, and a step with nothing to judge
- * simply has no such tab. So the tab strip changes with the type, while the
- * Properties page list underneath is the same for every step.
+ * it a tab of its own, and a step with nothing to judge simply has no such tab.
+ * So the tab strip changes with the type, while the Properties page list
+ * underneath is the same for every step.
+ *
+ * **Module comes first.** In 2019 the strip read `Properties | Module`; in
+ * 2026Q3 it reads `Module | Limits | Data Source | Properties`, which is also
+ * the order of the work: what the step calls, what it is judged against, where
+ * the number comes from, and then everything else.
  */
 function tabsFor(type) {
-  const tabs = [["properties", "Properties"]];
+  const tabs = [["module", "Module"]];
+  if (type === "numeric_limit") tabs.push(["limits", "Limits"]);
   if (type === "pass_fail" || type === "numeric_limit") {
     tabs.push(["data-source", "Data Source"]);
   }
-  if (type === "numeric_limit") tabs.push(["limits", "Limits"]);
-  tabs.push(["module", "Module"]);
+  tabs.push(["properties", "Properties"]);
   return tabs;
 }
 
@@ -870,6 +1073,27 @@ function todoNote(parent, text, detail) {
   p.textContent = `Not implemented: ${text}`;
   if (detail) p.title = detail;
   parent.append(p);
+}
+
+/**
+ * The gaps inside a page Anvil has built, read off the inventory.
+ *
+ * A page is not all-or-nothing — Looping exists and holds `retries`, and none
+ * of TestStand's loop types — so what a built page still lacks is declared in
+ * `paridad.mjs` like any other gap, and shown at the foot of the page it
+ * belongs to (ADR-0043 §4).
+ */
+function parityNote(parent, ...ids) {
+  for (const id of ids) {
+    const entry = PAGE_DETAILS.find((d) => d.id === id);
+    if (!entry) throw new Error(`no parity entry: ${id}`);
+    const p = document.createElement("p");
+    p.className = "todo";
+    p.dataset.parity = entry.state;
+    p.textContent = `Not implemented: ${entry.label}`;
+    p.title = gapTooltip(entry);
+    parent.append(p);
+  }
 }
 
 function note(parent, text) {
@@ -1100,10 +1324,7 @@ function pageRunOptions(body, ctx) {
     checkbox(step.disable, (v) => edit("disable", v ? true : undefined)),
     "TestStand's Run Mode ▸ Skip: the engine records the step as skipped without calling it.",
   );
-  todoNote(
-    fields,
-    "Run Mode ▸ Force Pass and Force Fail, Record Results, and Step Failure Causes Sequence Failure — which ADR-0040 put out of its own scope.",
-  );
+  parityNote(fields, "step.properties.run-options.run-mode");
 }
 
 function pageLooping(body, ctx) {
@@ -1115,10 +1336,7 @@ function pageLooping(body, ctx) {
     numberInput(step.retries, (v) => edit("retries", v)),
     "How many attempts the step gets. Anvil's own, not TestStand's: it calls the step again while the step does not pass.",
   );
-  todoNote(
-    fields,
-    "TestStand's loop types — Fixed number, While, Do While, Pass/Fail count — their pass and fail counts, and the Looping status. Retries is not a loop; issue #76 asks how the two should meet.",
-  );
+  parityNote(fields, "step.properties.looping.loop-types");
 }
 
 function pagePostActions(body, ctx) {
@@ -1130,10 +1348,7 @@ function pagePostActions(body, ctx) {
     checkbox(step.pause_on_fail, (v) => edit("pause_on_fail", v ? true : undefined)),
     "Stops the phase if this step fails.",
   );
-  todoNote(
-    fields,
-    "TestStand's On Pass and On Fail actions — Goto step, Call sequence, Terminate — and the custom conditions that choose between them.",
-  );
+  parityNote(fields, "step.properties.post-actions.on-pass-on-fail");
 }
 
 /** The expressions the engine evaluates around the step. */
@@ -1199,10 +1414,7 @@ function pageExpressions(body, ctx) {
     }
   }
 
-  todoNote(
-    fields,
-    "TestStand's Pre-Expression, which runs before the step, and its Status Expression. Anvil's `assign` runs after the step and can only write a declared local.",
-  );
+  parityNote(fields, "step.properties.expressions.pre-and-status");
 }
 
 function pagePreconditions(body, ctx) {
@@ -1598,7 +1810,7 @@ function renderStep() {
     );
     // A page that the current type does not have, or that Anvil cannot fill,
     // must not stay selected when the type changes underneath it.
-    if (!pages.some((page) => page.name === state.stepPage && !page.todo)) {
+    if (!pages.some((page) => page.label === state.stepPage && page.state === "built")) {
       state.stepPage = "General";
     }
 
@@ -1608,14 +1820,17 @@ function renderStep() {
       const item = document.createElement("button");
       item.type = "button";
       item.className = "prop-page";
-      item.textContent = page.name;
+      item.textContent = page.label;
       // Greyed out, not left off: the page is where TestStand puts it, and the
-      // tooltip says what it would hold.
-      item.disabled = Boolean(page.todo);
-      item.title = page.todo ?? `${page.name} settings for this step`;
-      if (page.name === state.stepPage) item.setAttribute("aria-current", "true");
+      // tooltip says what TestStand does there and where Anvil stands — which
+      // is not the same sentence for a debt, another road and a decision
+      // (ADR-0043 §4).
+      item.disabled = page.state !== "built";
+      item.dataset.parity = page.state;
+      item.title = gapTooltip(page) ?? `${page.label} settings for this step`;
+      if (page.label === state.stepPage) item.setAttribute("aria-current", "true");
       item.addEventListener("click", () => {
-        state.stepPage = page.name;
+        state.stepPage = page.label;
         renderStep();
       });
       nav.append(item);
@@ -1624,7 +1839,7 @@ function renderStep() {
     const content = document.createElement("div");
     content.className = "prop-content";
     body.append(nav, content);
-    pages.find((page) => page.name === state.stepPage)?.render?.(content, ctx);
+    pages.find((page) => page.label === state.stepPage)?.render?.(content, ctx);
   }
 
   // Moving and deleting a step are not step properties — TestStand keeps them
@@ -1671,13 +1886,26 @@ function renderVariables() {
   renderSequenceFields(doc);
   renderExecutors(doc);
 
+  // TestStand's column headings for this pane. The type is not editable and
+  // not stored: it is what the loader will read the scalar as, shown so that
+  // `4.5` and `"4.5"` stop looking like the same declaration (RF-31).
+  const heads = document.createElement("div");
+  heads.className = "var-head";
+  for (const h of ["Name", "Value", "Type"]) {
+    const c = document.createElement("span");
+    c.textContent = h;
+    heads.append(c);
+  }
+  ui.variables.append(heads);
+
   for (const scope of SCOPES) {
     const vars = doc.variables(scope);
     const names = Object.keys(vars);
 
     const head = document.createElement("div");
     head.className = "scope";
-    head.textContent = scope;
+    // As TestStand names them: the scope, and whose it is.
+    head.textContent = `${SCOPE_LABELS[scope]} ('${doc.name ?? NEW_SEQUENCE_NAME}')`;
     ui.variables.append(head);
 
     for (const name of names) {
@@ -1709,7 +1937,11 @@ function renderVariables() {
       });
       v.className = "v";
 
-      row.append(k, v, action("Remove", () => {
+      const t = document.createElement("span");
+      t.className = "t";
+      t.textContent = scalarType(vars[name]);
+
+      row.append(k, v, t, action("Remove", () => {
         doc.removeVariable(scope, name);
         afterEdit();
       }));
@@ -1729,6 +1961,33 @@ function renderVariables() {
     });
     ui.variables.append(add);
   }
+
+  // The fourth scope TestStand has, and what this pane cannot show yet.
+  parityRow(ui.variables, "variables.station-globals");
+  parityRow(ui.variables, "variables.live-values");
+}
+
+/** What each scope is called in TestStand's Variables pane. */
+const SCOPE_LABELS = {
+  locals: "Locals",
+  parameters: "Parameters",
+  file_globals: "FileGlobals",
+};
+
+/**
+ * The type the loader will read this scalar as (RF-31).
+ *
+ * Read off the value rather than stored, because the YAML has no type
+ * declaration: what is typed decides it. Showing it is how `4.5` and `"4.5"`
+ * stop looking like the same line — which in a test sequencer is the
+ * difference between a number and a label.
+ */
+function scalarType(value) {
+  if (value === null || value === undefined) return "";
+  const t = typeof value;
+  if (t === "boolean") return "Boolean";
+  if (t === "number") return "Number";
+  return "String";
 }
 
 /** The sequence's own fields. Its name is what the report is headed with. */
@@ -1900,13 +2159,177 @@ function renderAll({ skipText = false } = {}) {
   ui.run.disabled = boton.disabled;
   ui.run.title = boton.title;
   ui.sequenceTitle.textContent = state.doc?.name
-    ? `Sequence — ${state.doc.name}`
-    : "Sequence";
+    ? `Steps — ${state.doc.name}`
+    : "Steps";
   renderPalette();
+  renderTemplates();
+  renderSequences();
   renderSequence();
   renderStep();
   renderVariables();
+  renderExecution();
+  renderOutput();
+  renderStatusFields();
   if (!skipText && state.view === "text") renderText();
+}
+
+/**
+ * TestStand's status bar fields, in TestStand's order.
+ *
+ * Model, Step Selected and Number of Steps are Anvil's own; User and
+ * Environment are greyed, because Anvil has no notion of who is running it and
+ * configures a run from CLI switches rather than from a station environment.
+ */
+function renderStatusFields() {
+  ui.statusFields.replaceChildren();
+  const doc = state.doc;
+
+  for (const entry of STATUS_BAR) {
+    const span = document.createElement("span");
+    span.className = "status-field";
+    span.dataset.parity = entry.state;
+
+    if (entry.state !== "built") {
+      span.textContent = `${entry.label}: —`;
+      span.title = gapTooltip(entry);
+      ui.statusFields.append(span);
+      continue;
+    }
+
+    if (entry.id === "status.model") {
+      // `--process-model` is what wraps a sequence in a model; the editor does
+      // not pass one, so a run here is the sequence on its own.
+      span.textContent = "Model: <None>";
+      span.title = "Anvil's process model is a wrapper sequence (ADR-0016), passed with --process-model. The editor runs the sequence on its own.";
+    } else if (entry.id === "status.selected") {
+      // TestStand's own wording, index and all: `1 Step Selected [0]`.
+      span.textContent = state.selected
+        ? `1 Step Selected [${state.selected.index}]`
+        : "No Steps Selected";
+    } else {
+      const n = doc ? PHASES.reduce((t, ph) => t + doc.steps(ph).length, 0) : 0;
+      span.textContent = `Number of Steps: ${n}`;
+    }
+    ui.statusFields.append(span);
+  }
+}
+
+/**
+ * TestStand's execution toolbar: Run, and everything Anvil cannot do yet.
+ *
+ * This is the loudest thing the inventory produces, and it is meant to be.
+ * Five controls, and four of them wait on the same missing piece of the
+ * engine — stop, look, resume. Terminate waits on cancellation that still runs
+ * cleanup, which is the risk `editor/README.md` already names: killing the
+ * worker mid-sequence leaves the bench exactly as it was, with no cleanup run.
+ *
+ * They are drawn where TestStand draws them rather than left off, so that what
+ * is missing is visible at the moment someone would reach for it.
+ */
+const EXEC_TOOLBAR = [
+  "execution.break",
+  "execution.resume",
+  "execution.step-into",
+  "execution.terminate",
+  "execution.abort",
+];
+
+function renderExecControls() {
+  // Run is in the HTML and owns its own wiring; everything after it is built
+  // from the inventory.
+  for (const node of [...ui.execControls.children]) {
+    if (node !== ui.run) node.remove();
+  }
+  for (const id of EXEC_TOOLBAR) {
+    const entry = parityById(id);
+    const b = document.createElement("button");
+    b.type = "button";
+    b.className = "exec";
+    b.dataset.parity = entry.state;
+    b.textContent = entry.label;
+    b.disabled = true;
+    b.title = gapTooltip(entry);
+    ui.execControls.append(b);
+  }
+}
+
+/**
+ * The Execution pane: TestStand's execution window, as much of it as the
+ * engine's event stream supports.
+ *
+ * The Call Stack is real and always was possible: `--events` has carried
+ * `parent_run_id` and `depth` on every line since ADR-0033, and nothing read
+ * them. Watch and Breakpoints are greyed, and they say what they wait on.
+ */
+function renderExecution() {
+  ui.execution.replaceChildren();
+
+  const head = document.createElement("div");
+  head.className = "scope";
+  head.textContent = "Call Stack";
+  ui.execution.append(head);
+
+  if (!state.run) {
+    const idle = document.createElement("p");
+    idle.className = "hint";
+    idle.textContent = "Nothing has run yet. Run the sequence and the stack fills in as it goes.";
+    ui.execution.append(idle);
+  } else {
+    const { frames, truncated } = callStack(state.run);
+    if (truncated) {
+      // A stack that quietly begins halfway up reads as the whole truth
+      // (ADR-0019, Rule 2).
+      const note = document.createElement("p");
+      note.className = "todo";
+      note.textContent = "…the line naming the caller was lost, so this stack is partial.";
+      ui.execution.append(note);
+    }
+    if (frames.length === 0 && !truncated) {
+      const idle = document.createElement("p");
+      idle.className = "hint";
+      idle.textContent = state.run.done ? "The run finished." : "Waiting for the first step.";
+      ui.execution.append(idle);
+    }
+    for (const frame of frames) {
+      const row = document.createElement("div");
+      row.className = "stack-frame";
+      row.style.setProperty("--depth", String(frame.depth));
+      const name = document.createElement("span");
+      name.className = "k";
+      name.textContent = frame.name;
+      const where = document.createElement("span");
+      where.className = "v";
+      where.textContent = `${frame.sequence ?? "?"} · ${frame.phase ?? ""}`;
+      row.append(name, where);
+      ui.execution.append(row);
+    }
+  }
+
+  parityRow(ui.execution, "execution.watch");
+  parityRow(ui.execution, "execution.breakpoints");
+}
+
+/** Templates and IO Configurations: TestStand has both, Anvil neither. */
+function renderTemplates() {
+  ui.templates.replaceChildren();
+  parityRow(ui.templates, "window.palette.templates");
+  ui.ioConfigurations.replaceChildren();
+  parityRow(ui.ioConfigurations, "window.palette.io-configurations");
+}
+
+/**
+ * The Output tab: what the run printed.
+ *
+ * `run()` used to send this to the console with a note saying it would live
+ * here one day — "the full report goes to the console until there is somewhere
+ * to put it". This is that somewhere, and it is where TestStand puts it.
+ */
+function renderOutput() {
+  ui.output.replaceChildren();
+  const pre = document.createElement("pre");
+  pre.className = "output";
+  pre.textContent = state.output ?? "Nothing has run yet.";
+  ui.output.append(pre);
 }
 
 function afterEdit() {
@@ -1994,8 +2417,13 @@ async function run() {
   state.runInFlight = true;
   reportWork();
   state.run = newRunState();
+  state.output = null;
   ui.run.disabled = true;
+  // TestStand brings the execution forward when a run starts; there is no
+  // second window here, so the docked pane switches to it.
+  setRightTab("execution");
   renderSequence();
+  renderExecution();
 
   try {
     const { exitCode, stdout, stderr } = await engine.run({
@@ -2034,13 +2462,15 @@ async function run() {
       ? ` (${state.run.lost} event line(s) lost — some rows may be blank)`
       : "";
     status(exitCode === 0 ? "pass" : "fail", verdict + perdidas);
-    // The full report goes to the console until there is somewhere to put it.
-    // A run's detail — per-step results, measurements, limits — needs a pane of
-    // its own, and that arrives with the live events of ADR-0029.
+    // The report lands on the Output tab, where TestStand puts it. The console
+    // keeps it too: inside the shell that reaches the process's stdout
+    // (ADR-0037 §e), which is the trail worth having when the window is gone.
+    state.output = report;
     console.log(report);
   } catch (e) {
     const what = e instanceof EngineHostError ? e.message : String(e?.message ?? e);
     status("error", `could not run: ${what}`);
+    state.output = `could not run: ${what}`;
   } finally {
     state.runInFlight = false;
     renderAll();
@@ -2423,23 +2853,25 @@ function downloadFallback() {
 function wireMenus() {
   const closeAll = () => {
     for (const m of document.querySelectorAll(".menu")) {
-      m.querySelector("ul").hidden = true;
-      m.querySelector("button").setAttribute("aria-expanded", "false");
+      const list = m.querySelector("ul");
+      if (list) list.hidden = true;
+      m.querySelector("button")?.setAttribute("aria-expanded", "false");
     }
   };
 
-  for (const menu of document.querySelectorAll(".menu")) {
-    const button = menu.querySelector("button");
-    const list = menu.querySelector("ul");
-    button.setAttribute("aria-expanded", "false");
-    button.addEventListener("click", (e) => {
-      e.stopPropagation();
-      const open = list.hidden;
-      closeAll();
-      list.hidden = !open;
-      button.setAttribute("aria-expanded", String(open));
-    });
-  }
+  // Delegated, because the bar is rendered from the inventory rather than
+  // written into the HTML: binding each button once at start-up would miss
+  // every menu built after this runs.
+  ui.menus.addEventListener("click", (e) => {
+    const button = e.target.closest?.("[data-menu]");
+    if (!button || button.disabled) return;
+    e.stopPropagation();
+    const list = button.parentElement.querySelector("ul");
+    const open = list.hidden;
+    closeAll();
+    list.hidden = !open;
+    button.setAttribute("aria-expanded", String(open));
+  });
 
   document.addEventListener("click", closeAll);
   document.addEventListener("keydown", (e) => {
@@ -2477,12 +2909,84 @@ function wireMenus() {
     b.addEventListener("click", () => setView(b.dataset.view));
   }
 
+  // TestStand's panes are tabbed, and each dock has its own strip.
+  wirePaneTabs("left", setLeftTab);
+  wirePaneTabs("right", setRightTab);
+  wirePaneTabs("bottom", setBottomTab);
+
   ui.run.addEventListener("click", run);
+}
+
+function wirePaneTabs(dock, set) {
+  for (const b of document.querySelectorAll(`[data-${dock}]`)) {
+    b.addEventListener("click", () => set(b.dataset[dock]));
+  }
+}
+
+/**
+ * Shows one of a dock's panes and marks its tab.
+ *
+ * `hidden` rather than unmounting, because these panes hold live state — the
+ * text editor's cursor, the output of a run that has ended — and rebuilding
+ * them on every tab change would throw it away.
+ */
+function selectPane(dock, which, panes) {
+  for (const [name, node] of Object.entries(panes)) node.hidden = name !== which;
+  for (const b of document.querySelectorAll(`[data-${dock}]`)) {
+    b.setAttribute("aria-selected", String(b.dataset[dock] === which));
+  }
+}
+
+/** The Templates / IO Configurations pair, inside the palette. */
+function setLeftTab(which) {
+  state.leftTab = which;
+  selectPane("left", which, { templates: ui.templates, io: ui.ioConfigurations });
+}
+
+function setRightTab(which) {
+  state.rightTab = which;
+  selectPane("right", which, {
+    variables: ui.variables,
+    sequences: ui.sequences,
+    execution: ui.execution,
+  });
+}
+
+function setBottomTab(which) {
+  // Analysis Results is the Sequence Analyzer, which is out of scope
+  // (ADR-0043 §3). Its tab is there and refuses to open, saying why.
+  if (which === "analysis") return;
+  state.bottomTab = which;
+  selectPane("bottom", which, { step: ui.stepEditor, output: ui.output });
+  ui.stepTitle.hidden = which !== "step";
+}
+
+/**
+ * The docked tabs Anvil does not fill, greyed where TestStand puts them.
+ *
+ * Only the Analysis Results tab today: the Sequence Analyzer is out of the
+ * parity scope, and what Anvil checks statically the loader checks, live, in
+ * the status bar as the file is typed.
+ */
+function markGreyedTabs() {
+  for (const [selector, id] of [
+    ['[data-bottom="analysis"]', "execution.analysis-results"],
+  ]) {
+    const tab = document.querySelector(selector);
+    const entry = parityById(id);
+    if (!tab || !entry) continue;
+    tab.disabled = true;
+    tab.dataset.parity = entry.state;
+    tab.title = gapTooltip(entry);
+  }
 }
 
 // ---------------------------------------------------------------- start
 
+renderMenuBar();
 wireMenus();
+renderExecControls();
+markGreyedTabs();
 renderAll();
 
 // `?open=<path>` loads a sequence over HTTP instead of through the file picker.

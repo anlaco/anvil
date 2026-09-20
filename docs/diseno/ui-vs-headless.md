@@ -1,13 +1,20 @@
 # Diseño: UI vs. headless
 
 > **Prioridad:** MVP-parcial. **Headless/CLI en el MVP**; Operator UI web +
-> UIMsgs + editor visual son post-MVP.
+> UIMsgs son post-MVP. El **editor de secuencias existe desde 0.4.0** y su
+> paridad con TestStand la gobierna
+> [ADR-0043](../adr/0043-the-editor-is-laid-out-as-teststand-and-declares-what-it-does-not-do.md).
 
-Anvil nace **headless primero**: se corre con `wasmtime run anvil.wasm
-secuencia.yaml`. Sin UI gráfica en v1. La UI llega después, cuando el
-núcleo sea estable. Esto también evita el dolor de TestStand: una UI
-acoplada al motor que se queda atrás (Sequence Editor dev vs. Operator
-Interfaces prod desincronizados).
+Anvil nació **headless primero**: se corre con `anvil secuencia.yseq`, y el
+MVP entero (M0–M5) se cerró sin una sola pantalla. La UI llegó después, con el
+núcleo ya estable. Eso evita el dolor de TestStand —una UI acoplada al motor
+que se queda atrás, Sequence Editor de desarrollo contra Operator Interfaces de
+producción desincronizados— y se sostiene con una regla, no con una intención:
+**hay un solo motor y las dos front-ends son clientes suyos**
+([ADR-0031](../adr/0031-one-engine-two-front-ends.md),
+[ADR-0034](../adr/0034-the-engine-is-a-service-and-the-front-ends-are-clients.md)).
+El editor hospeda el mismo `anvil-guest.wasm` que embebe el binario nativo; no
+hay un fork del motor para la pantalla, y no puede haberlo.
 
 ## MVP: headless/CLI
 
@@ -109,41 +116,72 @@ Operator Interface consume; los no soportados se ignoran (investigación
   investigación §5, Could).
 - Lee el estado del motor por los UIMsgs; no lo acopla.
 
-## Editor visual (post-MVP) — con drag-and-drop e introspección de firma
+## El editor de secuencias — existe, y declara lo que no hace
 
-Cuando Anvil tenga editor visual, el objetivo es:
+Ya no es un plan. El editor abre, edita, valida en vivo, guarda y **corre**
+(`editor/`), es una SPA que se envuelve en Electron para la descarga
+([ADR-0037](../adr/0037-the-editors-shell-is-electron-because-linux-is-the-first-platform.md)),
+y sus reglas de diseño —los **AP**— están en
+[principios-del-editor.md](principios-del-editor.md).
 
-1. **Drag-and-drop del archivo** del code module (`.vi`/`.dll`/`.py`/
-   `.scilab`) sobre el editor.
-2. El editor **auto-descubre y actualiza los parámetros y el valor de
-   retorno** del paso a partir de la firma del módulo, como hace TestStand
-   al añadir un code module.
+Su forma es la del Sequence Editor de TestStand 2019, y **lo que Anvil no hace
+sale en gris en su sitio**, diciendo qué hace TestStand ahí y si es deuda
+(`todo`), otro camino (`elsewhere`) o una decisión (`never`). Así el inventario
+de lo que falta vive donde no puede quedarse obsoleto. El mecanismo y su
+alcance están en
+[ADR-0043](../adr/0043-the-editor-is-laid-out-as-teststand-and-declares-what-it-does-not-do.md);
+el inventario publicado, en [paridad-teststand.md](../paridad-teststand.md).
 
-Esto exige que un paso **exponga su firma** (parámetros: nombre, tipo,
-dirección in/out; tipo de retorno). Hoy `paso.proto` solo describe *cómo
-invocar* y *qué devuelve* a nivel de mensaje, no la firma tipada. Hay que
-añadir un **mecanismo de introspección** (p. ej. un RPC `Describe` o un
-sidecar de metadatos) — extensión futura del contrato, detallada en
-[contrato-grpc.md](../contrato-grpc.md) y ligada al registro de pasos
-([modelo-de-pasos.md](modelo-de-pasos.md)).
+La dirección importa: **el motor desbloquea la casilla, nunca al revés**
+(AP-13). El editor no puede pedirle al motor algo que el motor no haga ya, que
+es AP-04 — la regla de la que cuelga todo lo demás.
 
-> **Tensión resuelta:** la introspección de firma vive en el **lado del
-> ejecutor** (que provee el catálogo de pasos y sus firmas), no en el
-> núcleo del motor (que sigue genérico, ADR-0005). El editor y el ejecutor
-> hablan firmas; el motor sigue hablando solo `nombre`/`estado`.
+### La introspección de firma: resuelta, y no como decía este documento
+
+El objetivo era el de TestStand: arrastrar el code module sobre el editor y que
+**los parámetros y el retorno se descubran solos**. Este documento suponía que
+haría falta *inspeccionar* el módulo, como TestStand lee el connector pane de
+un `.vi`.
+
+Lo que se hizo fue **preguntar**, no inspeccionar: el RPC `Describe` del
+contrato
+([ADR-0021](../adr/0021-el-ejecutor-describe-su-catalogo.md),
+[ADR-0028](../adr/0028-describe-answers-without-the-bench.md)) devuelve el
+catálogo del ejecutor con la firma de cada paso. Preguntar funciona igual para
+un WASM, para Python, para una caja en otra sala y para lo que venga después
+(`crates/motor/src/catalogo.rs:11-17`).
+
+> **Tensión resuelta:** la firma vive en el **lado del ejecutor**, que es quien
+> provee el catálogo, no en el núcleo del motor, que sigue genérico
+> (ADR-0005). El editor y el ejecutor hablan firmas; el motor sigue hablando
+> sólo `nombre`/`estado`.
+
+El drag-and-drop del módulo sobre el editor es lo que sigue pendiente, y es una
+casilla del inventario, no un párrafo de este documento.
 
 ## Por qué headless primero
 
 - El núcleo (semántica, reintentos, contrato, ResultSinks) es lo que
   diferencia a Anvil; la UI no (Flojoy ya tiene editor visual AGPL,
   OpenTAP editor comercial — investigación §3). La UI no es la tesis
-  (ver [vision.md](../vision.md)).
+  (ver [vision.md](../vision.md)). **Eso sigue siendo cierto con el editor ya
+  construido**, y es la razón de que ADR-0043 §6 ponga al motor a marcar el
+  ritmo: una cadencia dirigida por la pantalla implementa lo que es barato de
+  dibujar y aplaza lo caro que sí importa.
 - Headless permite CI sin hardware (record/replay, ver
   [integracion-instrumentos.md](integracion-instrumentos.md)) y
   determinismo desde el día 1.
 
 ## Out-of-scope
 
-- Editor visual en el MVP (es post-MVP, ligado a introspección de firma).
-- Debugger visual completo.
+- Editor visual **en el MVP**: lo fue, y el MVP se cerró sin él. Existe desde
+  0.4.0 y va por M6 (ver [roadmap.md](../roadmap.md)).
+- **Debugger visual completo.** Sigue fuera, y ahora se ve: la ventana de
+  ejecución enseña Terminate, Breakpoints, Watch y Step **en gris**, y cuatro
+  de esos cinco esperan la misma pieza del motor —parar, mirar y seguir—, que
+  no está escrita. Terminate espera además la cancelación con `cleanup`
+  garantizado, que es el mayor riesgo declarado del editor hoy
+  (`editor/README.md`).
+- Operator Interfaces, Type Editor, Deployment Utility, integración con control
+  de versiones y Sequence Analyzer: fuera del alcance de paridad (ADR-0043 §3).
 - UI atada a un toolkit de escritorio (la UI es web, no nativa).

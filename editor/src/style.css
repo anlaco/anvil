@@ -193,7 +193,7 @@ body {
 
 .panes {
   display: grid;
-  grid-template-columns: 190px 1fr 250px;
+  grid-template-columns: 210px 1fr 340px;
   min-height: 0;
 }
 
@@ -220,18 +220,37 @@ body {
   grid-row: 1 / -1;
 }
 
+/* The docked panes are wider than they were: the palette carries a tab strip
+ * and the right dock holds the Variables table's three columns. */
+
+
+/* A column, not a two-row grid: a pane now carries a variable number of fixed
+ * rows above its scroller — a tab strip, a heading, a column header — and a
+ * fixed `grid-template-rows` had to be rewritten for each shape. */
 .pane {
-  display: grid;
-  grid-template-rows: auto 1fr;
+  display: flex;
+  flex-direction: column;
   min-width: 0;
   min-height: 0;
   background: var(--panel);
 }
 
-/* `display: grid` above out-specifies the browser's own `[hidden]` rule, so a
+.pane > .scroll {
+  flex: 1;
+}
+
+.pane > h2,
+.pane > .pane-tabs,
+.pane > .step-head {
+  flex: none;
+}
+
+/* `display: flex` above out-specifies the browser's own `[hidden]` rule, so a
  * hidden pane would still be laid out. Anything that sets `display` has to say
- * this, or `el.hidden = true` silently does nothing. */
-.pane[hidden] {
+ * this, or `el.hidden = true` silently does nothing. The same trap catches the
+ * tabbed panes inside a dock, which is why `.scroll[hidden]` is here too. */
+.pane[hidden],
+.scroll[hidden] {
   display: none;
 }
 
@@ -256,15 +275,6 @@ body {
 }
 
 /* ---------- insertion palette ---------- */
-
-.palette-group {
-  padding: 5px 10px 2px;
-  color: var(--muted);
-  font-size: 11px;
-  font-weight: 600;
-  letter-spacing: 0.05em;
-  text-transform: uppercase;
-}
 
 .palette-item {
   display: block;
@@ -305,27 +315,35 @@ body {
 
 /* ---------- sequence list ---------- */
 
+/* TestStand's group header, and it collapses: `+ Setup (17)`. A button, not a
+ * div, so it is reachable from the keyboard like every other control here. */
 .phase {
+  display: block;
+  width: 100%;
   padding: 4px 10px 2px;
+  background: none;
+  border: 0;
   color: var(--muted);
+  font: inherit;
   font-size: 11px;
   font-weight: 600;
   letter-spacing: 0.05em;
+  text-align: left;
   text-transform: uppercase;
+  cursor: pointer;
 }
 
-.step-row {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  width: 100%;
-  padding: 3px 10px 3px 18px;
-  background: none;
-  border: 0;
+.phase:hover {
   color: inherit;
-  font: inherit;
-  text-align: left;
-  cursor: pointer;
+}
+
+/* TestStand closes a group with this; it is what makes the extent of a phase
+ * readable when three of them sit in one flat list. */
+.phase-end {
+  padding: 2px 10px 4px 22px;
+  color: var(--muted);
+  font-size: 11px;
+  opacity: 0.6;
 }
 
 .step-row:hover {
@@ -338,21 +356,10 @@ body {
 }
 
 .step-row .name {
-  flex: 1;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
   font-family: var(--mono);
-}
-
-.step-row .kind {
-  color: var(--muted);
-  font-size: 11px;
-}
-
-.step-row[aria-current="true"] .kind {
-  color: var(--accent-ink);
-  opacity: 0.8;
 }
 
 .step-row[data-disabled="true"] .name {
@@ -1181,3 +1188,318 @@ button:focus-visible {
     animation: none;
   }
 }
+
+/* ---------- parity: what TestStand has and Anvil does not ---------- */
+
+/*
+ * The three verdicts must not look alike (ADR-0043 §4). A debt and a decision
+ * read differently in the tooltip, and reading every tooltip to find out which
+ * is which defeats the point of showing them at all.
+ *
+ *   todo       dimmed — it is coming
+ *   elsewhere  dimmed and italic — it is here, somewhere else
+ *   never      dimmed and struck through — it is not coming
+ *
+ * Struck-through is the one that has to survive being glanced at, because it
+ * is the only one that says "stop looking for this".
+ */
+[data-parity="todo"]:disabled,
+[data-parity="todo"].parity-row {
+  opacity: 0.45;
+}
+
+[data-parity="elsewhere"]:disabled,
+[data-parity="elsewhere"].parity-row {
+  opacity: 0.55;
+  font-style: italic;
+}
+
+[data-parity="never"]:disabled,
+[data-parity="never"].parity-row {
+  opacity: 0.4;
+  text-decoration: line-through;
+}
+
+/* A line standing in for something TestStand lists and Anvil does not have. */
+.parity-row {
+  padding: 3px 10px 3px 18px;
+  font-size: 12px;
+  color: var(--muted);
+  cursor: help;
+}
+
+/* ---------- docked pane tabs ---------- */
+
+.pane-tabs {
+  display: flex;
+  gap: 2px;
+  padding: 3px 4px 0;
+  background: var(--bg);
+  border-bottom: 1px solid var(--line);
+}
+
+.pane-tabs button {
+  padding: 3px 8px;
+  background: none;
+  border: 1px solid transparent;
+  border-bottom: 0;
+  border-radius: 3px 3px 0 0;
+  color: var(--muted);
+  font: inherit;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.pane-tabs button[aria-selected="true"] {
+  background: var(--panel);
+  border-color: var(--line);
+  color: inherit;
+}
+
+.pane-tabs button:disabled {
+  cursor: help;
+}
+
+/* ---------- Sequences pane ---------- */
+
+.seq-row {
+  padding: 3px 10px 3px 12px;
+  font-family: var(--mono);
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.seq-row[data-current="true"] {
+  background: var(--accent);
+  color: var(--accent-ink);
+}
+
+.seq-row[data-sub="true"] {
+  padding-left: 28px;
+  color: var(--muted);
+}
+
+/* ---------- the step list's columns ---------- */
+
+/*
+ * TestStand's three columns — Step, Description, Settings — with the gutter a
+ * breakpoint would sit in down the left. The header and every row share one
+ * template so the columns line up; a row is a flex item in a grid because it
+ * is also a button.
+ */
+.step-head,
+.step-row {
+  display: grid;
+  grid-template-columns: 14px minmax(0, 1.4fr) minmax(0, 1.6fr) minmax(0, 0.9fr) 14px;
+  gap: 6px;
+  align-items: center;
+}
+
+.step-head {
+  padding: 3px 10px 3px 4px;
+  background: var(--bg);
+  border-bottom: 1px solid var(--line);
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.step-row {
+  width: 100%;
+  padding: 3px 10px 3px 4px;
+  background: none;
+  border: 0;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+/* The gutter is drawn and nothing can be set in it: the engine cannot stop at
+ * a step. `help` rather than `pointer` is the difference between a control
+ * that is waiting for you and one that is explaining itself. */
+.step-row .gutter {
+  height: 10px;
+  cursor: help;
+}
+
+.step-row .c-desc,
+.step-row .c-settings {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.step-row[aria-current="true"] .c-desc,
+.step-row[aria-current="true"] .c-settings {
+  color: var(--accent-ink);
+  opacity: 0.8;
+}
+
+/*
+ * A step that ran inside a subsequence. It is not part of the document — there
+ * is nothing to select and nothing to drag — so it is a div, dimmer, and
+ * indented by the depth the engine states on every line (ADR-0033).
+ */
+.step-row.nested {
+  padding-left: calc(4px + var(--depth, 1) * 16px);
+  cursor: default;
+  opacity: 0.75;
+}
+
+.step-row.nested .name {
+  font-style: italic;
+}
+
+/* ---------- variables table ---------- */
+
+.var-head {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) 4.5em;
+  gap: 6px;
+  padding: 3px 10px 3px 18px;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.var .t {
+  width: 4.5em;
+  flex: none;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+/* ---------- execution ---------- */
+
+.exec-controls {
+  display: flex;
+  gap: 4px;
+  align-items: center;
+}
+
+.exec-controls .exec {
+  padding: 3px 8px;
+  background: none;
+  border: 1px solid var(--line);
+  border-radius: 3px;
+  color: var(--muted);
+  font: inherit;
+  font-size: 11px;
+  cursor: help;
+}
+
+.stack-frame {
+  display: flex;
+  gap: 6px;
+  align-items: baseline;
+  padding: 3px 10px;
+  padding-left: calc(18px + var(--depth, 0) * 14px);
+  font-family: var(--mono);
+  font-size: 12px;
+}
+
+.stack-frame .k {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.stack-frame .v {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+/* ---------- output ---------- */
+
+pre.output {
+  margin: 0;
+  padding: 8px 10px;
+  font-family: var(--mono);
+  font-size: 12px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+/* ---------- status bar fields ---------- */
+
+.status-fields {
+  display: flex;
+  gap: 12px;
+  margin-left: auto;
+  align-items: center;
+  white-space: nowrap;
+}
+
+.status-field {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.status-field[data-parity="todo"] {
+  opacity: 0.45;
+  cursor: help;
+}
+
+/* ---------- Sequences tab ---------- */
+
+/*
+ * TestStand 2026Q3 docks Sequences beside Variables rather than beside the
+ * step list, with its own three columns. Anvil has neither Comment nor
+ * Requirement on a sequence, so they are headed and empty: the heading is the
+ * gap, and hovering it says so.
+ */
+.seq-head,
+.seq-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1.5fr) minmax(0, 1fr) minmax(0, 1.1fr);
+  gap: 6px;
+  align-items: center;
+  padding-right: 10px;
+}
+
+.seq-head {
+  padding: 3px 10px 3px 12px;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  cursor: help;
+}
+
+.seq-row > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ---------- the palette's two sections ---------- */
+
+/* Not `.pane > .scroll`: this one scrolls both sections together, the way
+ * TestStand's docked palette does. */
+.palette-body > .pane-tabs {
+  padding-top: 4px;
+  background: none;
+}
+
+.section {
+  margin: 0;
+  padding: 8px 10px 4px;
+  border-bottom: 1px solid var(--line);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+}
+
+/* The browser's own `[hidden]` works on these — nothing here sets `display`. */

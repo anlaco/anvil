@@ -61,6 +61,22 @@ jobs:
             anvil/executors/rust
             anvil/ejemplos/hola-paso
 
+      # The parity page is generated from the editor's inventory (ADR-0043 §5),
+      # and this is the one way it can go stale: the inventory moves and nobody
+      # regenerates. It runs on its own rather than inside `make check` because
+      # that target *skips* when node is missing — right for a developer's
+      # machine, and a false green here, which is the thing ADR-0019 Rule 2
+      # forbids. It needs no build and no transpiler output: the inventory is
+      # plain data, so it costs seconds and fails first.
+      - name: Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Parity page matches the editor's inventory
+        working-directory: anvil
+        run: node editor/scripts/paridad-a-doc.mjs --check
+
       # `check` depends on `build`: clippy over the host runs its `build.rs`,
       # which demands the guests and the bridge already compiled. That is why
       # this step builds in debug before linting.

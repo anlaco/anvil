@@ -267,6 +267,50 @@ contaminaban los datos de la propia campaña:
 Con la trazabilidad cerrada, `docs/qa/regresion/run.sh` sale **entero en
 verde** (13 casos, 0 fallos).
 
+## M6 — El editor declara su paridad · post-MVP ✅ (hecho)
+
+Decidido el 20/09/2026 en
+[ADR-0043](adr/0043-the-editor-is-laid-out-as-teststand-and-declares-what-it-does-not-do.md).
+La arquitectura de información del editor es la del Sequence Editor de
+TestStand 2026Q3, y lo que Anvil no hace sale **en gris, en su sitio**, con uno
+de tres veredictos: `todo` (deuda, y nombra la función del motor que la
+desbloquea), `elsewhere` (Anvil lo resuelve de otra forma) o `never` (fuera de
+alcance por decisión).
+
+La dirección no se invierte: **el motor desbloquea la casilla.** Una función se
+implementa y se verifica headless —CLI y test— y sólo entonces el editor deja
+de pintarla en gris (AP-13, y AP-04 visto del revés).
+
+- **M6.1 — Los principios y la decisión** ✅ (hecho):
+  [diseno/principios-del-editor.md](diseno/principios-del-editor.md) define los
+  **AP**, que se citaban 24 veces en `editor/` sin estar escritos en ninguna
+  parte; ADR-0043 fija alcance, versión de referencia y los tres veredictos.
+- **M6.2 — El inventario en un solo sitio** ✅ (hecho): `editor/src/paridad.mjs`
+  (datos puros), el test que impide grises huérfanos, y el generador de
+  [paridad-teststand.md](paridad-teststand.md) con `--check` en CI.
+- **M6.3 — La ventana principal** ✅ (hecho): barra de menús completa, panel
+  Sequences, columnas Step/Description/Settings, grupos de fase con contador,
+  Templates, Variables con Value y Type, barra de estado.
+- **M6.4 — Ejecución y depuración** ✅ (hecho): pestaña Execution con **Call
+  Stack**, **filas para los pasos de una subsecuencia** y pestaña Output.
+  Terminate, Abort, Break, Resume, Step y Breakpoints salen en gris nombrando
+  lo que esperan. Nada de esto tocó el motor: `--events` ya emitía
+  `parent_run_id` y `depth` (ADR-0029, ADR-0033) y nadie los leía.
+
+Inventario a día de hoy: **103 casillas** — 35 construidas, 57 pendientes, 7
+por otro camino, 4 descartadas ([paridad-teststand.md](paridad-teststand.md)).
+
+Lo que M6.4 hace visible es la cola del motor que sale de aquí, y que **no**
+se implementa en M6:
+
+1. **Cancelación con `cleanup` garantizado.** Hoy parar una corrida mata el
+   hilo y deja el banco como estaba, sin `cleanup` (`editor/README.md`). Es un
+   riesgo ya, sin paridad ninguna, porque Run llega a hardware real.
+2. **Parada, inspección y reanudación** (breakpoints + watch + step). Cuatro de
+   los seis controles de depuración de TestStand esperan esta misma pieza.
+3. **Looping por paso**, **Post Actions** (goto/terminate según veredicto) y
+   **Additional Results**.
+
 ## Distribución de los ejecutores de lenguaje — **decisión pendiente**
 
 Anotado el 2026-08-27, sin decidir.
@@ -376,7 +420,20 @@ Eso, y no el empaquetado, es el trabajo de verdad.
 - Cada hito se vincula a issues cuando arranque su implementación.
 - Un alcance que se sale del MVP se mueve explícitamente a post-MVP con un
   ADR si cambia una decisión de fondo.
-- La regla rectora: **no replicar TestStand 1:1**; copiar lo bueno
-  (ResultListener, perfiles de instrumento, ResultSinks industriales) y
-  dejar fuera lo frágil (process model monolítico, callbacks que rompen
-  secuencias existentes).
+- La regla rectora, en dos mitades que hay que separar
+  ([ADR-0043](adr/0043-the-editor-is-laid-out-as-teststand-and-declares-what-it-does-not-do.md)):
+
+  - **La semántica no se replica 1:1.** Se copia lo bueno (ResultListener,
+    perfiles de instrumento, ResultSinks industriales) y se deja fuera lo
+    frágil (process model monolítico, callbacks que rompen secuencias
+    existentes). Sin cambios: es la regla de siempre.
+  - **La arquitectura de información del editor sí es la de TestStand**, y
+    declara sus huecos donde van a aparecer, con uno de tres veredictos
+    —`todo`, `elsewhere`, `never`—. El inventario vive en
+    `editor/src/paridad.mjs` y se publica generado en
+    [paridad-teststand.md](paridad-teststand.md).
+
+  Hasta el 20/09/2026 esta regla decía sólo la primera mitad, y el editor ya
+  hacía la segunda desde el commit `2a4a6c8`. Lo que la separación protege es
+  lo mismo que antes: copiar dónde se busca un ajuste no compromete a copiar
+  lo que ese ajuste significa.

@@ -16,8 +16,12 @@
 //   Rule 2 of ADR-0019 forbids.
 // - **The `locator` is a hint, not a key.** Two segments — `[phase, index]` —
 //   is a row this editor owns; anything longer is running inside a subsequence,
-//   which has no row here, so the honest answer is to name the call it is under
-//   rather than highlight nothing or, worse, the wrong row.
+//   so the highlight stays on the call and the step is listed underneath it.
+// - **Paternity is read off each line, never reconstructed with a push/pop
+//   stack** (ADR-0033 §2). Frames are stored by `step_run_id` and the call
+//   stack is walked from the innermost one through `parent_run_id`, so a lost
+//   line costs one node rather than the whole tree — and the walk says when it
+//   ran out of parents instead of pretending it reached the root.
 
 /** A fresh, empty run state. */
 export function newRunState() {
@@ -28,6 +32,16 @@ export function newRunState() {
     results: new Map(),
     /** The step running inside a subsequence, by name, or null. */
     nested: null,
+    /**
+     * Every step this run has started, by `step_run_id`.
+     *
+     * `{ id, parent, depth, name, sequence, phase, row, status }` — `row` is
+     * the `phase:index` of the editor's own row this step happened under, or
+     * null when the chain to it was broken by a lost line.
+     */
+    frames: new Map(),
+    /** The innermost step that has started and not ended, or null. */
+    innermost: null,
     /** Every step the sequence declared, from `sequence_start`. */
     plan: [],
     /** The last `seq` seen; -1 before the first line. */
@@ -76,33 +90,44 @@ export function applyEvent(state, line) {
       return true;
 
     case "step_start":
+      remember(state, e, mine ? rowKey(phase, index) : null);
       if (mine) {
         state.current = { phase, index };
         state.nested = null;
       } else {
-        // Leave the ancestor row lit and say what is running under it.
+        // Leave the ancestor row lit and say what is running under it. The
+        // step also gets a row of its own now, under that call.
         state.nested = typeof e.name === "string" ? e.name : null;
       }
       return true;
 
-    case "step_result":
+    case "step_result": {
+      const frame = state.frames.get(e.step_run_id);
+      if (frame && typeof e.status === "string") frame.status = e.status;
       if (mine && typeof e.status === "string") {
         state.results.set(rowKey(phase, index), e.status);
         return true;
       }
-      return false;
+      // A verdict inside a subsequence moves no row of its own, but it is the
+      // only thing the nested row under the call has to show.
+      return Boolean(frame);
+    }
 
     case "step_end":
+      if (state.innermost === e.step_run_id) {
+        state.innermost = state.frames.get(e.step_run_id)?.parent ?? null;
+      }
       if (mine) {
         state.current = null;
         state.nested = null;
         return true;
       }
-      return false;
+      return Boolean(state.frames.get(e.step_run_id));
 
     case "sequence_end":
       state.current = null;
       state.nested = null;
+      state.innermost = null;
       state.done = true;
       return true;
 
@@ -110,6 +135,85 @@ export function applyEvent(state, line) {
       // An event this build does not know. Skip the line and keep going.
       return false;
   }
+}
+
+/**
+ * Files a `step_start` as a frame, and makes it the innermost one.
+ *
+ * `row` is the editor's own row when this step *is* one; otherwise the step
+ * runs inside a subsequence and inherits the row of the nearest ancestor that
+ * has one. Inheriting at write time rather than walking at read time is what
+ * keeps a lost line cheap: the chain is only as long as it was when the line
+ * arrived, and a frame whose parent never came through says `row: null`
+ * instead of silently attaching itself to the wrong call.
+ */
+function remember(state, e, row) {
+  const id = e.step_run_id;
+  if (typeof id !== "string") return;
+  const parent = typeof e.parent_run_id === "string" ? e.parent_run_id : null;
+  const inherited = parent ? (state.frames.get(parent)?.row ?? null) : null;
+  state.frames.set(id, {
+    id,
+    parent,
+    depth: typeof e.depth === "number" ? e.depth : 0,
+    name: typeof e.name === "string" ? e.name : "(unnamed)",
+    sequence: e.locator?.sequence ?? null,
+    phase: typeof e.phase === "string" ? e.phase : null,
+    row: row ?? inherited,
+    status: null,
+  });
+  state.innermost = id;
+}
+
+/**
+ * The call stack, outermost first: what is running, and what it is running
+ * under. TestStand's Call Stack pane.
+ *
+ * Walked from the innermost frame through `parent_run_id`, never from a
+ * push/pop stack (ADR-0033 §2). `truncated` is true when the walk ran out of
+ * parents before reaching a root — a line was lost — and saying so is the
+ * point: a stack that quietly starts halfway up reads as the whole truth.
+ */
+export function callStack(state) {
+  const frames = [];
+  let seen = 0;
+  let id = state.innermost;
+  let truncated = false;
+  while (id) {
+    const frame = state.frames.get(id);
+    if (!frame) {
+      truncated = true;
+      break;
+    }
+    frames.unshift(frame);
+    id = frame.parent;
+    // A parent chain that points at itself would hang the interface, and the
+    // ids come off a wire this code does not control.
+    if (++seen > 128) {
+      truncated = true;
+      break;
+    }
+  }
+  return { frames, truncated };
+}
+
+/**
+ * The steps that ran inside a subsequence, grouped by the row of the call they
+ * happened under.
+ *
+ * This is what stops the step list being flat. A `sequence_call` used to stay
+ * lit with the status bar naming whatever was running beneath it, and nothing
+ * on screen said what had already passed or failed down there.
+ */
+export function nestedRows(state) {
+  const under = new Map();
+  for (const frame of state.frames.values()) {
+    // depth 0 is a row of the sequence being edited; it is not nested.
+    if (frame.depth === 0 || !frame.row) continue;
+    if (!under.has(frame.row)) under.set(frame.row, []);
+    under.get(frame.row).push(frame);
+  }
+  return under;
 }
 
 /**

@@ -54,8 +54,9 @@ docs/
 ├─ arquitectura.md            C4 architecture, levels 1–3
 ├─ contrato-grpc.md           semantics of the step contract over paso.proto
 ├─ licencia.md                dual AGPL / Apache licensing strategy
+├─ paridad-teststand.md       what Anvil does and does not do vs. TestStand (generated)
 ├─ roadmap.md                 milestones M0 → M4+ with MVP vs. post-MVP
-├─ adr/                       decisions already made (immutable), 0001–0042
+├─ adr/                       decisions already made (immutable), 0001–0043
 │                             see "The ADRs, by area" below
 ├─ planes/                    milestone plans (m4-nucleo, m4b, m5-ext)
 ├─ qa/                        campaign reports + executable checks
@@ -76,7 +77,8 @@ docs/
    ├─ integracion-instrumentos.md
    ├─ motor-de-expresiones.md
    ├─ proceso-de-test.md
-   └─ ui-vs-headless.md
+   ├─ ui-vs-headless.md
+   └─ principios-del-editor.md
 ```
 
 ### The ADRs, by area
@@ -99,6 +101,12 @@ Anvil does when it cannot judge) and
   (`Describe`), object references, the Rust SDK.
 - **Front ends** — 0030, 0031, 0034–0037: the engine in a browser, one engine
   for two front ends, the engine as a service, the Sequence Editor's shell.
+  [0043](adr/0043-the-editor-is-laid-out-as-teststand-and-declares-what-it-does-not-do.md):
+  the editor's information architecture is TestStand's, and what Anvil does not
+  do is greyed in place with one of three verdicts — `todo`, `elsewhere` or
+  `never`. The engine unlocks a cell, never the editor. Accepted, not
+  implemented. The editor's own principles (the **AP**) are written down in
+  [principios-del-editor.md](diseno/principios-del-editor.md).
 - **0.5.0** — [0038](adr/0038-the-csharp-step-sdk-is-hosted-by-the-users-own-process.md)
   (steps in C#) and [0039](adr/0039-a-sequence-file-may-end-in-yseq.md) (the
   `.yseq` extension).

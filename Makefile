@@ -41,7 +41,8 @@ ANVIL_DEBUG   := packaging/anvil-host/target/debug/anvil$(EXE)
 ANVIL_RELEASE := packaging/anvil-host/target/release/anvil$(EXE)
 
 .PHONY: all build release test test-core test-bridge test-host test-executors \
-        test-executors-rust test-executors-csharp example example-release dept check fmt run clean help
+        test-executors-rust test-executors-csharp example example-release dept check fmt run clean help \
+        check-paridad paridad
 
 all: build
 
@@ -180,6 +181,24 @@ check: build
 	else \
 		echo "no dotnet: C# format check skipped"; \
 	fi
+	@$(MAKE) --no-print-directory check-paridad
+
+## The published parity page is generated from the editor's inventory
+## (ADR-0043 §5), so it can go stale in exactly one way: someone edits
+## `editor/src/paridad.mjs` and does not regenerate. This is what stops that
+## reaching a release, where the page is what a TestStand user reads before
+## deciding whether to try Anvil. Needs no build and no transpiler output —
+## the inventory is plain data.
+check-paridad:
+	@if command -v node >/dev/null 2>&1; then \
+		node editor/scripts/paridad-a-doc.mjs --check; \
+	else \
+		echo "no node: parity page check skipped"; \
+	fi
+
+## Regenerates the parity page (what `check-paridad` verifies).
+paridad:
+	node editor/scripts/paridad-a-doc.mjs
 
 ## Applies the format (what `check` verifies).
 fmt:

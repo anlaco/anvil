@@ -26,32 +26,103 @@ applies from 0.6.0 on; by it, 0.6.0 itself would have been 0.5.1.
 
 ## [Unreleased]
 
-### Fixed
-
-- **A bridge that accepts and never answers no longer hangs the editor.** The
-  WebSocket handshake had no deadline, so a port that accepted the connection
-  and stayed silent left the editor at "connecting to the bridge…" for ever —
-  and because the page opens its file only after that settles, the sequence
-  never loaded either. The handshake now gets 5 seconds and then says what it
-  was waiting for, naming the address without its token. A socket closed before
-  it opened is reported too, which some browsers do instead of raising an error.
-
-### Changed
-
-- **Every example sequence is a `.yseq` file.** `ejemplos/*.yaml` became
-  `ejemplos/*.yseq` — the extension ADR-0039 gave a sequence — and everything
-  that pointed at them moved with them: CI, the host and editor tests, the QA
-  regression, the packaging scripts, the guides and the book. `git mv`, so each
-  file keeps its history.
-
-  `ejemplos/limites.limits.yaml` keeps its extension on purpose: it is a limits
-  sidecar, not a sequence.
-
-  The ADRs were not rewritten. They record what was true when they were
-  accepted, so their paths still read `.yaml`; ADR-0039 carries a note saying
-  when the rename happened and why they were left alone.
-
 ### Added
+
+- **The editor says what it does not do, and why.** The Sequence Editor's
+  layout has been TestStand's for a while, with the pages Anvil has not built
+  greyed out. That inventory lived as prose inside a render function, said the
+  same thing about every gap, and its claim that it "cannot go stale" was a
+  comment rather than a property.
+
+  It is now data — `editor/src/paridad.mjs` — and a gap declares which of three
+  things it is: **`todo`** (Anvil intends to, and it names the engine
+  capability it waits on), **`elsewhere`** (Anvil does it another way, and says
+  where) or **`never`** (out of scope, and it cites the decision). The
+  difference matters to whoever is deciding whether to migrate: *Property
+  Browser* is not missing, it is the Text view; *LabVIEW Utility* is not
+  coming, because escaping the LabVIEW lock-in is half of why Anvil exists.
+
+  47 entries: 11 built, 32 not yet, 2 done another way, 2 not planned.
+
+- **`docs/paridad-teststand.md`**, generated from that file and checked in CI,
+  so the published page and the product cannot drift.
+
+- **The editor is laid out as the whole Sequence Editor now**, not just its step
+  settings: TestStand's ten menus along the top, the Sequences pane beside the
+  step list, the **Step / Description / Settings** columns, Setup/Main/Cleanup
+  as groups with counts, Insertion Palette and Templates tabbed together,
+  Variables with its **Value** and **Type** columns under TestStand's own
+  headings — `Locals ("basica")` — and the status bar's Model, Step Selected and
+  Number of Steps.
+
+- **An Execution pane, with a real Call Stack.** It names what is running and
+  what it is running under, and it comes off `parent_run_id` and `depth`, which
+  the engine has put on every line since ADR-0033 and nothing read. **The step
+  list is no longer flat**: a step that ran inside a subsequence gets a row
+  under the call that ran it, carrying its own verdict. That closes one of the
+  two limits `editor/README.md` confessed to.
+
+  A stack that ran out of parents says it is **partial** rather than starting
+  halfway up, and a nested step whose ancestry was lost is **not** filed under a
+  guessed call. Both are Rule 2 of ADR-0019: an incomplete answer must not read
+  as a complete one.
+
+- **An Output tab**, where the run's report goes. `run()` used to send it to the
+  console with a note saying this would exist one day.
+
+- **TestStand's execution toolbar, greyed.** Break, Resume, Step Into / Over /
+  Out, Terminate and Abort sit where TestStand puts them, each naming what it
+  waits on. **Four of the five wait on the same missing piece of the engine** —
+  stopping a run at a step and resuming it — and Terminate waits on cancellation
+  that still runs cleanup, which `editor/README.md` already called the editor's
+  biggest risk now that Run reaches real hardware.
+
+  That they come out naming the same thing is the argument this inventory
+  exists to make: what was five separate absences is one piece of work, and it
+  is now visible at the moment someone reaches for it rather than buried in a
+  paragraph of a README.
+
+  The inventory stands at **103 entries — 35 built, 57 not yet, 7 done another
+  way, 4 not planned.**
+
+- **The reference is TestStand 2026Q3**, not 2019, and the editor was re-read
+  against it. Most of the inventory held — the same ten menus, the same eleven
+  Properties pages in the same order, the same palette, the same step-list
+  columns, the same status-bar fields. What moved:
+
+  - The step's tabs **reversed**, to `Module | Limits | Data Source |
+    Properties`, and a step now opens on Module.
+  - **Sequences moved** out of the sequence file window into a tab beside
+    Variables, with Sequence, Comment and Requirement columns.
+  - **DataLogger is gone** from the palette and **IO Configuration** has
+    arrived; **IO Configurations** joins Templates in the docked pane.
+  - A phase **collapses**, closes with `<End Group>`, and an empty one reads
+    `<Insert Steps Here>`. The status bar reads `1 Step Selected [0]` and
+    `No Steps Selected`, and a scope is `Locals ('basica')`.
+  - Declared but not built: the Variables **filter box**, one **tab per open
+    file**, the sequence **Comment and Requirement** columns, and the palette's
+    **adapter selector** — which is `elsewhere`, because Anvil's adapter is
+    gRPC and there is only one (ADR-0003).
+
+  The version lives in one place, `TESTSTAND` in `editor/src/paridad.mjs`, so
+  the editor, the tests and the published page cannot disagree about which
+  TestStand this is.
+
+- **`docs/diseno/principios-del-editor.md`** — the editor's **AP** principles.
+  They were cited 24 times across `editor/` and defined nowhere in the
+  repository, AP-04 among them, which is the rule the whole editor hangs from:
+  *the editor cannot build a sequence the loader refuses*. Six are
+  reconstructed from their citations; the unreferenced numbers are reserved
+  rather than renumbered, because AP-12 exists and renumbering would break
+  every citation to tidy a list. AP-01, AP-06 and AP-08–AP-11 are still
+  missing.
+
+  The decision behind all of it is
+  [ADR-0043](docs/adr/0043-the-editor-is-laid-out-as-teststand-and-declares-what-it-does-not-do.md),
+  which also pins the reference version (TestStand 2026Q3), fixes the scope, and
+  writes down the direction: **the engine unlocks a cell, never the editor.** A
+  capability is built and verified headless, and only then does the editor stop
+  greying it.
 
 - **A step may carry a `comment`.** Free text about the step, for whoever reads
   the sequence — TestStand's *Comment*, on the General page of a step's
@@ -75,6 +146,38 @@ applies from 0.6.0 on; by it, 0.6.0 itself would have been 0.5.1.
 - **The Module tab shows the parameter table.** Read-only for now: the engine
   already sends a step's `inputs` (ADR-0020), and until the editor can write
   them the table shows what the step declares rather than nothing.
+
+### Changed
+
+- **The roadmap's guiding rule splits in two.** It read «no replicar TestStand
+  1:1», and the editor had been doing exactly that since 0.7.0. The semantics
+  are still not replicated; the editor's information architecture is, and it
+  declares its gaps. `docs/diseno/ui-vs-headless.md` said the visual editor was
+  post-MVP and that there would be no graphical UI in v1, describing a
+  repository that stopped existing three releases ago.
+
+- **Every example sequence is a `.yseq` file.** `ejemplos/*.yaml` became
+  `ejemplos/*.yseq` — the extension ADR-0039 gave a sequence — and everything
+  that pointed at them moved with them: CI, the host and editor tests, the QA
+  regression, the packaging scripts, the guides and the book. `git mv`, so each
+  file keeps its history.
+
+  `ejemplos/limites.limits.yaml` keeps its extension on purpose: it is a limits
+  sidecar, not a sequence.
+
+  The ADRs were not rewritten. They record what was true when they were
+  accepted, so their paths still read `.yaml`; ADR-0039 carries a note saying
+  when the rename happened and why they were left alone.
+
+### Fixed
+
+- **A bridge that accepts and never answers no longer hangs the editor.** The
+  WebSocket handshake had no deadline, so a port that accepted the connection
+  and stayed silent left the editor at "connecting to the bridge…" for ever —
+  and because the page opens its file only after that settles, the sequence
+  never loaded either. The handshake now gets 5 seconds and then says what it
+  was waiting for, naming the address without its token. A socket closed before
+  it opened is reported too, which some browsers do instead of raising an error.
 
 ## [0.7.0] — 2026-09-18
 

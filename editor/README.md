@@ -5,8 +5,8 @@ The graphical sequence editor. It runs **the engine itself** — the same
 so a sequence can be loaded, validated and reported on with no wasmtime, no
 bridge and no bench (AP-07).
 
-Status: **milestone 4, partly**. It opens, edits, validates live, saves and
-**runs** — the engine in the tab invokes real steps through the bridge and
+Status: **milestone 6, partly** (`docs/roadmap.md`). It opens, edits, validates
+live, saves and **runs** — the engine in the tab invokes real steps through the bridge and
 reports the same verdict the CLI does — and the run is **visible while it
 happens**: the row being executed lights up, and each row keeps the verdict it
 produced.
@@ -17,10 +17,16 @@ that reads it is `src/run-state.mjs` — kept out of the DOM on purpose, because
 lighting up the wrong row while a unit is on the bench is the failure that
 matters, and a pure function is what can be asserted line by line.
 
-Two honest limits. A step inside a **subsequence has no row here**: the step
-list is flat per phase, so the call stays lit and the status bar names what is
-running under it. And if the stream loses a line, the view **says so** rather
-than showing a run that looks complete.
+A step inside a **subsequence now has a row**, under the call that ran it, and
+the **Call Stack** in the Execution pane names what is running and what it is
+running under. Both come off `parent_run_id` and `depth`, which the engine has
+put on every line since ADR-0033 and nothing read until the execution window
+was built.
+
+The honest limit that remains: if the stream loses a line, the view **says so**
+rather than showing a run that looks complete — a row whose ancestry was lost
+is not filed under a guessed call, and a call stack that ran out of parents
+says it is partial instead of starting halfway up.
 
 ## Getting it running
 
@@ -62,6 +68,35 @@ different provider for its WASI imports. Anything that would require changing
 the engine to suit the editor is a design mistake, and the reason this holds is
 that the editor never asks the engine for something the engine does not already
 do (AP-04).
+
+The **AP** are the editor's principles, and they are written down in
+[`docs/diseno/principios-del-editor.md`](../docs/diseno/principios-del-editor.md).
+AP-04 is the load-bearing one: the editor cannot build a sequence the loader
+refuses.
+
+## What TestStand has and Anvil does not
+
+`src/paridad.mjs` is the inventory: every page, menu entry and setting
+TestStand has, with where Anvil stands on each. It is plain data, and it is
+what decides the greyed cells — a gap is never left off the interface, it
+appears where TestStand puts it with a tooltip saying what TestStand does there
+and which of three things Anvil is:
+
+| | |
+|---|---|
+| `todo` | Anvil intends to, and names the **engine capability** it waits on. |
+| `elsewhere` | Anvil does it another way, and says where. |
+| `never` | Out of scope by a decision, and cites it. |
+
+`docs/paridad-teststand.md` is **generated** from that file
+(`node scripts/paridad-a-doc.mjs`, and `--check` in CI), so the published page
+and the product cannot drift. `test/paridad.test.mjs` holds the rest together:
+no greyed cell that is not declared, no declared cell that is never shown, and
+no verdict missing the field it owes.
+
+The direction never inverts: **the engine unlocks a cell.** A capability is
+built and verified headless, and only then does the editor stop greying it
+(AP-13, [ADR-0043](../docs/adr/0043-the-editor-is-laid-out-as-teststand-and-declares-what-it-does-not-do.md)).
 
 ## Four things that will bite you
 
@@ -118,6 +153,12 @@ stop available because the engine has no cancellation of its own. That is
 survivable while nothing is executed — a validate touches only memory. It will
 not be survivable once Run reaches hardware: killing the thread mid-sequence
 leaves the bench exactly as it was, with no `cleanup` run.
+
+Since ADR-0043 this sentence is also a cell on screen: **Terminate** and
+**Abort** sit on the execution toolbar, greyed, saying what they wait on. Four
+of the six controls there wait on one thing — stopping a run at a step and
+resuming it — which is the argument for building that before anything else the
+inventory lists.
 
 ## A step's type, and its module
 
