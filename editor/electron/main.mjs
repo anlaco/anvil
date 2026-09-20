@@ -141,6 +141,65 @@ async function startBridge(sequencePath) {
   });
 }
 
+/**
+ * The catalog of every executor a sequence declares (ADR-0044).
+ *
+ * `anvil describe <sequence>` connects, asks each one what steps it serves and
+ * with what signature, prints JSON and exits. It runs no step.
+ *
+ * It is **not** the bridge. The bridge belongs to a sequence, needs the bench
+ * up and stays open for a run; this is one short process that answers the
+ * question ADR-0028 was written about — *"the editor asks on a laptop on a
+ * train"* — so the parameters of a step can be drawn with nothing running.
+ *
+ * Failures come back as the message the engine printed, not as an exit code:
+ * "could not connect to 'multimetro' at 127.0.0.1:9101" is what someone can
+ * act on, and it is already written, in the engine's own words.
+ */
+async function describeSequence(sequencePath) {
+  const engine = await findEngine();
+  const sequence = existsSync(sequencePath)
+    ? sequencePath
+    : path.join(REPO, sequencePath.replace(/^[/\\]+/, ""));
+
+  return new Promise((resolve, reject) => {
+    const child = spawn(engine.path, ["describe", sequence, "--quiet"], {
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    let out = "";
+    let err = "";
+    // 20s, not the bridge's 5: this starts every `type: wasm` executor the
+    // sequence declares, and each one compiles its modules the first time.
+    const timer = setTimeout(() => {
+      child.kill();
+      reject(new Error("the engine did not answer `describe` within 20s"));
+    }, 20000);
+    const done = (fn, value) => {
+      clearTimeout(timer);
+      fn(value);
+    };
+
+    child.stdout.on("data", (d) => (out += d));
+    child.stderr.on("data", (d) => (err += d));
+    child.on("error", (e) => done(reject, new Error(`could not start ${engine.path}: ${e.message}`)));
+    child.on("exit", (code) => {
+      if (code !== 0) {
+        // The last line of stderr is the engine's diagnosis. Rewording it here
+        // would mean two sources for the same message, and the engine's is the
+        // one that names the executor and its address.
+        const last = err.trim().split("\n").filter(Boolean).pop();
+        done(reject, new Error(last || `describe exited ${code}`));
+        return;
+      }
+      try {
+        done(resolve, JSON.parse(out));
+      } catch (e) {
+        done(reject, new Error(`describe did not answer JSON: ${e.message}`));
+      }
+    });
+  });
+}
+
 // ------------------------------------------------------------- the engine
 
 // The editor does not carry the engine: it uses the `anvil` installed on the
@@ -251,6 +310,52 @@ async function locateEngine(window) {
   return engine;
 }
 
+/**
+ * Picks an executor's binary from disk, and answers its path **relative to the
+ * sequence** — which is the only kind a sequence may carry.
+ *
+ * `path:` on a `type: wasm` executor is the executor's own binary, not a
+ * `.wasm` and not a folder of modules (ADR-0027): Anvil spawns exactly that
+ * file, and where its modules live is the executor's business — it finds them
+ * next to itself. So this dialog is looking for `anvil-exec-wasm`, or whatever
+ * department binary someone built, sitting in the folder that is the
+ * department.
+ *
+ * Relative because the loader runs inside the engine's WASI sandbox, which
+ * only has the sequence's own directory preopened: an absolute path does not
+ * cross it even when the file is there. A binary outside that tree cannot be
+ * named at all, and saying so here beats a load error about a file that
+ * plainly exists.
+ */
+async function pickExecutor(window, sequencePath) {
+  const { canceled, filePaths } = await dialog.showOpenDialog(window, {
+    title: "Choose the executor's binary",
+    properties: ["openFile"],
+    filters:
+      process.platform === "win32"
+        ? [{ name: "Executor", extensions: ["exe"] }, { name: "All files", extensions: ["*"] }]
+        : [],
+  });
+  if (canceled) return null;
+
+  const elegido = filePaths[0];
+  if (!sequencePath) {
+    throw new Error("save the sequence first: an executor's path is relative to the file");
+  }
+  const base = path.dirname(
+    existsSync(sequencePath) ? sequencePath : path.join(REPO, sequencePath.replace(/^[/\\]+/, "")),
+  );
+  const rel = path.relative(base, elegido);
+  if (rel.startsWith("..") || path.isAbsolute(rel)) {
+    throw new Error(
+      `'${elegido}' is outside the sequence's folder. The engine only sees that folder, so a path above it cannot be named — put the department beside the sequence, or save the sequence next to it.`,
+    );
+  }
+  // Always forward slashes: the loader's own `es_path` accepts both, and a
+  // sequence written on Windows has to keep working on Linux.
+  return { path: rel.split(path.sep).join("/"), name: path.basename(path.dirname(elegido)) };
+}
+
 /** Resolves to `{ value }` or `{ error }`; see `anvil:start-bridge`. */
 const answer = (promise) =>
   promise.then(
@@ -304,6 +409,12 @@ function wireIpc() {
   // file opened — the same reasoning as `anvil:read-text-if-any` below.
   ipcMain.handle("anvil:start-bridge", (_event, sequencePath) => answer(startBridge(sequencePath)));
   ipcMain.handle("anvil:stop-bridge", () => killBridge());
+  // Same `answer` as the bridge, and for the same reason: an executor that is
+  // not up is an expected answer here, not a fault.
+  ipcMain.handle("anvil:describe", (_event, sequencePath) => answer(describeSequence(sequencePath)));
+  ipcMain.handle("anvil:pick-executor", (event, sequencePath) =>
+    answer(pickExecutor(BrowserWindow.fromWebContents(event.sender), sequencePath)),
+  );
   ipcMain.handle("anvil:locate-engine", (event) =>
     answer(locateEngine(BrowserWindow.fromWebContents(event.sender))),
   );

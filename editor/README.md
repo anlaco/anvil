@@ -74,6 +74,36 @@ The **AP** are the editor's principles, and they are written down in
 AP-04 is the load-bearing one: the editor cannot build a sequence the loader
 refuses.
 
+## One Module panel, for every language
+
+TestStand has five — LabVIEW, CVI, C/C++, .NET, Python — because it **inspects**
+five different artefacts: a VI's connector pane, a `.py`'s functions, an
+assembly's classes. Each format needs its own reader, so each needs its own
+panel.
+
+Anvil has one, because the executor already normalised them. Every department
+answers the same `Describe` with the same `StepSpec`, so the panel is three
+rows for every language:
+
+| TestStand | Anvil |
+|---|---|
+| Adapter, five of them | — the adapter *is* gRPC, and there is one (ADR-0003) |
+| Project Path / Assembly / Module | **Executor** — the department (ADR-0025) |
+| VI Path / Function / Method | **Module** — the logical name (ADR-0027) |
+| The connector pane | **`StepSpec`**, from `Describe` (ADR-0021) |
+
+The catalog is asked with **`anvil describe <sequence>`**
+([ADR-0044](../docs/adr/0044-the-catalog-comes-out-as-data-anvil-describe.md)),
+spawned by the shell — **not** through the bridge. The bridge belongs to a
+sequence and needs the bench up; this is the case ADR-0028 was written for,
+where someone writes a sequence on a laptop with nothing running. In a plain
+browser there is no process to spawn, so the panel says what it cannot know.
+
+What that buys, concretely: the module list is what the executor really serves,
+and the parameter table is what it really takes. It used to read a parameter's
+type off the literal in the YAML with `typeof` — which says what someone typed,
+not what the step takes.
+
 ## What TestStand has and Anvil does not
 
 `src/paridad.mjs` is the inventory: every page, menu entry and setting

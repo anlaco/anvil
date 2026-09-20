@@ -32,7 +32,7 @@ import {
   parityById,
 } from "./paridad.mjs";
 import { browserPool, connectBridge, EngineHostError } from "./engine-pool.mjs";
-import { gatherFiles, unsavedPathHint } from "./neighbours.mjs";
+import { gatherFiles, isPath, unsavedPathHint } from "./neighbours.mjs";
 import {
   applyEvent,
   callStack,
@@ -118,6 +118,19 @@ const state = {
   collapsed: new Set(),
   /** What the last run printed, for the Output tab. */
   output: null,
+  /**
+   * What the executors this sequence declares say they serve (ADR-0044).
+   *
+   * `null` until asked. `{ executors: {name: {describes, steps, reason}} }`
+   * once answered — the engine's own document, unchanged: re-shaping it here
+   * would be a second opinion about a signature, and there is only supposed to
+   * be one.
+   */
+  catalog: null,
+  /** Why the last `describe` did not answer, or null. */
+  catalogError: null,
+  /** True while one is in flight, so the button cannot be pressed twice. */
+  catalogBusy: false,
   text: null, // CodeMirror view
   validateTimer: null,
   bridge: null, // the URL, once connected
@@ -1442,14 +1455,17 @@ function pagePreconditions(body, ctx) {
 function iconButtons(specs) {
   const group = document.createElement("div");
   group.className = "icon-row";
-  for (const [label, glyph] of specs) {
+  for (const [label, glyph, onClick, busy] of specs) {
     const b = document.createElement("button");
     b.type = "button";
     b.className = "icon-button";
-    b.disabled = true;
-    b.title = `${label}. Not implemented.`;
+    // A button with something behind it works and says what it does; one
+    // without stays greyed and says why, which is what it was drawn for.
+    b.disabled = !onClick || Boolean(busy);
+    b.title = onClick ? label : `${label}. Not implemented.`;
     b.setAttribute("aria-label", label);
     b.append(svgIcon(glyph));
+    if (onClick) b.addEventListener("click", onClick);
     group.append(b);
   }
   return group;
@@ -1528,10 +1544,19 @@ function renderModuleTab(body, ctx) {
       ),
       "The subsequence this step calls, by name or by path.",
     );
-    resolved(head, step.sequence ? `resolved against this file's directory` : "nothing named yet");
+    // Decía la frase «resolved against this file's directory» en vez de la
+    // ruta. Esta línea existe para enseñar **contra qué** resolvió — decir el
+    // método en lugar del resultado no atrapa la que resolvió donde no debía,
+    // que es lo único para lo que sirve.
+    resolved(head, sequenceResolved(step));
+    // `args`, no `inputs`: un `sequence_call` cablea los `parameters` de la
+    // subsecuencia, y son campos distintos del YAML a propósito (el mismo
+    // bloque copiado de uno a otro cambiaba de significado en silencio). Con
+    // `inputs` la tabla decía siempre «no declara inputs», incluso con
+    // argumentos escritos.
     parameterTable(
       page,
-      step,
+      { ...step, inputs: step.args ?? step.inputs },
       "the argument table.",
       "A sequence_call's `args` wire the subsequence's parameters to locals. Only the Text view can write them today.",
     );
@@ -1548,18 +1573,30 @@ function renderModuleTab(body, ctx) {
     "How the step reaches its executor. Anvil has one: a step request over gRPC (ADR-0003).",
   );
 
+  // TestStand's Project Path, and the same job: choose the container before
+  // choosing the thing inside it. Here the container is a department
+  // (ADR-0025), and the list is what the sequence declares — not what the
+  // machine has, which is a different question and does not have an answer yet
+  // (ADR-0025 §Deferred).
+  const nombres = doc.executors().map((e) => e.name);
+  const elegirEjecutor = select(
+    ["", ...nombres],
+    step.executor ?? "",
+    (v) => edit("executor", v || undefined),
+  );
+  elegirEjecutor.disabled = nombres.length === 0;
   field(
     head,
     "Executor",
     pathRow(
-      disabledInput(step.executor ?? "<None>"),
-      [["Browse for an executor", GLYPH.browse]],
+      elegirEjecutor,
+      [["Add an executor…", GLYPH.browse, () => addExecutorFromDisk()]],
       [
         ["Declare a new executor", GLYPH.create],
         ["Edit this executor", GLYPH.edit],
       ],
     ),
-    "TestStand's Project Path: the department the module lives in. Chosen on the General page.",
+    "TestStand's Project Path: the department the module lives in.",
   );
   resolved(
     head,
@@ -1570,11 +1607,29 @@ function renderModuleTab(body, ctx) {
       : "this step names no executor",
   );
 
+  // TestStand's VI Path, and its button that picks a VI **belonging to the
+  // project**. Here that is the executor's own catalog.
+  //
+  // Still a text field, with the list beside it rather than instead of it: an
+  // executor that is not up has no catalog, and a name has to be typeable
+  // anyway. Nobody should have to start a bench to write down a step's name.
+  const modulos = modulesOf(step.executor);
+  const moduleRow = document.createElement("div");
+  moduleRow.className = "module-pick";
+  moduleRow.append(textInput(step.module ?? "", (v) => edit("module", v || undefined)));
+  if (modulos && modulos.length > 0) {
+    const lista = select(["", ...modulos], modulos.includes(step.module) ? step.module : "", (v) => {
+      if (v) edit("module", v);
+    });
+    lista.title = `The ${modulos.length} module(s) '${step.executor}' says it serves.`;
+    moduleRow.append(lista);
+  }
+
   field(
     head,
     "Module",
     pathRow(
-      textInput(step.module ?? "", (v) => edit("module", v || undefined)),
+      moduleRow,
       [
         ["Browse the executor's catalog", GLYPH.browse],
         ["Pick a module from the executor", GLYPH.terminals],
@@ -1584,7 +1639,12 @@ function renderModuleTab(body, ctx) {
       [
         ["Show the module's terminals", GLYPH.terminals],
         ["Edit the module", GLYPH.edit],
-        ["Reload the catalog", GLYPH.reload],
+        [
+          state.catalogBusy ? "Asking the executors…" : "Reload the catalog",
+          GLYPH.reload,
+          () => loadCatalog(),
+          state.catalogBusy,
+        ],
         ["Configure the call", GLYPH.tools],
         ["Create a module", GLYPH.create],
         ["Help on this module", GLYPH.help],
@@ -1595,12 +1655,7 @@ function renderModuleTab(body, ctx) {
       ? "TestStand's VI Path: what the step calls on its executor."
       : "TestStand's VI Path: what the step calls. Empty means it calls nothing.",
   );
-  resolved(
-    head,
-    step.module
-      ? `${step.module} on '${step.executor ?? "?"}'`
-      : "this step calls nothing",
-  );
+  resolved(head, moduleResolved(step));
 
   if (step.module === null) return;
 
@@ -1615,6 +1670,170 @@ function renderModuleTab(body, ctx) {
     "The engine already sends a step's `inputs` (ADR-0020), so two steps can call one module with different values. Only the Text view can write them today.",
   );
   modulePanel(split, step, executor);
+}
+
+// ---------------------------------------------------------------------------
+// The catalog (ADR-0044).
+//
+// TestStand has five Module panels because it **inspects** five artefacts. It
+// reads the connector pane of a `.vi`, the functions of a `.py`, the classes
+// of an assembly — so each format needs its own panel and its own reader.
+//
+// Anvil has one, because the executor did the normalising: every department
+// answers the same `Describe` with the same `StepSpec`, whatever is behind it.
+// So the panel is the executor, the module, and the signature — three rows for
+// every language.
+//
+// It is asked through `anvil describe`, not through the bridge. The bridge
+// belongs to a sequence and needs the bench up; this is the case ADR-0028 was
+// written for, where someone writes a sequence on a laptop with nothing
+// running. In a plain browser there is no process to spawn, so the panel keeps
+// saying what it cannot know — true of what the page can see.
+// ---------------------------------------------------------------------------
+
+/**
+ * TestStand's *"or browse for a VI anywhere on the system"*, as Anvil has to
+ * mean it.
+ *
+ * A step must name an executor — there is none built into anvil to fall back
+ * on (ADR-0041) — so picking a file cannot just fill in a path: it has to
+ * **declare a department**. That is the one place this differs from LabVIEW,
+ * and it is what makes the rest work, because from then on the module list and
+ * the signatures come from asking that department.
+ *
+ * `type: wasm` by default. It is the only one that needs nothing installed on
+ * the machine: Python needs Python, a `.vi` needs LabVIEW, C# needs to have
+ * been compiled. On a bench where nothing may be installed, that is the
+ * difference between working and not.
+ */
+async function addExecutorFromDisk() {
+  if (!inShell()) {
+    status("fail", "a browser cannot read the disk; open this in the desktop app to add an executor");
+    return;
+  }
+  let elegido;
+  try {
+    elegido = await window.anvil.pickExecutor(state.handle?.path ?? null);
+  } catch (e) {
+    status("fail", String(e?.message ?? e));
+    return;
+  }
+  if (!elegido) return;
+
+  // Named after the folder it sits in, which is the department (ADR-0027), and
+  // made unique rather than silently replacing one that is already declared.
+  const ya = new Set(state.doc.executors().map((e) => e.name));
+  let nombre = elegido.name || "department";
+  let n = 1;
+  while (ya.has(nombre)) nombre = `${elegido.name}_${++n}`;
+
+  state.doc.addExecutor(nombre, "wasm", elegido.path);
+  // The step being edited is almost certainly why someone went looking.
+  const sel = state.selected;
+  if (sel && CALLS_AN_EXECUTOR.includes(state.doc.steps(sel.phase)[sel.index]?.type)) {
+    state.doc.setStepField(sel.phase, sel.index, "executor", nombre);
+  }
+  afterEdit();
+  status("busy", `executor '${nombre}' declared — asking it what it serves…`);
+  // Save first: `describe` loads the sequence from disk, so an unsaved
+  // declaration is one the engine cannot see.
+  if (!state.dirty) await loadCatalog();
+}
+
+/** The catalog of one executor, or null if none was asked for or it declined. */
+function catalogOf(name) {
+  const e = state.catalog?.executors?.[name];
+  return e && e.describes ? e : null;
+}
+
+/** The modules this executor serves, by name, or null when it is not known. */
+function modulesOf(name) {
+  const e = catalogOf(name);
+  return e ? e.steps.map((s) => s.name) : null;
+}
+
+/** What the executor says this module takes and returns, or null. */
+function specOf(executor, module) {
+  return catalogOf(executor)?.steps.find((s) => s.name === module) ?? null;
+}
+
+/**
+ * Asks the engine for the catalog of everything this sequence declares.
+ *
+ * Only in the desktop shell, and only for a file on disk: `describe` loads the
+ * sequence the way a run does, so it needs the file and its neighbours to be
+ * where they say they are. A document from File ▸ New has neither.
+ */
+async function loadCatalog() {
+  if (state.catalogBusy) return;
+  const path = inShell() ? state.handle?.path : null;
+  if (!path) {
+    state.catalogError = inShell()
+      ? "save the sequence first: the catalog is asked of what its executors point at, relative to the file"
+      : "a browser cannot start the engine; open this in the desktop app to ask the executors what they serve";
+    renderStep();
+    return;
+  }
+
+  state.catalogBusy = true;
+  state.catalogError = null;
+  renderStep();
+  try {
+    state.catalog = await window.anvil.describe(path);
+    state.catalogError = null;
+  } catch (e) {
+    // The engine's own words. Rewording them would mean two sources for the
+    // same message, and its is the one naming the executor and its address.
+    state.catalog = null;
+    state.catalogError = String(e?.message ?? e);
+  } finally {
+    state.catalogBusy = false;
+    renderStep();
+  }
+}
+
+/**
+ * The greyed line under Module: what this step actually calls, and whether the
+ * executor agrees that it serves it.
+ *
+ * The three answers are different and have to stay different. A module the
+ * catalog knows is confirmed; one it does not know is a step that will not run
+ * — the loader's `EntradaDesconocida` of `catalogo.rs`, caught here instead of
+ * on the bench. And "nobody has been asked" is neither, so it says that rather
+ * than implying the name is fine (ADR-0019, Rule 2).
+ */
+function moduleResolved(step) {
+  if (!step.module) return "this step calls nothing";
+  const donde = `${step.module} on '${step.executor ?? "?"}'`;
+  if (!step.executor) return donde;
+  const cat = catalogOf(step.executor);
+  if (!cat) return `${donde} — not asked; the catalog would say whether it is served`;
+  return specOf(step.executor, step.module)
+    ? `${donde} — served`
+    : `${donde} — '${step.executor}' does not serve it`;
+}
+
+/**
+ * The greyed line under Sequence: what a `sequence_call` will actually open.
+ *
+ * A name is an inline subsequence of this same file; anything with a slash or
+ * a sequence extension is a path, and the loader resolves it against the
+ * file's own directory (`es_path`, mirrored in `neighbours.mjs`). Showing the
+ * two differently is the point — the mistake this catches is a name that was
+ * meant to be a path, which loads as "no such subsequence" and sends someone
+ * looking for a typo in the wrong place.
+ */
+function sequenceResolved(step) {
+  const target = step.sequence;
+  if (!target) return "nothing named yet";
+  if (!isPath(target)) {
+    const declaradas = state.doc?.subsequenceNames() ?? [];
+    return declaradas.includes(target)
+      ? `inline subsequence '${target}' of this file`
+      : `inline subsequence '${target}' — this file declares none by that name`;
+  }
+  const dir = state.filename ? state.filename.replace(/[^/\\]+$/, "") : "";
+  return dir ? `${dir}${target.replace(/^\.\//, "")}` : `${target}, relative to this file`;
 }
 
 /** A field with its two rows of buttons, as TestStand hangs them off a path. */
@@ -1641,6 +1860,26 @@ function resolved(parent, text) {
 }
 
 /** TestStand's parameter grid, kept recognisable while it is still read-only. */
+/**
+ * TestStand's parameter grid — and, with a catalog, no longer a guess.
+ *
+ * It used to read the type off the literal in the YAML with `typeof`, which
+ * says what someone typed, not what the step takes: a `canal` written `"1"`
+ * looked like a text parameter because it was written as one. Now the rows are
+ * **what the executor declares** (ADR-0021), and the YAML supplies the values.
+ *
+ * Three things a row can be, and they must not look alike:
+ *
+ * - declared and given a value — ordinary;
+ * - declared, **required** and empty — the step will not run (the engine's own
+ *   `EntradaObligatoria`), so it is marked here instead of on the bench;
+ * - written in the YAML and **not** in the catalog — `EntradaUnknown`: the
+ *   executor would drop it and measure something else, which is why the engine
+ *   calls it a finding and never a warning.
+ *
+ * With no catalog it falls back to the old shape and says so. Showing nothing
+ * would be worse: a step that has inputs would look like one that has none.
+ */
 function parameterTable(parent, step, todo, detail) {
   const box = document.createElement("div");
   box.className = "fields param-box";
@@ -1655,40 +1894,160 @@ function parameterTable(parent, step, todo, detail) {
     h.textContent = heading;
     table.append(h);
   }
-  const rows = Object.entries(step.inputs ?? {});
-  if (rows.length === 0) {
+
+  const escritos = step.inputs ?? {};
+  const spec = specOf(step.executor, step.module);
+  const filas = filasDeParametros(spec, escritos);
+
+  if (filas.length === 0) {
     const empty = document.createElement("span");
     empty.className = "param-empty";
-    empty.textContent = "This step declares no inputs.";
+    empty.textContent = spec
+      ? `'${step.module}' takes no inputs.`
+      : "This step declares no inputs.";
     table.append(empty);
   } else {
-    for (const [name, value] of rows) {
-      for (const cell of [name, typeof value, "in", String(value)]) {
-        const c = document.createElement("span");
-        c.className = "param-cell";
-        c.textContent = cell;
-        table.append(c);
-      }
-    }
+    for (const fila of filas) table.append(...celdasDeParametro(step, fila));
   }
+
   box.append(table);
-  todoNote(box, todo, detail);
+  if (spec) {
+    // The note that said only the Text view could write these is not true any
+    // more for a step whose executor answered.
+    if (spec.doc) note(box, spec.doc);
+  } else {
+    todoNote(box, todo, detail);
+  }
+}
+
+/**
+ * The rows of the table: what the executor declares, then anything written in
+ * the YAML that it did not declare.
+ *
+ * The declared ones come first and in the executor's own order, which is the
+ * order of the function's signature — the one whoever wrote the step chose.
+ */
+function filasDeParametros(spec, escritos) {
+  if (!spec) {
+    return Object.entries(escritos).map(([name, value]) => ({
+      name,
+      type: typeof value,
+      value,
+      tiene: true,
+      estado: "unknown-catalog",
+    }));
+  }
+  const filas = spec.inputs.map((p) => ({
+    name: p.name,
+    type: p.type,
+    required: p.required,
+    doc: p.doc,
+    hasDefault: p.has_default,
+    default: p.default,
+    value: escritos[p.name],
+    tiene: Object.hasOwn(escritos, p.name),
+    estado: "declared",
+  }));
+  for (const [name, value] of Object.entries(escritos)) {
+    if (spec.inputs.some((p) => p.name === name)) continue;
+    filas.push({ name, type: "—", value, tiene: true, estado: "not-served" });
+  }
+  return filas;
+}
+
+/** One row's four cells. The Value one is editable; the rest are the truth. */
+function celdasDeParametro(step, fila) {
+  const celda = (texto, clase = "param-cell") => {
+    const c = document.createElement("span");
+    c.className = clase;
+    c.textContent = texto;
+    return c;
+  };
+
+  const nombre = celda(fila.name);
+  if (fila.estado === "not-served") {
+    // The executor would drop it and measure something else. That is a finding
+    // in the engine, never a warning, so it is not a quiet grey here either.
+    nombre.dataset.param = "not-served";
+    nombre.title = `'${step.executor}' does not declare '${fila.name}'. It would be ignored, and the step would measure something other than what this says.`;
+  } else if (fila.required && !fila.tiene) {
+    nombre.dataset.param = "missing";
+    nombre.title = `'${fila.name}' is required and has no value: the step will not run.`;
+  } else if (fila.doc) {
+    nombre.title = fila.doc;
+  }
+
+  const tipo = celda(fila.type);
+  if (fila.type === "unspecified") {
+    // Proto3's default, so it is also what an executor that said nothing
+    // produces. Unchecked, never guessed.
+    tipo.title = "The executor did not say. Nothing checks this one.";
+  }
+
+  const dir = celda(fila.required === false ? "in (optional)" : "in");
+  if (fila.hasDefault) {
+    dir.title = `Defaults to ${JSON.stringify(fila.default)} if left empty. The step applies it, not the engine (ADR-0021 §5).`;
+  }
+
+  return [nombre, tipo, dir, celdaDeValor(step, fila)];
+}
+
+/**
+ * The Value cell: the one thing in this table someone writes.
+ *
+ * Editable only for a step that is part of the open sequence — a `sel` — and
+ * written with its type, by the loader's own rule: `4.5` is a number, `true` a
+ * boolean, the rest text. Same inference the engine makes reading the file
+ * back, and the same field the Variables pane uses, so the decimal separator
+ * trap is avoided the same way: a text input, never `type="number"`, because a
+ * number input renders through the browser's locale and on a Spanish machine
+ * `4.5` would show as `4,5` while the YAML says `4.5`. In a test sequencer
+ * that is the difference between 4.5 V and 45 V.
+ *
+ * Emptying it removes the input rather than writing `""`: a parameter that is
+ * not there takes the step's own default, and one written empty does not.
+ */
+function celdaDeValor(step, fila) {
+  const c = document.createElement("span");
+  c.className = "param-cell param-value";
+  const sel = state.selected;
+  const escribible = sel && fila.estado !== "unknown-catalog";
+
+  if (!escribible) {
+    c.textContent = fila.tiene ? String(fila.value) : "";
+    return c;
+  }
+
+  const input = textInput(fila.tiene ? scalarText(fila.value) : "", (raw) => {
+    const t = raw.trim();
+    state.doc.setStepInput(sel.phase, sel.index, fila.name, t === "" ? undefined : parseScalar(t));
+    afterEdit();
+  });
+  input.className = "v";
+  input.placeholder = fila.hasDefault ? scalarText(fila.default) : fila.required ? "required" : "";
+  if (fila.required && !fila.tiene) input.dataset.param = "missing";
+  c.append(input);
+  return c;
 }
 
 /**
  * The panel TestStand fills with the VI: its project and name, its connector
  * pane, and the documentation off the VI itself.
  *
- * Anvil's equivalent exists already on the wire and is not plugged in here
- * yet: an executor describes its steps — each one's inputs, outputs and a line
- * of documentation (`StepSpec` in `paso.proto`, ADR-0021) — which is the same
- * three things this panel shows. Asking for it needs the bridge, so the shape
- * is here and the content says what is missing rather than looking empty.
+ * Anvil's is the executor, the module, and what `Describe` says it takes and
+ * returns (`StepSpec`, ADR-0021) — the same three things. The terminals used
+ * to be drawn from the YAML's `inputs` on the left and the hard-coded pair
+ * `measured value` / `status` on the right, because nothing had asked. Now the
+ * right-hand side is the module's real outputs, and when nobody has been asked
+ * the panel says exactly that instead of showing a shape that looks like an
+ * answer.
  */
 function modulePanel(parent, step, executor) {
   const panel = document.createElement("div");
   panel.className = "module-panel";
   parent.append(panel);
+
+  const spec = specOf(step.executor, step.module);
 
   const project = document.createElement("div");
   project.className = "module-project";
@@ -1705,37 +2064,52 @@ function modulePanel(parent, step, executor) {
   const pane = document.createElement("div");
   pane.className = "connector";
 
-  const ins = document.createElement("div");
-  ins.className = "terminals in";
-  const inputs = Object.keys(step.inputs ?? {});
-  for (const t of inputs.length > 0 ? inputs : ["(inputs)"]) {
-    const s = document.createElement("span");
-    s.textContent = t;
-    if (inputs.length === 0) s.className = "unknown";
-    ins.append(s);
-  }
+  const terminales = (clase, nombres, vacio) => {
+    const d = document.createElement("div");
+    d.className = `terminals ${clase}`;
+    for (const t of nombres.length > 0 ? nombres : [vacio]) {
+      const s = document.createElement("span");
+      s.textContent = t;
+      // Greyed means "not known", never "none": a module that genuinely takes
+      // nothing is a fact, and it should not look like an unanswered question.
+      if (nombres.length === 0) s.className = "unknown";
+      d.append(s);
+    }
+    return d;
+  };
+
+  const ins = spec
+    ? terminales("in", spec.inputs.map((p) => p.name), "(no inputs)")
+    : terminales("in", Object.keys(step.inputs ?? {}), "(inputs)");
 
   const box = document.createElement("div");
   box.className = "connector-box";
   box.textContent = (step.module ?? "").split("/").pop() ?? "";
 
-  const outs = document.createElement("div");
-  outs.className = "terminals out";
-  for (const t of ["measured value", "status"]) {
-    const s = document.createElement("span");
-    s.className = "unknown";
-    s.textContent = t;
-    outs.append(s);
-  }
+  const outs = spec
+    ? terminales("out", spec.outputs.map((o) => o.name), "(no outputs)")
+    : terminales("out", [], "(outputs)");
 
   pane.append(ins, box, outs);
   panel.append(pane);
 
   const doc = document.createElement("p");
   doc.className = "module-doc";
-  doc.textContent = "Not connected: the executor has not been asked to describe this module.";
-  doc.title =
-    "What a module takes and returns, and what it is for, is what its executor answers to Describe (StepSpec in paso.proto, ADR-0021). Asking needs the bridge, which the editor cannot use yet, so these terminals are the shape of the answer rather than the answer.";
+  if (spec) {
+    doc.textContent = spec.doc || `'${step.module}' carries no documentation.`;
+    doc.title = `Answered by '${step.executor}' (ADR-0021). Reload the catalog to ask again.`;
+  } else if (state.catalogBusy) {
+    doc.textContent = "Asking the executors…";
+  } else if (state.catalogError) {
+    // The engine's own words, or the reason there was nothing to ask.
+    doc.textContent = state.catalogError;
+  } else if (catalogOf(step.executor)) {
+    doc.textContent = `'${step.executor}' did not name a module called '${step.module}'.`;
+  } else {
+    doc.textContent = "Not asked yet: use Reload the catalog to ask the executors what they serve.";
+    doc.title =
+      "What a module takes and returns, and what it is for, is what its executor answers to Describe (StepSpec in paso.proto, ADR-0021). The editor asks with `anvil describe` (ADR-0044), which needs no bridge and no bench.";
+  }
   panel.append(doc);
 }
 
@@ -2038,9 +2412,19 @@ function renderExecutors(doc) {
     const where =
       ex.type === "grpc"
         ? textInput(`${ex.host ?? ""}:${ex.port ?? ""}`, (v) => {
+            // Sin guarda, un valor sin `:` dejaba `Number(undefined)` — un
+            // `port: .nan` escrito en el fichero. El motor lo rechaza en el
+            // siguiente validate, pero para entonces ya está en el YAML, y
+            // `.nan` no le dice nada a nadie.
             const [host, port] = v.split(":");
+            const n = Number(port);
+            if (!host?.trim() || !Number.isInteger(n) || n <= 0 || n > 65535) {
+              status("fail", `'${v}' is not host:port — 127.0.0.1:9101, for instance`);
+              renderVariables();
+              return;
+            }
             doc.setExecutorField(ex.name, "host", host.trim());
-            doc.setExecutorField(ex.name, "port", Number(port));
+            doc.setExecutorField(ex.name, "port", n);
             afterEdit();
           })
         : textInput(ex.path ?? "", (v) => {

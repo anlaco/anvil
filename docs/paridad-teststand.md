@@ -15,11 +15,11 @@ the editor's own rules are in [diseno/principios-del-editor.md](diseno/principio
 
 | | Count |
 |---|---:|
-| Not yet | 57 |
-| Done another way | 7 |
-| Not planned | 4 |
-| Built | 35 |
-| **Total** | **103** |
+| Not yet | 59 |
+| Done another way | 9 |
+| Not planned | 3 |
+| Built | 39 |
+| **Total** | **110** |
 
 A gap is never simply left off the interface: it appears where TestStand puts
 it, greyed, saying what TestStand does there and which of these it is. The
@@ -42,6 +42,13 @@ Anvil intends to have these. Each one names the engine capability it is waiting 
 | **Loop types** | Fixed number, While, Do While and Pass/Fail count loops, their pass and fail counts, and the Looping status. | engine: per-step looping. Retries is not a loop; issue #76 asks how the two should meet. |
 | **On Pass / On Fail actions** | Goto step, Call sequence or Terminate after the step, and the custom conditions that choose between them. | engine: post actions, and a Terminate that runs cleanup. |
 | **Pre-Expression and Status Expression** | An expression evaluated before the step, and one that sets its status. | engine: an expression hook before the step. Anvil's `assign` runs after it and can only write a declared local. |
+
+### Step Settings ▸ Module
+
+| | In TestStand | Waiting on |
+|---|---|---|
+| **Remembering a catalog between sessions** | Keeps a step's parameters on screen with nothing running, because they live in a type file on the developer's machine. | engine: a per-module hash on the wire. ADR-0025 §5 says a catalog cache is invalidated by hash and not by re-describing, and no hash crosses `Describe` today — the executors compute one and only `--list` shows it. |
+| **Dropping a module file onto the step** | A `.vi` dragged onto the step fills its path and reads its terminals. | engine: nothing — `anvil describe` answers the signature already (ADR-0044). What is missing is turning a dropped file into a declared department, which the executors can already be pointed at. |
 
 ### Sequence file window
 
@@ -132,6 +139,12 @@ Anvil solves these, differently. A missing cell here is not a missing feature; i
 |---|---|---|
 | **Property Browser** | Browses the step's raw property tree. | The raw form of a step is the YAML itself — use the Text view. |
 
+### Step Settings ▸ Module
+
+| | In TestStand | In Anvil |
+|---|---|---|
+| **Call Type** | Chooses how the module is called — VI Call, Class Member Call, Property Node Call. | There is one kind of call to an executor: a step request over gRPC (ADR-0003). Which technology is behind it is the department's business, not the sequence's. |
+
 ### Sequence file window
 
 | | In TestStand | In Anvil |
@@ -150,6 +163,7 @@ Anvil solves these, differently. A missing cell here is not a missing feature; i
 | | In TestStand | In Anvil |
 |---|---|---|
 | **Property Loader** | Loads limits and properties from a file at run time, as a step. | The limits sidecar, `--limits fichero.limits.yaml` (RF-30). It is a switch on the run, not a step in the sequence. |
+| **LabVIEW Utility** | Steps that drive LabVIEW itself — opening VIs, setting controls, closing panels. | Modules of a LabVIEW department, not step types of Anvil's. A LabVIEW executor opens the project and serves its VIs over gRPC like any other department (ADR-0025); the inspecting happens inside it, and the engine never learns what a VI is. What stays out of scope is a LabVIEW adapter inside the test executive — which is what roadmap.md's line means. |
 
 ### Menu bar
 
@@ -174,12 +188,6 @@ Deliberately out of scope. Each one cites the decision that put it there, and ch
 |---|---|---|
 | **Analysis Results tab** | Shows what the Sequence Analyzer found in the sequence file. | ADR-0043 §3 puts the Sequence Analyzer out of the parity scope. What Anvil checks statically, the loader checks, and it says so in the status bar as the file is typed. |
 
-### Insert Step
-
-| | In TestStand | Why not |
-|---|---|---|
-| **LabVIEW Utility** | Steps that drive LabVIEW itself — opening VIs, setting controls, closing panels. | roadmap.md lists integration with LabVIEW/CVI as out of scope; escaping the LabVIEW lock-in is half of why Anvil exists (vision.md). |
-
 ### Menu bar
 
 | | In TestStand | Why not |
@@ -200,6 +208,15 @@ Anvil has these. They are listed so the inventory is a census rather than a list
 | **Post Actions** | `step.properties.post-actions` |
 | **Expressions** | `step.properties.expressions` |
 | **Preconditions** | `step.properties.preconditions` |
+
+### Step Settings ▸ Module
+
+| | |
+|---|---|
+| **Executor picker** | `module.executor` |
+| **Module picker** | `module.module` |
+| **Parameter table** | `module.parameters` |
+| **Connector pane** | `module.connector` |
 
 ### Sequence file window
 

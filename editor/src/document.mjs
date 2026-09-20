@@ -545,6 +545,35 @@ export class SequenceDocument {
     this.#reemit();
   }
 
+  /**
+   * One of a step's `inputs`: what it sends to its module (ADR-0020).
+   *
+   * Same shape as `setStepAssign`, and for the same reasons: `undefined`
+   * removes the entry, and the last one removes `inputs` itself rather than
+   * leaving an empty map behind in a file that gets read in diffs (AP-05).
+   *
+   * The value is written **with its type**, because the loader reads the
+   * scalar: `4.5` is a number, `true` a boolean, the rest text (RF-31). An
+   * expression is text that happens to say `${…}`, and the engine evaluates
+   * it — the editor does not have to know which it is.
+   */
+  setStepInput(phase, index, name, value) {
+    const step = this.#stepNode(phase, index);
+    let inputs = step.get("inputs", true);
+    if (!isMap(inputs)) {
+      if (value === undefined) return;
+      step.set("inputs", this.#doc.createNode({}));
+      inputs = step.get("inputs", true);
+    }
+    if (value === undefined) {
+      inputs.delete(name);
+      if (inputs.items.length === 0) step.delete("inputs");
+    } else {
+      inputs.set(name, value);
+    }
+    this.#reemit();
+  }
+
   /** The subsequences this file declares, by name. */
   subsequenceNames() {
     const subs = this.#doc.get("subsequences");

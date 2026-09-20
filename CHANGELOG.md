@@ -28,6 +28,43 @@ applies from 0.6.0 on; by it, 0.6.0 itself would have been 0.5.1.
 
 ### Added
 
+- **One Module panel, and it knows what the module takes.** The Sequence
+  Editor asks the engine for the catalog (`anvil describe`, above) and draws
+  the step's module from it:
+
+  - **Executor** is a dropdown of what the sequence declares, and **Module** is
+    a dropdown of what that executor says it serves — TestStand's *Project
+    Path* and *pick a VI belonging to the project*, with a department and its
+    modules in their place. The module stays typeable: an executor that is not
+    up has no catalog, and nobody should need a bench running to write down a
+    step's name.
+  - **The parameter table is the executor's, not the YAML's.** It used to read
+    a type off the literal with `typeof` — which says what someone typed, not
+    what the step takes, so a `canal` written `"1"` looked like text. Now the
+    rows are what the executor declares, a **required input with no value** is
+    marked, and an input the executor **does not declare** is marked louder:
+    it would be dropped, and the step would measure something else. The engine
+    calls that a finding and never a warning, and the editor is not gentler.
+  - **The connector pane's outputs are real.** They were hard-coded to
+    `measured value` / `status`.
+  - **The Value column is editable**, writing the scalar with its type
+    (RF-31). These could only be written in the Text view before.
+
+  Why one panel serves every language: TestStand needs five because it
+  **inspects** five artefacts — a VI's connector pane, a `.py`'s functions, an
+  assembly's classes. Anvil asks instead, and every department answers the
+  same thing (`crates/motor/src/catalogo.rs`). A LabVIEW executor will inspect
+  too, but **inside the department**, and answer the same `Describe` as a
+  `.wasm`.
+
+- **«Add an executor…» declares a department from a file on disk.** TestStand's
+  *or browse for a VI anywhere*, as Anvil has to mean it: a step must name an
+  executor (ADR-0041), so picking a file **declares** one — `type: wasm`, with
+  the path relative to the sequence, because that is the only kind the engine's
+  sandbox can see. `wasm` by default for the reason that decides it on a locked
+  bench: it needs nothing installed, while Python needs Python, a `.vi` needs
+  LabVIEW, and C# needs to have been compiled first.
+
 - **`anvil describe <secuencia>` prints the catalog as JSON**
   ([ADR-0044](docs/adr/0044-the-catalog-comes-out-as-data-anvil-describe.md)).
   It asks every executor the sequence declares what steps it serves and with
@@ -195,6 +232,22 @@ applies from 0.6.0 on; by it, 0.6.0 itself would have been 0.5.1.
   when the rename happened and why they were left alone.
 
 ### Fixed
+
+- **A `grpc` executor typed without a port no longer writes `port: .nan`.**
+  `Number(undefined)` went into the file unguarded; the engine rejected it on
+  the next validate, but by then it was written, and `.nan` tells nobody
+  anything. The field now refuses what is not `host:port` and says so.
+
+- **A `sequence_call`'s resolved line shows the path, not the method.** It
+  printed the words "resolved against this file's directory". That line exists
+  to show **what** it resolved to — saying how it was resolved catches none of
+  the ones that resolved somewhere unexpected, which is all it is for. It now
+  also distinguishes an inline subsequence from a path, and says when the file
+  declares no subsequence by that name.
+
+- **A `sequence_call`'s parameter table reads `args`.** It read `inputs`, which
+  a `sequence_call` does not have — they are separate fields on purpose — so
+  the table always said the step declared none, even with arguments written.
 
 - **A bridge that accepts and never answers no longer hangs the editor.** The
   WebSocket handshake had no deadline, so a port that accepted the connection

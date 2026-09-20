@@ -45,6 +45,20 @@ contextBridge.exposeInMainWorld("anvil", {
   /** Stops the bridge `startBridge` started, if there is one. */
   stopBridge: () => ipcRenderer.invoke("anvil:stop-bridge"),
   /**
+   * The catalog of the executors a sequence declares (ADR-0044): runs
+   * `anvil describe <path>` and resolves to its JSON. Runs no step, and does
+   * not need a bridge — which is what lets a step's parameters be drawn with
+   * nothing on the bench running.
+   */
+  describe: (path) => ipcRenderer.invoke("anvil:describe", path).then(unwrap),
+  /**
+   * Picks an executor's binary from disk and answers `{ path, name }` with the
+   * path **relative to the sequence** — the only kind a sequence may carry
+   * (ADR-0027). Null if the dialog was dismissed.
+   */
+  pickExecutor: (sequencePath) =>
+    ipcRenderer.invoke("anvil:pick-executor", sequencePath).then(unwrap),
+  /**
    * Calls `listener(action)` for each item picked from the native menu. The
    * action is the same name the page's own menus carry in `data-action`.
    */

@@ -1,0 +1,67 @@
+{
+  "describe_version": 1,
+  "executors": {
+    "instrumentos": {
+      "describes": true,
+      "lifetime": "",
+      "contract": 4,
+      "steps": [
+        {
+          "name": "demo/measure_voltage",
+          "doc": "Measures voltage and returns the reading; the engine judges it against the",
+          "inputs": [
+            {
+              "name": "channel",
+              "type": "number",
+              "required": false,
+              "doc": "",
+              "has_default": false,
+              "default": null
+            },
+            {
+              "name": "offset",
+              "type": "number",
+              "required": false,
+              "doc": "",
+              "has_default": false,
+              "default": null
+            }
+          ],
+          "outputs": [
+            {
+              "name": "channel_used",
+              "type": "number",
+              "doc": ""
+            },
+            {
+              "name": "temperature",
+              "type": "number",
+              "doc": ""
+            }
+          ]
+        },
+        {
+          "name": "multimetro/medir_voltaje",
+          "doc": "Measures DC voltage on a channel.",
+          "inputs": [
+            {
+              "name": "canal",
+              "type": "number",
+              "required": false,
+              "doc": "",
+              "has_default": false,
+              "default": null
+            }
+          ],
+          "outputs": [
+            {
+              "name": "canal_usado",
+              "type": "number",
+              "doc": ""
+            }
+          ]
+        }
+      ]
+    }
+  }
+}

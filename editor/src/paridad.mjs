@@ -124,6 +124,37 @@ export const PROPERTY_PAGES = [
 // as a note at the foot of it. Keyed by the page id they hang under.
 // ---------------------------------------------------------------------------
 
+export const MODULE_TAB = [
+  { id: "module.executor", label: "Executor picker", state: "built" },
+  { id: "module.module", label: "Module picker", state: "built" },
+  { id: "module.parameters", label: "Parameter table", state: "built" },
+  { id: "module.connector", label: "Connector pane", state: "built" },
+  {
+    id: "module.catalog-cache",
+    label: "Remembering a catalog between sessions",
+    state: "todo",
+    teststand:
+      "Keeps a step's parameters on screen with nothing running, because they live in a type file on the developer's machine.",
+    needs:
+      "engine: a per-module hash on the wire. ADR-0025 §5 says a catalog cache is invalidated by hash and not by re-describing, and no hash crosses `Describe` today — the executors compute one and only `--list` shows it.",
+  },
+  {
+    id: "module.drag-and-drop",
+    label: "Dropping a module file onto the step",
+    state: "todo",
+    teststand: "A `.vi` dragged onto the step fills its path and reads its terminals.",
+    needs:
+      "engine: nothing — `anvil describe` answers the signature already (ADR-0044). What is missing is turning a dropped file into a declared department, which the executors can already be pointed at.",
+  },
+  {
+    id: "module.call-type",
+    label: "Call Type",
+    state: "elsewhere",
+    teststand: "Chooses how the module is called — VI Call, Class Member Call, Property Node Call.",
+    anvil: "There is one kind of call to an executor: a step request over gRPC (ADR-0003). Which technology is behind it is the department's business, not the sequence's.",
+  },
+];
+
 export const PAGE_DETAILS = [
   {
     id: "step.properties.run-options.run-mode",
@@ -310,9 +341,10 @@ export const INSERT_MENU = [
     id: "insert.labview-utility",
     label: "LabVIEW Utility",
     items: [],
-    state: "never",
+    state: "elsewhere",
     teststand: "Steps that drive LabVIEW itself — opening VIs, setting controls, closing panels.",
-    why: "roadmap.md lists integration with LabVIEW/CVI as out of scope; escaping the LabVIEW lock-in is half of why Anvil exists (vision.md).",
+    anvil:
+      "Modules of a LabVIEW department, not step types of Anvil's. A LabVIEW executor opens the project and serves its VIs over gRPC like any other department (ADR-0025); the inspecting happens inside it, and the engine never learns what a VI is. What stays out of scope is a LabVIEW adapter inside the test executive — which is what roadmap.md's line means.",
   },
   {
     id: "insert.io-configuration",
@@ -712,6 +744,7 @@ export function parityEntries() {
   const flat = [
     ["Step Settings \u25b8 Properties", PROPERTY_PAGES],
     ["Step Settings \u25b8 Properties", PAGE_DETAILS],
+    ["Step Settings \u25b8 Module", MODULE_TAB],
     ["Sequence file window", SEQUENCE_WINDOW],
     ["Variables", VARIABLES_PANE],
     ["Status bar", STATUS_BAR],

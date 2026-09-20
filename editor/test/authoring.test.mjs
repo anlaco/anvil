@@ -304,3 +304,50 @@ test("basica is built from nothing with the editor's own calls, and runs", async
     }));
   assert.deepEqual(shape(written), shape(original), doc.text);
 });
+
+// ---------------------------------------------------------------------------
+// A step's `inputs`, written from the Module tab (ADR-0044).
+//
+// Until the catalog arrived these could only be written in the Text view. The
+// table now knows what a module takes, so the value column writes it — and
+// what it writes has to be what the loader reads back, with its type (RF-31).
+// ---------------------------------------------------------------------------
+
+test("an input is written with its type, and removing the last one removes the map", () => {
+  const doc = new SequenceDocument(
+    "name: s\nexecutors:\n  - name: demo\n    type: wasm\n    path: d/exec\n" +
+      "main:\n  - name: medir\n    type: action\n    executor: demo\n    module: multimetro/medir\n",
+  );
+
+  doc.setStepInput("main", 0, "canal", 1);
+  doc.setStepInput("main", 0, "etiqueta", "A");
+  doc.setStepInput("main", 0, "activo", true);
+  assert.deepEqual(doc.steps("main")[0].inputs, { canal: 1, etiqueta: "A", activo: true });
+  // The scalar keeps its type in the file: `1` is a number, not "1". In a test
+  // sequencer that is not cosmetic.
+  assert.match(doc.text, /canal: 1\b/);
+  assert.match(doc.text, /activo: true\b/);
+
+  doc.setStepInput("main", 0, "canal", undefined);
+  doc.setStepInput("main", 0, "etiqueta", undefined);
+  doc.setStepInput("main", 0, "activo", undefined);
+  // `readMap` answers null for a key that is not there, which is the shape the
+  // rest of the step model uses.
+  assert.equal(doc.steps("main")[0].inputs, null);
+  // Not an empty `inputs: {}` left behind: these files are read in diffs
+  // (AP-05), and the loader should not have to accept a map that says nothing.
+  assert.doesNotMatch(doc.text, /inputs:/);
+});
+
+test("writing an input leaves the rest of the file alone", () => {
+  // The rule the whole document model exists for (AP-05).
+  const antes =
+    "# por qué este paso existe\nname: s\nexecutors:\n  - name: demo\n    type: wasm\n    path: d/exec\n" +
+    "main:\n  - name: medir\n    type: action\n    executor: demo\n    module: m/medir\n";
+  const doc = new SequenceDocument(antes);
+  doc.setStepInput("main", 0, "canal", 2);
+
+  const nuevas = doc.text.split("\n").filter((l) => !antes.split("\n").includes(l));
+  assert.deepEqual(nuevas.map((l) => l.trim()), ["inputs:", "canal: 2"]);
+  assert.match(doc.text, /^# por qué este paso existe$/m, "the comment survives");
+});

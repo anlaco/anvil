@@ -399,7 +399,15 @@ Eso, y no el empaquetado, es el trabajo de verdad.
 
 - Replicar el process model de TestStand 1:1 (Parallel/Batch + callbacks +
   entry points).
-- Integración con LabVIEW/CVI.
+- **Un adaptador de LabVIEW/CVI dentro del motor.** Matizado el 20/09/2026, y
+  la distinción importa: lo que queda fuera es que Anvil aprenda qué es un VI,
+  como hace TestStand, que inspecciona el connector pane desde el *test
+  executive*. Un **ejecutor** LabVIEW —un departamento que arranca VI Server,
+  abre un proyecto, enumera los VI públicos y lee sus pines— **no es eso**:
+  inspecciona dentro de sí mismo y contesta el mismo `Describe` que un `.wasm`
+  (ADR-0025, ADR-0044). El motor sigue sin saber qué hay detrás, que es la
+  propiedad entera. Ése es el camino por el que Anvil puede sustituir a
+  TestStand sin heredar lo que lo hace pesado.
 - Debugger visual completo.
 
 ## Procesos diferidos
