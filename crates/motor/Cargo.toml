@@ -10,6 +10,9 @@ modelo.workspace = true
 expr.workspace = true
 cargador.workspace = true
 result_sink.workspace = true
+# ADR-0044: el catálogo sale como JSON por `anvil describe`. Ya entra en el
+# `.wasm` a través de `result_sink`, así que declararlo aquí no pesa más.
+serde_json.workspace = true
 prost.workspace = true
 wasi-grpc.workspace = true
 getrandom.workspace = true

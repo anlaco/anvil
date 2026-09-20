@@ -116,6 +116,12 @@ fn va_a_ejecutar_pasos(args: &[String]) -> bool {
     // typed it on the command line asked for it. Without the flag, `--validate`
     // still brings nothing up (issue #22).
     let pregunta_catalogos = args.iter().any(|a| a == "--with-executors");
+    // ADR-0044: `anvil describe <secuencia>` tampoco ejecuta un paso, y
+    // también necesita los ejecutores arriba para poder preguntarles. Es el
+    // mismo caso que `--validate --with-executors`, y por la misma razón:
+    // quien lo tecleó pidió que se conectara. Sin esto los `type: wasm` no se
+    // arrancan y el catálogo sale vacío — un falso «no sirve nada».
+    let args = sin_subcomando(args);
     let mut it = args.iter();
     let mut hay_ruta = false;
     while let Some(a) = it.next() {
@@ -139,7 +145,25 @@ fn va_a_ejecutar_pasos(args: &[String]) -> bool {
 /// their values. `None` if there is none, or if `--help`/`--version` was
 /// requested (there is no YAML to pre-scan there, and warning that "no se
 /// pudo leer '--help'" would only pollute the help).
+/// The words this CLI accepts in first position that are not a path and not a
+/// flag. Exactly one today (ADR-0044).
+const SUBCOMANDOS: [&str; 1] = ["describe"];
+
+/// The arguments with a leading subcommand dropped.
+///
+/// Everything in this file that reads the arguments is looking for the
+/// sequence and its flags, and a subcommand is neither. Stripping it once,
+/// here, is what keeps `describe` inheriting `--process-model`, `--limits`,
+/// `--executor` and the preopen logic without any of them learning the word.
+fn sin_subcomando(args: &[String]) -> &[String] {
+    match args.first() {
+        Some(a) if SUBCOMANDOS.contains(&a.as_str()) => &args[1..],
+        _ => args,
+    }
+}
+
 fn ruta_de_secuencia(args: &[String]) -> Option<String> {
+    let args = sin_subcomando(args);
     let mut it = args.iter();
     while let Some(a) = it.next() {
         if a == "--help" || a == "-h" || a == "--version" || a == "-V" {
@@ -166,6 +190,7 @@ const FLAGS_DE_RUTA: [&str; 4] = ["--process-model", "--json", "--csv", "--limit
 /// the file exists — see the preopen loop in `main`.
 fn rutas_de_argumentos(args: &[String]) -> Vec<String> {
     let mut rutas: Vec<String> = ruta_de_secuencia(args).into_iter().collect();
+    let args = sin_subcomando(args);
     let mut it = args.iter();
     while let Some(a) = it.next() {
         if FLAGS_DE_RUTA.contains(&a.as_str()) {

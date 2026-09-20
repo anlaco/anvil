@@ -1,0 +1,24 @@
+# Fixture de `tests/describe.rs`: un ejecutor `grpc` que no sirve nadie.
+#
+# Existe para fijar lo único que `anvil describe` no puede permitirse: salir
+# con 0 y un `executors` vacío. Ese documento está bien formado y se lee como
+# «este banco no sirve nada», que es el falso verde de la regla 2 de ADR-0019
+# y justo la confusión que ADR-0028 existe para evitar — un ejecutor ausente
+# no es un ejecutor que declina.
+#
+# El puerto es del rango efímero alto y no lo escucha nadie; el motor reintenta
+# y se rinde, que es la respuesta honesta.
+
+name: describe_caido
+
+executors:
+  - name: fantasma
+    type: grpc
+    host: 127.0.0.1
+    port: 59999
+
+main:
+  - name: no_llega_a_correr
+    type: action
+    executor: fantasma
+    module: lo_que_sea

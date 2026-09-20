@@ -56,7 +56,7 @@ docs/
 ├─ licencia.md                dual AGPL / Apache licensing strategy
 ├─ paridad-teststand.md       what Anvil does and does not do vs. TestStand (generated)
 ├─ roadmap.md                 milestones M0 → M4+ with MVP vs. post-MVP
-├─ adr/                       decisions already made (immutable), 0001–0043
+├─ adr/                       decisions already made (immutable), 0001–0044
 │                             see "The ADRs, by area" below
 ├─ planes/                    milestone plans (m4-nucleo, m4b, m5-ext)
 ├─ qa/                        campaign reports + executable checks
@@ -118,6 +118,11 @@ Anvil does when it cannot judge) and
   [0042](adr/0042-what-adr-0040-left-unsaid.md): what 0040 left unsaid —
   `result` in `condition`, the order of `assign`, retries. Accepted, not
   implemented.
+- **The catalog** — [0044](adr/0044-the-catalog-comes-out-as-data-anvil-describe.md):
+  `anvil describe <sequence>` prints what each declared executor serves, and
+  with what signature, as JSON. It is the *enumerate* operation ADR-0025 §4
+  named and nothing implemented — the one an editor draws a parameter table
+  from instead of guessing.
 - **Governance** — 0032: contributions and the reversion clause (a direction,
   not yet in force).
 

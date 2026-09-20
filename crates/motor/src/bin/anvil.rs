@@ -71,11 +71,18 @@ struct Cli {
     /// por evento, mientras corre. No lo silencia `--quiet`: son preguntas
     /// distintas, y «eventos sin ruido de consola» es la combinación esperada.
     events: bool,
+    /// ADR-0044: `anvil describe <secuencia>` — conecta, pregunta el catálogo
+    /// a cada ejecutor declarado y lo imprime como JSON a **stdout**. No
+    /// ejecuta un paso: `Describe` pregunta, no mide.
+    describe: bool,
 }
 
 fn usage() {
     eprintln!(
-        "uso: anvil <secuencia.yaml> [opciones]\n\nOpciones:\n  \
+        "uso: anvil <secuencia.yaml> [opciones]\n     anvil describe <secuencia.yaml> [opciones]\n\n\
+El subcomando 'describe' pregunta a cada ejecutor que declara la secuencia qué\n\
+pasos sirve y con qué firma, y lo imprime como JSON por stdout (ADR-0044). No\n\
+ejecuta ningún paso.\n\nOpciones:\n  \
 --process-model <ruta>  envuelve la secuencia en un process model (RF-38)\n  \
 --json <ruta>           vuelca el reporte a JSON\n  \
 --csv <ruta>            vuelca el reporte a CSV\n  \
@@ -106,8 +113,18 @@ fn parse_cli(args: Vec<String>) -> Result<Cli, AccionEarlyExit> {
         with_executors: false,
         quiet: false,
         events: false,
+        describe: false,
     };
-    let mut args = args.into_iter();
+    // ADR-0044. El único argumento de esta CLI que no es ni una ruta ni un
+    // flag, y por eso se atiende aquí y no en el bucle: a partir de la
+    // siguiente posición todo vuelve a ser lo de siempre, así que `describe`
+    // hereda `--executor`, `--process-model`, `--limits` y `--quiet` sin
+    // escribir una línea para cada uno.
+    let mut args = args.into_iter().peekable();
+    if args.peek().map(String::as_str) == Some("describe") {
+        args.next();
+        cli.describe = true;
+    }
     while let Some(arg) = args.next() {
         match arg.as_str() {
             "--help" | "-h" => return Err(AccionEarlyExit::Help),
@@ -150,7 +167,22 @@ fn parse_cli(args: Vec<String>) -> Result<Cli, AccionEarlyExit> {
         }
     }
     if cli.ruta.is_empty() {
-        return Err(AccionEarlyExit::Uso("falta la secuencia YAML".into()));
+        return Err(AccionEarlyExit::Uso(if cli.describe {
+            "falta la secuencia: 'anvil describe <secuencia.yseq>'".into()
+        } else {
+            "falta la secuencia YAML".to_string()
+        }));
+    }
+    // Las dos cosas conectan y ninguna ejecuta, pero contestan preguntas
+    // distintas: `--validate` dice si la secuencia casa con los catálogos,
+    // `describe` **devuelve** los catálogos. Aceptar las dos a la vez pediría
+    // decidir qué sale por stdout, y no hay respuesta buena.
+    if cli.describe && (cli.validate || cli.with_executors) {
+        return Err(AccionEarlyExit::Uso(
+            "'describe' no se combina con --validate: uno comprueba la secuencia contra los \
+             catálogos y el otro los devuelve"
+                .into(),
+        ));
     }
     // Checking against the catalogs happens on every run anyway, before the
     // first step. The flag only means anything for `--validate`, which is the
@@ -284,6 +316,35 @@ fn main() {
                 std::process::exit(1);
             }
         }
+    }
+
+    // ADR-0044: conecta, pregunta el catálogo a cada ejecutor declarado y lo
+    // imprime como JSON. No ejecuta un paso — `Describe` pregunta, no mide —
+    // y sale antes de abrir ningún fichero de reporte.
+    //
+    // A **stdout**, que es donde va un documento; stderr sigue siendo de los
+    // logs, así que `anvil describe s.yseq 2>/dev/null | jq` funciona sin
+    // pedirle a nadie `--quiet`.
+    if cli.describe {
+        let mut motor = match conecta_con_reintento(&programa, cli.quiet) {
+            Ok(m) => m,
+            Err(e) => {
+                eprintln!("'describe' necesita los ejecutores arriba, y no se pudo conectar: {e}");
+                std::process::exit(1);
+            }
+        };
+        let catalogos = motor.describe_ejecutores();
+        // Un ejecutor que declina sale igual, con el motivo: omitirlo se
+        // leería como «no sirve pasos», que es el falso verde de ADR-0019.
+        let doc = motor::catalogos_a_json(&catalogos);
+        match serde_json::to_string_pretty(&doc) {
+            Ok(t) => println!("{t}"),
+            Err(e) => {
+                eprintln!("no se pudo serializar el catálogo: {e}");
+                std::process::exit(1);
+            }
+        }
+        std::process::exit(0);
     }
 
     // --validate: carga + valida (cargador + sidecar) sin ejecutar ni
@@ -634,6 +695,79 @@ mod tests {
         // Sin PM, la raíz ya es la secuencia del usuario: el campo sobra.
         let sin_pm = parse_cli(vec!["ejemplos/basica.yseq".into()]).unwrap();
         assert!(secuencia_de_operador(&sin_pm).is_none());
+    }
+
+    // ---- ADR-0044: `describe` ------------------------------------------
+
+    #[test]
+    fn describe_toma_la_secuencia_de_la_siguiente_posicion() {
+        let c = parse_cli(vec!["describe".into(), "ejemplos/basica.yseq".into()]).unwrap();
+        assert!(c.describe);
+        assert_eq!(c.ruta, "ejemplos/basica.yseq");
+    }
+
+    #[test]
+    fn describe_hereda_los_flags_de_siempre() {
+        // La razón de atender el subcomando fuera del bucle: a partir de la
+        // siguiente posición todo vuelve a ser lo de siempre, así que no hay
+        // que escribir una línea por flag.
+        let c = parse_cli(vec![
+            "describe".into(),
+            "ejemplos/basica.yseq".into(),
+            "--executor".into(),
+            "demo=127.0.0.1:9101".into(),
+            "--quiet".into(),
+        ])
+        .unwrap();
+        assert!(c.describe);
+        assert!(c.quiet);
+        assert_eq!(c.ejecutores, vec!["demo=127.0.0.1:9101".to_string()]);
+    }
+
+    #[test]
+    fn describe_sin_secuencia_dice_como_se_escribe() {
+        // Antes de ADR-0044 el único posicional era una ruta, así que el
+        // mensaje de siempre —«falta la secuencia YAML»— dejaba a alguien que
+        // tecleó `anvil describe` sin saber qué le faltaba.
+        match parse_cli(vec!["describe".into()]) {
+            Err(AccionEarlyExit::Uso(m)) => assert!(
+                m.contains("anvil describe <secuencia.yseq>"),
+                "el mensaje no enseña la forma: {m}"
+            ),
+            Err(otro) => panic!("se esperaba un error de uso, y salió {otro:?}"),
+            Ok(_) => panic!("se esperaba un error de uso, y parseó bien"),
+        }
+    }
+
+    #[test]
+    fn describe_y_validate_no_se_combinan() {
+        // Las dos conectan y ninguna ejecuta, pero contestan preguntas
+        // distintas, y aceptarlas juntas pediría decidir qué sale por stdout.
+        for args in [
+            vec!["describe".into(), "s.yseq".into(), "--validate".into()],
+            vec![
+                "describe".into(),
+                "s.yseq".into(),
+                "--validate".into(),
+                "--with-executors".into(),
+            ],
+        ] {
+            assert!(
+                matches!(parse_cli(args), Err(AccionEarlyExit::Uso(_))),
+                "describe + --validate debería ser error de uso"
+            );
+        }
+    }
+
+    #[test]
+    fn describe_solo_cuenta_en_primera_posicion() {
+        // Una secuencia que se llame `describe` sigue siendo alcanzable, y una
+        // que lo lleve después no se convierte en subcomando por accidente.
+        let c = parse_cli(vec!["seq.yseq".into(), "describe".into()]);
+        assert!(
+            matches!(c, Err(AccionEarlyExit::Uso(ref m)) if m.contains("argumento de más")),
+            "un segundo posicional sigue siendo un argumento de más"
+        );
     }
 
     #[test]

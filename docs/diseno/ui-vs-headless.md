@@ -33,7 +33,17 @@ binario único que hospeda wasmtime, ADR-0011) soporta:
 anvil <secuencia.yaml> [--process-model <pm.yaml>] [--json <ruta>] \
   [--csv <ruta>] [--limits <ruta>] [--executor n=host:puerto] [--validate] [--quiet] \
   [--help] [--version]
+anvil describe <secuencia.yaml> [opciones]
 ```
+
+- `describe` pregunta a cada ejecutor que la secuencia declara qué pasos sirve
+  y con qué firma, y lo imprime como **JSON por stdout**
+  ([ADR-0044](../adr/0044-the-catalog-comes-out-as-data-anvil-describe.md)). No
+  ejecuta ningún paso: `Describe` pregunta, no mide. Hereda los flags de
+  siempre —`--executor`, `--limits`, `--process-model`, `--quiet`— porque a
+  partir de la siguiente posición la línea vuelve a ser la de siempre. Es la
+  operación *enumerate* que ADR-0025 §4 nombró, y de donde el editor saca la
+  tabla de parámetros en vez de adivinarla del literal del YAML.
 
 - `--process-model <ruta>` envuelve la secuencia en un PM Sequential
   (RF-38, ADR-0016). Sin él, la secuencia corre tal cual.
@@ -92,9 +102,15 @@ lanza el binario real: es la única forma de observar el aplanamiento — un tes
 contra el motor nativo pasaría en verde sin probar nada de esto.
 
 Parseo manual, sin `clap`/`getopts`: el flag set es pequeño y se evita
-peso en el `.wasm` (ADR-0001). Si el flag set crece > ~10 o aparecen
-subcomandos, se reconsidera con un ADR (post-MVP). El host
-hereda los args al guest motor, así los flags fluyen al binario único.
+peso en el `.wasm` (ADR-0001). La regla era: si el flag set crece > ~10 o
+aparecen subcomandos, se reconsidera con un ADR. **Las dos condiciones se han
+cumplido** —hay trece flags y `describe` es el primer subcomando— y lo que se
+escribió es [ADR-0044](../adr/0044-the-catalog-comes-out-as-data-anvil-describe.md),
+que decidió el subcomando y dejó el parseo a mano: la alternativa barata era un
+flag `--catalog`, y se descartó porque lee como modificador de «corre esto»
+cuando es un modo distinto. El host hereda los args al guest motor, así los
+flags fluyen al binario único, y el subcomando se recorta en un solo sitio
+(`sin_subcomando`) para que nada más tenga que aprender la palabra.
 
 ## Desacoplo motor ↔ UI: UIMsgs (post-MVP)
 

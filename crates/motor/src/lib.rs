@@ -14,6 +14,7 @@
 //! ADR-0009).
 
 mod catalogo;
+mod describe;
 mod entorno;
 
 use modelo::proto::{StepRequest, StepResult, Value as ProtoValue, CONTRACT, ROUTE_INVOKE};
@@ -29,6 +30,7 @@ pub use catalogo::{
     comprueba_programa, endpoints_con_referencias, Catalogos, Descripcion, Hallazgo,
     Informe as InformeFirmas, SinComprobar,
 };
+pub use describe::{catalogos_a_json, DESCRIBE_VERSION};
 pub use entorno::EntornoMotor;
 use expr::{eval, eval_sentencias, Entorno, Expresion, Scope, Sentencia, Value};
 use std::collections::HashMap;

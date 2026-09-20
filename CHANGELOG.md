@@ -28,6 +28,31 @@ applies from 0.6.0 on; by it, 0.6.0 itself would have been 0.5.1.
 
 ### Added
 
+- **`anvil describe <secuencia>` prints the catalog as JSON**
+  ([ADR-0044](docs/adr/0044-the-catalog-comes-out-as-data-anvil-describe.md)).
+  It asks every executor the sequence declares what steps it serves and with
+  what signature — name, type, whether it is required, its default, its line of
+  documentation — and prints it to stdout. It runs no step: `Describe` asks, it
+  does not measure.
+
+  All of it was already on the wire and one place read it: `--validate
+  --with-executors`, which compared it against a sequence and threw it away.
+  This is the *enumerate* operation ADR-0025 §4 named — *"a tooling operation…
+  for an editor"* — and which existed as three `--list` flags printing prose
+  nothing consumed. It is what the Sequence Editor's Module tab will draw its
+  parameter table from instead of guessing the type from the literal in the
+  YAML.
+
+  **An executor that declines appears anyway**, with `describes: false` and the
+  reason. Omitting it would read as "serves no steps", which is a different
+  statement and a false one — the distinction ADR-0028 exists to protect.
+  Types cross as their names (`number`, `text`, `boolean`, `reference`,
+  `unspecified`), never as the enum's integers.
+
+  It is the CLI's first subcommand. The rule in `ui-vs-headless.md` said that a
+  subcommand, or more than ten flags, meant stopping to write an ADR; both had
+  happened, so that is what ADR-0044 is.
+
 - **The editor says what it does not do, and why.** The Sequence Editor's
   layout has been TestStand's for a while, with the pages Anvil has not built
   greyed out. That inventory lived as prose inside a render function, said the

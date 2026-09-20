@@ -267,6 +267,13 @@ impl ParameterSpec {
 }
 
 impl OutputSpec {
+    /// The declared type, decoded. Same rule as [`ParameterSpec::value_type`]:
+    /// an unknown number on the wire reads as [`ValueType::Unspecified`] —
+    /// unchecked, never guessed.
+    pub fn value_type(&self) -> ValueType {
+        ValueType::try_from(self.r#type).unwrap_or(ValueType::Unspecified)
+    }
+
     /// A named value the step returns besides its measurement.
     pub fn nueva(name: &str, r#type: ValueType, doc: &str) -> Self {
         OutputSpec {

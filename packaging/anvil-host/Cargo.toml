@@ -28,3 +28,8 @@ path = "src/main.rs"
 
 [dev-dependencies]
 tungstenite = { version = "0.30", default-features = false, features = ["handshake"] }
+# `tests/describe.rs` parsea el JSON de `anvil describe` (ADR-0044). Versión
+# suelta y no `workspace = true`: este crate es un workspace propio a
+# propósito, para que el core no arrastre wasmtime. Sólo en tests, y el host
+# es nativo: no toca el tamaño del `.wasm`.
+serde_json = "1"
