@@ -194,3 +194,47 @@ test("an executor's own step is addressed by its qualified name", () => {
   assert.ok(specOf(state)("instrumentos", "demo/measure_voltage"));
   assert.equal(specOf(state)("instrumentos", "medir_voltaje"), null);
 });
+
+// ---------------------------------------------------------------------------
+// The Output tab, and what does not belong on it.
+//
+// Found by running the editor against a real Python executor rather than by
+// reading it: the tab was most NDJSON. `--events` writes one JSON object per
+// line to stderr, and stderr is what the tab shows — so the event stream
+// buried the lines someone actually needs, a warning from an executor or a
+// connection that was retried.
+// ---------------------------------------------------------------------------
+
+const sinEventos = new Function(`${lift("sinEventos")}; return sinEventos;`)();
+
+test("the event stream is taken off the Output tab, and nothing else is", () => {
+  const stderr = [
+    "secuencia 'prueba_fuente' cargada (2 pasos en main)",
+    '{"event":"sequence_start","sequence":"prueba_fuente","seq":0}',
+    "connected to the step executors (banco)",
+    '{"event":"step_start","name":"autotest","seq":1}',
+    "aviso: el ejecutor 'banco' no publica una vida en su catálogo",
+  ].join("\n");
+
+  assert.deepEqual(sinEventos(stderr).split("\n"), [
+    "secuencia 'prueba_fuente' cargada (2 pasos en main)",
+    "connected to the step executors (banco)",
+    "aviso: el ejecutor 'banco' no publica una vida en su catálogo",
+  ]);
+});
+
+test("a line that only looks like JSON stays", () => {
+  // fd 2 is shared with the executors, and this filter must not eat what one
+  // of them printed. The test is `applyEvent`'s, inverted: an object with an
+  // `event` is an event, and everything else is someone talking.
+  const stderr = [
+    '{"nivel":"warn","texto":"el instrumento tardó 3 s"}',
+    "{ esto no es json",
+    '{"event":"step_end","seq":2}',
+  ].join("\n");
+
+  assert.deepEqual(sinEventos(stderr).split("\n"), [
+    '{"nivel":"warn","texto":"el instrumento tardó 3 s"}',
+    "{ esto no es json",
+  ]);
+});

@@ -1740,6 +1740,38 @@ async function addExecutorFromDisk() {
   if (!state.dirty) await loadCatalog();
 }
 
+/**
+ * stderr with the event stream taken out, for the Output tab.
+ *
+ * `--events` writes one JSON object per line to stderr (ADR-0029), and fd 2 is
+ * shared with the engine's logs and the executors'. Put verbatim on the
+ * Output tab, the NDJSON is most of what is there and it buries the lines
+ * someone actually needs — a warning from an executor, a connection that was
+ * retried. It is not dropped because it is unimportant: it is dropped here
+ * because it has **already been read**, by the state machine that lit the rows
+ * and filled the Call Stack. This tab is the other half, the part written for
+ * a person.
+ *
+ * The test is the same one `applyEvent` uses, and inverted on purpose: a line
+ * that parses as an object with an `event` is an event. Anything else is
+ * someone talking, and it stays.
+ */
+function sinEventos(texto) {
+  return texto
+    .split("\n")
+    .filter((linea) => {
+      const t = linea.trim();
+      if (!t.startsWith("{")) return true;
+      try {
+        const e = JSON.parse(t);
+        return !(e && typeof e.event === "string");
+      } catch {
+        return true;
+      }
+    })
+    .join("\n");
+}
+
 /** The catalog of one executor, or null if none was asked for or it declined. */
 function catalogOf(name) {
   const e = state.catalog?.executors?.[name];
@@ -2826,7 +2858,7 @@ async function run() {
     //
     // The text is the engine's own, never re-worded here: two renderings of one
     // verdict drift, and then the editor and the CLI disagree (ADR-0031).
-    const report = `${stdout}\n${stderr}`.trim();
+    const report = `${stdout}\n${sinEventos(stderr)}`.trim();
     const verdict =
       stdout
         .split("\n")

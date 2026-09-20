@@ -233,6 +233,15 @@ applies from 0.6.0 on; by it, 0.6.0 itself would have been 0.5.1.
 
 ### Fixed
 
+- **The Output tab is not the event stream.** `--events` writes one JSON object
+  per line to stderr (ADR-0029), and the tab shows stderr, so a run buried its
+  eight useful lines under seven hundred of NDJSON — the loader's line, the
+  executors it connected to, a warning one of them printed. The events are not
+  dropped because they do not matter: they have **already been read**, by the
+  state machine that lit the rows and filled the Call Stack. This tab is the
+  other half, the one written for a person. Found by running the editor against
+  a real Python executor, not by reading it.
+
 - **A `grpc` executor typed without a port no longer writes `port: .nan`.**
   `Number(undefined)` went into the file unguarded; the engine rejected it on
   the next validate, but by then it was written, and `.nan` tells nobody
