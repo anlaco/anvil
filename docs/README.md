@@ -56,7 +56,7 @@ docs/
 ├─ licencia.md                dual AGPL / Apache licensing strategy
 ├─ paridad-teststand.md       what Anvil does and does not do vs. TestStand (generated)
 ├─ roadmap.md                 milestones M0 → M4+ with MVP vs. post-MVP
-├─ adr/                       decisions already made (immutable), 0001–0044
+├─ adr/                       decisions already made (immutable), 0001–0045
 │                             see "The ADRs, by area" below
 ├─ planes/                    milestone plans (m4-nucleo, m4b, m5-ext)
 ├─ qa/                        campaign reports + executable checks
@@ -123,6 +123,11 @@ Anvil does when it cannot judge) and
   with what signature, as JSON. It is the *enumerate* operation ADR-0025 §4
   named and nothing implemented — the one an editor draws a parameter table
   from instead of guessing.
+- **Stopping a run** — [0045](adr/0045-terminating-a-run-is-a-request-checked-between-steps.md):
+  terminating is a **request**, noticed between steps and never inside an
+  invocation, and it takes the exit that already runs `cleanup` at every level
+  of the stack. It arrives as one byte on stdin, reports `inconclusive` rather
+  than a green nobody earned, and there is no Abort. Accepted, not implemented.
 - **Governance** — 0032: contributions and the reversion clause (a direction,
   not yet in force).
 

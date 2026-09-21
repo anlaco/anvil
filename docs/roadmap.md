@@ -303,9 +303,13 @@ por otro camino, 4 descartadas ([paridad-teststand.md](paridad-teststand.md)).
 Lo que M6.4 hace visible es la cola del motor que sale de aquí, y que **no**
 se implementa en M6:
 
-1. **Cancelación con `cleanup` garantizado.** Hoy parar una corrida mata el
-   hilo y deja el banco como estaba, sin `cleanup` (`editor/README.md`). Es un
-   riesgo ya, sin paridad ninguna, porque Run llega a hardware real.
+1. **Cancelación con `cleanup` garantizado** — **diseñada**, sin construir:
+   [ADR-0045](adr/0045-terminating-a-run-is-a-request-checked-between-steps.md).
+   Terminar es una **petición**, que el motor mira entre pasos y nunca dentro de
+   una invocación, y que toma la salida que ya corre `cleanup` en cada nivel de
+   la pila. Llega como un byte por stdin —el único canal que los dos hosts ya
+   tienen, y que el motor no usa— y la corrida reporta `inconclusive` en vez de
+   un verde que nadie se ganó. Ctrl-C pasa a significar eso. No hay Abort.
 2. **Parada, inspección y reanudación** (breakpoints + watch + step). Cuatro de
    los seis controles de depuración de TestStand esperan esta misma pieza.
 3. **Looping por paso**, **Post Actions** (goto/terminate según veredicto) y

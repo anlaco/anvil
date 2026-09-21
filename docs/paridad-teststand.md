@@ -15,9 +15,9 @@ the editor's own rules are in [diseno/principios-del-editor.md](diseno/principio
 
 | | Count |
 |---|---:|
-| Not yet | 59 |
+| Not yet | 58 |
 | Done another way | 9 |
-| Not planned | 3 |
+| Not planned | 4 |
 | Built | 39 |
 | **Total** | **110** |
 
@@ -79,8 +79,7 @@ Anvil intends to have these. Each one names the engine capability it is waiting 
 
 | | In TestStand | Waiting on |
 |---|---|---|
-| **Terminate** | Stops the execution and runs the cleanup of every sequence on the stack. | engine: cancellation that still runs cleanup. Today the editor can only kill the worker thread, which leaves the bench exactly as it was, with no cleanup run. |
-| **Abort** | Stops the execution immediately, without running any cleanup. | engine: a cancellation the engine acknowledges. Killing the thread is not the same thing: the engine never learns the run ended. |
+| **Terminate** | Stops the execution and runs the cleanup of every sequence on the stack. | engine: the termination request of ADR-0045 — a byte on stdin, checked between steps, taking the exit that already runs cleanup at every level. Designed, not built. Today the editor can only kill the worker thread, which leaves the bench exactly as it was. |
 | **Break** | Suspends the execution where it is. | engine: stopping a run at a step and resuming it. Nothing in Anvil can pause a sequence mid-flight. |
 | **Resume** | Continues a suspended execution. | engine: stopping a run at a step and resuming it. Nothing in Anvil can pause a sequence mid-flight. |
 | **Step Into / Over / Out** | Advances a suspended execution one step, over a call, or out of the current sequence. | engine: stopping a run at a step and resuming it. Nothing in Anvil can pause a sequence mid-flight. |
@@ -186,6 +185,7 @@ Deliberately out of scope. Each one cites the decision that put it there, and ch
 
 | | In TestStand | Why not |
 |---|---|---|
+| **Abort** | Stops the execution immediately, without running any cleanup. | ADR-0045 §5: an honest Abort is a killed process, and that is already available from outside — the shell, the window's close button. A button here would dress up «leave the bench however it is» as a supported operation, and that is the one thing it should never be. |
 | **Analysis Results tab** | Shows what the Sequence Analyzer found in the sequence file. | ADR-0043 §3 puts the Sequence Analyzer out of the parity scope. What Anvil checks statically, the loader checks, and it says so in the status bar as the file is typed. |
 
 ### Menu bar

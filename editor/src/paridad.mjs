@@ -645,15 +645,14 @@ export const EXECUTION = [
     state: "todo",
     teststand: "Stops the execution and runs the cleanup of every sequence on the stack.",
     needs:
-      "engine: cancellation that still runs cleanup. Today the editor can only kill the worker thread, which leaves the bench exactly as it was, with no cleanup run.",
+      "engine: the termination request of ADR-0045 — a byte on stdin, checked between steps, taking the exit that already runs cleanup at every level. Designed, not built. Today the editor can only kill the worker thread, which leaves the bench exactly as it was.",
   },
   {
     id: "execution.abort",
     label: "Abort",
-    state: "todo",
+    state: "never",
     teststand: "Stops the execution immediately, without running any cleanup.",
-    needs:
-      "engine: a cancellation the engine acknowledges. Killing the thread is not the same thing: the engine never learns the run ended.",
+    why: "ADR-0045 §5: an honest Abort is a killed process, and that is already available from outside — the shell, the window's close button. A button here would dress up «leave the bench however it is» as a supported operation, and that is the one thing it should never be.",
   },
   {
     id: "execution.break",

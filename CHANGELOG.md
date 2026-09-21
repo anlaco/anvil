@@ -24,6 +24,31 @@ something may have broken: Cargo treats `0.6` and `0.7` as incompatible, and
 `anvil-step = "0.6"` would have to be edited by hand for nothing. The rule
 applies from 0.6.0 on; by it, 0.6.0 itself would have been 0.5.1.
 
+## [Unreleased]
+
+### Added
+
+- **A decision on how a run is stopped**
+  ([ADR-0045](docs/adr/0045-terminating-a-run-is-a-request-checked-between-steps.md)),
+  designed and not yet built. Terminating is a **request**: the engine notices
+  it between steps and never inside an invocation — a step that has reached the
+  instrument finishes, because Anvil does not know what it started — and then
+  takes the exit it already has, the one that runs `cleanup` at every level of
+  the stack.
+
+  It arrives as one byte on **stdin**, the only channel both hosts already have
+  and one the engine never reads. Ctrl-C comes to mean it; today it kills the
+  host and takes the bench with it.
+
+  A terminated run reports **`inconclusive`**, not a pass. Three passing steps
+  and a stop would otherwise aggregate to green on a unit nobody finished
+  testing. No new status, no new column, no `contract` move.
+
+  And there is **no Abort**. An honest one is a killed process, already
+  available from outside; a button for it would dress up "leave the bench
+  however it is" as something supported. Its cell in the parity inventory moves
+  from `todo` to `never`.
+
 ## [0.8.0] — 2026-09-20
 
 **The Sequence Editor asks the executors what they serve.** A step's module is
