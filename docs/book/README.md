@@ -54,7 +54,7 @@ every session again and checks that each file still appears word for word in
 a chapter:
 
 ```console
-$ docs/book/check.sh path/to/anvil-v0.7.0-x86_64-linux-musl
+$ docs/book/check.sh path/to/anvil-v0.8.0-x86_64-linux-musl
 ```
 
 What could not be run is marked **not verified**, with those words.

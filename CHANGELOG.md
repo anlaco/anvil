@@ -24,9 +24,38 @@ something may have broken: Cargo treats `0.6` and `0.7` as incompatible, and
 `anvil-step = "0.6"` would have to be edited by hand for nothing. The rule
 applies from 0.6.0 on; by it, 0.6.0 itself would have been 0.5.1.
 
-## [Unreleased]
+## [0.8.0] — 2026-09-20
+
+**The Sequence Editor asks the executors what they serve.** A step's module is
+picked from what its executor really offers, and its parameters are the ones
+the executor declares — not the ones guessed from the literal in the YAML.
 
 ### Added
+
+- **`anvil describe <secuencia>` prints the catalog as JSON**
+  ([ADR-0044](docs/adr/0044-the-catalog-comes-out-as-data-anvil-describe.md)).
+  It asks every executor the sequence declares what steps it serves and with
+  what signature — name, type, whether it is required, its default, its line of
+  documentation — and prints it to stdout. It runs no step: `Describe` asks, it
+  does not measure.
+
+  All of it was already on the wire and one place read it: `--validate
+  --with-executors`, which compared it against a sequence and threw it away.
+  This is the *enumerate* operation ADR-0025 §4 named — *"a tooling operation…
+  for an editor"* — and which existed as three `--list` flags printing prose
+  nothing consumed. It is what the Sequence Editor's Module tab will draw its
+  parameter table from instead of guessing the type from the literal in the
+  YAML.
+
+  **An executor that declines appears anyway**, with `describes: false` and the
+  reason. Omitting it would read as "serves no steps", which is a different
+  statement and a false one — the distinction ADR-0028 exists to protect.
+  Types cross as their names (`number`, `text`, `boolean`, `reference`,
+  `unspecified`), never as the enum's integers.
+
+  It is the CLI's first subcommand. The rule in `ui-vs-headless.md` said that a
+  subcommand, or more than ten flags, meant stopping to write an ADR; both had
+  happened, so that is what ADR-0044 is.
 
 - **One Module panel, and it knows what the module takes.** The Sequence
   Editor asks the engine for the catalog (`anvil describe`, above) and draws
@@ -64,31 +93,6 @@ applies from 0.6.0 on; by it, 0.6.0 itself would have been 0.5.1.
   sandbox can see. `wasm` by default for the reason that decides it on a locked
   bench: it needs nothing installed, while Python needs Python, a `.vi` needs
   LabVIEW, and C# needs to have been compiled first.
-
-- **`anvil describe <secuencia>` prints the catalog as JSON**
-  ([ADR-0044](docs/adr/0044-the-catalog-comes-out-as-data-anvil-describe.md)).
-  It asks every executor the sequence declares what steps it serves and with
-  what signature — name, type, whether it is required, its default, its line of
-  documentation — and prints it to stdout. It runs no step: `Describe` asks, it
-  does not measure.
-
-  All of it was already on the wire and one place read it: `--validate
-  --with-executors`, which compared it against a sequence and threw it away.
-  This is the *enumerate* operation ADR-0025 §4 named — *"a tooling operation…
-  for an editor"* — and which existed as three `--list` flags printing prose
-  nothing consumed. It is what the Sequence Editor's Module tab will draw its
-  parameter table from instead of guessing the type from the literal in the
-  YAML.
-
-  **An executor that declines appears anyway**, with `describes: false` and the
-  reason. Omitting it would read as "serves no steps", which is a different
-  statement and a false one — the distinction ADR-0028 exists to protect.
-  Types cross as their names (`number`, `text`, `boolean`, `reference`,
-  `unspecified`), never as the enum's integers.
-
-  It is the CLI's first subcommand. The rule in `ui-vs-headless.md` said that a
-  subcommand, or more than ten flags, meant stopping to write an ADR; both had
-  happened, so that is what ADR-0044 is.
 
 - **The editor says what it does not do, and why.** The Sequence Editor's
   layout has been TestStand's for a while, with the pages Anvil has not built
@@ -1421,6 +1425,7 @@ primera campaña de betatesting externa.
 - *Private vulnerability reporting* no puede activarse mientras el
   repositorio sea privado; hasta entonces vale el correo de `SECURITY.md`.
 
+[0.8.0]: https://github.com/anlaco/anvil/releases/tag/v0.8.0
 [0.7.0]: https://github.com/anlaco/anvil/releases/tag/v0.7.0
 [0.6.3]: https://github.com/anlaco/anvil/releases/tag/v0.6.3
 [0.6.2]: https://github.com/anlaco/anvil/releases/tag/v0.6.2

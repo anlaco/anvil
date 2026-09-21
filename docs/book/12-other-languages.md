@@ -132,7 +132,7 @@ executor, and you can copy it to another machine as it is:
 ```console
 $ cargo build --target wasm32-wasip2 --manifest-path board-wasm/Cargo.toml
 $ mkdir wasm-dept
-$ cp anvil-v0.7.0-x86_64-linux-musl/anvil-exec-wasm board-wasm/target/wasm32-wasip2/debug/board.wasm wasm-dept/
+$ cp anvil-v0.8.0-x86_64-linux-musl/anvil-exec-wasm board-wasm/target/wasm32-wasip2/debug/board.wasm wasm-dept/
 ```
 
 The first build takes about a minute. Then:
