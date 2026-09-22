@@ -14,11 +14,12 @@ its file stem: `multimetro.wasm` is `multimetro`, and a sequence names a step
 YAML, so the department can reorganise itself — or rewrite a module in another
 language — without editing anybody's sequence.
 
-**Told nothing, it serves the folder its own binary is in**
+**Told nothing, it serves the folder its own binary is in**; `--modules <dir>`
+points it at another
 ([ADR-0027](../../docs/adr/0027-a-sequence-names-the-executor-not-the-module.md)).
-That is what makes a department a **copyable folder**: this binary with its
-`.wasm` beside it. A sequence points `path:` at *this executor* and never at a
-module, so where the modules live never leaks into it.
+That is what makes a department a **copyable folder** of `.wasm` modules. A
+sequence names neither the folder nor a module: it names the address the
+executor listens at (ADR-0046), so where the modules live never leaks into it.
 
 The qualified name travels inside `StepRequest.name`, which is an opaque
 string as far as `paso.proto` is concerned: serving many modules costs no
@@ -35,17 +36,26 @@ your component — answers the contract echo.
 
 ## How Anvil uses it
 
-The bridge ships as a **file next to `anvil`** — the release carries both,
-and `make release` leaves them together in the target directory too
-([ADR-0023](../../docs/adr/0023-the-bridge-ships-as-a-file-next-to-anvil.md)).
-For every `type: wasm` executor declared in the sequence, `anvil` spawns
-**the binary that sequence names in its `path:`** — one process per declared
-executor, on an ephemeral loopback port, with stdin piped so the bridge exits
-when the host dies. It is passed the port and nothing else: which modules it
-serves is its own business. Nothing to install, nothing to start — and the
-same file you got with the release is the one you copy into a department, or to
-another machine to run by hand. If the `path:` a sequence names is not there —
-or is a `.wasm` instead of the executor — `anvil` stops saying so.
+It does not use it: **Anvil connects to an address**
+([ADR-0046](../../docs/adr/0046-an-executor-is-an-address-and-nothing-brings-one-up.md)).
+A sequence says there is an executor at `127.0.0.1:9101`, and this bridge is
+one of the things that can be listening there. It used to be spawned by the
+host for a `type: wasm` executor, on an ephemeral port, from a `path:` the
+sequence carried; none of that exists any more, and neither does the `path:`.
+
+So the bridge is **installed once**, in the folder where a logical runtime
+name resolves, instead of being copied next to `anvil` (which ADR-0023 said,
+and ADR-0046 §4 amended) or next to every set of modules:
+
+```
+~/.anvil/executors/wasm/    executor.json  anvil-exec-wasm
+```
+
+`make install-executors` puts it there from a source tree, and the release
+package carries an `executors/` folder with its own `install.sh`. Starting it
+is somebody's job — a service manager, the machine's boot, a person in a
+terminal, or the Sequence Editor from the sequence's `dev:` block. See
+[executors/README-instalacion.md](../README-instalacion.md).
 
 ## Running it by hand
 
@@ -69,7 +79,7 @@ an editor needs, and the way to answer "which steps does this executor serve?"
 without starting a bench:
 
 ```sh
-./ejemplos/departamento/dist/anvil-exec-wasm --list
+anvil-exec-wasm --modules ejemplos/departamento/dist --list
 ```
 
 `--bind 0.0.0.0` is what makes the remote case (the executor on another

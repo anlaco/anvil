@@ -226,7 +226,7 @@ jobs:
       - name: "Smoke: anvil.exe runs a sequence"
         working-directory: anvil
         run: |
-          ./ejemplos/departamento/dist/anvil-exec-wasm.exe \
+          ./executors/wasm/target/release/anvil-exec-wasm.exe \
             --modules ejemplos/departamento/dist --port 9101 &
           BENCH=$!
           trap 'kill $BENCH 2>/dev/null || true' EXIT

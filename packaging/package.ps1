@@ -1,5 +1,6 @@
 # Windows sibling of package.sh: builds the downloadable package for the
-# engine — `anvil.exe` and `anvil-exec-wasm.exe` — plus its SHA256SUMS.
+# engine — `anvil.exe` plus the folder of executors to install (ADR-0046 §4)
+# — and its SHA256SUMS.
 #
 # This is the engine's own package, independent of the Sequence Editor's
 # installer (an Electron app, built separately by `npm run app:build` in
@@ -47,18 +48,28 @@ cargo build --release --target $Target --manifest-path packaging/anvil-host/Carg
 $PkgDir = Join-Path $Out $PkgName
 if (Test-Path $PkgDir) { Remove-Item -Recurse -Force $PkgDir }
 New-Item -ItemType Directory -Force -Path (Join-Path $PkgDir "ejemplos/departamento/dist") | Out-Null
+New-Item -ItemType Directory -Force -Path (Join-Path $PkgDir "executors/wasm") | Out-Null
 
 Copy-Item "packaging/anvil-host/target/$Target/release/anvil.exe" $PkgDir
-Copy-Item "executors/wasm/target/$Target/release/anvil-exec-wasm.exe" $PkgDir
 Copy-Item README.md, CHANGELOG.md $PkgDir
 Copy-Item LICENSE (Join-Path $PkgDir "LICENSE")                       # anvil: AGPL-3.0-or-later
 Copy-Item executors/LICENSE (Join-Path $PkgDir "LICENSE.executors")   # anvil-exec-wasm: Apache-2.0
 Copy-Item ejemplos/*.yseq, ejemplos/*.yaml (Join-Path $PkgDir "ejemplos")
 
-# The example department: the executor's binary with its modules beside it,
-# which is what the demos' `path:` points at (ADR-0027).
+# The executors to install (ADR-0046 §4): installed once, under
+# `%USERPROFILE%\.anvil\executors\<runtime>\`, where a `dev:` block naming
+# `wasm` resolves. `executor.json` says which flag takes the code, which is what
+# lets tooling launch a runtime it knows nothing about.
+$ExecDir = Join-Path $PkgDir "executors/wasm"
+Copy-Item "executors/wasm/target/$Target/release/anvil-exec-wasm.exe" $ExecDir
+Copy-Item "executors/wasm/executor.json" $ExecDir
+Copy-Item "executors/README-instalacion.md" (Join-Path $PkgDir "executors/README.md")
+Copy-Item "packaging/install-executors.ps1" (Join-Path $PkgDir "executors/install.ps1")
+
+# The example department: its **modules**, which is what the demos' `dev:`
+# block points `code:` at. The binary that serves them is installed once,
+# above — since ADR-0046 it is not copied next to every set of modules.
 $DeptDir = Join-Path $PkgDir "ejemplos/departamento/dist"
-Copy-Item "executors/wasm/target/$Target/release/anvil-exec-wasm.exe" $DeptDir
 Copy-Item "ejemplos/departamento/target/$Wasm/release/*.wasm" $DeptDir
 Copy-Item "ejemplos/hola-paso/target/$Wasm/release/*.wasm" $DeptDir
 

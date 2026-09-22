@@ -3,9 +3,9 @@
 # page, plus its SHA256SUMS.
 #
 # It exists because the package used to be assembled by hand, and what ships is
-# not "whatever is in target/": it is two statically linked musl binaries, the
-# example sequences, and — since ADR-0027 — an assembled **department**, so the
-# WASM demos in the package run without building anything.
+# not "whatever is in target/": it is the engine, a folder of executors to
+# install (ADR-0046 §4), the example sequences, and the demo department's
+# modules, so the WASM demos in the package run without building anything.
 #
 # Usage (from the repo root):
 #   ./packaging/package.sh            # version taken from the host's manifest
@@ -37,19 +37,28 @@ cargo build --release --target $TARGET --manifest-path executors/wasm/Cargo.toml
 cargo build --release --target $TARGET --manifest-path packaging/anvil-host/Cargo.toml
 
 rm -rf "$OUT/$NAME"
-mkdir -p "$OUT/$NAME/ejemplos/departamento/dist"
+mkdir -p "$OUT/$NAME/ejemplos/departamento/dist" "$OUT/$NAME/executors/wasm"
 
 cp packaging/anvil-host/target/$TARGET/release/anvil "$OUT/$NAME/"
-cp executors/wasm/target/$TARGET/release/anvil-exec-wasm "$OUT/$NAME/"
 cp README.md CHANGELOG.md "$OUT/$NAME/"
 cp LICENSE "$OUT/$NAME/LICENSE"                    # anvil: AGPL-3.0-or-later
 cp executors/LICENSE "$OUT/$NAME/LICENSE.executors" # anvil-exec-wasm: Apache-2.0
-cp ejemplos/*.yseq ejemplos/*.yaml "$OUT/$NAME/ejemplos/"
+cp ejemplos/*.yseq ejemplos/*.yaml ejemplos/arrancar-banco.sh "$OUT/$NAME/ejemplos/"
 
-# The example department: the executor's binary with its modules beside it,
-# which is what the demos' `path:` points at (ADR-0027). Without this the two
-# WASM demos in the package would name a folder that is not there.
-cp executors/wasm/target/$TARGET/release/anvil-exec-wasm "$OUT/$NAME/ejemplos/departamento/dist/"
+# The executors to install (ADR-0046 §4). The package is the engine plus this
+# folder, not a binary with a bridge beside it: an executor is installed once,
+# under `~/.anvil/executors/<runtime>/`, and a `dev:` block naming `wasm`
+# resolves there. `executor.json` is what makes that possible for a runtime the
+# tooling knows nothing about — it says which flag takes the code.
+cp executors/wasm/target/$TARGET/release/anvil-exec-wasm "$OUT/$NAME/executors/wasm/"
+cp executors/wasm/executor.json "$OUT/$NAME/executors/wasm/"
+cp executors/README-instalacion.md "$OUT/$NAME/executors/README.md"
+cp packaging/install-executors.sh "$OUT/$NAME/executors/install.sh"
+chmod +x "$OUT/$NAME/executors/install.sh" "$OUT/$NAME/ejemplos/arrancar-banco.sh"
+
+# The example department: its **modules**, which is what the demos' `dev:`
+# block points `code:` at. The binary that serves them is installed once, above
+# — since ADR-0046 it is not copied next to every set of modules.
 cp ejemplos/departamento/target/$WASM/release/*.wasm "$OUT/$NAME/ejemplos/departamento/dist/"
 cp ejemplos/hola-paso/target/$WASM/release/*.wasm "$OUT/$NAME/ejemplos/departamento/dist/"
 

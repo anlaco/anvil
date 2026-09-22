@@ -45,14 +45,21 @@ make release
 ```
 
 `anvil` no lleva ejecutor de pasos propio
-([ADR-0041](docs/adr/0041-there-is-no-embedded-executor.md)): los ejemplos
-declaran el banco de demo, `ejemplos/departamento/dist/anvil-exec-wasm`, y el
-host lo arranca. Para correr el guest del motor suelto con wasmtime (dos
-terminales), se arranca ese ejecutor a mano y se le pasa al motor:
+([ADR-0041](docs/adr/0041-there-is-no-embedded-executor.md)) y **no arranca
+ninguno** ([ADR-0046](docs/adr/0046-an-executor-is-an-address-and-nothing-brings-one-up.md)):
+los ejemplos dicen dónde escucha el banco de demo y hay que levantarlo antes.
+
+```sh
+./ejemplos/arrancar-banco.sh &
+./packaging/anvil-host/target/release/anvil ejemplos/basica.yseq
+```
+
+Para correr el guest del motor suelto con wasmtime (dos terminales), se
+arranca el ejecutor a mano y se le pasa al motor:
 
 ```sh
 # terminal 1 — el ejecutor del banco de demo
-ejemplos/departamento/dist/anvil-exec-wasm --port 9300
+executors/wasm/target/release/anvil-exec-wasm --modules ejemplos/departamento/dist --port 9300
 
 # terminal 2 — motor con la secuencia "basica"
 wasmtime -S cli -S tcp=y -S inherit-network=y --dir=. \

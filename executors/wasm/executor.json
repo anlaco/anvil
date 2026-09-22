@@ -1,0 +1,7 @@
+{
+  "runtime": "wasm",
+  "exec": "anvil-exec-wasm",
+  "code": "--modules",
+  "port": "--port",
+  "eof": "--exit-on-eof"
+}

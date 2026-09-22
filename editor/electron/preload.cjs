@@ -52,6 +52,22 @@ contextBridge.exposeInMainWorld("anvil", {
    */
   describe: (path) => ipcRenderer.invoke("anvil:describe", path).then(unwrap),
   /**
+   * Brings up one executor as its `dev:` entry describes, at the address the
+   * sequence declares (ADR-0046 §5). `spec` is
+   * `{ name, host, port, runtime, code }`; resolves to what was started.
+   *
+   * Only tooling reads `dev:`: nothing on the run path does, so a sequence
+   * behaves the same on a bench whether the block is there or not.
+   */
+  startDev: (path, spec) => ipcRenderer.invoke("anvil:start-dev", path, spec).then(unwrap),
+  /** Stops one this shell started. True if there was one. */
+  stopDev: (name) => ipcRenderer.invoke("anvil:stop-dev", name),
+  /**
+   * Calls `listener({ name, reason })` when a started executor dies on its
+   * own — which is the only way the page can find out, since nothing polls it.
+   */
+  onDevExit: (listener) => ipcRenderer.on("anvil:dev-exit", (_event, info) => listener(info)),
+  /**
    * Calls `listener(action)` for each item picked from the native menu. The
    * action is the same name the page's own menus carry in `data-action`.
    */

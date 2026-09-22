@@ -16,10 +16,31 @@ set -euo pipefail
 
 raiz="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 dist="$raiz/ejemplos/departamento/dist"
-exe="$dist/anvil-exec-wasm"
 
-if [ ! -x "$exe" ]; then
-    echo "no está el banco de demo en $dist — constrúyelo con 'make example'" >&2
+# El ejecutable se instala una vez (ADR-0046 §4), no se copia junto a cada
+# carpeta de módulos. En un árbol de fuentes vale el recién construido, que es
+# el que alguien que está tocando el puente quiere probar; si no, el instalado.
+anvil_home="${ANVIL_HOME:-$HOME/.anvil}"
+exe=""
+for sufijo in "" ".exe"; do          # Git Bash en Windows (ADR-0036)
+    for candidato in \
+        "$raiz/executors/wasm/target/release/anvil-exec-wasm$sufijo" \
+        "$raiz/executors/wasm/target/debug/anvil-exec-wasm$sufijo" \
+        "$anvil_home/executors/wasm/anvil-exec-wasm$sufijo"
+    do
+        if [ -x "$candidato" ]; then exe="$candidato"; break 2; fi
+    done
+done
+
+if [ -z "$exe" ]; then
+    echo "no hay ejecutor wasm en $anvil_home/executors/wasm/." >&2
+    echo "  desde el paquete descargado:  ./executors/install.sh" >&2
+    echo "  desde el árbol de fuentes:    make build && make install-executors" >&2
+    exit 1
+fi
+
+if [ ! -f "$dist/multimetro.wasm" ]; then
+    echo "no están los módulos del banco de demo en $dist — constrúyelos con 'make example'" >&2
     exit 1
 fi
 

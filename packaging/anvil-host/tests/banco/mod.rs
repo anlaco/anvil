@@ -73,12 +73,30 @@ pub fn raiz_repo() -> PathBuf {
         .expect("repo root")
 }
 
-/// The demo department, as `make example` leaves it, or None when it has not
-/// been built — a skip never claims a pass.
+/// The WASM bridge, as its own workspace leaves it, or None when it has not
+/// been built.
+///
+/// Its own `target/`, not the department's: since ADR-0046 the binary is
+/// installed once (`~/.anvil/executors/wasm/`) instead of being copied beside
+/// every set of modules that wants serving, and a test tree is the one place
+/// that still has a reason to reach for the freshly built one rather than the
+/// installed one — it is testing *this* build.
+pub fn puente() -> Option<PathBuf> {
+    let base = raiz_repo().join("executors/wasm/target");
+    let exe = format!("anvil-exec-wasm{}", std::env::consts::EXE_SUFFIX);
+    [
+        base.join("release").join(&exe),
+        base.join("debug").join(&exe),
+    ]
+    .into_iter()
+    .find(|p| p.exists())
+}
+
+/// The demo department's modules, as `make example` leaves them, or None when
+/// they have not been built — a skip never claims a pass.
 pub fn dist() -> Option<PathBuf> {
     let d = raiz_repo().join("ejemplos/departamento/dist");
-    let exe = d.join(format!("anvil-exec-wasm{}", std::env::consts::EXE_SUFFIX));
-    (exe.exists() && d.join("multimetro.wasm").exists()).then_some(d)
+    d.join("multimetro.wasm").exists().then_some(d)
 }
 
 /// A bench that shuts itself down when the test drops it, and holds the lock
@@ -124,7 +142,7 @@ pub fn arranca() -> Option<Banco> {
         std::thread::sleep(std::time::Duration::from_millis(10));
     }
 
-    let exe = d.join(format!("anvil-exec-wasm{}", std::env::consts::EXE_SUFFIX));
+    let exe = puente()?;
     let child = Command::new(exe)
         .args([
             "--modules",

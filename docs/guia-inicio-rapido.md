@@ -266,13 +266,14 @@ anvil <sequence.yaml> [--process-model <pm.yaml>] [--json <path>] [--csv <path>]
 ## Debugging with the wasmtime CLI (advanced)
 
 To run the engine guest **loose** (without the host), you need the `wasmtime`
-CLI and two terminals. The host is what would start the demo bench's executor
-and hand the engine its address, so here you do both by hand:
+CLI and two terminals. Nothing starts an executor for you (ADR-0046), and here
+you also pick its port, so the engine is handed an address overriding the one
+the sequence declares:
 
 ```sh
 make release
 # Terminal 1 — the demo bench's executor
-ejemplos/departamento/dist/anvil-exec-wasm --port 9300
+executors/wasm/target/release/anvil-exec-wasm --modules ejemplos/departamento/dist --port 9300
 # Terminal 2 — engine, pointed at it
 wasmtime -S cli -S tcp=y -S inherit-network=y --dir=. \
   target/wasm32-wasip2/release/anvil-guest.wasm ejemplos/basica.yseq \

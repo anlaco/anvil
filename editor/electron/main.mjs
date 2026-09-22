@@ -16,6 +16,8 @@ import { app, BrowserWindow, dialog, ipcMain, Menu, protocol, shell } from "elec
 import { writeFile } from "node:fs/promises";
 import updater from "electron-updater";
 
+import { devCommand, executorsRoot, notLocal } from "./runtimes.mjs";
+
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const REPO = path.resolve(HERE, "../..");
 const DIST = path.join(HERE, "..", "dist");
@@ -141,6 +143,117 @@ async function startBridge(sequencePath) {
   });
 }
 
+// ------------------------------------------------- the dev executors
+
+// ADR-0046 §5: only tooling reads `dev:`, and this is the tooling. The engine
+// never brings an executor up, on a bench or here — what it does is connect to
+// an address. So the editor starting one is not a shortcut around that rule: it
+// is a person doing by button what they would otherwise do in a second
+// terminal, on their own machine, while they write the sequence.
+//
+// It is what gives `Describe` something to ask (ADR-0044). A module list and a
+// step's parameters come from the executor itself, and until one is up the
+// Module panel can only say that nobody has been asked.
+
+/** The executors this shell started, by the name the sequence declares. */
+const devExecutors = new Map();
+
+/** The last lines an executor wrote before dying — its own account of why. */
+const DEV_LOG_LINES = 20;
+
+function stopDevExecutor(name) {
+  const running = devExecutors.get(name);
+  if (!running) return false;
+  devExecutors.delete(name);
+  running.child.kill();
+  return true;
+}
+
+function stopDevExecutors() {
+  for (const name of [...devExecutors.keys()]) stopDevExecutor(name);
+}
+
+/**
+ * Brings up the executor `spec.name` as its `dev:` entry describes, at the
+ * address the sequence declares.
+ *
+ * Three things are refused before anything is spawned, and each one has a
+ * message of its own rather than a process that exits into a stream nobody is
+ * reading: an address that is not this machine's, a `runtime` that is not
+ * installed, and `code` that is not there.
+ *
+ * Started, not waited on: an executor is up when it answers `Describe`, and
+ * that is the next thing the page does. Watching stdout for a line would tie
+ * this shell to one runtime's idea of what to print — the install folder
+ * exists so that it does not have to know one from another.
+ */
+function startDevExecutor(sender, sequencePath, spec) {
+  stopDevExecutor(spec.name);
+
+  const remote = notLocal(spec.host);
+  if (remote) throw new Error(remote);
+
+  const sequence = existsSync(sequencePath)
+    ? sequencePath
+    : path.join(REPO, sequencePath.replace(/^[/\\]+/, ""));
+  const root = executorsRoot();
+  const command = devCommand(spec, { sequenceDir: path.dirname(sequence), port: spec.port, root });
+
+  const child = spawn(command.exe, command.args, {
+    cwd: command.cwd,
+    // What normally ends these is `stopDevExecutors`, on the window closing
+    // and on quit. That covers every orderly close and nothing else: killed
+    // or crashed, this process runs no code, and an executor left holding the
+    // port the next sequence declares is invisible — nothing on screen says
+    // it is there.
+    //
+    // So a runtime whose manifest names an `eof` flag gets a stdin this
+    // process never writes to. The pipe closes when this process dies however
+    // it dies, and the executor goes with it. Which flag that is belongs in
+    // the manifest, not here: the install folder exists so this shell need
+    // not know one runtime from another (ADR-0046 §4).
+    stdio: [command.stopsOnEof ? "pipe" : "ignore", "ignore", "pipe"],
+  });
+
+  const log = [];
+  child.stderr.on("data", (d) => {
+    for (const line of String(d).split("\n")) if (line.trim()) log.push(line.trimEnd());
+    if (log.length > DEV_LOG_LINES) log.splice(0, log.length - DEV_LOG_LINES);
+  });
+
+  const running = { child, command };
+  devExecutors.set(spec.name, running);
+
+  // The window may already be gone — these are killed as it closes, and the
+  // exit arrives after. Telling a destroyed sender is an exception in a
+  // listener, which Electron logs as a crash of the shell.
+  const tell = (reason) => {
+    if (!sender.isDestroyed()) sender.send("anvil:dev-exit", { name: spec.name, reason });
+  };
+
+  child.on("error", (e) => {
+    if (devExecutors.get(spec.name) === running) devExecutors.delete(spec.name);
+    tell(`could not start ${command.exe}: ${e.message}`);
+  });
+  child.on("exit", (code, signal) => {
+    // A stop asked for here has already removed it: that exit is not news.
+    if (devExecutors.get(spec.name) !== running) return;
+    devExecutors.delete(spec.name);
+    const how = signal ? `killed by ${signal}` : `exited ${code}`;
+    const said = log.length > 0 ? `\n${log.join("\n")}` : "";
+    tell(`'${spec.name}' ${how}${said}`);
+  });
+
+  return {
+    name: spec.name,
+    pid: child.pid,
+    exe: command.exe,
+    args: command.args,
+    runtime: command.runtime.name,
+    at: `${spec.host}:${spec.port}`,
+  };
+}
+
 /**
  * The catalog of every executor a sequence declares (ADR-0044).
  *
@@ -168,8 +281,9 @@ async function describeSequence(sequencePath) {
     });
     let out = "";
     let err = "";
-    // 20s, not the bridge's 5: this starts every `type: wasm` executor the
-    // sequence declares, and each one compiles its modules the first time.
+    // 20s, not the bridge's 5: it connects to every executor the sequence
+    // declares and waits for each one's answer, and an executor that has just
+    // been started compiles its modules before it can give one.
     const timer = setTimeout(() => {
       child.kill();
       reject(new Error("the engine did not answer `describe` within 20s"));
@@ -367,6 +481,14 @@ function wireIpc() {
   // Same `answer` as the bridge, and for the same reason: an executor that is
   // not up is an expected answer here, not a fault.
   ipcMain.handle("anvil:describe", (_event, sequencePath) => answer(describeSequence(sequencePath)));
+  // And the same again: a runtime that is not installed, an address that is
+  // not this machine's and a `code` folder that is not there are all answers,
+  // not faults. `answer` is synchronous-safe — `startDevExecutor` throws all
+  // three before it spawns anything.
+  ipcMain.handle("anvil:start-dev", (event, sequencePath, spec) =>
+    answer(Promise.resolve().then(() => startDevExecutor(event.sender, sequencePath, spec))),
+  );
+  ipcMain.handle("anvil:stop-dev", (_event, name) => stopDevExecutor(name));
   ipcMain.handle("anvil:locate-engine", (event) =>
     answer(locateEngine(BrowserWindow.fromWebContents(event.sender))),
   );
@@ -806,7 +928,13 @@ function createWindow() {
   // outlive the window a person can see it from. `closed`, not `close`: a
   // close can still be cancelled by the unsaved-changes question, and a
   // window left open without its bridge has lost Run for nothing.
-  window.on("closed", killBridge);
+  // The executors this window started are its children too, and for the same
+  // reason: one left running holds the port the next sequence declares, and
+  // nothing on screen says it is there.
+  window.on("closed", () => {
+    killBridge();
+    stopDevExecutors();
+  });
   return window;
 }
 
@@ -838,9 +966,13 @@ app.whenReady().then(() => {
 
 app.on("window-all-closed", () => {
   killBridge();
+  stopDevExecutors();
   if (process.platform !== "darwin") app.quit();
 });
 
 // `will-quit`, not `before-quit`, for the same reason as `closed` above: it is
 // emitted only once every window has actually closed.
-app.on("will-quit", killBridge);
+app.on("will-quit", () => {
+  killBridge();
+  stopDevExecutors();
+});

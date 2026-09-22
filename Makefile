@@ -1,9 +1,12 @@
 # Anvil — build orchestration.
 #
-# `anvil` is a binary that embeds the engine's WASM guest and ships the `.wasm`
-# bridge next to it (ADR-0011, ADR-0023), so three things must be built in
-# order: the guest and the bridge first, the host last (its `build.rs` copies
-# them, it does not build them). This exists so that order does not have to be remembered.
+# `anvil` is a binary that embeds the engine's WASM guest (ADR-0011), so the
+# guest has to be built before the host, whose `build.rs` copies it and does
+# not build it. This exists so that order does not have to be remembered.
+#
+# The WASM bridge is built here too, but it is no longer part of that chain:
+# since ADR-0046 nothing places it next to `anvil` and nothing spawns it — it
+# is an executor like any other, installed once with `make install-executors`.
 #
 #   make build     everything in debug
 #   make release   everything in release  ← the binary that gets distributed
@@ -11,6 +14,7 @@
 #   make check     fmt + clippy for the four workspaces (what CI will demand)
 #   make fmt       applies the format
 #   make run       runs the basic example with the debug binary
+#   make install-executors   installs the executors into ~/.anvil/executors
 #   make clean     cleans the four targets
 #
 # The four workspaces are deliberately independent (the core does not drag in
@@ -42,7 +46,7 @@ ANVIL_RELEASE := packaging/anvil-host/target/release/anvil$(EXE)
 
 .PHONY: all build release test test-core test-bridge test-host test-executors \
         test-executors-rust test-executors-csharp example example-release dept check fmt run clean help \
-        check-paridad paridad
+        check-paridad paridad install-executors
 
 all: build
 
@@ -51,7 +55,7 @@ build: example
 	cargo build --target $(TARGET) $(GUESTS)
 	cargo build --manifest-path $(BRIDGE)
 	cargo build --manifest-path $(HOST)
-	@$(MAKE) --no-print-directory dept BRIDGE_BIN=executors/wasm/target/debug/anvil-exec-wasm$(EXE)
+	@$(MAKE) --no-print-directory dept
 	@echo "ready → $(ANVIL_DEBUG)"
 
 ## The reference step component (`ejemplos/hola-paso`), the one
@@ -70,15 +74,15 @@ example-release:
 	cargo build --release --target $(TARGET) --manifest-path $(EXAMPLE)
 	cargo build --release --target $(TARGET) --manifest-path $(DEPT)
 
-## Assembles the example **department** (ADR-0027): the executor's binary with
-## its modules beside it, which is what `path:` points at. It needs the bridge
-## already built, so `build`/`release` call it last and not as a dependency of
-## `example`.
+## Assembles the example **department** (ADR-0027): the modules the demo bench
+## serves. Since ADR-0046 it is modules and nothing else — the executor's
+## binary is installed once, in `~/.anvil/executors/`, not copied into every
+## project that wants steps served. `code: departamento/dist` in the examples'
+## `dev:` block points here.
 DIST := ejemplos/departamento/dist
 WASM_PROFILE ?= debug
 dept:
 	@mkdir -p $(DIST)
-	@cp $(BRIDGE_BIN) $(DIST)/
 	@cp ejemplos/departamento/target/$(TARGET)/$(WASM_PROFILE)/*.wasm $(DIST)/
 	@cp ejemplos/hola-paso/target/$(TARGET)/$(WASM_PROFILE)/*.wasm $(DIST)/
 	@echo "department ready → $(DIST)"
@@ -89,7 +93,7 @@ release: example-release
 	cargo build --release --target $(TARGET) $(GUESTS)
 	cargo build --release --manifest-path $(BRIDGE)
 	cargo build --release --manifest-path $(HOST)
-	@$(MAKE) --no-print-directory dept WASM_PROFILE=release BRIDGE_BIN=executors/wasm/target/release/anvil-exec-wasm$(EXE)
+	@$(MAKE) --no-print-directory dept WASM_PROFILE=release
 	@echo "ready → $(ANVIL_RELEASE)"
 
 test: test-core test-bridge test-host test-executors test-executors-rust \
@@ -208,6 +212,34 @@ fmt:
 	cargo fmt --all --manifest-path $(RUSTSDK)
 	cargo fmt --manifest-path $(EXAMPLE)
 	cargo fmt --all --manifest-path $(DEPT)
+
+## Installs the executors where a logical `runtime` name resolves (ADR-0046 §4).
+##
+## `~/.anvil/executors/<runtime>/`, or `$ANVIL_HOME/executors/` — one lever,
+## not a search path. Each folder is the executor plus its `executor.json`,
+## which is what lets a front end launch a runtime it knows nothing about:
+## the manifest says which flag takes the code.
+##
+## The WASM bridge has to be built first; Python's is a script and is copied
+## with the modules it needs beside it.
+ANVIL_HOME ?= $(HOME)/.anvil
+EXEC_DIR   := $(ANVIL_HOME)/executors
+install-executors:
+	@mkdir -p $(EXEC_DIR)/wasm $(EXEC_DIR)/python
+	@if [ -x executors/wasm/target/release/anvil-exec-wasm$(EXE) ]; then \
+		cp executors/wasm/target/release/anvil-exec-wasm$(EXE) $(EXEC_DIR)/wasm/; \
+	elif [ -x executors/wasm/target/debug/anvil-exec-wasm$(EXE) ]; then \
+		cp executors/wasm/target/debug/anvil-exec-wasm$(EXE) $(EXEC_DIR)/wasm/; \
+	else \
+		echo "no bridge built: run 'make build' or 'make release' first" >&2; exit 1; \
+	fi
+	@cp executors/wasm/executor.json $(EXEC_DIR)/wasm/
+	@cp executors/python/executor.json executors/python/anvil-exec-python \
+	    executors/python/server.py executors/python/paso_pb2.py \
+	    executors/python/paso_pb2_grpc.py $(EXEC_DIR)/python/
+	@cp -r executors/python/anvil_step $(EXEC_DIR)/python/
+	@chmod +x $(EXEC_DIR)/python/anvil-exec-python
+	@echo "executors installed → $(EXEC_DIR)"
 
 ## Smoke: runs the basic example with the freshly built binary.
 run: build

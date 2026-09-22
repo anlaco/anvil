@@ -34,18 +34,24 @@ TMP=$R/.tmp; mkdir -p "$TMP"
 # The demo bench, which since ADR-0046 nobody starts for us: an executor is an
 # address, and putting something at it is the job of whoever runs the bench.
 # That is the product's behaviour, so it is this script's too.
-BANCO=""
-DIST=ejemplos/departamento/dist
-if [ -x "$DIST/anvil-exec-wasm" ]; then
-  "$DIST/anvil-exec-wasm" --modules "$DIST" --port 9101 >/dev/null 2>&1 &
-  BANCO=$!
-  for _ in $(seq 1 600); do
-    (exec 3<>/dev/tcp/127.0.0.1/9101) 2>/dev/null && break
-    sleep 0.05
-  done
+#
+# Started the same way the examples tell a reader to start it, rather than by
+# a path of this script's own: the executable is installed once (ADR-0046 §4)
+# and not copied next to the modules, so there is one place that knows where
+# to find it and this is not it.
+ejemplos/arrancar-banco.sh >"$TMP/banco.log" 2>&1 &
+BANCO=$!
+for _ in $(seq 1 600); do
+  (exec 3<>/dev/tcp/127.0.0.1/9101) 2>/dev/null && break
+  sleep 0.05
+done
+if (exec 3<>/dev/tcp/127.0.0.1/9101) 2>/dev/null; then
   echo "bench: 127.0.0.1:9101 (pid $BANCO)"
 else
-  echo "warning: no demo bench in $DIST — build it with 'make example'" >&2
+  kill "$BANCO" 2>/dev/null
+  BANCO=""
+  echo "warning: no demo bench — it said:" >&2
+  cat "$TMP/banco.log" >&2
 fi
 
 limpia() {

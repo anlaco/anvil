@@ -142,13 +142,14 @@ binary to **start in tens of seconds**: wasmtime compiles the guest
 unoptimized every time. The release one starts in ~1 s.
 
 To debug the engine guest on its own with the wasmtime CLI (two terminals),
-start the demo bench's executor by hand and point the guest at it — the host
-is what would otherwise start it and pass that `--executor`:
+start the demo bench by hand and point the guest at it. Nothing starts an
+executor for you (ADR-0046) — here you also choose its port, which is why the
+guest is given an `--executor` overriding the sequence:
 
 ```sh
 make release
 # terminal 1
-ejemplos/departamento/dist/anvil-exec-wasm --port 9300
+executors/wasm/target/release/anvil-exec-wasm --modules ejemplos/departamento/dist --port 9300
 # terminal 2
 wasmtime -S cli -S tcp=y -S inherit-network=y --dir=. \
   target/wasm32-wasip2/release/anvil-guest.wasm ejemplos/basica.yseq \

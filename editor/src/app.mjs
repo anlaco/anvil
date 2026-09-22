@@ -131,6 +131,20 @@ const state = {
   catalogError: null,
   /** True while one is in flight, so the button cannot be pressed twice. */
   catalogBusy: false,
+  /**
+   * The executors this editor brought up from `dev:` (ADR-0046 §5), by name:
+   * `{ pid, exe, args, runtime, at }`.
+   *
+   * Only what **this** editor started. An executor already listening — started
+   * at boot, by a service manager, on another machine — is not in here and must
+   * not be: the sequence names an address, and who put something there is not
+   * the editor's to claim.
+   */
+  dev: {},
+  /** Why the last start did not happen, or how the last one died. */
+  devError: null,
+  /** The executor a start or stop is in flight for, so it cannot be double-pressed. */
+  devBusy: null,
   text: null, // CodeMirror view
   validateTimer: null,
   bridge: null, // the URL, once connected
@@ -1493,6 +1507,8 @@ const GLYPH = {
   help: `<path d="M5.8 6a2.2 2.2 0 1 1 2.6 2.2v1.4" fill="none" stroke="currentColor" stroke-width="1.4"/>
          <circle cx="8.4" cy="12.4" r="1" fill="currentColor"/>`,
   collapse: `<path d="m3 9 5-4 5 4M3 13l5-4 5 4" fill="none" stroke="currentColor" stroke-width="1.4"/>`,
+  start: `<path d="M4.5 3.2 12.8 8l-8.3 4.8z" fill="#2e8b57"/>`,
+  stop: `<rect x="4.2" y="4.2" width="7.6" height="7.6" fill="#c0392b"/>`,
 };
 
 /**
@@ -1585,12 +1601,28 @@ function renderModuleTab(body, ctx) {
     (v) => edit("executor", v || undefined),
   );
   elegirEjecutor.disabled = nombres.length === 0;
+  // The button TestStand has no equivalent of, because TestStand's adapters
+  // run in-process. Anvil's executor is a server, and on a development machine
+  // somebody has to start it: `dev:` says how, and this does it (ADR-0046 §5).
+  const arrancado = executor ? devOf(executor.name) : null;
+  const arrancar = executor
+    ? [
+        arrancado ? `Stop '${executor.name}'` : `Start '${executor.name}' from its dev: entry`,
+        arrancado ? GLYPH.stop : GLYPH.start,
+        () => toggleDev(executor.name),
+        state.devBusy === executor.name,
+      ]
+    : null;
+
   field(
     head,
     "Executor",
     pathRow(
       elegirEjecutor,
-      [["Declare an executor", GLYPH.create, () => declaraEjecutor()]],
+      [
+        ["Declare an executor", GLYPH.create, () => declaraEjecutor()],
+        ...(arrancar ? [arrancar] : []),
+      ],
       [
         ["Declare a new executor", GLYPH.create],
         ["Edit this executor", GLYPH.edit],
@@ -1598,10 +1630,11 @@ function renderModuleTab(body, ctx) {
     ),
     "TestStand's Project Path: the department the module lives in.",
   );
-  resolved(
-    head,
-    executor ? `${executor.host}:${executor.port}` : "this step names no executor",
-  );
+  resolved(head, executorResolved(doc, executor));
+  // How the last start failed, or how a started executor died. It stays until
+  // something else happens: a status line is gone by the time someone has read
+  // the panel it was about.
+  if (state.devError) resolved(head, state.devError);
 
   // TestStand's VI Path, and its button that picks a VI **belonging to the
   // project**. Here that is the executor's own catalog.
@@ -1711,6 +1744,140 @@ function declaraEjecutor() {
   }
   afterEdit();
   status("pass", `executor '${nombre}' declared at 127.0.0.1:9101 — point it where yours listens`);
+}
+
+// ---------------------------------------------------------------------------
+// Bringing an executor up from `dev:` (ADR-0046 §5).
+//
+// Nothing starts an executor during a run — not the engine, not the host, not
+// this editor. What this is, is the second terminal: on a development machine,
+// while someone writes a sequence, the button does what they would otherwise
+// type. The sequence is unchanged by it, which is the whole point of `dev:`
+// being optional and ignored by the engine — a sequence that reaches a bench
+// behaves identically whether the block is there or not.
+//
+// And it is what gives `Describe` something to ask. Until an executor is up,
+// the Module panel can only say that nobody has been asked (ADR-0044).
+// ---------------------------------------------------------------------------
+
+/** What this editor started for `name`, or null. */
+function devOf(name) {
+  return state.dev[name] ?? null;
+}
+
+/**
+ * Starts the executor `name` where the sequence says it listens — or stops the
+ * one this editor started.
+ *
+ * Every way this cannot happen has its own sentence, because they are
+ * different problems with different fixes: a browser has no processes, an
+ * unsaved file has nothing for `code` to be relative to, a sequence without a
+ * `dev:` entry is not saying how, and an address elsewhere is somebody else's
+ * bench. The remaining ones — a runtime that is not installed, a `code` folder
+ * that is not there — come back from the shell already naming where it looked.
+ */
+async function toggleDev(name) {
+  if (state.devBusy) return;
+  const doc = state.doc;
+  if (!doc || !name) return;
+
+  if (devOf(name)) {
+    state.devBusy = name;
+    renderStep();
+    try {
+      await window.anvil.stopDev(name);
+    } finally {
+      delete state.dev[name];
+      state.devBusy = null;
+      state.devError = null;
+      renderStep();
+    }
+    status("pass", `'${name}' stopped`);
+    return;
+  }
+
+  if (!inShell()) {
+    state.devError = "a browser cannot start a process; open this in the desktop app";
+    renderStep();
+    status("fail", state.devError);
+    return;
+  }
+  const path = state.handle?.path;
+  if (!path) {
+    state.devError = "save the sequence first: `dev:` names its code relative to the file";
+    renderStep();
+    status("fail", state.devError);
+    return;
+  }
+  const dev = doc.devFor(name);
+  if (!dev) {
+    state.devError = `this sequence has no 'dev:' entry for '${name}' — it says where it listens, not how to bring it up`;
+    renderStep();
+    status("fail", state.devError);
+    return;
+  }
+  const executor = doc.executors().find((e) => e.name === name);
+
+  state.devBusy = name;
+  state.devError = null;
+  renderStep();
+  try {
+    const started = await window.anvil.startDev(path, {
+      name,
+      host: executor?.host,
+      port: executor?.port,
+      runtime: dev.runtime,
+      code: dev.code,
+    });
+    state.dev[name] = started;
+    status("pass", `'${name}' started at ${started.at} — ${started.runtime}, pid ${started.pid}`);
+  } catch (e) {
+    // The shell's own words: it is the half that knows the install folder and
+    // where it looked in it.
+    state.devError = String(e?.message ?? e);
+    status("fail", state.devError);
+  } finally {
+    state.devBusy = null;
+    renderStep();
+  }
+
+  // The reason to have started it. An executor that is up has a catalog, and
+  // the Module panel has been saying nobody was asked.
+  if (state.dev[name]) await loadCatalog();
+}
+
+/**
+ * One of these died on its own. Nothing polls it, so this is the only way the
+ * page finds out — and it has to, because the row would otherwise go on
+ * offering to stop something that is gone, and the catalog beside it would be
+ * about an executor that is no longer there.
+ */
+function devExited({ name, reason }) {
+  if (!(name in state.dev)) return;
+  delete state.dev[name];
+  state.devError = reason;
+  renderStep();
+  status("fail", reason);
+}
+
+/**
+ * The Executor row's greyed line: the address, and who is at it.
+ *
+ * The four answers are different and must stay different. An executor this
+ * editor started is the only one it can say anything about; one with a `dev:`
+ * entry is one it *could* start, and only in the desktop shell; and the last
+ * case is the normal one on a bench, where somebody else put it there and the
+ * editor has no business implying otherwise.
+ */
+function executorResolved(doc, executor) {
+  if (!executor) return "this step names no executor";
+  const at = `${executor.host}:${executor.port}`;
+  const running = devOf(executor.name);
+  if (running) return `${at} — started from here: ${running.runtime}, pid ${running.pid}`;
+  const dev = doc.devFor(executor.name);
+  if (dev && inShell()) return `${at} — 'dev:' can bring it up here with ${dev.runtime}`;
+  if (dev) return `${at} — 'dev:' says a ${dev.runtime} executor serves it; a browser cannot start one`;
+  return `${at} — whoever runs this bench started it`;
 }
 
 /**
@@ -3287,6 +3454,7 @@ function wireMenus() {
     ui.menus.hidden = true;
     window.anvil.onMenu((action) => actions[action]?.());
     window.anvil.onSaveThenLeave(saveThenLeave);
+    window.anvil.onDevExit(devExited);
     window.anvil.versions().then((v) => {
       state.versions = v;
       renderVersions();

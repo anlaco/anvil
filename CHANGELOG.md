@@ -96,6 +96,42 @@ instead, and trying the examples takes two commands where it took one.
   It is parsed with `deny_unknown_fields` so a typo in it is still caught: the
   strictness that produces DIAG-5's *«¿querías 'main'?»* was not worth a hole.
 
+- **The folder where an installed executor lives**, which is what makes a
+  logical `runtime` name mean something
+  ([ADR-0046 §4](docs/adr/0046-an-executor-is-an-address-and-nothing-brings-one-up.md)).
+
+  ```
+  ~/.anvil/executors/
+    wasm/    executor.json  anvil-exec-wasm
+    python/  executor.json  anvil-exec-python  …
+  ```
+
+  `ANVIL_HOME` moves it. One lever and not a list of places to look: several
+  places is how a name starts meaning different code on two machines, which is
+  the silent failure ADR-0046 refused a station file over.
+
+  `executor.json` carries the logical name, the executable, and **which flag
+  takes the code** — `--modules` for the WASM bridge, `--steps` for Python.
+  That one indirection is the only thing the folder has to standardise, and it
+  is what lets a front end launch a runtime it knows nothing about. An optional
+  `eof` names the flag that makes it stop when its stdin closes, so a tool that
+  started one does not leave it holding a port after being killed. Installed
+  with `make install-executors` from the source tree, or with the `install.sh`
+  the package now carries.
+
+- **The Sequence Editor brings an executor up from `dev:`** (ADR-0046 §5). The
+  Module panel's Executor row gained a start/stop button: it starts the
+  executor **where the sequence says it listens**, and then asks it for its
+  catalog — which is the reason to have started it, since until one is up the
+  panel can only say that nobody has been asked.
+
+  It is the second terminal, not a new way to run: nothing on the run path
+  reads `dev:`, so a sequence behaves the same on a bench whether the block is
+  there or not. Four things it refuses before spawning anything, each with its
+  own sentence: a browser has no processes, an unsaved file has nothing for
+  `code` to be relative to, a sequence with no `dev:` entry is not saying how,
+  and an address that is not this machine's is somebody else's bench.
+
 - **A decision on how a run is stopped**
   ([ADR-0045](docs/adr/0045-terminating-a-run-is-a-request-checked-between-steps.md)),
   designed and not yet built. Terminating is a **request**: the engine notices
@@ -134,6 +170,14 @@ instead, and trying the examples takes two commands where it took one.
 
 - **The editor no longer mounts executor binaries** for the engine in the tab
   (`neighbours.mjs`): there is no binary for the loader to check.
+
+- **`anvil-exec-wasm` next to `anvil`, and inside the example department.**
+  The host's build script placed it beside the binary because the host spawned
+  it (ADR-0023); nothing spawns it now. `ejemplos/departamento/dist/` is its
+  modules and nothing else — which is what the examples' `dev:` block points
+  `code:` at — and the executor is installed once instead of being copied
+  next to every set of modules that wants serving. The download is now the
+  engine plus a folder of executors to install.
 
 ## [0.8.0] — 2026-09-20
 
