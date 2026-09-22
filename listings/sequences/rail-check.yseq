@@ -1,0 +1,21 @@
+name: rail_check
+
+parameters:
+  channel: 1
+  volts: 0.0
+
+locals:
+  measured: 0.0
+
+main:
+  - name: dmm/measure_voltage
+    type: action
+    module: dmm/measure_voltage
+    executor: bench
+    inputs: { channel: '${parameters.channel}' }
+    assign:
+      measured: result.measured_value
+
+  - name: return_volts
+    type: statement
+    statement: 'parameters.volts = locals.measured'

@@ -1,0 +1,84 @@
+$ anvil sequences/data.yseq --json data.json 2>/dev/null
+=== data: pass ===
+  [done] unit/read_serial: serial read
+  [pass] dmm/measure_voltage: range 10V
+  [pass] board/check_led: 
+  [pass] rail_in_spec: condición cumplida
+$ cat data.json
+{
+  "sequence": "data",
+  "status": "pass",
+  "skipped_steps": 0,
+  "total_steps": 4,
+  "steps": [
+    {
+      "name": "unit/read_serial",
+      "module": "unit/read_serial",
+      "status": "done",
+      "phase": "main",
+      "message": "serial read",
+      "measured_value": null,
+      "limit_min": null,
+      "limit_max": null,
+      "expected_value": null,
+      "operator": null,
+      "comparison": null,
+      "units": null,
+      "inputs": {},
+      "outputs": {
+        "serial": "SN-0042"
+      }
+    },
+    {
+      "name": "dmm/measure_voltage",
+      "module": "dmm/measure_voltage",
+      "status": "pass",
+      "phase": "main",
+      "message": "range 10V",
+      "measured_value": 1.8,
+      "limit_min": 1.7,
+      "limit_max": 1.9,
+      "expected_value": null,
+      "operator": null,
+      "comparison": "GELE",
+      "units": null,
+      "inputs": {
+        "channel": 2.0,
+        "range": "10V"
+      },
+      "outputs": {}
+    },
+    {
+      "name": "board/check_led",
+      "module": "board/check_led",
+      "status": "pass",
+      "phase": "main",
+      "message": "",
+      "measured_value": null,
+      "limit_min": null,
+      "limit_max": null,
+      "expected_value": null,
+      "operator": null,
+      "comparison": null,
+      "units": null,
+      "inputs": {},
+      "outputs": {}
+    },
+    {
+      "name": "rail_in_spec",
+      "module": null,
+      "status": "pass",
+      "phase": "main",
+      "message": "condición cumplida",
+      "measured_value": null,
+      "limit_min": null,
+      "limit_max": null,
+      "expected_value": null,
+      "operator": null,
+      "comparison": null,
+      "units": null,
+      "inputs": {},
+      "outputs": {}
+    }
+  ]
+}

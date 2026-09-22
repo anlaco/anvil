@@ -1,0 +1,4 @@
+$ anvil sequences/unknown.yseq 2>&1 | tail -n 3
+connected to the step executors (bench)
+la secuencia no casa con lo que ofrecen los ejecutores (1 problema(s)):
+  - step 'board/measure_rial': executor 'bench' does not serve it (it serves: board/measure_rail)

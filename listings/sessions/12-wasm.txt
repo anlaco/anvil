@@ -1,0 +1,8 @@
+$ anvil sequences/wasm.yseq 2>/dev/null
+=== wasm: pass ===
+  [pass] board/measure_rail: 
+$ ./wasm-dept/anvil-exec-wasm --list
+board  sha256:2087caa515293f3a0cda2b14c78a09d6d9b2bfb98a5e2c63916c872cb1d807d5
+    /home/you/anvil-book/wasm-dept/board.wasm
+    board/measure_rail()
+        Measures the supply rail, in volts.

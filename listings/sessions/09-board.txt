@@ -1,0 +1,13 @@
+$ anvil sequences/board.yseq 2>/dev/null
+=== board: pass ===
+  [pass] power_up: sequence call 'power_up' → pass
+    [done] fixture/power_on: 
+    [pass] board/check_led: 
+  [pass] measure_3v3: sequence call 'sequences/rail-check.yseq' → pass
+    [done] dmm/measure_voltage: range auto
+    [done] return_volts: statement ok
+  [pass] measure_1v1: sequence call 'sequences/rail-check.yseq' → pass
+    [done] dmm/measure_voltage: range auto
+    [done] return_volts: statement ok
+  [pass] rails_in_spec: condición cumplida
+  [done] fixture/power_off: 

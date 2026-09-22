@@ -1,0 +1,15 @@
+name: serial
+
+executors:
+  - { name: bench, type: grpc, host: 127.0.0.1, port: 9201 }
+
+locals:
+  serial: ""
+
+main:
+  - name: unit/read_serial
+    type: action
+    module: unit/read_serial
+    executor: bench
+    assign:
+      serial: result.outputs.serial

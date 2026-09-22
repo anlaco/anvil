@@ -1,0 +1,11 @@
+name: python
+
+executors:
+  - { name: py, type: grpc, host: 127.0.0.1, port: 9101 }
+
+main:
+  - name: board/measure_rail
+    type: numeric_limit
+    module: board/measure_rail
+    executor: py
+    limit: { comparison: GELE, low: 4.75, high: 5.25 }
