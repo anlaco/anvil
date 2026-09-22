@@ -5,18 +5,21 @@
 # by name→endpoint (`executor:` on the step → `executors:` in the YAML); it
 # neither knows nor cares what is behind each endpoint (ADR-0013).
 #
-# Start-up:
+# Two endpoints means two servers, and since ADR-0046 nobody starts either of
+# them for you:
 #   # terminal 1: TCP simulator (stand-in for the simulator's equipment)
 #   python3 executors/python/simulador_tcp.py
-#   # terminal 2: Python executor on loopback (127.0.0.1:9101). Its steps
-#   # live in executors/python/steps/, not inside server.py (ADR-0021).
-#   cd executors/python && python3 server.py
-#   # terminal 3: Anvil, which starts the demo bench itself
+#   # terminal 2: the demo bench, on 127.0.0.1:9101
+#   ./ejemplos/arrancar-banco.sh
+#   # terminal 3: the Python executor, on 127.0.0.1:9200. Its steps live in
+#   # executors/python/steps/, not inside server.py (ADR-0021).
+#   cd executors/python && python3 server.py --port 9200
+#   # terminal 4: Anvil
 #   ./anvil ejemplos/demo_ejecutores.yseq --json /tmp/out.json
 #
 # Variant with an executor override (R&D vs. factory, the --limits pattern):
-#   ./anvil ejemplos/demo_ejecutores.yseq --executor python=127.0.0.1:9200
-#   (with another server.py on --port 9200; the YAML is not touched)
+#   ./anvil ejemplos/demo_ejecutores.yseq --executor python=127.0.0.1:9300
+#   (with another server.py on --port 9300; the YAML is not touched)
 #
 # Check that the sequence matches what the executors offer, without running a
 # single step (ADR-0021):
@@ -24,13 +27,16 @@
 
 name: demo_ejecutores
 executors:
+  # Two endpoints, so two ports: the demo bench where every example expects it,
+  # and the Python one beside it. The engine dispatches by name and neither
+  # knows nor cares what is behind each address (ADR-0013, ADR-0046).
   - { name: demo, type: grpc, host: 127.0.0.1, port: 9101 }
   - name: python
     type: grpc
     host: 127.0.0.1
-    port: 9101
+    port: 9200
 main:
-  # A step of the demo bench, a WASM component: the host spawns its executor.
+  # A step of the demo bench, served by a WASM component behind `demo`.
   - name: demo/check_led
     type: pass_fail
     module: demo/check_led
@@ -38,7 +44,7 @@ main:
     retries: 1
 
   # Step on the Python executor on loopback: the engine dispatches over gRPC
-  # to 127.0.0.1:9101; the Python one talks TCP to the simulator and returns
+  # to 127.0.0.1:9200; the Python one talks TCP to the simulator and returns
   # the measurement. The engine evaluates the limit from the YAML (ADR-0008).
   - name: instrument/medir_simulador
     type: numeric_limit
@@ -64,3 +70,6 @@ dev:
   demo:
     runtime: wasm
     code: departamento/dist
+  python:
+    runtime: python
+    code: ../executors/python/steps

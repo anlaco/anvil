@@ -5172,11 +5172,21 @@ main:
             .unwrap_or_else(|e| panic!("no carga el programa {ruta}: {e}"));
         assert_eq!(prog.raiz.nombre, "demo_ejecutores");
         assert_eq!(prog.ejecutores.len(), 2, "demo + python");
+        // Dos extremos, dos puertos. El ejemplo existe para enseñar el
+        // enrutado por nombre→endpoint, y dos ejecutores en la misma dirección
+        // no son dos extremos: ni pueden escuchar a la vez.
+        assert_eq!(
+            prog.ejecutores["demo"].tipo,
+            TipoEjecutor::Grpc {
+                host: "127.0.0.1".into(),
+                puerto: 9101
+            }
+        );
         assert_eq!(
             prog.ejecutores["python"].tipo,
             TipoEjecutor::Grpc {
                 host: "127.0.0.1".into(),
-                puerto: 9101
+                puerto: 9200
             }
         );
         assert_eq!(
