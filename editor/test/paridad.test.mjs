@@ -265,8 +265,11 @@ test("the published parity page matches the inventory", () => {
   // than in a pipeline. The page is the migration document someone reads
   // before deciding whether to try Anvil; a page that quietly stopped matching
   // the product is worse than no page.
+  //
+  // Line endings normalised away for the same reason `--check` does it: the
+  // question is whether the page still says what the inventory says.
   assert.equal(
-    readFileSync(OUT, "utf8"),
+    readFileSync(OUT, "utf8").replace(/\r\n/g, "\n"),
     render(),
     "docs/paridad-teststand.md is stale — run: node editor/scripts/paridad-a-doc.mjs",
   );

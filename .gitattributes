@@ -1,0 +1,29 @@
+# Line endings, decided here rather than by each machine's git.
+#
+# Two Windows-only CI failures came from this and neither was about Windows.
+# `catalog.test.mjs` lifts a function out of `app.mjs` by source and looks for
+# `\n}\n`, which a CRLF checkout does not contain: the slice comes back empty
+# and the failure reads «filasDeParametros is not defined», naming the function
+# and meaning the line endings. The parity page check compares a file rendered
+# with `\n` against the one on disk, and reported a diff in which every line
+# was identical. Both passed on Linux, which is the worst shape a failure can
+# have — it says "Windows" and means "your checkout".
+#
+# Measured on a Windows 11 machine, not assumed: a fresh clone gave
+# `editor/src/app.mjs` with 3588 CRLF endings and the test failed; with this
+# file in place and the tree re-checked-out it has none and the test passes
+# unchanged. Git Bash, for its part, runs a CRLF shell script without
+# complaining — that was checked too, and is not a reason for this.
+#
+# Nothing here needs CRLF: the editors this repo is written with all read LF,
+# and PowerShell has since 5.1.
+* text=auto eol=lf
+
+# Not text, and must not be touched. The `.wasm` ones are test fixtures —
+# a component whose signature does not match, one that traps, and a file that
+# is not a component at all — and a byte changed in any of them is a test that
+# passes for the wrong reason.
+*.wasm  binary
+*.png   binary
+*.ico   binary
+*.woff2 binary

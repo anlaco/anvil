@@ -222,23 +222,30 @@ fmt:
 ##
 ## The WASM bridge has to be built first; Python's is a script and is copied
 ## with the modules it needs beside it.
-ANVIL_HOME ?= $(HOME)/.anvil
-EXEC_DIR   := $(ANVIL_HOME)/executors
+##
+## `$$HOME`, expanded by the shell and not by make. On Windows, GnuWin32 make
+## synthesises `$(HOME)` as `C:\Users\…` while the shell it then runs — Git's
+## `sh` — reads `\U` as an escape, so the path arrives as `C:UsersQuickemu` and
+## the copy fails on a directory nobody asked for. Measured on Windows 11, with
+## exactly that path in the error. The shell's own `$HOME` is `/c/Users/…` and
+## names the same directory `os.homedir()` gives the editor.
+ANVIL_HOME ?= $$HOME/.anvil
+EXEC_DIR    = $(ANVIL_HOME)/executors
 install-executors:
-	@mkdir -p $(EXEC_DIR)/wasm $(EXEC_DIR)/python
+	@mkdir -p "$(EXEC_DIR)/wasm" "$(EXEC_DIR)/python"
 	@if [ -x executors/wasm/target/release/anvil-exec-wasm$(EXE) ]; then \
-		cp executors/wasm/target/release/anvil-exec-wasm$(EXE) $(EXEC_DIR)/wasm/; \
+		cp executors/wasm/target/release/anvil-exec-wasm$(EXE) "$(EXEC_DIR)/wasm/"; \
 	elif [ -x executors/wasm/target/debug/anvil-exec-wasm$(EXE) ]; then \
-		cp executors/wasm/target/debug/anvil-exec-wasm$(EXE) $(EXEC_DIR)/wasm/; \
+		cp executors/wasm/target/debug/anvil-exec-wasm$(EXE) "$(EXEC_DIR)/wasm/"; \
 	else \
 		echo "no bridge built: run 'make build' or 'make release' first" >&2; exit 1; \
 	fi
-	@cp executors/wasm/executor.json $(EXEC_DIR)/wasm/
+	@cp executors/wasm/executor.json "$(EXEC_DIR)/wasm/"
 	@cp executors/python/executor.json executors/python/anvil-exec-python \
 	    executors/python/server.py executors/python/paso_pb2.py \
-	    executors/python/paso_pb2_grpc.py $(EXEC_DIR)/python/
-	@cp -r executors/python/anvil_step $(EXEC_DIR)/python/
-	@chmod +x $(EXEC_DIR)/python/anvil-exec-python
+	    executors/python/paso_pb2_grpc.py "$(EXEC_DIR)/python/"
+	@cp -r executors/python/anvil_step "$(EXEC_DIR)/python/"
+	@chmod +x "$(EXEC_DIR)/python/anvil-exec-python"
 	@echo "executors installed → $(EXEC_DIR)"
 
 ## Smoke: runs the basic example with the freshly built binary.

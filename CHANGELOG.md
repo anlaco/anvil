@@ -96,6 +96,14 @@ instead, and trying the examples takes two commands where it took one.
   It is parsed with `deny_unknown_fields` so a typo in it is still caught: the
   strictness that produces DIAG-5's *«¿querías 'main'?»* was not worth a hole.
 
+- **Line endings decided in the repo** (`.gitattributes`, `* text=auto
+  eol=lf`). Two Windows-only CI failures came from this and neither was about
+  Windows: a test that lifts a function out of `app.mjs` by source looked for
+  `\n}\n`, which a CRLF checkout does not contain, and the parity page check
+  compared a file rendered with `\n` against the one on disk. Both readers now
+  normalise as well, so the failure cannot come back through a checkout
+  setting.
+
 - **The folder where an installed executor lives**, which is what makes a
   logical `runtime` name mean something
   ([ADR-0046 §4](docs/adr/0046-an-executor-is-an-address-and-nothing-brings-one-up.md)).
@@ -118,6 +126,14 @@ instead, and trying the examples takes two commands where it took one.
   started one does not leave it holding a port after being killed. Installed
   with `make install-executors` from the source tree, or with the `install.sh`
   the package now carries.
+
+  Exercised on Windows 11, where three things go differently and all three
+  were wrong at first: `make` synthesises `$(HOME)` as `C:\Users\…` while the
+  `sh` it then runs reads `\U` as an escape, so the recipe copied into
+  `C:UsersQuickemu`; the manifest says `anvil-exec-wasm` and the file is
+  `anvil-exec-wasm.exe`; and `arrancar-banco.sh` has to find that under
+  `$HOME/.anvil` from Git Bash. The Windows CI job now does all three on every
+  push.
 
 - **The Sequence Editor brings an executor up from `dev:`** (ADR-0046 §5). The
   Module panel's Executor row gained a start/stop button: it starts the

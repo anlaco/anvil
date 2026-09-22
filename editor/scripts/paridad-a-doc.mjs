@@ -140,7 +140,11 @@ function main() {
 
   let have = null;
   try {
-    have = readFileSync(OUT, "utf8");
+    // Line endings normalised away: this asks whether the page still says what
+    // the inventory says, and a checkout that writes CRLF is not an answer to
+    // that. It failed on `windows-latest` for exactly that reason, reporting a
+    // diff in which every line was identical.
+    have = readFileSync(OUT, "utf8").replace(/\r\n/g, "\n");
   } catch {
     console.error(`paridad: ${OUT} does not exist. Run: node editor/scripts/paridad-a-doc.mjs`);
     return 1;

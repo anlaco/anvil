@@ -17,7 +17,12 @@ import { strict as assert } from "node:assert";
 import { test } from "node:test";
 import { readFileSync } from "node:fs";
 
-const app = readFileSync(new URL("../src/app.mjs", import.meta.url), "utf8");
+// Normalised, because what is lifted below is found by looking for `\n}\n`:
+// on a CRLF checkout that string is not in the file, the slice comes back
+// empty, and the failure reads «filasDeParametros is not defined» — which
+// names the function and means the line endings. `.gitattributes` now keeps
+// the checkout at LF; this is so the test says what it tests either way.
+const app = readFileSync(new URL("../src/app.mjs", import.meta.url), "utf8").replace(/\r\n/g, "\n");
 
 /**
  * `filasDeParametros` and its two helpers are not exported: `app.mjs` is the
