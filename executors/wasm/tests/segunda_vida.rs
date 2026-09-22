@@ -83,9 +83,17 @@ fn fichero_que_no_es_wasm_se_diagnostica() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
-/// With a real component, a hand-launched bridge does what the host relies
-/// on: it loads the component, listens, and exits **on its own** when its
-/// stdin closes (EOF) — the lifecycle the host's pipe depends on.
+/// With a real component, a bridge launched as somebody's child does what
+/// that parent relies on: it loads the component, listens, and exits **on its
+/// own** when its stdin closes (EOF).
+///
+/// `--exit-on-eof`, explicitly, because that is the only way it happens now.
+/// It used to be the default, which was right while Anvil spawned the bridge
+/// itself and wrong the moment anyone started it by hand: from a terminal
+/// stdin is at EOF immediately, so it printed «listening» and died on the next
+/// line. ADR-0046 made starting it by hand the normal case, so the mechanism
+/// became opt-in — see `sin_el_flag_no_se_muere_por_eof` below, which is the
+/// half that was missing when this was the default.
 #[test]
 fn escucha_y_sale_por_eof() {
     let Some(componente) = componente_demo() else {
@@ -97,7 +105,7 @@ fn escucha_y_sale_por_eof() {
     let mut hijo = Command::new(env!("CARGO_BIN_EXE_anvil-exec-wasm"))
         .args(["--wasm"])
         .arg(&componente)
-        .args(["--port", &puerto.to_string()])
+        .args(["--port", &puerto.to_string(), "--exit-on-eof"])
         .stdin(std::process::Stdio::piped())
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped())
@@ -140,4 +148,57 @@ fn escucha_y_sale_por_eof() {
             s
         }
     );
+}
+
+/// And without the flag it stays up, which is the defect this separates from
+/// the feature above.
+///
+/// A bench's executor is started from a terminal, by a service manager or at
+/// boot (ADR-0046), and in none of those does anything write to its stdin. A
+/// bridge that took that for "my parent is gone" was a bench that reported
+/// *connection refused* while its own log said it was listening.
+#[test]
+fn sin_el_flag_no_se_muere_por_eof() {
+    let Some(componente) = componente_demo() else {
+        eprintln!("skipped: ejemplos/hola-paso has not been compiled (make example)");
+        return;
+    };
+    let puerto = puerto_libre();
+
+    let mut hijo = Command::new(env!("CARGO_BIN_EXE_anvil-exec-wasm"))
+        .args(["--wasm"])
+        .arg(&componente)
+        .args(["--port", &puerto.to_string()])
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .expect("launch the bridge");
+    let stdin = hijo.stdin.take().expect("piped stdin");
+
+    let addr = format!("127.0.0.1:{puerto}");
+    let mut listo = false;
+    for _ in 0..6000 {
+        if TcpStream::connect(&addr).is_ok() {
+            listo = true;
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    assert!(listo, "the bridge must listen on the port it was given");
+
+    drop(stdin);
+    // Long enough to catch the old behaviour, which exited within a moment of
+    // the EOF, and short enough not to be the slowest test in the file.
+    std::thread::sleep(Duration::from_secs(2));
+    let vivo = hijo.try_wait().expect("wait for the bridge").is_none();
+    // Still answering, not merely not-yet-reaped.
+    let responde = TcpStream::connect(&addr).is_ok();
+    let _ = hijo.kill();
+    let _ = hijo.wait();
+    assert!(
+        vivo,
+        "without --exit-on-eof an EOF on stdin must not end it"
+    );
+    assert!(responde, "and it must still be listening");
 }
