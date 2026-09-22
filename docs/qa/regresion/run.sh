@@ -29,7 +29,31 @@ R=docs/qa/regresion
 ok=0; falla=0
 # The binary only preopens the CWD: --csv/--json output must land inside the
 # tree, not in /tmp.
-TMP=$R/.tmp; mkdir -p "$TMP"; trap 'rm -rf "$TMP"' EXIT
+TMP=$R/.tmp; mkdir -p "$TMP"
+
+# The demo bench, which since ADR-0046 nobody starts for us: an executor is an
+# address, and putting something at it is the job of whoever runs the bench.
+# That is the product's behaviour, so it is this script's too.
+BANCO=""
+DIST=ejemplos/departamento/dist
+if [ -x "$DIST/anvil-exec-wasm" ]; then
+  "$DIST/anvil-exec-wasm" --modules "$DIST" --port 9101 >/dev/null 2>&1 &
+  BANCO=$!
+  for _ in $(seq 1 600); do
+    (exec 3<>/dev/tcp/127.0.0.1/9101) 2>/dev/null && break
+    sleep 0.05
+  done
+  echo "bench: 127.0.0.1:9101 (pid $BANCO)"
+else
+  echo "warning: no demo bench in $DIST — build it with 'make example'" >&2
+fi
+
+limpia() {
+  rm -rf "$TMP"
+  [ -n "$BANCO" ] && kill "$BANCO" 2>/dev/null
+  return 0
+}
+trap limpia EXIT
 
 check() {  # check <id> <description> <0=ok|1=fail>
   if [ "$3" -eq 0 ]; then
@@ -163,62 +187,47 @@ check DIAG-5c "an unknown flag is reported as unknown" $?
 $A -h 2>&1 | grep -qE '^uso: anvil' && $A -V 2>&1 | grep -qE '^anvil [0-9]'
 check DIAG-5e "-h and -V answer like --help and --version" $?
 
-# ---- DIAG-5d: a .wasm that is a core module, not a component ----
-# The 8 header bytes are a valid, empty core module: enough for the executor to
-# refuse it, and the message must say WHY (it used to say only "failed to parse
-# WebAssembly module", which got the toolchain blamed).
+# ---- ADR-0046: the way out of a sequence written for a WASM department ----
+# This replaces DIAG-5d and DIAG-5g, whose subject went with `type: wasm`: a
+# core module inside a department, and a `path` pointing at a `.wasm`. Neither
+# can be said any more — a sequence names no binary at all.
 #
-# Since ADR-0027 the YAML's `path` is the executor's binary, so the bad module
-# goes INSIDE the department: a fake one is assembled with a copy of the
-# executor and the core.wasm beside it.
-PUENTE=""
-for cand in packaging/anvil-host/target/release/anvil-exec-wasm \
-            packaging/anvil-host/target/debug/anvil-exec-wasm \
-            executors/wasm/target/release/anvil-exec-wasm \
-            executors/wasm/target/debug/anvil-exec-wasm; do
-  [ -x "$cand" ] && { PUENTE="$cand"; break; }
-done
-if [ -z "$PUENTE" ]; then
-  check DIAG-5d "a core-module .wasm is diagnosed as such (no executor: skipped)" 1
-else
-  mkdir -p "$TMP/depto"
-  cp "$PUENTE" "$TMP/depto/anvil-exec-wasm"
-  printf '\x00asm\x01\x00\x00\x00' >"$TMP/depto/core.wasm"
-  cat >"$TMP/coremod.yaml" <<'YAML'
-name: regresion_modulo_core
+# What matters now is the upgrade path. `type: wasm` with its `path` is what
+# **every** sequence written before 0.9 says, and `deny_unknown_fields` would
+# otherwise reject it with «unknown field 'path'», which tells nobody what to
+# write. The loader keeps accepting `path` in order to refuse it properly.
+cat >"$TMP/viejo.yaml" <<'YAML'
+name: regresion_type_wasm_antiguo
 executors:
-  - name: dmm
-    type: wasm
-    path: ./depto/anvil-exec-wasm
+  - { name: demo, type: wasm, path: departamento/dist/anvil-exec-wasm }
 main:
-  - name: core/medir
+  - name: demo/check_led
     type: pass_fail
-    module: core/medir
-    executor: dmm
+    module: demo/check_led
+    executor: demo
 YAML
-  $A "$TMP/coremod.yaml" 2>&1 | grep -qiE 'módulo core|modulo core|core module'
-  check DIAG-5d "a core-module .wasm is diagnosed as such" $?
-fi
+salida=$($A "$TMP/viejo.yaml" 2>&1)
+res=0
+echo "$salida" | grep -q 'type: grpc' || res=1
+echo "$salida" | grep -q 'anvil-exec-wasm --modules' || res=1
+echo "$salida" | grep -q "dev:" || res=1
+check ADR46-a "type: wasm says what to write instead" $res
 
-# ---- DIAG-5g: pointing a wasm executor's `path` at a `.wasm` ----
-# The number one stumble coming from before ADR-0027. It is a file, so it passes
-# any existence check, and `exec` would fail with "Exec format error" — which
-# sends you to look at the toolchain instead of the YAML line.
-printf '\x00asm\x0d\x00\x01\x00' >"$TMP/suelto.wasm"
-cat >"$TMP/pathwasm.yaml" <<'YAML'
-name: regresion_path_es_wasm
+# And the same for a `path` left behind on an otherwise correct declaration:
+# the natural half-migration.
+cat >"$TMP/medio.yaml" <<'YAML'
+name: regresion_path_sobrante
 executors:
-  - name: dmm
-    type: wasm
-    path: ./suelto.wasm
+  - { name: demo, type: grpc, host: 127.0.0.1, port: 9101, path: dept/anvil-exec-wasm }
 main:
-  - name: x/medir
+  - name: demo/check_led
     type: pass_fail
-    module: x/medir
-    executor: dmm
+    module: demo/check_led
+    executor: demo
 YAML
-$A "$TMP/pathwasm.yaml" 2>&1 | grep -qiE 'binario del ejecutor|executor.s binary'
-check DIAG-5g "a path to a .wasm says the executor's binary is expected" $?
+$A "$TMP/medio.yaml" 2>&1 | grep -qE "'path'.*ya no existe|no longer exists"
+check ADR46-b "a leftover 'path' is named, not swallowed" $?
+
 
 # ---- LEC-1: `result.*` outside `assign` must be a load error ----
 # The product lesson (§5): this YAML loaded, the precondition was a constant
@@ -227,7 +236,7 @@ check DIAG-5g "a path to a .wasm says the executor's binary is expected" $?
 cat >"$TMP/lec1.yaml" <<'YAML'
 name: regresion_result_outside_assign
 executors:
-  - { name: demo, type: wasm, path: ../../../../ejemplos/departamento/dist/anvil-exec-wasm }
+  - { name: demo, type: grpc, host: 127.0.0.1, port: 9101 }
 locals:
   v_real: 5.0
 main:
@@ -247,7 +256,7 @@ check LEC-1 "result.* in a precondition is a load error" $?
 cat >"$TMP/lec2.yaml" <<'YAML'
 name: regresion_visible_skips
 executors:
-  - { name: demo, type: wasm, path: ../../../../ejemplos/departamento/dist/anvil-exec-wasm }
+  - { name: demo, type: grpc, host: 127.0.0.1, port: 9101 }
 locals:
   activo: false
 main:

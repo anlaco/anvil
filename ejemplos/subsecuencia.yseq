@@ -15,7 +15,7 @@
 # use `demo` too, and a subsequence file declares no executors of its own.
 name: basica
 executors:
-  - { name: demo, type: wasm, path: departamento/dist/anvil-exec-wasm }
+  - { name: demo, type: grpc, host: 127.0.0.1, port: 9101 }
 locals:
   canal_in: 0.5
   ok_init: false
@@ -41,3 +41,10 @@ main:
     args: { canal: locals.canal_in }
     assign: { estado_fuentes: "${result.status}" }
     # on return: locals.canal_in = parameters.canal (final, mutated to 1.5)
+
+# ADR-0046: opcional, y el motor la ignora. Dice cómo levantar ese ejecutor
+# en tu máquina para diseñar y depurar; en producción este bloque no está.
+dev:
+  demo:
+    runtime: wasm
+    code: departamento/dist

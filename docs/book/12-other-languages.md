@@ -132,7 +132,7 @@ executor, and you can copy it to another machine as it is:
 ```console
 $ cargo build --target wasm32-wasip2 --manifest-path board-wasm/Cargo.toml
 $ mkdir wasm-dept
-$ cp anvil-v0.8.0-x86_64-linux-musl/anvil-exec-wasm board-wasm/target/wasm32-wasip2/debug/board.wasm wasm-dept/
+$ cp anvil-v0.9.0-x86_64-linux-musl/anvil-exec-wasm board-wasm/target/wasm32-wasip2/debug/board.wasm wasm-dept/
 ```
 
 The first build takes about a minute. Then:
@@ -141,7 +141,7 @@ The first build takes about a minute. Then:
 name: wasm
 
 executors:
-  - { name: rs, type: wasm, path: ../wasm-dept/anvil-exec-wasm }
+  - { name: rs, type: grpc, host: 127.0.0.1, port: 9101 }
 
 main:
   - name: board/measure_rail
@@ -149,24 +149,39 @@ main:
     module: board/measure_rail
     executor: rs
     limit: { comparison: GELE, low: 4.75, high: 5.25 }
+
+# Optional, and the engine never reads it: how to bring that executor up on a
+# machine you are writing on. In production it is not here — the bench is
+# already running and the sequence only needs its address.
+dev:
+  rs:
+    runtime: wasm
+    code: ../wasm-dept
 ```
 
+Start the department, then run the sequence:
+
 ```console
+$ ./wasm-dept/anvil-exec-wasm --modules wasm-dept --port 9101 &
 $ anvil sequences/wasm.yseq 2>/dev/null
 === wasm: pass ===
   [pass] board/measure_rail: 
-$ ./wasm-dept/anvil-exec-wasm --list
+$ ./wasm-dept/anvil-exec-wasm --list --modules wasm-dept
 board  sha256:2087caa515293f3a0cda2b14c78a09d6d9b2bfb98a5e2c63916c872cb1d807d5
     /home/you/anvil-book/wasm-dept/board.wasm
     board/measure_rail()
         Measures the supply rail, in volts.
 ```
 
-There was no executor to start: with `type: wasm`, Anvil starts
-`anvil-exec-wasm` itself from `path`. That path is **relative to the sequence
-file**, not to the folder you run `anvil` from — hence the `../`.
+**Nothing starts an executor for you** (ADR-0046). A sequence says where one is
+listening; putting something there is the job of whoever runs the bench, which
+on a real one is the machine's start-up and here is you. It is the same for
+Python, for C# and for anything that comes next — which is the point: one kind
+of executor, and it is an address.
+
 `anvil-exec-wasm --list` shows each module with the SHA-256 of the file that
-serves it.
+serves it, and `anvil describe sequences/wasm.yseq` asks the same thing through
+the sequence.
 
 The step-by-step [Rust quick start](https://anlaco.github.io/quickstart.html)
 goes further, with two modules and optional inputs, and

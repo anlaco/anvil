@@ -218,9 +218,22 @@ jobs:
       # range) — exit code 1 here means the engine judged correctly, not
       # that something crashed, so the check is on the report line, not on
       # the exit code.
+      # The bench is started here, in the same step, because ADR-0046 stopped
+      # anything starting it for you — and because a background process from
+      # one workflow step is not something the next one may count on. It is
+      # also what makes this a real smoke: on Windows this is the only place
+      # the bridge binary is spawned and reaped by hand.
       - name: "Smoke: anvil.exe runs a sequence"
         working-directory: anvil
         run: |
+          ./ejemplos/departamento/dist/anvil-exec-wasm.exe \
+            --modules ejemplos/departamento/dist --port 9101 &
+          BENCH=$!
+          trap 'kill $BENCH 2>/dev/null || true' EXIT
+          for i in $(seq 1 100); do
+            (exec 3<>/dev/tcp/127.0.0.1/9101) 2>/dev/null && break
+            sleep 0.2
+          done
           ./packaging/anvil-host/target/release/anvil.exe ejemplos/basica.yseq | tee run.out || true
           grep -q "=== basica: fail ===" run.out
 

@@ -29,6 +29,9 @@
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 
+mod banco;
+use banco::arranca;
+
 /// La raíz del repo. El binario sólo preabre su CWD (`main.rs`, `wasi.
 /// preopened_dir(&cwd, ".")`), así que los tests corren desde aquí y pasan
 /// **rutas relativas**: una ruta absoluta no atraviesa el sandbox WASI y
@@ -146,6 +149,10 @@ fn una_secuencia_cuyo_veredicto_no_se_evalua_sale_con_uno() {
 
 #[test]
 fn una_asigna_tras_un_error_no_borra_la_variable_que_lee_el_cleanup() {
+    let Some(_banco) = arranca() else {
+        eprintln!("skipped: ejemplos/departamento has not been assembled (make example)");
+        return;
+    };
     // Issue #27 / ADR-0019, Regla 2. El exit code aquí no distingue nada (el
     // `error` del paso que no pudo medir ya sale 1 con o sin el arreglo): lo
     // que se mide es el reporte, donde el `pass_fail` de `cleanup` dice si
@@ -293,40 +300,6 @@ fn validate_rechaza_ejecutores_en_una_subsecuencia_externa() {
     );
 }
 
-/// Issue #22, el test del arreglo.
-///
-/// La secuencia declara un `tipo: wasm` cuyo fichero **existe** pero no es un
-/// componente. Con el guard puesto, el host no toca ese fichero bajo
-/// `--validate` y la secuencia sale válida.
-///
-/// **Al revertir el guard este test tarda ~60 s en ponerse rojo**: el host
-/// spawnea el puente, el puente muere al instanciar el componente, y
-/// `esperar_wasm` agota sus sondeos antes de rendirse. Es el precio de no
-/// depender de un `.wasm` construido en `target/`, que no existe en un clon
-/// limpio.
-#[test]
-fn validate_no_levanta_el_puente_wasm() {
-    let s = valida("packaging/anvil-host/tests/fixtures/validate_wasm_basura.yaml");
-    let err = String::from_utf8_lossy(&s.stderr);
-    assert!(
-        !err.contains("anvil-exec-wasm"),
-        "el puente no debe arrancar bajo --validate. stderr:\n{err}"
-    );
-    assert!(!err.contains("escuchando en"), "stderr:\n{err}");
-    assert!(!err.contains("no empezó a escuchar"), "stderr:\n{err}");
-    assert_eq!(codigo(&s), 0, "stderr:\n{err}");
-}
-
-/// El contrapunto: no instanciar no es quedarse ciego. Que el `.wasm` exista
-/// es una comprobación de fichero, la hace el cargador, y sigue corriendo.
-#[test]
-fn validate_sigue_comprobando_que_el_wasm_existe() {
-    let s = valida("packaging/anvil-host/tests/fixtures/validate_wasm_inexistente.yaml");
-    let err = String::from_utf8_lossy(&s.stderr);
-    assert_eq!(codigo(&s), 1, "stderr:\n{err}");
-    assert!(err.contains("no existe"), "stderr:\n{err}");
-}
-
 /// ADR-0021 / issue #45: un parámetro y una salida mal escritos se cazan
 /// **preguntando al ejecutor**, sin ejecutar un solo paso.
 ///
@@ -338,6 +311,12 @@ fn validate_sigue_comprobando_que_el_wasm_existe() {
 /// Visto en rojo escribiendo los dos nombres bien: sale 0 y sin hallazgos.
 #[test]
 fn validate_con_ejecutores_caza_los_nombres_mal_escritos() {
+    // Preguntar necesita a quién preguntar, y desde ADR-0046 el banco lo
+    // levanta quien corre, no el host.
+    let Some(_banco) = arranca() else {
+        eprintln!("skipped: ejemplos/departamento has not been assembled (make example)");
+        return;
+    };
     let s = Command::new(env!("CARGO_BIN_EXE_anvil"))
         .current_dir(raiz_repo())
         .args([

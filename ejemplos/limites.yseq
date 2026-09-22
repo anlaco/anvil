@@ -11,7 +11,7 @@
 
 name: limites
 executors:
-  - { name: demo, type: wasm, path: departamento/dist/anvil-exec-wasm }
+  - { name: demo, type: grpc, host: 127.0.0.1, port: 9101 }
 setup:
   - name: demo/open_relay        # action (RF-27): technical success, no measurement
     type: action
@@ -44,3 +44,10 @@ cleanup:
     module: demo/disconnect
     executor: demo
     retries: 1
+
+# ADR-0046: opcional, y el motor la ignora. Dice cómo levantar ese ejecutor
+# en tu máquina para diseñar y depurar; en producción este bloque no está.
+dev:
+  demo:
+    runtime: wasm
+    code: departamento/dist

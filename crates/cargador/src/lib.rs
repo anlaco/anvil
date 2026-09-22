@@ -73,6 +73,37 @@ struct SecuenciaYaml {
     /// steps call executors needs them here: there is no default (ADR-0041).
     #[serde(default)]
     executors: Vec<EjecutorYaml>,
+    /// ADR-0046: how to bring an executor up on a development machine.
+    ///
+    /// **Nothing on the run path reads this.** It is parsed so that a typo in
+    /// it is still caught — the strictness that produced DIAG-5's «¿querías
+    /// 'main'?» is not worth a hole — and then nothing uses the result. A
+    /// production sequence does not carry it: there the executor is already
+    /// running, and the sequence only needs its address.
+    ///
+    /// Read by tooling. The Sequence Editor starts what it describes so that a
+    /// module list and its parameters can be seen while authoring (ADR-0044).
+    #[serde(default)]
+    dev: HashMap<String, DevYaml>,
+}
+
+/// One entry of `dev:` — how a front end may bring this executor up here.
+///
+/// Two rules make it safe to have in a file that goes to git, and the loader
+/// enforces the first by construction: `runtime` is a **logical name**,
+/// resolved against the install folder, never a path; and `code` is relative
+/// to the sequence, like every other path a sequence carries. A machine path
+/// here would be the one line that differs per developer in a file everyone
+/// commits.
+#[derive(Debug, PartialEq, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct DevYaml {
+    /// The installed runtime that serves this executor: `python`, `wasm`, …
+    runtime: String,
+    /// Where this project's steps are, relative to the sequence. Optional: a
+    /// runtime may serve something it already knows about.
+    #[serde(default)]
+    code: Option<String>,
 }
 
 /// Un ejecutor como se lee del YAML (`ejecutores:`), antes de traducirse a
@@ -83,25 +114,32 @@ struct SecuenciaYaml {
 #[serde(deny_unknown_fields)]
 struct EjecutorYaml {
     name: String,
-    /// `"wasm"` or `"grpc"`, and required (ADR-0041). An `Option` only so its
-    /// absence gets a message that says what to write, not serde's
-    /// "missing field".
+    /// `"grpc"`, and required. There is one kind of executor and it is an
+    /// address (ADR-0046); the field stays because a sequence that says
+    /// nothing, or says `wasm`, has to be told what to write.
     ///
     /// `kind` y no `type`: `type` es palabra reservada de Rust. El
     /// `serde(rename)` es por el lenguaje, no por el idioma — en el YAML la
     /// clave es `type`.
     #[serde(default, rename = "type")]
     kind: Option<String>,
-    /// Sólo si `tipo == "wasm"`. Path relativo al directorio del YAML.
-    #[serde(default)]
-    path: Option<String>,
-    /// Sólo si `tipo == "grpc"`. Host; puede ser no-loopback **sólo si se
-    /// declara** (relajación acotada del loopback de ADR-0011).
+    /// El host; puede ser no-loopback **sólo si se declara** (relajación
+    /// acotada del loopback de ADR-0011).
     #[serde(default)]
     host: Option<String>,
-    /// Sólo si `type == "grpc"`. Puerto.
+    /// El puerto.
     #[serde(default)]
     port: Option<u16>,
+    /// Retirado por ADR-0046, y **aceptado a propósito** para poder
+    /// rechazarlo con un mensaje que explique.
+    ///
+    /// `deny_unknown_fields` corre antes que [`EjecutorYaml::a_definicion`],
+    /// así que sin este campo una secuencia escrita contra un departamento
+    /// WASM —que es lo que dice toda secuencia anterior a 0.9— moriría con
+    /// «campo desconocido 'path'» y nadie sabría qué escribir en su lugar.
+    /// Es la misma cortesía que ADR-0040 §10 le dio a `type: grpc`.
+    #[serde(default)]
+    path: Option<String>,
 }
 
 /// A variable declared in a scope of M4 (`locals:`, `parameters:`,
@@ -579,11 +617,18 @@ impl EjecutorYaml {
     /// `tipo` y sus campos (fail-fast). `dir_yaml` es el directorio del
     /// archivo que declara el ejecutor: los paths `wasm` se resuelven
     /// relativo a él.
-    fn a_definicion(self, dir_yaml: &Path) -> Result<DefinicionEjecutor, ErrorCarga> {
+    /// ADR-0046: one kind of executor, and it is an address.
+    ///
+    /// `dir_yaml` is no longer used — the loader has nothing left to resolve
+    /// against the filesystem here — and is kept in the signature because
+    /// every other `a_definicion` in this file takes it and the symmetry is
+    /// worth more than the argument.
+    fn a_definicion(self, _dir_yaml: &Path) -> Result<DefinicionEjecutor, ErrorCarga> {
         let Some(kind) = self.kind.as_deref() else {
             return Err(ErrorCarga::Validacion(format!(
-                "executor '{}' names no 'type': write 'type: wasm' with the 'path' of an \
-                 executor binary, or 'type: grpc' with its 'host' and 'port'",
+                "executor '{}' names no 'type': write 'type: grpc' with its 'host' and \
+                 'port'. An executor is an address (ADR-0046); how it is started is not \
+                 the sequence's business",
                 self.name
             )));
         };
@@ -593,57 +638,35 @@ impl EjecutorYaml {
             "embedded" => {
                 return Err(ErrorCarga::Validacion(format!(
                     "executor '{}' is 'type: embedded', and there is no executor built into \
-                     anvil any more (ADR-0041). Declare the one that serves these steps — \
-                     the package's demo bench is 'type: wasm' with \
-                     'path: ejemplos/departamento/dist/anvil-exec-wasm', relative to where \
-                     the sequence is",
+                     anvil any more (ADR-0041). Declare where the one that serves these \
+                     steps is listening: 'type: grpc' with its 'host' and 'port'",
                     self.name
                 )))
             }
+            // Removed by ADR-0046. Every sequence written against a WASM
+            // department says this, so it gets the two lines that replace it
+            // and the command that brings the bench up — the alternative is
+            // «unknown type» on a word that was correct last release.
             "wasm" => {
-                if self.host.is_some() || self.port.is_some() {
-                    return Err(ErrorCarga::Validacion(format!(
-                        "el ejecutor '{}' es 'wasm' pero trae 'host'/'puerto' (sólo aplican a 'grpc')",
-                        self.name
-                    )));
-                }
-                let Some(path) = self.path else {
-                    return Err(ErrorCarga::Validacion(format!(
-                        "el ejecutor '{}' es 'wasm' pero no trae 'path'",
-                        self.name
-                    )));
-                };
-                // El cargador corre dentro del sandbox WASM del motor, que
-                // solo tiene preabierto el directorio del YAML (DEF-4): un
-                // path absoluto es invisible para `exists()` exista o no en
-                // el host, así que se distingue antes de comprobar.
-                if Path::new(&path).is_absolute() {
-                    return Err(ErrorCarga::Validacion(format!(
-                        "el ejecutor '{}' es 'wasm' con 'path' absoluto '{}': el \
-                         cargador corre en un sandbox que solo ve el directorio \
-                         del YAML; usa un path relativo",
-                        self.name, path
-                    )));
-                }
-                // El path debe existir (relativo al directorio del YAML),
-                // como las subsecuencias externas (fail-fast al cargar).
-                let ruta = normalizar_path(dir_yaml, Path::new(&path));
-                // The loader runs inside the engine's WASM sandbox and cannot
-                // tell which OS it is on, so one sequence naming
-                // `anvil-exec-wasm` must also find `anvil-exec-wasm.exe`
-                // (ADR-0041 §5); the host picks the right one when it spawns.
-                if !ruta.exists() && !con_sufijo(&ruta, ".exe").exists() {
-                    return Err(ErrorCarga::Validacion(format!(
-                        "el ejecutor '{}' es 'wasm' y su 'path' '{}' no existe",
-                        self.name, path
-                    )));
-                }
-                TipoEjecutor::Wasm { path }
+                return Err(ErrorCarga::Validacion(format!(
+                    "executor '{name}' is 'type: wasm', which no longer exists: an executor \
+                     is an address and nothing starts one for you (ADR-0046). Start the \
+                     bench and declare where it listens:\n  \
+                     - name: {name}\n      type: grpc\n      host: 127.0.0.1\n      \
+                     port: 9101\n\
+                     and bring it up with 'anvil-exec-wasm --modules <dir> --port 9101'. \
+                     Where its modules live can go in the optional 'dev:' section, which \
+                     the engine ignores",
+                    name = self.name
+                )))
             }
             "grpc" => {
                 if self.path.is_some() {
                     return Err(ErrorCarga::Validacion(format!(
-                        "el ejecutor '{}' es 'grpc' pero trae 'path' (sólo aplica a 'wasm')",
+                        "el ejecutor '{}' trae 'path', que ya no existe: un ejecutor es una \
+                         dirección y nada lo arranca por ti (ADR-0046). Quita el 'path'; si \
+                         lo que quieres es decir cómo se levanta en tu máquina, eso va en la \
+                         sección opcional 'dev:', que el motor ignora",
                         self.name
                     )));
                 }
@@ -657,7 +680,7 @@ impl EjecutorYaml {
             }
             otro => {
                 return Err(ErrorCarga::Validacion(format!(
-                    "el ejecutor '{}' tiene 'type' '{otro}' desconocido (wasm|grpc)",
+                    "el ejecutor '{}' tiene 'type' '{otro}' desconocido: el único es 'grpc'",
                     self.name
                 )))
             }
@@ -1633,9 +1656,6 @@ pub enum Endpoint<'a> {
     SinEjecutor,
     /// A gRPC executor, keyed by the name the YAML gave it.
     Grpc(&'a str),
-    /// A `type: wasm` executor. The engine never runs one — the host
-    /// translates it to `grpc` first (ADR-0014).
-    Wasm(&'a str),
     /// A name no `executors:` entry declares.
     NoDeclarado(&'a str),
 }
@@ -1646,7 +1666,7 @@ impl<'a> Endpoint<'a> {
     pub fn clave(&self) -> &'a str {
         match self {
             Endpoint::SinEjecutor => "",
-            Endpoint::Grpc(n) | Endpoint::Wasm(n) | Endpoint::NoDeclarado(n) => n,
+            Endpoint::Grpc(n) | Endpoint::NoDeclarado(n) => n,
         }
     }
 }
@@ -1661,7 +1681,6 @@ pub fn resolver_endpoint<'a>(
     };
     match ejecutores.get(nombre).map(|e| &e.tipo) {
         Some(TipoEjecutor::Grpc { .. }) => Endpoint::Grpc(nombre),
-        Some(TipoEjecutor::Wasm { .. }) => Endpoint::Wasm(nombre),
         None => Endpoint::NoDeclarado(nombre),
     }
 }
@@ -1713,25 +1732,25 @@ fn validar_referencias_de(
         let Some(ejecutor) = decl.ejecutor_de_referencia() else {
             continue;
         };
-        match resolver_endpoint(Some(ejecutor), &programa.ejecutores) {
-            Endpoint::NoDeclarado(_) => {
-                return Err(ErrorCarga::Validacion(format!(
-                    "'locals.{nombre}' de la secuencia '{}' declara una referencia del \
-                     ejecutor '{ejecutor}', que no está en 'executors:' de la secuencia raíz",
-                    def.nombre
-                )))
-            }
-            Endpoint::Wasm(_) => {
-                return Err(ErrorCarga::Validacion(format!(
-                    "'locals.{nombre}' de la secuencia '{}' declara una referencia del \
-                     ejecutor '{ejecutor}', que es 'type: wasm'. Un componente WASM no puede \
-                     sostener una referencia: su interfaz es una función sin estado entre \
-                     llamadas (anvil:step, ADR-0020 §4d), así que no tiene dónde guardar el \
-                     objeto. Sírvelo como ejecutor 'grpc' (ADR-0022 §8)",
-                    def.nombre
-                )))
-            }
-            _ => {}
+        // ADR-0046 removed `type: wasm`, and with it the loader's ability to
+        // tell **what** serves an endpoint: every executor is an address now.
+        // So the check that a WASM component cannot hold an object reference
+        // (ADR-0022 §8) cannot be made here any more.
+        //
+        // It is not lost, and where it moved is better: an executor that
+        // cannot hold objects publishes an empty `lifetime` in its catalog,
+        // and `comprueba_firmas` already warns when a sequence declares
+        // references from one of those — for any such executor, not only for
+        // a WASM one. What is genuinely given up is fail-fast: this used to be
+        // a load error with no bench, and it is now a warning that needs the
+        // executor up, plus the explicit error the component itself returns
+        // when a reference arrives.
+        if let Endpoint::NoDeclarado(_) = resolver_endpoint(Some(ejecutor), &programa.ejecutores) {
+            return Err(ErrorCarga::Validacion(format!(
+                "'locals.{nombre}' de la secuencia '{}' declara una referencia del \
+                 ejecutor '{ejecutor}', que no está en 'executors:' de la secuencia raíz",
+                def.nombre
+            )));
         }
     }
 
@@ -4763,56 +4782,6 @@ main:
         );
     }
 
-    /// `tipo: wasm` con `path` absoluto → error que explica el sandbox
-    /// (DEF-4), no que el fichero "no existe" (el fichero sí existe en
-    /// disco; el cargador solo no puede verlo desde su sandbox).
-    #[test]
-    fn wasm_con_path_absoluto_es_error_explicativo() {
-        let dir = std::env::temp_dir().join(format!("anvil_m5ext_{}", "wasm_absoluto"));
-        std::fs::create_dir_all(&dir).unwrap();
-        let wasm = dir.join("p.wasm");
-        std::fs::write(&wasm, b"\0asm").unwrap();
-        let y = dir.join("s.yaml");
-        std::fs::write(
-            &y,
-            format!(
-                "name: s\nexecutors:\n  - {{ name: p, type: wasm, path: {} }}\nmain:\n  - name: a\n    type: pass_fail\n    module: a\n",
-                wasm.display()
-            ),
-        )
-        .unwrap();
-        let err = cargar_programa_de_archivo(y.to_str().unwrap()).unwrap_err();
-        assert!(
-            matches!(&err, ErrorCarga::Validacion(m) if m.contains("absoluto") && !m.contains("no existe")),
-            "{err}"
-        );
-    }
-
-    /// `tipo: wasm` sin `path` → error; con `path` inexistente → error.
-    #[test]
-    fn wasm_sin_path_o_inexistente_es_error() {
-        let dir = std::env::temp_dir().join(format!("anvil_m5ext_{}", "wasm"));
-        std::fs::create_dir_all(&dir).unwrap();
-        let y = dir.join("s.yaml");
-        std::fs::write(
-            &y,
-            "name: s\nexecutors:\n  - { name: p, type: wasm }\nmain:\n  - name: a\n    type: pass_fail\n    module: a\n",
-        )
-        .unwrap();
-        let err = cargar_programa_de_archivo(y.to_str().unwrap()).unwrap_err();
-        assert!(
-            matches!(&err, ErrorCarga::Validacion(m) if m.contains("'path'")),
-            "{err}"
-        );
-
-        std::fs::write(&y, "name: s\nexecutors:\n  - { name: p, type: wasm, path: ./no_existe.wasm }\nmain:\n  - name: a\n    type: pass_fail\n    module: a\n").unwrap();
-        let err = cargar_programa_de_archivo(y.to_str().unwrap()).unwrap_err();
-        assert!(
-            matches!(&err, ErrorCarga::Validacion(m) if m.contains("no existe")),
-            "{err}"
-        );
-    }
-
     fn limite_de(texto: &str) -> Result<Limite, ErrorCarga> {
         let y = format!(
             "name: s\nmain:\n  - name: n\n    type: numeric_limit\n    module: m\n    limit: {texto}\n"
@@ -5018,46 +4987,11 @@ main:
         );
     }
 
-    /// A sequence written as `path: ./anvil-exec-wasm` loads where the file on
-    /// disk is `anvil-exec-wasm.exe`, so one sequence serves Linux and Windows.
-    #[test]
-    fn wasm_path_without_exe_finds_the_windows_binary() {
-        let dir = std::env::temp_dir().join(format!("anvil_adr41_exe_{}", std::process::id()));
-        std::fs::create_dir_all(&dir).unwrap();
-        std::fs::write(dir.join("anvil-exec-wasm.exe"), b"MZ").unwrap();
-        let y = dir.join("s.yaml");
-        std::fs::write(
-            &y,
-            "name: s\nexecutors:\n  - { name: p, type: wasm, path: ./anvil-exec-wasm }\nmain:\n  - name: a\n    type: pass_fail\n    module: a\n    executor: p\n",
-        )
-        .unwrap();
-        let loaded = cargar_programa_de_archivo(y.to_str().unwrap());
-        std::fs::remove_dir_all(&dir).ok();
-        assert!(loaded.is_ok(), "{:?}", loaded.err());
-    }
-
     #[test]
     fn con_sufijo_appends_instead_of_replacing_an_extension() {
         assert_eq!(
             con_sufijo(Path::new("dist/exec.v2"), ".exe"),
             PathBuf::from("dist/exec.v2.exe")
-        );
-    }
-
-    /// `tipo: wasm` con un path que sí existe (se crea en el dir) → carga OK.
-    #[test]
-    fn wasm_con_path_existente_carga() {
-        let dir = std::env::temp_dir().join(format!("anvil_m5ext_{}", "wasm_ok"));
-        std::fs::create_dir_all(&dir).unwrap();
-        std::fs::write(dir.join("p.wasm"), b"\0asm").unwrap();
-        let y = dir.join("s.yaml");
-        std::fs::write(&y, "name: s\nexecutors:\n  - { name: p, type: wasm, path: ./p.wasm }\nmain:\n  - name: a\n    type: pass_fail\n    module: a\n    executor: p\n").unwrap();
-        let prog = cargar_programa_de_archivo(y.to_str().unwrap()).unwrap();
-        assert_eq!(
-            prog.ejecutores["p"].tipo,
-            TipoEjecutor::Wasm {
-                path: "./p.wasm".into()
-            }
         );
     }
 
@@ -5082,6 +5016,68 @@ main:
         );
     }
 
+    /// ADR-0046: `dev:` se acepta, se valida y **no cambia el programa**.
+    ///
+    /// Es dato para herramientas: dice cómo levantar un ejecutor en una
+    /// máquina de desarrollo. El motor no lo lee, y una secuencia de
+    /// producción no lo trae — por eso lo que se afirma aquí es que cargar
+    /// con y sin el bloque da exactamente el mismo `Programa`.
+    #[test]
+    fn dev_se_acepta_y_no_cambia_nada() {
+        let dir = std::env::temp_dir().join("anvil_adr46_dev");
+        std::fs::create_dir_all(&dir).unwrap();
+        let base = "name: s\nexecutors:\n  - { name: banco, type: grpc, host: 127.0.0.1, port: 9101 }\nmain:\n  - name: a\n    type: pass_fail\n    module: a\n    executor: banco\n";
+
+        let sin = dir.join("sin.yaml");
+        std::fs::write(&sin, base).unwrap();
+        let con = dir.join("con.yaml");
+        std::fs::write(
+            &con,
+            format!("{base}dev:\n  banco:\n    runtime: python\n    code: ./pasos\n"),
+        )
+        .unwrap();
+
+        let a = cargar_programa_de_archivo(sin.to_str().unwrap()).unwrap();
+        let b = cargar_programa_de_archivo(con.to_str().unwrap()).unwrap();
+        assert_eq!(a.ejecutores, b.ejecutores, "dev: no toca los ejecutores");
+        assert_eq!(a.raiz, b.raiz, "dev: no toca la secuencia");
+    }
+
+    /// Y se valida, aunque nadie la use: `deny_unknown_fields` es lo que
+    /// produce el «¿querías 'main'?» de DIAG-5, y un bloque que se acepta sin
+    /// mirar sería un agujero en esa red — una errata ahí no la avisa nadie.
+    #[test]
+    fn una_errata_dentro_de_dev_se_caza() {
+        let dir = std::env::temp_dir().join("anvil_adr46_dev_mal");
+        std::fs::create_dir_all(&dir).unwrap();
+        let y = dir.join("s.yaml");
+        std::fs::write(&y, "name: s\nexecutors:\n  - { name: banco, type: grpc, host: 127.0.0.1, port: 9101 }\nmain:\n  - name: a\n    type: pass_fail\n    module: a\n    executor: banco\ndev:\n  banco:\n    runtimee: python\n").unwrap();
+        let err = cargar_programa_de_archivo(y.to_str().unwrap()).unwrap_err();
+        assert!(
+            format!("{err}").contains("runtimee"),
+            "la errata tiene que nombrarse: {err}"
+        );
+    }
+
+    /// Una secuencia escrita contra un departamento WASM es lo que dice toda
+    /// secuencia anterior a 0.9, así que el error tiene que enseñar qué
+    /// escribir — no «campo desconocido 'path'», que es lo que saldría si
+    /// `path` no se siguiera aceptando para poder rechazarlo bien.
+    #[test]
+    fn type_wasm_dice_que_escribir_en_su_lugar() {
+        let dir = std::env::temp_dir().join("anvil_adr46_wasm");
+        std::fs::create_dir_all(&dir).unwrap();
+        let y = dir.join("s.yaml");
+        std::fs::write(&y, "name: s\nexecutors:\n  - { name: demo, type: wasm, path: dept/anvil-exec-wasm }\nmain:\n  - name: a\n    type: pass_fail\n    module: a\n    executor: demo\n").unwrap();
+        let err = format!(
+            "{}",
+            cargar_programa_de_archivo(y.to_str().unwrap()).unwrap_err()
+        );
+        for parte in ["type: grpc", "anvil-exec-wasm --modules", "dev:"] {
+            assert!(err.contains(parte), "falta '{parte}' en: {err}");
+        }
+    }
+
     /// `type: embedded` says what to write instead; an unknown type names
     /// itself; no type at all says what types there are (ADR-0041).
     #[test]
@@ -5093,7 +5089,7 @@ main:
         let err = cargar_programa_de_archivo(y.to_str().unwrap()).unwrap_err();
         assert!(
             matches!(&err, ErrorCarga::Validacion(m)
-                if m.contains("no executor built into") && m.contains("type: wasm")),
+                if m.contains("no executor built into") && m.contains("type: grpc")),
             "{err}"
         );
 
@@ -5201,14 +5197,13 @@ main:
     }
 
     /// Override `--executor nombre=host:puerto`: re-apunta un grpc, convierte
-    /// un wasm, y falla si el nombre no está declarado.
+    /// y falla si el nombre no está declarado.
     #[test]
     fn override_de_ejecutores() {
         let dir = std::env::temp_dir().join(format!("anvil_m5ext_{}", "override"));
         std::fs::create_dir_all(&dir).unwrap();
-        std::fs::write(dir.join("anvil-exec-wasm"), b"").unwrap();
         let y = dir.join("s.yaml");
-        std::fs::write(&y, "name: s\nexecutors:\n  - { name: e, type: wasm, path: ./anvil-exec-wasm }\n  - { name: py, type: grpc, host: 127.0.0.1, port: 9101 }\nmain:\n  - name: a\n    type: pass_fail\n    module: a\n    executor: py\n").unwrap();
+        std::fs::write(&y, "name: s\nexecutors:\n  - { name: e, type: grpc, host: 127.0.0.1, port: 9102 }\n  - { name: py, type: grpc, host: 127.0.0.1, port: 9101 }\nmain:\n  - name: a\n    type: pass_fail\n    module: a\n    executor: py\n").unwrap();
         let mut prog = cargar_programa_de_archivo(y.to_str().unwrap()).unwrap();
 
         // Re-apuntar un grpc a remoto.
@@ -6139,29 +6134,6 @@ executors:
         .unwrap_err();
         assert!(
             matches!(&err, ErrorCarga::Validacion(m) if m.contains("rack") && m.contains("medir")),
-            "{err}"
-        );
-    }
-
-    /// Un componente WASM no tiene dónde guardar el objeto (ADR-0022 §8), y se
-    /// dice al cargar en vez de esperar a que el puente lo rechace en marcha.
-    #[test]
-    fn una_referencia_de_un_ejecutor_wasm_se_rechaza() {
-        let dir = std::env::temp_dir().join("anvil_ref_wasm");
-        let _ = std::fs::remove_dir_all(&dir);
-        std::fs::create_dir_all(&dir).unwrap();
-        std::fs::write(dir.join("p.wasm"), b"\0asm\x0d\0\x01\0").unwrap();
-        let y = dir.join("s.yaml");
-        std::fs::write(
-            &y,
-            "name: s\nexecutors:\n  - { name: comp, type: wasm, path: ./p.wasm }\n\
-             locals:\n  rack: { type: reference, executor: comp }\n\
-             main:\n  - name: abrir\n    type: pass_fail\n    module: abrir\n    executor: comp\n    assign: { rack: result.outputs.rack }\n",
-        )
-        .unwrap();
-        let err = cargar_programa_de_archivo(y.to_str().unwrap()).unwrap_err();
-        assert!(
-            matches!(&err, ErrorCarga::Validacion(m) if m.contains("wasm") && m.contains("rack")),
             "{err}"
         );
     }

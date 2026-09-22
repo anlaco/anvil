@@ -310,51 +310,6 @@ async function locateEngine(window) {
   return engine;
 }
 
-/**
- * Picks an executor's binary from disk, and answers its path **relative to the
- * sequence** — which is the only kind a sequence may carry.
- *
- * `path:` on a `type: wasm` executor is the executor's own binary, not a
- * `.wasm` and not a folder of modules (ADR-0027): Anvil spawns exactly that
- * file, and where its modules live is the executor's business — it finds them
- * next to itself. So this dialog is looking for `anvil-exec-wasm`, or whatever
- * department binary someone built, sitting in the folder that is the
- * department.
- *
- * Relative because the loader runs inside the engine's WASI sandbox, which
- * only has the sequence's own directory preopened: an absolute path does not
- * cross it even when the file is there. A binary outside that tree cannot be
- * named at all, and saying so here beats a load error about a file that
- * plainly exists.
- */
-async function pickExecutor(window, sequencePath) {
-  const { canceled, filePaths } = await dialog.showOpenDialog(window, {
-    title: "Choose the executor's binary",
-    properties: ["openFile"],
-    filters:
-      process.platform === "win32"
-        ? [{ name: "Executor", extensions: ["exe"] }, { name: "All files", extensions: ["*"] }]
-        : [],
-  });
-  if (canceled) return null;
-
-  const elegido = filePaths[0];
-  if (!sequencePath) {
-    throw new Error("save the sequence first: an executor's path is relative to the file");
-  }
-  const base = path.dirname(
-    existsSync(sequencePath) ? sequencePath : path.join(REPO, sequencePath.replace(/^[/\\]+/, "")),
-  );
-  const rel = path.relative(base, elegido);
-  if (rel.startsWith("..") || path.isAbsolute(rel)) {
-    throw new Error(
-      `'${elegido}' is outside the sequence's folder. The engine only sees that folder, so a path above it cannot be named — put the department beside the sequence, or save the sequence next to it.`,
-    );
-  }
-  // Always forward slashes: the loader's own `es_path` accepts both, and a
-  // sequence written on Windows has to keep working on Linux.
-  return { path: rel.split(path.sep).join("/"), name: path.basename(path.dirname(elegido)) };
-}
 
 /** Resolves to `{ value }` or `{ error }`; see `anvil:start-bridge`. */
 const answer = (promise) =>
@@ -412,9 +367,6 @@ function wireIpc() {
   // Same `answer` as the bridge, and for the same reason: an executor that is
   // not up is an expected answer here, not a fault.
   ipcMain.handle("anvil:describe", (_event, sequencePath) => answer(describeSequence(sequencePath)));
-  ipcMain.handle("anvil:pick-executor", (event, sequencePath) =>
-    answer(pickExecutor(BrowserWindow.fromWebContents(event.sender), sequencePath)),
-  );
   ipcMain.handle("anvil:locate-engine", (event) =>
     answer(locateEngine(BrowserWindow.fromWebContents(event.sender))),
   );

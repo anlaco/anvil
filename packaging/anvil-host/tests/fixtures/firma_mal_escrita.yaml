@@ -12,7 +12,7 @@
 name: firma_mal_escrita
 
 executors:
-  - { name: demo, type: wasm, path: ../../../../ejemplos/departamento/dist/anvil-exec-wasm }
+  - { name: demo, type: grpc, host: 127.0.0.1, port: 9101 }
 
 locals:
   t: 0.0

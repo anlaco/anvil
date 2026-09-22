@@ -5,7 +5,7 @@ up:
 
 ```console
 $ cd ~/anvil-book
-$ export PATH="$PWD/anvil-v0.8.0-x86_64-linux-musl:$PATH"
+$ export PATH="$PWD/anvil-v0.9.0-x86_64-linux-musl:$PATH"
 $ mkdir sequences
 ```
 

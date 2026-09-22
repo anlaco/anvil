@@ -11,25 +11,13 @@
 //! Like `exit_codes.rs` and `executor_binary.rs`, run it in release: each
 //! invocation starts wasmtime and compiles the guest.
 
-use std::path::{Path, PathBuf};
 use std::process::Output;
 
-/// The repo root. The binary only preopens its CWD, so the tests run from
-/// here and pass **relative paths**.
-fn raiz_repo() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("../..")
-        .canonicalize()
-        .expect("repo root")
-}
+mod banco;
+use banco::{arranca, dist, raiz_repo};
 
-/// The example department, as `make example` leaves it. Skips when it has not
-/// been built — a skip never claims a pass.
 fn hay_departamento() -> bool {
-    let dist = raiz_repo().join("ejemplos/departamento/dist");
-    dist.join(format!("anvil-exec-wasm{}", std::env::consts::EXE_SUFFIX))
-        .exists()
-        && dist.join("multimetro.wasm").exists()
+    dist().is_some()
 }
 
 fn describe(secuencia: &str) -> Output {
@@ -62,13 +50,16 @@ fn el_catalogo_del_departamento_sale_por_stdout_como_json() {
         eprintln!("skipped: ejemplos/departamento has not been assembled (make example)");
         return;
     }
+    let _banco = arranca().expect("the demo bench");
     let s = describe("ejemplos/demo_departamento.yseq");
     assert_eq!(s.status.code(), Some(0), "describe should exit 0");
 
     let doc = json(&s);
     assert_eq!(doc["describe_version"], 1);
 
-    let ejecutores = doc["executors"].as_object().expect("executors is an object");
+    let ejecutores = doc["executors"]
+        .as_object()
+        .expect("executors is an object");
     // The one the sequence declares, and it is not empty: an empty catalog
     // here would mean the host never started the `type: wasm` executor, and
     // the document would still be well-formed.
@@ -117,6 +108,7 @@ fn describe_no_ejecuta_un_paso() {
     // the document would stop being JSON. Asked quietly, the report is
     // silenced and this test passes against an engine that ran the sequence:
     // the first version of it did exactly that.
+    let _banco = arranca().expect("the demo bench");
     let s = describe_con("ejemplos/demo_departamento.yseq", &[]);
     let stdout = String::from_utf8_lossy(&s.stdout);
     assert!(

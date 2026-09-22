@@ -169,7 +169,6 @@ from outside:
 | A reference in an operation — arithmetic, comparison, a limit, a verdict | Evaluating the expression | no |
 | A reference literal written into the sequence | Loading | no |
 | A handle passed to a step of another executor, or filled by one | Loading | no |
-| A reference declared on a `type: wasm` executor | Loading | no |
 | A reference variable written by a `statement`, or from anything but `result.outputs.<name>` | Loading | no |
 | An executor that minted under a life its own catalog contradicts | On reading the result | — |
 | The executor restarted, or stopped answering | **Before invoking** the step that carries the handle | yes |
@@ -187,8 +186,16 @@ moment Anvil most wants the step that closes the rack to run.
 `anvil:step` is `run(name, attempt, inputs) -> step-result` plus `describe()`:
 functions, with no resources and no state between calls (ADR-0020 §4d), so a
 component has nowhere to keep the map. A reference reaching one is an **explicit error and never a
-silence** — refused at load if the executor is declared `type: wasm`, and again
-at the bridge. Giving WASM state is a decision with its own ADR (ADR-0022 §8).
+silence**, refused at the bridge.
+
+It used to be refused at load too, because `type: wasm` told the loader what
+served an endpoint. ADR-0046 removed that type: every executor is an address
+and the loader cannot know what is behind one. The check moved, and to a better
+place — an executor that cannot hold objects publishes an **empty `lifetime`**,
+and the engine already warns when a sequence declares references from one of
+those, for any such executor rather than only a WASM one. What is given up is
+fail-fast: it needed no bench before and now it needs the executor up. Giving
+WASM state is a decision with its own ADR (ADR-0022 §8).
 
 ## Codificación de medidas
 

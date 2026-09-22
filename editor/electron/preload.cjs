@@ -52,13 +52,6 @@ contextBridge.exposeInMainWorld("anvil", {
    */
   describe: (path) => ipcRenderer.invoke("anvil:describe", path).then(unwrap),
   /**
-   * Picks an executor's binary from disk and answers `{ path, name }` with the
-   * path **relative to the sequence** — the only kind a sequence may carry
-   * (ADR-0027). Null if the dialog was dismissed.
-   */
-  pickExecutor: (sequencePath) =>
-    ipcRenderer.invoke("anvil:pick-executor", sequencePath).then(unwrap),
-  /**
    * Calls `listener(action)` for each item picked from the native menu. The
    * action is the same name the page's own menus carry in `data-action`.
    */

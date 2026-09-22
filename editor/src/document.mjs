@@ -410,13 +410,12 @@ export class SequenceDocument {
    * Declares an executor. Without one, no step can call anything (ADR-0041),
    * so this is the first thing a sequence built from nothing needs.
    *
-   * `wasm` takes the path of the executor binary, whose modules live beside it
-   * (ADR-0025, ADR-0027); `grpc` takes a host and a port.
+   * One kind since ADR-0046, and it is an address: how the thing at that
+   * address was started is not the sequence's business. What it takes to
+   * bring one up on this machine goes in `dev:`, which the engine ignores.
    */
-  addExecutor(name, type, pathOrHost, port = null) {
-    const entry = type === "grpc"
-      ? { name, type, host: pathOrHost, port }
-      : { name, type, path: pathOrHost };
+  addExecutor(name, host, port) {
+    const entry = { name, type: "grpc", host, port };
     let list = this.#doc.get("executors", true);
     if (!isSeq(list)) {
       this.#doc.set("executors", this.#doc.createNode([]));
@@ -615,11 +614,10 @@ export class SequenceDocument {
   }
 
   /**
-   * The executors this file declares, with the fields their type uses.
+   * The executors this file declares: a name and where it is listening.
    *
-   * `wasm` names the executor binary by path and its modules live beside it
-   * (ADR-0025, ADR-0027); `grpc` names a host and a port. There is no third
-   * kind and no default: a step that calls one names it (ADR-0041).
+   * One kind, and it is an address (ADR-0046). There is no default: a step
+   * that calls one names it (ADR-0041).
    */
   executors() {
     const list = this.#doc.get("executors", true);
@@ -627,10 +625,24 @@ export class SequenceDocument {
     return list.items.map((e) => ({
       name: e?.get?.("name") ?? null,
       type: e?.get?.("type") ?? null,
-      path: e?.get?.("path") ?? null,
       host: e?.get?.("host") ?? null,
       port: e?.get?.("port") ?? null,
     }));
+  }
+
+  /**
+   * The `dev:` entry for an executor, or null — how a front end may bring it
+   * up here (ADR-0046). The engine never reads this, and a production
+   * sequence does not carry it.
+   */
+  devFor(name) {
+    const dev = this.#doc.get("dev", true);
+    const entry = isMap(dev) ? dev.get(name, true) : null;
+    if (!isMap(entry)) return null;
+    return {
+      runtime: entry.get("runtime") ?? null,
+      code: entry.get("code") ?? null,
+    };
   }
 
   /** Sets one field of a declared executor. */

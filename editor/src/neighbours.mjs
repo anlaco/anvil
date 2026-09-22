@@ -2,11 +2,13 @@
 // filesystem.
 //
 // The engine loads a sequence the way the native binary does, and the loader
-// reads more than the one file: an executor of `type: wasm` must name a binary
-// that exists (crates/cargador/src/lib.rs, `EjecutorYaml::a_definicion`), and
-// a `sequence_call` by path reads that file. Handed only the open document, the
-// editor rejected every sequence using the demo bench (ADR-0041) and every call
-// to an external subsequence — sequences the binary runs.
+// reads more than the one file: a `sequence_call` by path reads that file.
+// Handed only the open document, the editor rejected every call to an external
+// subsequence — sequences the binary runs.
+//
+// It used to mount executor binaries too, because `type: wasm` made the loader
+// check one existed. ADR-0046 removed that type: an executor is an address and
+// the loader touches no binary, so there is nothing left to mount for one.
 //
 // So the editor mounts what the sequence references, read through `reader`. In
 // the desktop shell that is the disk; in a plain browser there is no disk, no
@@ -59,13 +61,9 @@ export function referencesOf(text) {
   try {
     doc = parse(text);
   } catch {
-    return { executors: [], sequences: [] };
+    return { sequences: [] };
   }
-  if (!doc || typeof doc !== "object") return { executors: [], sequences: [] };
-
-  const executors = (Array.isArray(doc.executors) ? doc.executors : [])
-    .filter((e) => e && e.type === "wasm" && typeof e.path === "string")
-    .map((e) => e.path);
+  if (!doc || typeof doc !== "object") return { sequences: [] };
 
   const sequences = [];
   const walk = (section) => {
@@ -80,7 +78,7 @@ export function referencesOf(text) {
   walk(doc);
   for (const sub of Object.values(doc.subsequences ?? {})) walk(sub);
 
-  return { executors, sequences };
+  return { sequences };
 }
 
 /**
@@ -89,9 +87,6 @@ export function referencesOf(text) {
  *
  * `reader.readText(path)` resolves to the text or null; `reader.exists(path)`
  * to a boolean. Paths are relative to the open document's directory. An
- * executor binary is mounted empty — the loader only asks whether it is there —
- * and under the name found on disk, `.exe` included, which the loader accepts
- * for the name the sequence wrote.
  */
 export async function gatherFiles(name, text, reader) {
   const files = { [name]: text };
@@ -100,19 +95,8 @@ export async function gatherFiles(name, text, reader) {
   const queue = [[name, text]];
   while (queue.length > 0 && Object.keys(files).length < MAX_FILES) {
     const [path, source] = queue.shift();
-    const { executors, sequences } = referencesOf(source);
+    const { sequences } = referencesOf(source);
     const dir = dirOf(path);
-
-    for (const rel of executors) {
-      const target = joinRelative(dir, rel);
-      if (target === null || target in files) continue;
-      for (const candidate of [target, `${target}.exe`]) {
-        if (await reader.exists(candidate)) {
-          files[candidate] = "";
-          break;
-        }
-      }
-    }
 
     for (const rel of sequences) {
       const target = joinRelative(dir, rel);

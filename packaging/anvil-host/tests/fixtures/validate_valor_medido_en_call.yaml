@@ -2,7 +2,7 @@
 # `nothing` and silently wiped the target.
 name: validate_valor_medido_en_call
 executors:
-  - { name: demo, type: wasm, path: ../../../../ejemplos/departamento/dist/anvil-exec-wasm }
+  - { name: demo, type: grpc, host: 127.0.0.1, port: 9101 }
 locals:
   my_num: 42.0
 subsequences:

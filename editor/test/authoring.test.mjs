@@ -214,25 +214,27 @@ test("an executor can be declared, edited and removed", async () => {
   // With none declared, the palette cannot offer the types that call one.
   assert.match(doc.cannotAdd("action"), /no executors/);
 
-  doc.addExecutor("demo", "wasm", "departamento/dist/anvil-exec-wasm");
+  doc.addExecutor("demo", "127.0.0.1", 9101);
   assert.deepEqual(doc.executorNames(), ["demo"]);
   assert.equal(doc.cannotAdd("action"), null);
   assert.deepEqual(doc.executors(), [
-    { name: "demo", type: "wasm", path: "departamento/dist/anvil-exec-wasm", host: null, port: null },
+    { name: "demo", type: "grpc", host: "127.0.0.1", port: 9101 },
   ]);
 
-  doc.setExecutorField("demo", "path", "otro/anvil-exec-wasm");
-  assert.equal(doc.executors()[0].path, "otro/anvil-exec-wasm");
+  doc.setExecutorField("demo", "host", "192.168.1.50");
+  assert.equal(doc.executors()[0].host, "192.168.1.50");
 
   doc.removeExecutor("demo");
   assert.deepEqual(doc.executorNames(), []);
 });
 
-test("a grpc executor is declared with its host and port", async () => {
+test("an executor is an address, and that is the whole of it", async () => {
+  // ADR-0046: one kind. The test that declared a second one, `wasm` with the
+  // path of a binary, went with the type.
   const doc = new SequenceDocument("name: sequence\nmain: []\n");
-  doc.addExecutor("python", "grpc", "127.0.0.1", 9101);
+  doc.addExecutor("python", "127.0.0.1", 9101);
   assert.deepEqual(doc.executors(), [
-    { name: "python", type: "grpc", path: null, host: "127.0.0.1", port: 9101 },
+    { name: "python", type: "grpc", host: "127.0.0.1", port: 9101 },
   ]);
 });
 
@@ -256,7 +258,7 @@ test("basica is built from nothing with the editor's own calls, and runs", async
   const doc = new SequenceDocument("name: sequence\nmain: []\n");
 
   doc.setName("basica_editada");
-  doc.addExecutor("demo", "wasm", "departamento/dist/anvil-exec-wasm");
+  doc.addExecutor("demo", "127.0.0.1", 9101);
 
   const connect = doc.addStep("setup", "action");
   doc.setStepField("setup", connect, "name", "demo/connect");

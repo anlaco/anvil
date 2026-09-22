@@ -71,7 +71,7 @@ console. There are no dependencies to install.
 
 > **Executor routing (M5-ext.1, ADR-0013):** `ejemplos/demo_ejecutores.yseq`
 > demonstrates the name→endpoint dispatch: `demo/check_led` is served by the
-> demo bench (`type: wasm`, which the host starts) and `instrument/medir_simulador` /
+> demo bench (started with `ejemplos/arrancar-banco.sh`) and `instrument/medir_simulador` /
 > `instrument/conectar_equipo` by a Python executor on `127.0.0.1:9101` (start
 > `simulador_tcp.py` and `server.py` from `executors/python/` in two other
 > terminals). Those two carry a module prefix because a Python step is named
@@ -226,8 +226,9 @@ anvil <sequence.yaml> [--process-model <pm.yaml>] [--json <path>] [--csv <path>]
 - Console unless `--quiet`; `--json`/`--csv` optional (file).
 - `--process-model` wraps the sequence in a process model file (RF-38).
 - `--validate` loads and validates without executing or connecting (CI with
-  no hardware). It opens no ports: it does not even bring up the bridge of a
-  `type: wasm` executor, though it does check the declared `.wasm` exists.
+  no hardware). It opens no ports and it starts nothing — since ADR-0046
+  nothing starts an executor at any time, so there is no longer a difference
+  here to point out.
   Beyond the schema, the cycles and the subsequence signatures, it validates
   the **expressions**: reading an undeclared name, writing `file_globals`, or
   writing `parameters` from the root, are load errors. The **types** are not:
@@ -394,34 +395,43 @@ install beyond the Rust toolchain.** Official reference: `ejemplos/hola-paso/`.
    cp target/wasm32-wasip2/debug/hola.wasm mi-departamento/
    ```
 
-6. Declare **the executor** in the YAML — its binary, not your module — and
-   name the step `<module>/<step>`:
+6. Declare **the executor** in the YAML — where it listens, not what it is —
+   and name the step `<module>/<step>`:
 
    ```yaml
    executors:
-     - { name: instrumentos, type: wasm, path: mi-departamento/anvil-exec-wasm }
+     - { name: instrumentos, type: grpc, host: 127.0.0.1, port: 9101 }
    main:
      - name: hola/medir_voltaje
        executor: instrumentos
    ```
 
-   Then `./anvil sequence.yaml`. The host spawns that binary, which loads your
-   component (empty WASI sandbox: no files, no network) and translates
-   gRPC↔function. If the executor is on another machine, declare it as
-   `type: grpc` with its host and port instead — the steps do not change.
+   Start it, then run:
+
+   ```sh
+   anvil-exec-wasm --modules mi-departamento --port 9101 &
+   ./anvil sequence.yaml
+   ```
+
+   The bridge loads your component (empty WASI sandbox: no files, no network)
+   and translates gRPC↔function. **Nothing starts it for you** (ADR-0046): an
+   executor is an address, and on a real bench something put it there at
+   start-up. If it is on another machine, the only thing that changes is the
+   `host:` — the steps do not.
 
 ### One executor, several modules (ADR-0025)
 
-One executor serves every `*.wasm` it finds beside its own binary, and each is
-a module named after its file. What a step calls is then `<module>/<step>`,
+One executor serves every `*.wasm` in the directory it was pointed at, and each
+is a module named after its file. What a step calls is then `<module>/<step>`,
 and it goes in `module:` — `name:` is just the label in the report
 ([ADR-0040](adr/0040-a-step-type-says-how-a-step-is-judged-not-what-it-calls.md)):
 
 ```yaml
 executors:
   - name: instrumentos
-    type: wasm
-    path: departamento/dist/anvil-exec-wasm
+    type: grpc
+    host: 127.0.0.1
+    port: 9101
 main:
   - name: Rail voltage
     type: numeric_limit
@@ -528,28 +538,23 @@ regresses named defects already covered there).
   a precondition is evaluated *before* invoking it, so there is no result to
   read. Dump the measurement into a local with `asigna` and read it from
   there (see [variables-y-alcances.md](diseno/variables-y-alcances.md)).
-- **`el ejecutor '…' (…) no empezó a escuchar en …`** → a `type: wasm`
-  executor did not come up; the concrete error goes to stderr. If it is slow
-  but does not fail, it is the slow debug startup (see above): use
-  `make release`.
-- **`could not connect to the step executors: executor '…' at …`** → a
-  declared `grpc` executor is not listening at that address. Start it, or
-  re-point it with `--executor`.
+- **`could not connect to the step executors: executor '…' at …`** → nothing
+  is listening at that address. Start the bench and try again — since
+  ADR-0046 that is always the answer, because nothing starts one for you. For
+  the examples, `ejemplos/arrancar-banco.sh`. To point the sequence somewhere
+  else without editing it, `--executor <name>=<host>:<port>`.
 - **`step '…' of sequence '…' calls an executor and names none`** → add
   `executor: <name>` to the step; the message lists the executors the root
   sequence declares. There is no executor built into `anvil` to fall back on.
-- **`address in use` with two `anvil` processes at once** → should not
-  happen: the host starts each `type: wasm` executor on an **ephemeral** port
-  per process, so you can launch N `anvil` in parallel (#15).
-- **`el ejecutor '…' es 'wasm' y su 'path' '…' no existe`** → a `type: wasm`
-  executor's `path:` names a file that is not there. `path` is **the
-  executor's binary** — a department's `anvil-exec-wasm` — relative to the
-  YAML file, not to where you launch `anvil` from (ADR-0027). The package
-  ships one assembled in `ejemplos/departamento/dist/`.
-- **`el ejecutor '…' declara 'path: ….wasm', que es un módulo '.wasm'`** →
-  `path` points at a module instead of at the executor. Point it at the
-  `anvil-exec-wasm` in the folder where the `.wasm` modules are; the executor
-  finds them beside itself.
+- **`address in use` when starting a bench** → something is already on that
+  port, quite possibly a bench you left running. `anvil` itself binds nothing
+  (ADR-0046), so N sequences can run against one bench in parallel.
+- **`executor '…' is 'type: wasm', which no longer exists`** → the sequence
+  was written before 0.9. An executor is an address now: declare
+  `type: grpc` with the `host` and `port` where the bench listens, start the
+  bench yourself, and — if you want — say how to bring it up in the optional
+  `dev:` section, which the engine ignores. The error prints the lines to
+  write.
 
 ## Next reading
 

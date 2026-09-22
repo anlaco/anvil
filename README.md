@@ -20,22 +20,39 @@ run sequences, read the reports — follow [The Anvil Book](docs/book/README.md)
 
 ## Run the example
 
-**One binary** (`anvil`, ADR-0011) hosts wasmtime and the engine's WASM guest
-in a sandbox. It carries no step executor of its own (ADR-0041): the package
-also carries `anvil-exec-wasm` next to it — the executor that serves `.wasm`
-steps (ADR-0023) — and a demo bench built with it, which the examples run
-against. You copy that file into a
-folder together with your `.wasm` modules — that folder is a *department* —
-and a sequence names its binary in `path:`; `anvil` spawns it (ADR-0027). Both
-are statically linked against musl: they need no Rust, no cargo, no glibc,
-nothing installed on the system.
+**Two things, and a command for each.** `anvil` (ADR-0011) hosts wasmtime and
+the engine's WASM guest in a sandbox; it carries no step executor of its own
+(ADR-0041) and starts none (ADR-0046). An executor is **an address**: a
+sequence says where one is listening, and putting something there is the job of
+whoever runs the bench — at boot, by a service manager, or by hand. The package
+ships `anvil-exec-wasm`, the executor that serves `.wasm` steps, and a demo
+bench built with it. Both are statically linked against musl: they need no
+Rust, no cargo, no glibc, nothing installed on the system.
 
 ```sh
-curl -LO https://github.com/anlaco/anvil/releases/download/v0.8.0/anvil-v0.8.0-x86_64-linux-musl.tar.gz
-tar xzf anvil-v0.8.0-x86_64-linux-musl.tar.gz
-cd anvil-v0.8.0-x86_64-linux-musl
+curl -LO https://github.com/anlaco/anvil/releases/download/v0.9.0/anvil-v0.9.0-x86_64-linux-musl.tar.gz
+tar xzf anvil-v0.9.0-x86_64-linux-musl.tar.gz
+cd anvil-v0.9.0-x86_64-linux-musl
 
+# 1. the bench, in one terminal — or in the background, as here
+./ejemplos/arrancar-banco.sh &
+
+# 2. the sequence
 ./anvil ejemplos/subsecuencia.yseq --json ./out.json --csv ./out.csv
+```
+
+The second command is the one that used to be the only one, and the first is
+what was happening invisibly. Every bench has it; making it visible on the
+first run is the point. To point a sequence somewhere else without editing it:
+
+```sh
+./anvil ejemplos/basica.yseq --executor demo=192.168.1.50:9101
+```
+
+To ask a bench what it serves, without running anything:
+
+```sh
+./anvil describe ejemplos/subsecuencia.yseq
 ```
 
 Linux x86_64, any libc. The [release page][rel] publishes one `SHA256SUMS`
@@ -43,7 +60,8 @@ for every download; to check the tarball, download it alongside and run
 `sha256sum -c --ignore-missing SHA256SUMS` (it lists the Windows downloads
 too, which you did not fetch). The `.yaml` files ship in the package because
 `subsecuencia.yseq` invokes `medir_fuentes.yseq` by relative path, and the demo
-bench ships in `ejemplos/departamento/dist/` because every example names it.
+bench ships in `ejemplos/departamento/dist/` because every example expects one
+at `127.0.0.1:9101`.
 
 **Windows** (ADR-0036): the [release page][rel] also publishes
 `anvil-vX.Y.Z-x86_64-windows.zip` — the same engine, `anvil.exe` and
@@ -91,6 +109,7 @@ cd anvil
 ```sh
 make release   # WASM guest and example components → bridge → host, in that order
 
+./ejemplos/arrancar-banco.sh &
 ./packaging/anvil-host/target/release/anvil ejemplos/subsecuencia.yseq --json ./out.json --csv ./out.csv
 ```
 

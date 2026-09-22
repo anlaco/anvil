@@ -809,15 +809,29 @@ struct Args {
     /// answers "which steps does this executor serve?" without starting a
     /// bench. The same door the Python executor already has.
     list: bool,
+    /// `--exit-on-eof`: stop when stdin closes, for whoever spawns this as a
+    /// child and needs it not to outlive them (ADR-0046). Off by default: a
+    /// bench started from a terminal has stdin at EOF straight away.
+    exit_on_eof: bool,
 }
 
 fn parse_args() -> Result<Args, String> {
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    parse_args_de(&args)
+}
+
+/// El parser, separado de `std::env::args` para poder probarlo — el mismo
+/// reparto que `parse_cli` en el motor, y por la misma razón: una regla de
+/// línea de comandos que no se puede afirmar en un test se afirma corriendo
+/// el binario, y entonces no se afirma.
+fn parse_args_de<S: AsRef<str>>(args: &[S]) -> Result<Args, String> {
+    let args: Vec<String> = args.iter().map(|s| s.as_ref().to_string()).collect();
     let mut wasm: Option<PathBuf> = None;
     let mut modules: Vec<PathBuf> = Vec::new();
     let mut port: u16 = 0;
     let mut bind: IpAddr = "127.0.0.1".parse().unwrap();
     let mut list = false;
-    let args: Vec<String> = std::env::args().skip(1).collect();
+    let mut exit_on_eof = false;
     let mut i = 0;
     while i < args.len() {
         match args[i].as_str() {
@@ -830,6 +844,7 @@ fn parse_args() -> Result<Args, String> {
                 modules.push(PathBuf::from(args.get(i).ok_or("--modules with no value")?));
             }
             "--list" => list = true,
+            "--exit-on-eof" => exit_on_eof = true,
             "--port" => {
                 i += 1;
                 port = args
@@ -869,6 +884,7 @@ fn parse_args() -> Result<Args, String> {
         port,
         bind,
         list,
+        exit_on_eof,
     })
 }
 
@@ -1009,18 +1025,32 @@ fn main() {
 
     eprintln!("anvil-exec-wasm: listening on {addr}");
 
-    // Clean exit: the host spawns the bridge with stdin piped; when the host
-    // dies (or drops the `Child`), the pipe closes → EOF → the bridge exits.
-    // Without this, a dead host would leave the bridge orphaned.
-    let current_stdin = std::io::stdin();
-    let _ = thread::spawn(move || {
-        let mut buf = [0u8; 1];
-        while let Ok(n) = std::io::Read::read(&mut current_stdin.lock(), &mut buf) {
-            if n == 0 {
-                std::process::exit(0);
+    // Exit when stdin closes — **opt-in**, with `--exit-on-eof`.
+    //
+    // It used to be unconditional, because Anvil spawned the bridge as its
+    // child with stdin piped: the host dying closed the pipe, and without this
+    // the bridge was orphaned. ADR-0046 removed that spawning, and the
+    // mechanism then did the opposite of its job — started from a terminal or
+    // a script, stdin is at EOF immediately and the bridge printed
+    // «listening» and died on the next line. Which is exactly how this was
+    // found: the sequence said connection refused while the log said the
+    // bench was up.
+    //
+    // It stays because whoever spawns a bridge as a child still needs it —
+    // the Sequence Editor will, to bring a bench up for authoring — and it is
+    // off by default because a bench a person starts must outlive the
+    // terminal that started it.
+    if args.exit_on_eof {
+        let current_stdin = std::io::stdin();
+        let _ = thread::spawn(move || {
+            let mut buf = [0u8; 1];
+            while let Ok(n) = std::io::Read::read(&mut current_stdin.lock(), &mut buf) {
+                if n == 0 {
+                    std::process::exit(0);
+                }
             }
-        }
-    });
+        });
+    }
 
     // The server does not finish on its own (a loop serving requests). The
     // host kills the process when the sequence ends; by hand, Ctrl-C.
@@ -1494,5 +1524,26 @@ mod contract_tests {
             assert_eq!(back.name, "p");
             assert_eq!(named_to_proto(&back), there);
         }
+    }
+
+    /// ADR-0046: salir al cerrarse stdin es **opcional**.
+    ///
+    /// Era incondicional, y tenía sentido mientras Anvil lo lanzaba como hijo
+    /// con stdin entubado: si el host moría, el puente se quedaba huérfano.
+    /// Sin ese padre, el mecanismo hace lo contrario de su trabajo — arrancado
+    /// desde una terminal o un script, stdin está en EOF ya, y el puente
+    /// imprime «listening» y se muere en la línea siguiente.
+    ///
+    /// Encontrado corriéndolo: la secuencia decía «connection refused» y el
+    /// log del banco decía que estaba escuchando.
+    #[test]
+    fn salir_al_cerrar_stdin_es_opcional_y_por_defecto_no() {
+        let d = parse_args_de(&["--modules", "/tmp"]).unwrap();
+        assert!(
+            !d.exit_on_eof,
+            "un banco que arranca una persona tiene que sobrevivir a su terminal"
+        );
+        let c = parse_args_de(&["--modules", "/tmp", "--exit-on-eof"]).unwrap();
+        assert!(c.exit_on_eof, "y quien lo lanza como hijo puede pedirlo");
     }
 }

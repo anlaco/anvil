@@ -748,15 +748,13 @@ pub enum TipoPaso {
 /// the executor name a step declares in `DefinicionPaso.ejecutor`, which is
 /// required on every step that calls one: there is no default executor
 /// (ADR-0041). The engine does not know what is behind each endpoint.
+/// One variant, on purpose. ADR-0046 left a single kind of executor — an
+/// address — and this stays an enum rather than collapsing into a struct
+/// because what an executor *is* has changed twice already (the embedded one
+/// went with ADR-0041, `Wasm` with ADR-0046) and the next kind, if there is
+/// one, should cost a variant and not a refactor of every `match`.
 #[derive(Debug, Clone, PartialEq)]
 pub enum TipoEjecutor {
-    /// Módulo `.wasm` propio que el **host** carga por path en runtime
-    /// (RF-36.2, M5-ext.2, ADR-0013). Es una
-    /// **directiva de carga para el host** (ADR-0014): el cargador la valida
-    /// al cargar (el path debe existir), el host la instancia y la expone
-    /// como `grpc` (override `--executor`); el motor **nunca la ejecuta**
-    /// (si llega sin traducir, `Error::EjecutorWasmSinHost`).
-    Wasm { path: String },
     /// Ejecutor de lenguaje distribuido (Python, …) accesible por gRPC
     /// (RF-36.1). `host:puerto` puede ser no-loopback **sólo si se declara**
     /// en el YAML (relajación acotada del loopback de ADR-0011).
@@ -1658,17 +1656,10 @@ mod tests {
         );
     }
 
-    /// M5-ext.1: both variants of `TipoEjecutor` are built.
+    /// ADR-0046: one variant, and it is an address. The test that built two
+    /// went with `Wasm`.
     #[test]
-    fn tipo_ejecutor_dos_variantes() {
-        assert_eq!(
-            TipoEjecutor::Wasm {
-                path: "./p.wasm".into()
-            },
-            TipoEjecutor::Wasm {
-                path: "./p.wasm".into()
-            }
-        );
+    fn un_ejecutor_es_una_direccion() {
         assert_eq!(
             TipoEjecutor::Grpc {
                 host: "127.0.0.1".into(),

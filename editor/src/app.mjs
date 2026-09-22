@@ -1590,7 +1590,7 @@ function renderModuleTab(body, ctx) {
     "Executor",
     pathRow(
       elegirEjecutor,
-      [["Add an executor…", GLYPH.browse, () => addExecutorFromDisk()]],
+      [["Declare an executor", GLYPH.create, () => declaraEjecutor()]],
       [
         ["Declare a new executor", GLYPH.create],
         ["Edit this executor", GLYPH.edit],
@@ -1600,11 +1600,7 @@ function renderModuleTab(body, ctx) {
   );
   resolved(
     head,
-    executor
-      ? executor.type === "grpc"
-        ? `${executor.host}:${executor.port}`
-        : (executor.path ?? "no path declared")
-      : "this step names no executor",
+    executor ? `${executor.host}:${executor.port}` : "this step names no executor",
   );
 
   // TestStand's VI Path, and its button that picks a VI **belonging to the
@@ -1692,52 +1688,29 @@ function renderModuleTab(body, ctx) {
 // ---------------------------------------------------------------------------
 
 /**
- * TestStand's *"or browse for a VI anywhere on the system"*, as Anvil has to
- * mean it.
+ * TestStand's *"or browse for a VI anywhere on the system"*, as ADR-0046 made
+ * it mean.
  *
- * A step must name an executor — there is none built into anvil to fall back
- * on (ADR-0041) — so picking a file cannot just fill in a path: it has to
- * **declare a department**. That is the one place this differs from LabVIEW,
- * and it is what makes the rest work, because from then on the module list and
- * the signatures come from asking that department.
- *
- * `type: wasm` by default. It is the only one that needs nothing installed on
- * the machine: Python needs Python, a `.vi` needs LabVIEW, C# needs to have
- * been compiled. On a bench where nothing may be installed, that is the
- * difference between working and not.
+ * A step must name an executor (ADR-0041), and an executor is an address — so
+ * there is no file to browse for here any more. Declaring one is naming where
+ * it listens; bringing that address up is the `dev:` block's job, and starting
+ * it is the editor's, not the sequence's.
  */
-async function addExecutorFromDisk() {
-  if (!inShell()) {
-    status("fail", "a browser cannot read the disk; open this in the desktop app to add an executor");
-    return;
-  }
-  let elegido;
-  try {
-    elegido = await window.anvil.pickExecutor(state.handle?.path ?? null);
-  } catch (e) {
-    status("fail", String(e?.message ?? e));
-    return;
-  }
-  if (!elegido) return;
-
-  // Named after the folder it sits in, which is the department (ADR-0027), and
-  // made unique rather than silently replacing one that is already declared.
-  const ya = new Set(state.doc.executors().map((e) => e.name));
-  let nombre = elegido.name || "department";
+function declaraEjecutor() {
+  const doc = state.doc;
+  if (!doc) return;
+  const ya = new Set(doc.executorNames());
+  let nombre = "bench";
   let n = 1;
-  while (ya.has(nombre)) nombre = `${elegido.name}_${++n}`;
+  while (ya.has(nombre)) nombre = `bench_${++n}`;
+  doc.addExecutor(nombre, "127.0.0.1", 9101);
 
-  state.doc.addExecutor(nombre, "wasm", elegido.path);
-  // The step being edited is almost certainly why someone went looking.
   const sel = state.selected;
-  if (sel && CALLS_AN_EXECUTOR.includes(state.doc.steps(sel.phase)[sel.index]?.type)) {
-    state.doc.setStepField(sel.phase, sel.index, "executor", nombre);
+  if (sel && CALLS_AN_EXECUTOR.includes(doc.steps(sel.phase)[sel.index]?.type)) {
+    doc.setStepField(sel.phase, sel.index, "executor", nombre);
   }
   afterEdit();
-  status("busy", `executor '${nombre}' declared — asking it what it serves…`);
-  // Save first: `describe` loads the sequence from disk, so an unsaved
-  // declaration is one the engine cannot see.
-  if (!state.dirty) await loadCatalog();
+  status("pass", `executor '${nombre}' declared at 127.0.0.1:9101 — point it where yours listens`);
 }
 
 /**
@@ -2473,17 +2446,16 @@ function renderExecutors(doc) {
     ui.variables.append(row);
   }
 
+  // One kind since ADR-0046, so there is nothing to choose: the dropdown that
+  // used to pick `wasm` or `grpc` had one option left.
   const add = document.createElement("div");
   add.className = "assign-row add-var";
-  const kind = select(["wasm", "grpc"], "wasm", () => {});
   add.append(
-    kind,
-    action("Declare", () => {
+    action("Declare an executor", () => {
       let n = 1;
       let name = "bench";
       while (doc.executorNames().includes(name)) name = `bench_${++n}`;
-      if (kind.value === "grpc") doc.addExecutor(name, "grpc", "127.0.0.1", 9101);
-      else doc.addExecutor(name, "wasm", "departamento/dist/anvil-exec-wasm");
+      doc.addExecutor(name, "127.0.0.1", 9101);
       afterEdit();
     }),
   );

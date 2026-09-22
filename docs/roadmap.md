@@ -315,6 +315,21 @@ se implementa en M6:
 3. **Looping por paso**, **Post Actions** (goto/terminate según veredicto) y
    **Additional Results**.
 
+## M7 — Un solo tipo de ejecutor · ✅ (hecho)
+
+[ADR-0046](adr/0046-an-executor-is-an-address-and-nothing-brings-one-up.md).
+Un ejecutor es **una dirección**: `type: wasm` desaparece y nada arranca uno
+por ti. Cómo levantarlo en una máquina de desarrollo va en la sección opcional
+**`dev:`**, que el motor no lee y que una secuencia de producción no trae.
+
+Lo que se gana: una secuencia deja de llevar dentro el binario de nuestro
+ejecutor —la queja que arrancó todo esto—, reescribir un departamento de WASM a
+Python no cambia una línea, y desaparece del host toda la maquinaria de
+arranque. Lo que cuesta: dos órdenes donde había una, y todas las secuencias
+escritas antes de 0.9 dejan de cargar, con un error que dice qué escribir.
+
+Enmienda ADR-0011, 0013, 0014, 0023 y parte de 0027.
+
 ## Distribución de los ejecutores de lenguaje — **decisión pendiente**
 
 Anotado el 2026-08-27, sin decidir.

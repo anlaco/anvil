@@ -46,22 +46,26 @@ test("a relative path folds into the mounted root, and cannot climb out of it", 
   assert.equal(joinRelative("", "/abs/x.yaml"), null);
 });
 
-test("references are the wasm executors and the calls by path, inline subsequences included", () => {
-  const refs = referencesOf(`
-name: s
-executors:
-  - { name: dmm, type: wasm, path: dept/anvil-exec-wasm }
-  - { name: py, type: grpc, host: 127.0.0.1, port: 9101 }
-subsequences:
-  inner:
-    main:
-      - { name: c, type: sequence_call, sequence: ./deep.yaml }
-main:
-  - { name: a, type: sequence_call, sequence: inner }
-  - { name: b, type: sequence_call, sequence: ./other.yseq }
-`);
-  assert.deepEqual(refs.executors, ["dept/anvil-exec-wasm"]);
-  assert.deepEqual(refs.sequences.sort(), ["./deep.yaml", "./other.yseq"]);
+test("references are the calls by path, inline subsequences included", async () => {
+  // Only sequences now: ADR-0046 removed `type: wasm`, so there is no executor
+  // binary for the loader to check and none for this to mount.
+  const text = [
+    "name: s",
+    "executors:",
+    "  - { name: banco, type: grpc, host: 127.0.0.1, port: 9101 }",
+    "main:",
+    "  - { name: a, type: sequence_call, sequence: ./otra.yseq }",
+    "  - { name: b, type: sequence_call, sequence: inline }",
+    "subsequences:",
+    "  inline:",
+    "    main:",
+    "      - { name: c, type: sequence_call, sequence: sub/tercera.yseq }",
+    "",
+  ].join("\n");
+
+  const refs = referencesOf(text);
+  assert.deepEqual(refs.sequences, ["./otra.yseq", "sub/tercera.yseq"]);
+  assert.equal(refs.executors, undefined, "an executor references no file any more");
 });
 
 test("with no reader, only the open document is mounted", async () => {
@@ -69,10 +73,14 @@ test("with no reader, only the open document is mounted", async () => {
   assert.deepEqual(Object.keys(await gatherFiles("basica.yseq", text)), ["basica.yseq"]);
 });
 
-test("the demo bench's binary is mounted, and basica validates as the binary says", async () => {
+test("basica validates with nothing mounted but itself", async () => {
+  // It used to need the demo bench's binary mounted, because `type: wasm` made
+  // the loader check one existed. ADR-0046 removed that: an executor is an
+  // address and the loader touches no binary, so the only file this sequence
+  // needs is itself.
   const text = await readFile(join(EJEMPLOS, "basica.yseq"), "utf8");
   const files = await gatherFiles("basica.yseq", text, diskReader(EJEMPLOS));
-  assert.ok("departamento/dist/anvil-exec-wasm" in files, Object.keys(files).join(", "));
+  assert.deepEqual(Object.keys(files), ["basica.yseq"]);
 
   const { exitCode, stderr } = await run({ args: ["basica.yseq", "--validate"], files, load });
   assert.equal(exitCode, 0, stderr);
@@ -87,11 +95,6 @@ test("an external subsequence is mounted, and so is what it references", async (
   assert.equal(exitCode, 0, stderr);
 });
 
-test("a Windows binary is mounted under its .exe name", async () => {
-  const text = "name: s\nexecutors:\n  - { name: d, type: wasm, path: dist/anvil-exec-wasm }\nmain:\n  - { name: d/x, type: pass_fail, module: d/x, executor: d }\n";
-  const files = await gatherFiles("s.yaml", text, mapReader({ "dist/anvil-exec-wasm.exe": "" }));
-  assert.deepEqual(Object.keys(files).sort(), ["dist/anvil-exec-wasm.exe", "s.yaml"]);
-});
 
 test("a missing file is not invented, and a cycle ends", async () => {
   const a = "name: a\nmain:\n  - { name: c, type: sequence_call, sequence: ./b.yaml }\n  - { name: m, type: sequence_call, sequence: ./missing.yaml }\n";

@@ -18,7 +18,7 @@
 
 name: regresion_csv_nombre
 executors:
-  - { name: demo, type: wasm, path: ../../../ejemplos/departamento/dist/anvil-exec-wasm }
+  - { name: demo, type: grpc, host: 127.0.0.1, port: 9101 }
 main:
   - name: demo/check_led
     type: pass_fail

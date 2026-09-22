@@ -24,9 +24,77 @@ something may have broken: Cargo treats `0.6` and `0.7` as incompatible, and
 `anvil-step = "0.6"` would have to be edited by hand for nothing. The rule
 applies from 0.6.0 on; by it, 0.6.0 itself would have been 0.5.1.
 
-## [Unreleased]
+## [0.9.0] — 2026-09-22
+
+**Sequences written for 0.8 do not load.** An executor is an address now, and
+nothing starts one for you: `type: wasm` is gone, the loader says what to write
+instead, and trying the examples takes two commands where it took one.
+
+### Changed
+
+- **One kind of executor, and it is an address**
+  ([ADR-0046](docs/adr/0046-an-executor-is-an-address-and-nothing-brings-one-up.md)).
+
+  ```yaml
+  executors:
+    - { name: banco, type: grpc, host: 192.168.1.50, port: 9101 }
+  ```
+
+  That is what a production sequence carries: *there is an executor there*. Not
+  what technology serves it, not where its code lives, not how it was started.
+  Rewriting a department from WASM to Python changes no sequence.
+
+  `type: wasm` was never a kind of executor. The engine has always refused one
+  (`crates/motor/src/lib.rs`: *«el motor nunca lo ejecuta»*) — the **host**
+  spawned the bridge and handed the engine a synthetic `--executor`. It was a
+  launch instruction wearing a declaration's clothes, and it put a copy of our
+  binary inside every project, in a file that goes to git.
+
+- **Nothing brings an executor up during a run.** The host's spawn path, its
+  dedup by path, its readiness polling and the synthetic overrides are all
+  gone. To try the examples:
+
+  ```sh
+  ./ejemplos/arrancar-banco.sh &
+  anvil ejemplos/subsecuencia.yseq
+  ```
+
+  Two commands, and the first one is the truth: every real bench has that
+  server started at boot or by a service manager, possibly on another machine.
+  The one-command demo was the only place in Anvil where an executor appeared
+  by itself, and whoever learned there had to unlearn it.
+
+  `--executor name=host:port` (RF-36.3) re-points a sequence from a laptop's
+  loopback to a factory address without editing it. It has existed since
+  M5-ext.1 for exactly this.
+
+- **`anvil-exec-wasm` gained `--exit-on-eof`, and stopped doing it by
+  default.** It exited when stdin closed, which was right while Anvil spawned
+  it as a child: the host dying closed the pipe and the bridge did not outlive
+  it. With no parent the mechanism does the opposite of its job — started from
+  a terminal, stdin is at EOF immediately, so it printed «listening» and died
+  on the next line. Found by running it: the sequence said *connection refused*
+  while the bench's log said it was up.
 
 ### Added
+
+- **An optional `dev:` section**, which the engine never reads.
+
+  ```yaml
+  dev:
+    banco:
+      runtime: python    # a logical name, resolved where executors are installed
+      code: ./pasos      # your steps, relative to this file
+  ```
+
+  How to bring an executor up on a development machine, for tooling to use. A
+  production sequence does not carry it. `runtime` is a **logical name and
+  never a path**, and `code` is relative to the sequence — between them, there
+  is nothing in the block that differs from one machine to the next, which is
+  what makes it safe in a file everyone commits.
+
+  It is parsed with `deny_unknown_fields` so a typo in it is still caught: the
+  strictness that produces DIAG-5's *«¿querías 'main'?»* was not worth a hole.
 
 - **A decision on how a run is stopped**
   ([ADR-0045](docs/adr/0045-terminating-a-run-is-a-request-checked-between-steps.md)),
@@ -48,6 +116,24 @@ applies from 0.6.0 on; by it, 0.6.0 itself would have been 0.5.1.
   available from outside; a button for it would dress up "leave the bench
   however it is" as something supported. Its cell in the parity inventory moves
   from `todo` to `never`.
+
+### Removed
+
+- **`type: wasm`, and `path:` on an executor.** Every sequence written before
+  this says it, so the loader keeps **accepting** `path` in order to refuse it
+  with the two lines that replace it and the command that starts the bench —
+  otherwise serde would reject it first with «unknown field 'path'», which
+  tells nobody anything.
+
+- **The load-time check that a WASM component cannot hold an object
+  reference** (ADR-0022 §8). The loader could make it because `type: wasm` told
+  it what served an endpoint; it cannot now. It is not lost, and where it
+  moved is more general: an executor that cannot hold objects publishes an
+  empty `lifetime`, and the engine already warns about references declared from
+  one of those — for **any** such executor. What is given up is fail-fast.
+
+- **The editor no longer mounts executor binaries** for the engine in the tab
+  (`neighbours.mjs`): there is no binary for the loader to check.
 
 ## [0.8.0] — 2026-09-20
 
@@ -1450,6 +1536,7 @@ primera campaña de betatesting externa.
 - *Private vulnerability reporting* no puede activarse mientras el
   repositorio sea privado; hasta entonces vale el correo de `SECURITY.md`.
 
+[0.9.0]: https://github.com/anlaco/anvil/releases/tag/v0.9.0
 [0.8.0]: https://github.com/anlaco/anvil/releases/tag/v0.8.0
 [0.7.0]: https://github.com/anlaco/anvil/releases/tag/v0.7.0
 [0.6.3]: https://github.com/anlaco/anvil/releases/tag/v0.6.3

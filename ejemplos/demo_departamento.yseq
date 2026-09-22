@@ -20,12 +20,14 @@
 
 name: demo_departamento
 executors:
-  # `path` is **the executor's own binary** (ADR-0027). Where its modules are
-  # is its business: it finds them next to itself, so no build path of ours
-  # ends up in this file.
+  # An executor is an address (ADR-0046). What technology serves it, where its
+  # modules live and how it was started are not this file's business — which is
+  # why rewriting the department from WASM to Python would not change a line
+  # here.
   - name: instrumentos
-    type: wasm
-    path: departamento/dist/anvil-exec-wasm
+    type: grpc
+    host: 127.0.0.1
+    port: 9101
 
 main:
   # Two modules, the same step name, two different instruments. This is the
@@ -52,3 +54,10 @@ main:
       comparison: GELE
       low: 23.0
       high: 25.0
+
+# ADR-0046: opcional, y el motor la ignora. Dice cómo levantar ese ejecutor
+# en tu máquina para diseñar y depurar; en producción este bloque no está.
+dev:
+  instrumentos:
+    runtime: wasm
+    code: departamento/dist

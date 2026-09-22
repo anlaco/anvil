@@ -102,10 +102,10 @@ IPs only if declared. There is no default executor: a step that calls one
 names it (ADR-0041). The **language executors** (`executors/`, Apache-2.0)
 serve steps with their ecosystem's native gRPC.
 
-**M5-ext.2 (ADR-0014/0015):** the **`.wasm` module loader by path** (the
-`.vi` model of TestStand) is the **host's** job: for every `type: wasm` in
-the YAML it spawns the **bridge** `anvil-exec-wasm` (a file next to the
-`anvil` binary since ADR-0023 — no longer embedded), which loads the user's
+**M5-ext.2 (ADR-0014/0015), superseded by ADR-0046:** the host used to spawn
+the **bridge** `anvil-exec-wasm` for every `type: wasm` in the YAML. That type
+is gone and so is the spawning — an executor is an address, and whoever runs a
+bench puts something there. The bridge is still the piece that loads the user's
 `.wasm` component (WIT interface `anvil:step`: a `run` function, no gRPC, no
 protobuf) and translates gRPC↔function with tonic. The bridge runs with an
 empty WASI sandbox (the component is a pure function). The engine only sees

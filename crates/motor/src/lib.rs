@@ -41,11 +41,9 @@ use std::collections::HashMap;
 /// La tabla `conexiones` se abre en `desde_programa` y cada `Grpc`
 /// declarado tiene su `Cliente` propio.
 pub struct Motor {
-    /// Conexiones abiertas, keyed por nombre de ejecutor. Un
-    /// `TipoEjecutor::Wasm` **no** abre conexión: el
-    /// motor nunca lo ejecuta (ADR-0014) — el host lo traduce a `grpc`
-    /// (override `--executor`) antes de que llegue aquí; si llega sin
-    /// traducir, `Error::EjecutorWasmSinHost`.
+    /// Conexiones abiertas, keyed por nombre de ejecutor. Una por cada
+    /// ejecutor declarado: desde ADR-0046 sólo hay una clase y es una
+    /// dirección, así que aquí ya no hay nada que traducir ni que rechazar.
     conexiones: HashMap<String, Cliente>,
     /// The life each executor was on when the run started, for the endpoints
     /// that publish one (ADR-0022 §6). Filled by
@@ -84,13 +82,6 @@ pub enum Error {
         destino: String,
         causa: net::Error,
     },
-    /// El paso declara `ejecutor: <nombre>` con `tipo: wasm` y llegó al motor
-    /// **sin traducir**. Eso sólo pasa si se corre el guest motor suelto
-    /// (`wasmtime run anvil.wasm`) sin el host: el cargador de `.wasm` por
-    /// path vive en el host (M5-ext.2, ADR-0014), que lo instancia y lo
-    /// expone como `grpc` (override `--executor`). El motor no ejecuta
-    /// `Wasm` nunca.
-    EjecutorWasmSinHost(String),
 }
 
 impl std::fmt::Display for Error {
@@ -112,12 +103,6 @@ impl std::fmt::Display for Error {
                 destino,
                 causa,
             } => write!(f, "executor '{ejecutor}' at {destino}: {causa}"),
-            Error::EjecutorWasmSinHost(n) => write!(
-                f,
-                "el ejecutor '{n}' es 'wasm': el cargador de `.wasm` por path vive en \
-                 anvil-host (M5-ext.2); corre con `./anvil <secuencia.yaml>` en vez de \
-                 `wasmtime run anvil.wasm`"
-            ),
         }
     }
 }
@@ -145,15 +130,15 @@ impl Motor {
     pub fn desde_programa(programa: &Programa) -> Result<Self, Error> {
         let mut conexiones = HashMap::new();
         for (nombre, def) in &programa.ejecutores {
-            if let TipoEjecutor::Grpc { host, puerto } = &def.tipo {
-                let cliente =
-                    Cliente::conectar(host, *puerto).map_err(|causa| Error::NoSeConecto {
-                        ejecutor: nombre.clone(),
-                        destino: format!("{host}:{puerto}"),
-                        causa,
-                    })?;
-                conexiones.insert(nombre.clone(), cliente);
-            }
+            // `let`, not `if let`: since ADR-0046 there is one kind and every
+            // declared executor opens a connection. The compiler says so.
+            let TipoEjecutor::Grpc { host, puerto } = &def.tipo;
+            let cliente = Cliente::conectar(host, *puerto).map_err(|causa| Error::NoSeConecto {
+                ejecutor: nombre.clone(),
+                destino: format!("{host}:{puerto}"),
+                causa,
+            })?;
+            conexiones.insert(nombre.clone(), cliente);
         }
         Ok(Motor {
             conexiones,
@@ -162,9 +147,8 @@ impl Motor {
     }
 
     /// Resuelve el endpoint de un paso (M5-ext.1, RF-36.3): sin `ejecutor`
-    /// declarado → error (ADR-0041); `Grpc` →
-    /// su nombre (clave de `conexiones`); `Wasm` → error (M5-ext.2: el motor
-    /// no ejecuta `Wasm`; el host lo traduce a `grpc` antes de llegar aquí).
+    /// declarado → error (ADR-0041); declarado → su nombre, que es la clave de
+    /// `conexiones`; no declarado → error.
     ///
     /// La regla de routing vive en el cargador ([`cargador::resolver_endpoint`])
     /// y aquí sólo se traduce a los errores del motor: el cargador la necesita
@@ -178,7 +162,6 @@ impl Motor {
         match cargador::resolver_endpoint(def.ejecutor.as_deref(), &programa.ejecutores) {
             cargador::Endpoint::SinEjecutor => Err(Error::PasoSinEjecutor(def.nombre.clone())),
             cargador::Endpoint::Grpc(n) => Ok(n),
-            cargador::Endpoint::Wasm(n) => Err(Error::EjecutorWasmSinHost(n.to_string())),
             cargador::Endpoint::NoDeclarado(n) => Err(Error::EjecutorNoDeclarado(n.to_string())),
         }
     }
@@ -2329,15 +2312,6 @@ mod tests {
                         },
                     },
                 ),
-                (
-                    "mi_paso".to_string(),
-                    DefinicionEjecutor {
-                        nombre: "mi_paso".into(),
-                        tipo: TipoEjecutor::Wasm {
-                            path: "./p.wasm".into(),
-                        },
-                    },
-                ),
             ]),
         }
     }
@@ -2354,19 +2328,6 @@ mod tests {
         let mut p = DefinicionPaso::nuevo("b", 1);
         p.ejecutor = Some("python".into());
         assert_eq!(Motor::resolver_endpoint(&p, &programa).unwrap(), "python");
-    }
-
-    #[test]
-    fn resolver_endpoint_wasm_es_error_sin_host() {
-        let programa = programa_ruteado();
-        let mut p = DefinicionPaso::nuevo("x", 1);
-        p.ejecutor = Some("mi_paso".into());
-        let err = Motor::resolver_endpoint(&p, &programa).unwrap_err();
-        assert!(matches!(err, Error::EjecutorWasmSinHost(ref n) if n == "mi_paso"));
-        assert!(
-            err.to_string().contains("anvil-host"),
-            "apunta al host: {err}"
-        );
     }
 
     #[test]

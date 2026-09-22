@@ -30,11 +30,9 @@
 //! (`socket_addr_check → is_loopback`), except for the non-loopback IPs
 //! declared in `executors:` (ADR-0011, bounded relaxation).
 
-use std::collections::{HashMap, HashSet};
-use std::net::{IpAddr, TcpListener, TcpStream};
+use std::collections::HashSet;
+use std::net::{IpAddr, TcpListener};
 use std::path::{Path, PathBuf};
-use std::thread;
-use std::time::Duration;
 use wasmtime::component::{Component, Linker, ResourceTable};
 use wasmtime::{Engine, Store};
 use wasmtime_wasi::{DirPerms, FilePerms, WasiCtx, WasiCtxBuilder, WasiCtxView, WasiView};
@@ -88,58 +86,6 @@ const FLAGS_CON_VALOR: [&str; 5] = [
     "--limits",
     "--executor",
 ];
-
-/// If the engine is going to exit without invoking a step, **nothing that
-/// serves steps** should come up: none of the declared `type: wasm`
-/// executors. Starting them announces their modules and port ahead of the
-/// help or the verdict. Covers
-/// what is decided **by the arguments alone** —`-h`, `-V`, `--validate`
-/// (which loads without connecting) and a missing sequence—; an unknown flag
-/// does not, because the host does not parse the command line (that is the
-/// guest's job) and duplicating the full flag set here would be a worse
-/// trade.
-///
-/// Issue #22: this existed from the start, but it only guarded the executor
-/// then built into anvil. The `.wasm` loop never consulted it, so `anvil s.yaml
-/// --validate` with a declared `tipo: wasm` spawned `anvil-exec-wasm`,
-/// which bound an ephemeral port and printed two lines — exactly what the
-/// manual promises `--validate` does not do, and in the scenario (CI, no
-/// hardware) where it matters most.
-///
-/// Whether the `.wasm` **exists** is still checked under `--validate`: that
-/// is `EjecutorYaml::a_definicion`'s job in the loader, a file check that
-/// needs neither instantiating wasmtime nor opening anything.
-fn va_a_ejecutar_pasos(args: &[String]) -> bool {
-    // ADR-0021: `--validate --with-executors` does not run a single step, but
-    // it does **ask** the executors which steps they serve, and asking
-    // requires connecting. The only exception, and an explicit one: whoever
-    // typed it on the command line asked for it. Without the flag, `--validate`
-    // still brings nothing up (issue #22).
-    let pregunta_catalogos = args.iter().any(|a| a == "--with-executors");
-    // ADR-0044: `anvil describe <secuencia>` tampoco ejecuta un paso, y
-    // también necesita los ejecutores arriba para poder preguntarles. Es el
-    // mismo caso que `--validate --with-executors`, y por la misma razón:
-    // quien lo tecleó pidió que se conectara. Sin esto los `type: wasm` no se
-    // arrancan y el catálogo sale vacío — un falso «no sirve nada».
-    let args = sin_subcomando(args);
-    let mut it = args.iter();
-    let mut hay_ruta = false;
-    while let Some(a) = it.next() {
-        match a.as_str() {
-            "--help" | "-h" | "--version" | "-V" => return false,
-            "--validate" if !pregunta_catalogos => return false,
-            // `--validate --with-executors` does not exit here: the path still
-            // counts, like any run.
-            "--validate" => {}
-            f if FLAGS_CON_VALOR.contains(&f) => {
-                it.next();
-            }
-            f if !f.starts_with('-') => hay_ruta = true,
-            _ => {}
-        }
-    }
-    hay_ruta
-}
 
 /// The sequence's path: the first **positional** argument, skipping flags and
 /// their values. `None` if there is none, or if `--help`/`--version` was
@@ -214,11 +160,12 @@ fn ips_no_loopback_declaradas(programa: &modelo::Programa) -> HashSet<IpAddr> {
     programa
         .ejecutores
         .values()
-        .filter_map(|def| match &def.tipo {
-            modelo::TipoEjecutor::Grpc { host, .. } => {
-                host.parse::<IpAddr>().ok().filter(|ip| !ip.is_loopback())
-            }
-            _ => None,
+        .filter_map(|def| {
+            // One kind since ADR-0046, so there is nothing left to filter out
+            // here — only hosts that do not parse as an IP (`localhost`) and
+            // the loopback ones.
+            let modelo::TipoEjecutor::Grpc { host, .. } = &def.tipo;
+            host.parse::<IpAddr>().ok().filter(|ip| !ip.is_loopback())
         })
         .collect()
 }
@@ -238,136 +185,6 @@ fn correr_guest(engine: &Engine, wasi: WasiCtx, bytes: &[u8]) -> wasmtime::Resul
     let command =
         wasmtime_wasi::p2::bindings::sync::Command::instantiate(&mut store, &component, &linker)?;
     command.wasi_cli_run().call_run(&mut store)
-}
-
-/// A `.wasm` executor loaded by path (M5-ext.2, ADR-0015): the host spawns
-/// the **bridge** (`anvil-exec-wasm`, a file next to this binary —
-/// ADR-0023), which loads the user's `.wasm` component (the `anvil:paso`
-/// interface, a `run` function) and serves it as a gRPC executor on
-/// loopback. The user's `.wasm` is NOT a gRPC server: it is a pure function;
-/// the bridge translates gRPC↔function.
-///
-/// `puerto` is the assigned (ephemeral) port, for readiness and to expose it
-/// to the engine. `_child` is kept alive to preserve the stdin pipe: if the
-/// host dies, the pipe closes → EOF → the bridge exits on its own (no
-/// orphans).
-struct EjecutorWasm {
-    nombre: String,
-    path: String,
-    puerto: u16,
-    _child: std::process::Child,
-}
-
-/// Spawns the bridge for a `.wasm` executor declared by path (M5-ext.2,
-/// ADR-0015; ADR-0025 for the directory case):
-///
-/// 1. Reserves an **ephemeral** loopback port (`bind 127.0.0.1:0`).
-/// 2. Looks up the bridge binary next to this one (ADR-0023).
-/// 3. Spawns `anvil-exec-wasm --wasm <file> --port <port>` — or
-///    `--modules <dir>` when the path is a directory — with stdin piped: the
-///    bridge exits on its own if the host dies (EOF).
-///
-/// **The path decides which of the two the executor is** (ADR-0025 §D2): a
-/// file serves one module and its steps keep their bare names, which is what
-/// every sequence written before ADR-0025 says; a directory serves every
-/// `*.wasm` in it and its steps are named `<module>/<step>`. Deriving it from
-/// what the YAML points at is what keeps the two modes from blending.
-///
-/// The bridge is the one loading the components into its own Store (empty
-/// WASI sandbox: no files, no network — a component is a pure function).
-/// The executor binary a `path:` names, as it is on this platform: a sequence
-/// says `dist/anvil-exec-wasm` and on Windows the file is
-/// `dist/anvil-exec-wasm.exe` (ADR-0041 §5). A path that already names a file
-/// is taken as written.
-fn binario_de_plataforma(path: &Path, exe_suffix: &str) -> PathBuf {
-    if exe_suffix.is_empty() || path.is_file() {
-        return path.to_path_buf();
-    }
-    cargador::con_sufijo(path, exe_suffix)
-}
-
-fn instanciar_wasm(nombre: &str, path: &Path) -> Result<EjecutorWasm, String> {
-    // El tropiezo nº1 viniendo de antes de ADR-0027: apuntar `path` al `.wasm`.
-    // Es un fichero, así que pasaría cualquier comprobación de existencia, y
-    // `exec` fallaría con «Exec format error» — que manda a mirar el toolchain
-    // en vez de la línea del YAML que está mal.
-    if path.extension().and_then(|e| e.to_str()) == Some("wasm") {
-        return Err(format!(
-            "el ejecutor '{nombre}' declara 'path: {}', que es un módulo '.wasm'. El \
-             'path' de un ejecutor 'wasm' es **el binario del ejecutor** (por ejemplo \
-             'mi-departamento/anvil-exec-wasm'), no un módulo ni la carpeta de \
-             módulos: los módulos los encuentra el propio ejecutor, junto a su \
-             binario, y el paso los nombra con '<módulo>/<paso>'",
-            path.display()
-        ));
-    }
-    let path = &binario_de_plataforma(path, std::env::consts::EXE_SUFFIX);
-    if !path.is_file() {
-        return Err(format!(
-            "el ejecutor '{nombre}' declara 'path: {}', que no es un fichero: se \
-             espera el binario del ejecutor (por ejemplo \
-             'mi-departamento/anvil-exec-wasm')",
-            path.display()
-        ));
-    }
-
-    // Reservar un puerto efímero de loopback para el puente.
-    let listener = TcpListener::bind("127.0.0.1:0")
-        .map_err(|e| format!("no se pudo reservar puerto para el ejecutor '{nombre}': {e}"))?;
-    let puerto = listener
-        .local_addr()
-        .map_err(|e| {
-            format!("no se pudo leer el puerto reservado para el ejecutor '{nombre}': {e}")
-        })?
-        .port();
-    drop(listener);
-
-    // **El binario que se lanza es el que declara la secuencia** (ADR-0027),
-    // no el que acompaña a `anvil`. Sólo se le pasa el puerto: dónde están sus
-    // módulos lo sabe él, junto a su propio binario, y eso es lo que mantiene
-    // la ruta de los módulos fuera de la partitura.
-    let child = std::process::Command::new(path)
-        .args(["--port", &puerto.to_string()])
-        .stdin(std::process::Stdio::piped())
-        .spawn()
-        .map_err(|e| {
-            format!(
-                "no se pudo lanzar el ejecutor '{nombre}' ({}): {e}",
-                path.display()
-            )
-        })?;
-
-    Ok(EjecutorWasm {
-        nombre: nombre.into(),
-        path: path.display().to_string(),
-        puerto,
-        _child: child,
-    })
-}
-
-/// 10 ms polls while waiting for an executor to start listening (60 s).
-/// Generous on purpose: in a **debug** build wasmtime compiles the guest
-/// unoptimized and the executor can take tens of seconds to reach its `bind`
-/// (in release it is immediate). The timeout only runs out when something is
-/// really wrong, so overshooting costs nothing.
-const SONDEOS_ARRANQUE: u32 = 6000;
-
-/// Waits for the bridge of the `.wasm` executor to listen on its port (same
-/// polling pattern as `wait_executor`). Timeout is per module; it fails with
-/// a clear message naming the executor.
-fn esperar_wasm(exec: &EjecutorWasm) -> Result<(), String> {
-    let addr = format!("127.0.0.1:{}", exec.puerto);
-    for _ in 0..SONDEOS_ARRANQUE {
-        if let Ok(c) = TcpStream::connect(&addr) {
-            drop(c); // conexión de prueba: se cierra; el puente la descarta.
-            return Ok(());
-        }
-        thread::sleep(Duration::from_millis(10));
-    }
-    Err(format!(
-        "el ejecutor '{}' ({}) no empezó a escuchar en {addr}",
-        exec.nombre, exec.path
-    ))
 }
 
 fn main() {
@@ -391,7 +208,6 @@ fn main() {
     // flags before the sequence); if it is missing, or only help was asked
     // for, there is nothing to pre-scan and the engine guest takes over.
     let mut ips_no_loopback: HashSet<IpAddr> = HashSet::new();
-    let mut programa: Option<modelo::Programa> = None;
     let ruta_secuencia = ruta_de_secuencia(&args_motor);
     if let Some(ruta) = ruta_secuencia.as_ref() {
         match cargador::cargar_programa_de_archivo(ruta) {
@@ -406,7 +222,6 @@ fn main() {
                     );
                     std::process::exit(1);
                 }
-                programa = Some(p);
             }
             // The engine guest re-parses the same YAML an instant later and
             // reports the error with its own wording. Repeating it here, and
@@ -432,18 +247,7 @@ fn main() {
 
     // --- M5-ext.2: instantiate the `tipo: wasm` executors declared in the
     // --- YAML and expose them to the engine as synthetic `--executor`
-    // --- overrides. The engine guest re-parses the YAML itself (ADR-0005:
-    // --- the engine is not handed an in-memory `Programa`), so the host
-    // --- cannot rewrite its model: it composes
-    // --- `--executor name=127.0.0.1:port` (M5-ext.1, which already turns
-    // --- `wasm` into `grpc` when applying it).
-    let ruta_yaml = ruta_secuencia.clone().unwrap_or_default();
-    let dir_yaml = Path::new(&ruta_yaml)
-        .parent()
-        .unwrap_or_else(|| Path::new(""))
-        .to_path_buf();
-    let mut ejecutores_wasm: Vec<EjecutorWasm> = Vec::new();
-    let mut overrides_motor: Vec<String> = Vec::new();
+    let overrides_motor: Vec<String> = Vec::new();
     // How many arguments came from the user. Everything appended past this
     // point is synthetic — the `--executor` overrides — and in bridge mode only
     // those travel: the engine in the browser supplies the
@@ -462,56 +266,14 @@ fn main() {
     // false: the guest loads the sequence, nobody started its executors, and
     // the user sees `connection-refused` without a single line saying why. The
     // host does not predict the guest's verdict.
-    let va_a_ejecutar = va_a_ejecutar_pasos(&args_motor_final);
-    if va_a_ejecutar {
-        if let Some(p) = programa.as_ref() {
-            // Deduplicate by path (two executors with the same `.wasm` → one
-            // Store).
-            let mut stores_por_path: HashMap<String, u16> = HashMap::new();
-            let mut errores: Vec<String> = Vec::new();
-            for (nombre, def) in &p.ejecutores {
-                if let modelo::TipoEjecutor::Wasm { path } = &def.tipo {
-                    // The loader already validated the path exists (fail-fast
-                    // at load); here we resolve it relative to the YAML's
-                    // directory.
-                    let ruta = cargador::normalizar_path(&dir_yaml, Path::new(path));
-                    let clave = ruta.to_string_lossy().into_owned();
-                    let puerto = if let Some(puerto) = stores_por_path.get(&clave) {
-                        *puerto
-                    } else {
-                        let exec = match instanciar_wasm(nombre, &ruta) {
-                            Ok(e) => e,
-                            Err(e) => {
-                                errores.push(e);
-                                continue;
-                            }
-                        };
-                        let puerto = exec.puerto;
-                        if let Err(e) = esperar_wasm(&exec) {
-                            errores.push(e);
-                            continue;
-                        }
-                        eprintln!(
-                            "ejecutor '{}' cargado ({} → 127.0.0.1:{})",
-                            nombre,
-                            ruta.display(),
-                            puerto
-                        );
-                        ejecutores_wasm.push(exec);
-                        stores_por_path.insert(clave, puerto);
-                        puerto
-                    };
-                    overrides_motor.push(format!("{nombre}=127.0.0.1:{puerto}"));
-                }
-            }
-            if !errores.is_empty() {
-                for e in &errores {
-                    eprintln!("{e}");
-                }
-                std::process::exit(1);
-            }
-        }
-    }
+    // ADR-0046: nothing is brought up here any more. An executor is an
+    // address, the sequence says where, and whoever runs a bench starts it —
+    // at boot, by a service manager, or by hand for the examples. The host's
+    // spawn path, its dedup by path, its readiness polling and the synthetic
+    // `--executor` overrides all went with `type: wasm`.
+    //
+    // `--executor name=host:port` stays, and it is now the only way the
+    // engine's executor table is ever rewritten: by whoever typed it.
     for o in &overrides_motor {
         args_motor_final.push("--executor".into());
         args_motor_final.push(o.clone());
@@ -617,42 +379,12 @@ fn main() {
         }
     };
 
-    // The spawned executors keep their components loaded until the host exits
-    // (preload, TestStand's default); dropping them closes their stdin, and
-    // they exit on EOF. There is no orderly shutdown in the MVP.
-    drop(ejecutores_wasm);
     std::process::exit(exit_code);
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{binario_de_plataforma, ruta_de_secuencia, rutas_de_argumentos};
-    use std::path::{Path, PathBuf};
-
-    #[test]
-    fn a_path_without_exe_resolves_to_the_windows_binary() {
-        let dir = std::env::temp_dir().join(format!("anvil_host_exe_{}", std::process::id()));
-        std::fs::create_dir_all(&dir).unwrap();
-        std::fs::write(dir.join("anvil-exec-wasm.exe"), b"MZ").unwrap();
-        let named = dir.join("anvil-exec-wasm");
-
-        let on_windows = binario_de_plataforma(&named, ".exe");
-        let on_linux = binario_de_plataforma(&named, "");
-        std::fs::remove_dir_all(&dir).ok();
-
-        assert_eq!(on_windows, dir.join("anvil-exec-wasm.exe"));
-        assert_eq!(on_linux, named);
-    }
-
-    #[test]
-    fn a_path_that_names_a_file_is_taken_as_written() {
-        let exe = std::env::current_exe().unwrap();
-        assert_eq!(binario_de_plataforma(&exe, ".exe"), exe);
-        assert_eq!(
-            binario_de_plataforma(Path::new("no/such/file"), ""),
-            PathBuf::from("no/such/file")
-        );
-    }
+    use super::{ruta_de_secuencia, rutas_de_argumentos};
 
     fn args(v: &[&str]) -> Vec<String> {
         v.iter().map(|s| s.to_string()).collect()
@@ -746,26 +478,5 @@ mod tests {
             ruta_de_secuencia(&args(&["s.yaml", "--help"])),
             Some("s.yaml".into())
         );
-    }
-
-    /// A declared wasm executor binds a port and announces it on stderr: it must
-    /// not start when the engine will exit without invoking any step.
-    #[test]
-    fn los_ejecutores_solo_arrancan_si_hay_pasos_que_correr() {
-        use super::va_a_ejecutar_pasos as necesita;
-        assert!(necesita(&args(&["s.yaml"])));
-        assert!(necesita(&args(&["--process-model", "pm.yaml", "s.yaml"])));
-        // Help and version: the engine prints and exits.
-        assert!(!necesita(&args(&["-h"])));
-        assert!(!necesita(&args(&["--help"])));
-        assert!(!necesita(&args(&["-V"])));
-        assert!(!necesita(&args(&["s.yaml", "--version"])));
-        // `--validate` loads and validates without connecting to anyone.
-        assert!(!necesita(&args(&["s.yaml", "--validate"])));
-        // No sequence, nothing to run.
-        assert!(!necesita(&args(&[])));
-        assert!(!necesita(&args(&["--quiet"])));
-        // And a flag's value does not count as a sequence.
-        assert!(!necesita(&args(&["--json", "o.json"])));
     }
 }

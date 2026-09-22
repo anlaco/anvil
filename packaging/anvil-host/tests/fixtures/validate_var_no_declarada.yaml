@@ -1,7 +1,7 @@
 # Issue #19: `--validate` approved this and the run died halfway.
 name: validate_var_no_declarada
 executors:
-  - { name: demo, type: wasm, path: ../../../../ejemplos/departamento/dist/anvil-exec-wasm }
+  - { name: demo, type: grpc, host: 127.0.0.1, port: 9101 }
 locals:
   v: 0.0
 main:

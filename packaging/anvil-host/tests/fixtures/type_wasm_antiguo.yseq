@@ -1,0 +1,18 @@
+# Fixture de `tests/ejecutor_es_una_direccion.rs`: una secuencia escrita como
+# se escribían antes de ADR-0046, con un ejecutor `type: wasm` y el `path` de
+# su binario.
+#
+# Es lo que dice **toda** secuencia anterior a 0.9, así que el error que
+# produce es la ruta de salida de quien actualiza. Existe para fijar que esa
+# ruta se enseña, y no un «campo desconocido 'path'».
+
+name: type_wasm_antiguo
+
+executors:
+  - { name: demo, type: wasm, path: departamento/dist/anvil-exec-wasm }
+
+main:
+  - name: a
+    type: pass_fail
+    module: demo/check_led
+    executor: demo

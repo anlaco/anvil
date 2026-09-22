@@ -11,7 +11,7 @@
 name: parametros
 
 executors:
-  - { name: demo, type: wasm, path: departamento/dist/anvil-exec-wasm }
+  - { name: demo, type: grpc, host: 127.0.0.1, port: 9101 }
 
 locals:
   # The channel is declared once here and used below with `${...}`.
@@ -40,3 +40,10 @@ main:
   - name: temperatura_en_rango
     type: pass_fail
     condition: 'locals.temperatura_leida > 15.0 && locals.temperatura_leida < 30.0'
+
+# ADR-0046: opcional, y el motor la ignora. Dice cómo levantar ese ejecutor
+# en tu máquina para diseñar y depurar; en producción este bloque no está.
+dev:
+  demo:
+    runtime: wasm
+    code: departamento/dist
