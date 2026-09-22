@@ -64,13 +64,16 @@ error (ADR-0041), and so is the other way round.
 
 ```yaml
 executors:
-  - name: demo            # the demo bench, a WASM department
-    type: wasm
-    path: departamento/dist/anvil-exec-wasm
+  # One kind, and it is an address (ADR-0046): what serves it is the
+  # department's business, not the sequence's.
+  - name: demo            # the demo bench, served by a WASM department
+    type: grpc
+    host: 127.0.0.1
+    port: 9101
   - name: python          # a separate language executor
     type: grpc
     host: 127.0.0.1         # or 192.168.x.y (future LID) — only if declared
-    port: 9101
+    port: 9200
 main:
   - name: demo/check_led
     type: pass_fail
@@ -99,9 +102,20 @@ the sequence references it by path. **Nothing gets recompiled.**
 ```yaml
 executors:
   - name: mi_paso_wasm      # free key for the sequence
-    type: wasm                # component loaded by the HOST (ADR-0015)
-    path: ./pasos/mi_paso.wasm  # relative to the YAML
+    type: grpc              # an executor is an address (ADR-0046)
+    host: 127.0.0.1
+    port: 9101
+
+dev:                        # optional, and the engine never reads it
+  mi_paso_wasm:
+    runtime: wasm           # a logical name, resolved in the install folder
+    code: ./pasos           # your components, relative to this file
 ```
+
+The sequence says *there is an executor there*, and the `.wasm` never appears
+in it: what loads the component is the WASM bridge, started by whoever runs
+the bench. `dev:` is how a front end brings that bridge up on a development
+machine, and a production sequence does not carry it.
 
 - **The user's `.wasm` is a WASM component exporting `run` and `describe`**
   (WIT interface `anvil:step`, ADR-0015, ADR-0024). It is not a gRPC server: it
@@ -262,13 +276,14 @@ Embedded first, sidecar later (same as the limits, RF-30):
 
    ```yaml
    executors:
-     - name: mi_paso_wasm    # a WASM department: the executor binary, its
-       type: wasm            # .wasm modules beside it (ADR-0027)
-       path: ./pasos/anvil-exec-wasm
+     - name: mi_paso_wasm    # a WASM department, behind an address
+       type: grpc            # (ADR-0027, ADR-0046)
+       host: 127.0.0.1
+       port: 9101
      - name: python          # a separate language executor
        type: grpc              # same contract, other process/host
        host: 127.0.0.1         # or 192.168.x.y (LID) — only if declared
-       port: 9101
+       port: 9200
    ```
 
    And each step references its executor: `executor: python` in
@@ -292,8 +307,8 @@ Python on loopback** (no Docker, no LID).
 ```yaml
 name: demo_ejecutores
 executors:
-  - { name: demo, type: wasm, path: departamento/dist/anvil-exec-wasm }
-  - { name: python, type: grpc, host: 127.0.0.1, port: 9101 }
+  - { name: demo, type: grpc, host: 127.0.0.1, port: 9101 }
+  - { name: python, type: grpc, host: 127.0.0.1, port: 9200 }
 main:
   - { name: demo/check_led, type: pass_fail, module: demo/check_led, executor: demo }
   - name: instrument/medir_simulador
@@ -306,12 +321,12 @@ main:
 
 Verification: the sequence passes/fails per step, and the report shows steps
 served by two different executors without the engine knowing anything about
-the language. The demo with an own `.wasm` step (`type: wasm`) is
-`ejemplos/demo_wasm.yseq` (M5-ext.2, ADR-0015): the host spawns the bridge,
-which loads the `ejemplos/hola-paso` component (the "hello world") and calls
-its `run`; the engine dispatches its steps (`demo/check_led` and the
-component's) with
-the limit and retries evaluated by the engine. See
+the language. The demo with an own `.wasm` step is `ejemplos/demo_wasm.yseq`
+(M5-ext.2, ADR-0015): the bridge — started by hand, or by the editor from the
+sequence's `dev:` block — loads the `ejemplos/hola-paso` component (the "hello
+world") and calls its `run`; the engine dispatches its steps
+(`demo/check_led` and the component's) with the limit and retries evaluated by
+the engine. See
 [ADR-0015](../adr/0015-el-wasm-del-usuario-es-una-funcion-puenteado-a-grpc.md).
 
 ## Extended-MVP cuts

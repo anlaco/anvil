@@ -300,8 +300,9 @@ su ejecutor, porque `anvil` no lleva uno propio
 ```yaml
 name: demo_ejecutores
 executors:
-  - { name: demo, type: wasm, path: departamento/dist/anvil-exec-wasm }
-  - { name: python, type: grpc, host: 127.0.0.1, port: 9101 }
+  # Un ejecutor es una dirección, y ya (ADR-0046): dos extremos, dos puertos.
+  - { name: demo, type: grpc, host: 127.0.0.1, port: 9101 }
+  - { name: python, type: grpc, host: 127.0.0.1, port: 9200 }
 main:
   - name: demo/check_led         # servido por el banco de demo
     type: pass_fail

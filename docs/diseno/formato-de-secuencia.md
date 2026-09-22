@@ -20,7 +20,9 @@ retirado con ADR-0041); desde entonces es un YAML que el cargador traduce a
 # Secuencia de ejemplo "basica" (ejemplos/basica.yseq)
 name: basica
 executors:
-  - { name: demo, type: wasm, path: departamento/dist/anvil-exec-wasm }
+  # Un ejecutor es una dirección y nada más (ADR-0046): no dice qué tecnología
+  # lo sirve, ni dónde vive su código, ni cómo se arrancó.
+  - { name: demo, type: grpc, host: 127.0.0.1, port: 9101 }
 setup:
   - name: demo/connect
     type: action
@@ -271,12 +273,17 @@ orquesta el motor contra su propio entorno; un paso gRPC no.
   `parameter` (DEF-3 del informe de beta: sin esto, un destino mal escrito o
   el nombre de un `parameter` creaba una `Local` nueva en silencio en vez de
   fallar). Ver [variables-y-alcances.md](variables-y-alcances.md).
-- **Las referencias a objeto se comprueban enteras al cargar** (ADR-0022): que
-  el ejecutor que declara la variable exista y no sea `type: wasm`; que ningún
-  paso de **otro** ejecutor reciba esa referencia ni la rellene; y que sólo la
-  escriba el `assign` de un paso de ejecutor, desde `result.outputs.<nombre>`.
-  Nada de eso necesita un ejecutor levantado, así que corre también en
-  `--validate` a secas.
+- **Las referencias a objeto se comprueban al cargar** (ADR-0022): que el
+  ejecutor que declara la variable exista; que ningún paso de **otro** ejecutor
+  reciba esa referencia ni la rellene; y que sólo la escriba el `assign` de un
+  paso de ejecutor, desde `result.outputs.<nombre>`. Nada de eso necesita un
+  ejecutor levantado, así que corre también en `--validate` a secas.
+
+  Lo que ya no se comprueba al cargar es *si ese ejecutor puede sostener
+  objetos*: con `type: wasm` el cargador sabía qué servía cada extremo y podía
+  rechazarlo ahí (ADR-0046 §Consecuencias d). Ahora lo avisa el motor, para
+  cualquier ejecutor que publique un `lifetime` vacío — más general, y sin el
+  fail-fast.
 - Errores de schema → la secuencia no carga (fail-fast), no se ejecuta a
   medias.
 - El cargador produce `DefinicionSecuencia`; el motor la recorre (ADR-0005).

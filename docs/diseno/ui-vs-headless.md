@@ -49,12 +49,12 @@ anvil describe <secuencia.yaml> [opciones]
   (RF-38, ADR-0016). Sin él, la secuencia corre tal cual.
 - `--validate` carga y valida el programa (schema, lvalues, firmas,
   ciclos) sin ejecutar ni conectar al ejecutor — útil en CI sin hardware.
-- `--executor <nombre>=<host>:<puerto>` re-apunta un ejecutor declarado. El
-  motor se conecta sólo a los ejecutores `grpc` que declara la secuencia y
-  reintenta la conexión si no están listos (5 s máx); los `type: wasm` los
-  arranca el host en un puerto efímero por proceso y se los pasa así, de modo
-  que varios `anvil` pueden correr en paralelo (#15). `--port` ya no existe:
-  fijaba el puerto del ejecutor embebido, retirado con
+- `--executor <nombre>=<host>:<puerto>` re-apunta un ejecutor declarado, que
+  es lo que lleva una secuencia de la loopback de un portátil a una dirección
+  de fábrica sin tocar el archivo. El motor se conecta a los ejecutores que
+  declara la secuencia — todos son direcciones (ADR-0046) — y reintenta la
+  conexión si no están listos (5 s máx); **no arranca ninguno**. `--port` ya no
+  existe: fijaba el puerto del ejecutor embebido, retirado con
   [ADR-0041](../adr/0041-there-is-no-embedded-executor.md).
 - `--quiet` silencia el reporte de consola y los logs informativos de
   stderr; los errores y los exit codes se preservan (RNF-08: el formato
